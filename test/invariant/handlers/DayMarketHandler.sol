@@ -173,8 +173,8 @@ contract DayMarketHandler is DayMarketTestBase {
     /**
      * @dev Idle premium senior shares deployed into the venue since the last price-monotonicity check,
      *      whether by a sync's own reinvestment attempt or by op_reinvest. A deploy re-marks the deployed
-     *      shares from their exact claimable-leg valuation floor(n * stEffectiveNAV / stSupply) down to
-     *      the venue's WAD-quantized senior rate, floor(stEffectiveNAV * WAD / stSupply) / WAD per share,
+     *      shares from their exact claimable-leg valuation floor(n * (stEffectiveNAV + 1) / (stSupply + 1e6)) down to
+     *      the venue's WAD-quantized senior rate, floor((stEffectiveNAV + 1) * WAD / (stSupply + 1e6)) / WAD per share,
      *      so the liquidity effective NAV may fall by the quantization residual
      *      n * ((stEffectiveNAV * WAD) mod stSupply) / (stSupply * WAD) < n / WAD NAV wei with no value
      *      leaving the market (the mark is quantized, not the value). The liquidity price check consumes
@@ -1517,8 +1517,8 @@ contract DayMarketHandler is DayMarketTestBase {
         if (ltSupply1 > 0) {
             uint256 pLt = _ltEffNav.mulDiv(WAD, ltSupply1);
             // Deploying n idle premium senior shares re-marks them from the exact claimable-leg valuation
-            // floor(n * stEffectiveNAV / stSupply) to the venue's WAD-quantized senior rate
-            // floor(stEffectiveNAV * WAD / stSupply) / WAD per share, an NAV drop of
+            // floor(n * (stEffectiveNAV + 1) / (stSupply + 1e6)) to the venue's WAD-quantized senior rate
+            // floor((stEffectiveNAV + 1) * WAD / (stSupply + 1e6)) / WAD per share, an NAV drop of
             // n * ((stEffectiveNAV * WAD) mod stSupply) / (stSupply * WAD) < n / WAD NAV wei that is mark
             // quantization, not value leakage. The per-mulDiv flooring residue on the deploy path stays
             // inside the constant PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND budget, so the dust bound widens

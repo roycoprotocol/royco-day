@@ -45,10 +45,9 @@ contract TestFuzz_Valuation_Logic is Test {
      * tranche deposit prices through, so an edge regression here misprices every entry.
      * Property: _convertToShares(v, T, S, Floor) == RoycoTestMath.convertToShares(v, T, S) exactly, with each
      * branch additionally re-pinned against inline math so the mirror itself cannot mask a regression:
-     *   S == 0                 => shares == v (the first deposit mints 1:1, totalValue ignored, clamp exempt)
-     *   S > 0, mint binds      => shares == floor(S * MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD)) (the dilution cap)
-     *   S > 0, T == 0, no bind => shares == S * v (the denominator pins to 1 wei)
-     *   otherwise              => shares == floor(S * v / T)
+     *   S == 0 && T == 0 => shares == v (a genuinely fresh tranche mints 1:1, clamp exempt)
+     *   mint binds       => shares == floor((S + VS) * MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD)) (the cap on the effective supply)
+     *   otherwise        => shares == floor((S + VS) * v / (T + VA)) (T == 0 with a live supply pins the denominator to the 1-wei VA)
      */
     function testFuzz_ConvertToShares_MatchesMirrorIncludingZeroEdges(uint256 _value, uint256 _totalValue, uint256 _supply) public pure {
         _value = bound(_value, 0, MAX_NAV); // uniform over the full supported NAV range incl. the 0 edge
@@ -82,8 +81,8 @@ contract TestFuzz_Valuation_Logic is Test {
      * stay, so a redeemer can never extract more than its exact pro-rata slice of the backing value.
      * Property: _convertToValue(shares, S, T, Floor) == RoycoTestMath.convertToValue(shares, T, S) exactly,
      * with the zero edge pinned inline:
-     *   S == 0    => value == 0 (an empty supply backs no claim)
-     *   otherwise => value == floor(T * shares / S)
+     *   S == 0 && T == 0 => value == 0 (a genuinely fresh tranche backs no claim)
+     *   otherwise        => value == floor((T + VA) * shares / (S + VS))
      */
     function testFuzz_ConvertToValue_MatchesMirrorIncludingZeroEdges(uint256 _shares, uint256 _totalValue, uint256 _supply) public pure {
         _shares = bound(_shares, 0, MAX_NAV); // uniform over the full share range incl. the 0 edge
@@ -106,9 +105,9 @@ contract TestFuzz_Valuation_Logic is Test {
      * and can lose at most the floor dust of the two conversions, so round-tripping cannot be used to
      * drain a tranche and an honest LP's loss is bounded by one share's worth of value.
      * Property: for a live vault (S >= 1, T >= 1) and a NON-BINDING mint, valueFor(sharesFor(v)) sits in
-     * [v - (ceil(T/S) + 1), v]. Slack derivation (both conversions floor):
-     *   shares = floor(S*v/T) > S*v/T - 1, so value = floor(T*shares/S) > T*shares/S - 1 > v - T/S - 1,
-     *   hence value >= v - ceil(T/S) - 1. Upper side: shares <= S*v/T gives value <= floor(v) = v.
+     * [v - (ceil((T+VA)/(S+VS)) + 1), v]. Slack derivation with S' = S + VS and T' = T + VA (both conversions floor):
+     *   shares = floor(S'*v/T') > S'*v/T' - 1, so value = floor(T'*shares/S') > T'*shares/S' - 1 > v - T'/S' - 1,
+     *   hence value >= v - ceil(T'/S') - 1. Upper side: shares <= S'*v/T' gives value <= floor(v) = v.
      * The fair-pricing round trip only exists below the bind: a binding mint deliberately returns less
      * (the clamp's purpose; its loss bound is the DepositorLossBounded property in
      * TestFuzz_MintDilutionClamp.t.sol), so the domain is shaped to the no-bind region via bound(), not

@@ -225,8 +225,9 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      *      (shares == cap exactly; a clamped mint's value diverges from its minted NAV by design)
      */
     function _assertMintValueBound(uint256 _stEff, uint256 _prem, uint256 _fee, uint256 _preSupply) internal pure {
-        // Precondition, re-derived from first principles: neither leg may bind at the protocol residual
-        uint256 denom = (_stEff - _prem - _fee) == 0 ? 1 : (_stEff - _prem - _fee);
+        // Precondition, re-derived from first principles: neither leg may bind at the protocol residual. The
+        // denominator carries the +1 VIRTUAL_ASSETS exactly as production's bind predicate does
+        uint256 denom = (_stEff - _prem - _fee) + 1;
         assertTrue(_prem * 1e6 <= denom * (WAD - 1e6), "precondition: the premium leg must not bind");
         assertTrue(_fee * 1e6 <= denom * (WAD - 1e6), "precondition: the fee leg must not bind");
 
@@ -265,7 +266,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     /**
      * The binding arm: on a bind the fair value bound is REPLACED by cap exactness — the clamp deliberately
      * mints less than the minted NAV is worth, and what it mints is exactly
-     * cap = floor(preSupply * (WAD - eps) / eps) at eps = 1e6.
+     * cap = floor((preSupply + 1e6) * (WAD - eps) / eps) at eps = 1e6.
      * Tuple (10e18, 4e18, 6e18, 1e18) (the degenerate full-NAV state): both legs bind (retained 0 -> 1-wei denominator,
      * bind since ceil(4e18 * 1e6 / (1e18 - 1e6)) > 1), cap = floor((1e18+1e6) * (1e18 - 1e6) / 1e6) = 999_999_999_999_999_999_999_999_000_000.
      * Tuple (1e30, 1e30 - 2, 1, 3) (retained 1): the PREMIUM leg binds ((1e30 - 2) * 1e6 > (1+1) * (1e18 - 1e6))

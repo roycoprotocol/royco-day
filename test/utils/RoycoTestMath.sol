@@ -284,14 +284,16 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice Shares minted for a value contribution: min(⌊supply · value / totalValue⌋, dilution cap).
+     * @notice Shares minted for a value contribution: min(⌊(supply + VIRTUAL_SHARES) · value / (totalValue + VIRTUAL_ASSETS)⌋, dilution cap).
      * @dev Mirrors src ValuationLogic._convertToShares.
-     *      Edges: supply == 0 mints value 1:1 (totalValue ignored, no clamp — a bootstrap mint dilutes nobody),
-     *      and totalValue == 0 with a live supply pins the denominator to 1 wei.
+     *      Edges: a genuinely fresh tranche (supply == 0 AND totalValue == 0) mints value 1:1 (no clamp — a
+     *      bootstrap mint dilutes nobody); the empty-with-backing state (supply == 0, totalValue > 0) falls
+     *      through to the priced branch so pre-existing backing is not captured; totalValue == 0 with a live
+     *      supply pins the denominator to the 1-wei VIRTUAL_ASSETS.
      *      The mint-dilution clamp: a single mint may own at most MAX_MINT_DILUTION / WAD of the
-     *      post-mint supply (MAX_MINT_DILUTION is this library's own restatement of the protocol
+     *      post-mint EFFECTIVE supply (MAX_MINT_DILUTION is this library's own restatement of the protocol
      *      constant — if Constants.sol changes without this mirror, every cross-assert fails loudly). The
-     *      shares therefore never exceed cap = ⌊supply · MAX_MINT_DILUTION / (WAD − MAX_MINT_DILUTION)⌋.
+     *      shares therefore never exceed cap = ⌊(supply + VIRTUAL_SHARES) · MAX_MINT_DILUTION / (WAD − MAX_MINT_DILUTION)⌋.
      *      The bind test runs BEFORE the fair-shares division in its overflow-free form
      *      (⌈value·(WAD − MAX_MINT_DILUTION) / MAX_MINT_DILUTION⌉ > denominator,
      *      integer-equivalent to fair > cap), mirroring production's ordering exactly — including the panic
@@ -318,9 +320,11 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice Value redeemed for shares: ⌊totalValue · shares / supply⌋.
+     * @notice Value redeemed for shares: ⌊(totalValue + VIRTUAL_ASSETS) · shares / (supply + VIRTUAL_SHARES)⌋.
      * @dev Mirrors src ValuationLogic._convertToValue.
-     *      Edge: supply == 0 returns 0. Rounding: Floor. Favors: remaining holders.
+     *      Edge: only a genuinely fresh tranche (supply == 0 AND totalValue == 0) returns 0; with backing but no
+     *      supply the priced branch runs against the VIRTUAL_SHARES-only denominator.
+     *      Rounding: Floor. Favors: remaining holders.
      * @param shares The shares being valued
      * @param totalValue The total value backing the supply
      * @param supply The share supply
@@ -338,7 +342,8 @@ library RoycoTestMath {
      *         over the retained denominator stEffectiveNAV − premium − fee.
      * @dev Mirrors src FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint.
      *      Each mint is a convertToShares computation over the retained NAV, so the share-conversion edges
-     *      apply per leg (pre-sync supply 0 mints 1:1, retained NAV 0 pins the denominator to 1 wei) — including
+     *      apply per leg (a genuinely fresh state — pre-sync supply 0 AND retained NAV 0 — mints 1:1, and a
+     *      retained NAV of 0 with a live supply pins the denominator to the 1-wei VIRTUAL_ASSETS) — including
      *      the mint-dilution clamp, which applies PER MINT at the shared pre-sync supply: in the degenerate
      *      zero-retained state both legs clamp to the same cap, so the pair may own up to 2·cap/(preSupply + 2·cap)
      *      of the post-mint supply (the residual guarantee is per mint, not per sync).
@@ -423,8 +428,8 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice LT effective NAV: ltRawNAV + ⌊idleShares · stEffectiveNAV / stSupply⌋, the BPT depth plus the claimable
-     *         idle liquidity premium senior shares valued at the senior share price.
+     * @notice LT effective NAV: ltRawNAV + ⌊idleShares · (stEffectiveNAV + VIRTUAL_ASSETS) / (stSupply + VIRTUAL_SHARES)⌋,
+     *         the BPT depth plus the claimable idle liquidity premium senior shares valued at the senior share price.
      * @dev Mirrors src ValuationLogic._getLiquidityTrancheEffectiveNAV.
      *      The idle-share leg is a convertToValue valuation, so stSupply == 0 values it at 0.
      *      Rounding: Floor on the idle-share leg. Favors: pool leg.

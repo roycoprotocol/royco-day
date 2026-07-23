@@ -71,7 +71,7 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
     /**
      * @notice (ii) The dilution edge the clamp exists for: the junior tranche is wiped to exactly zero effective NAV with its
      *         supply outstanding, then a depositor enters. The mint is exactly the cap
-     *         floor(supply x MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)) = supply x (1e12 - 1): the depositor captures all but one
+     *         floor((supply + 1e6) x MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)) = (supply + 1e6) x (1e12 - 1): the depositor captures all but one
      *         part in 1e12 of the tranche, and the supply grows by a bounded factor instead of x value
      *         (pre-clamp, this deposit would have minted supply x value ~ 1e21 times more). Preview parity
      *         must hold on the clamped branch too

@@ -179,13 +179,10 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
         uint256 multiAssetMax = liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER);
         uint256 inKindMax = liquidityTranche.maxRedeem(LT_PROVIDER);
-        // At zero relief the two bounds share identical NAV inputs (same maxLTWithdrawal W, ltRawNAV claimNAV, supply S),
-        // so they differ only by the virtual-shares offset: maxRedeem prices through _convertToShares
-        // (floor((S+1e6)*W/(claimNAV+1))) while maxRedeemMultiAsset uses a raw mulDiv (floor(S*W/claimNAV)). The in-kind
-        // bound therefore WEAKLY DOMINATES, and the gap is bounded by 1e6*W/(claimNAV+1) < VIRTUAL_SHARES (W <= claimNAV).
-        // The pre-offset exact equality softens to weak dominance within the virtual-shares offset.
-        assertLe(multiAssetMax, inKindMax, "zero relief: the multi-asset bound must not exceed the in-kind bound");
-        assertLe(inKindMax - multiAssetMax, 1e6, "zero relief: the bounds coincide up to the virtual-shares offset");
+        // At zero relief the two bounds share identical NAV inputs (same maxLTWithdrawal W, ltRawNAV claimNAV, supply S)
+        // and both price through the same virtual-shares primitive (floor((S+1e6)*W/(claimNAV+1))), so they coincide
+        // share for share
+        assertEq(multiAssetMax, inKindMax, "zero relief: the two bounds must coincide exactly");
         assertGt(multiAssetMax, 0, "the equality must be tested with live capacity");
         assertLt(multiAssetMax, liquidityTranche.balanceOf(LT_PROVIDER), "the equality must be on the gate branch, not the balance clamp");
     }

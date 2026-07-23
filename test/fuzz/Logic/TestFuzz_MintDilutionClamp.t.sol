@@ -33,9 +33,9 @@ contract TestFuzz_MintDilutionClamp_Logic is Test {
 
     /**
      * The clamp's defining guarantee, asserted UNCONDITIONALLY (bind or not, every branch except the exempt
-     * bootstrap): the minted shares own at most (1 − EPS/WAD) of the post-mint supply. In product form
-     * (exactly equivalent to m <= cap and overflow-safe on this domain since m <= S * (WAD − EPS) / EPS
-     * <= 1e30 * (1e12 − 1) < 1e43): m * EPS <= S * (WAD − EPS)
+     * bootstrap): the minted shares own at most (1 − EPS/WAD) of the post-mint EFFECTIVE supply. In product form
+     * (exactly equivalent to m <= cap and overflow-safe on this domain since m <= (S + VS) * (WAD − EPS) / EPS
+     * <= ~1e30 * (1e12 − 1) < 1e43): m * EPS <= (S + VS) * (WAD − EPS)
      */
     function testFuzz_Clamp_PostMintOwnershipBound(uint256 _value, uint256 _totalValue, uint256 _supply) public pure {
         _value = bound(_value, 0, MAX_NAV); // uniform over the full NAV range incl. the 0 edge
@@ -47,7 +47,7 @@ contract TestFuzz_MintDilutionClamp_Logic is Test {
     }
 
     /**
-     * Above the bind the clamp returns EXACTLY cap = floor(supply * (WAD − EPS) / EPS): the mint plateaus at
+     * Above the bind the clamp returns EXACTLY cap = floor((supply + VS) * (WAD − EPS) / EPS): the mint plateaus at
      * the residual guarantee. The bind predicate is recomputed here in its integer-equivalent product form
      * (value * EPS > d * (WAD − EPS), both products <= 1e30 * 1e18 so overflow-free), independent of the
      * production ordering

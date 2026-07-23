@@ -358,8 +358,9 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice `getRate` equals the committed senior NAV per share: `floor(WAD * lastSTEffectiveNAV /
-     *         stTotalSupply)` right after a sync. This is the number the pool's WITH_RATE leg prices at.
+     * @notice `getRate` equals the committed senior NAV per share priced through the virtual-shares primitive:
+     *         `floor(WAD * (lastSTEffectiveNAV + VIRTUAL_ASSETS) / (stTotalSupply + VIRTUAL_SHARES))` right after
+     *         a sync. This is the number the pool's WITH_RATE leg prices at.
      * @dev Cache regime: frozen-cache read of the sync's written value — the exact value the Vault consumes.
      *      (Cache-miss vs live-path parity is pinned in the mock-based quoter suite (test/concrete/Quoters);
      *      here the fork asserts the committed coherence of the value real pool ops execute against.)

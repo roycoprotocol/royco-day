@@ -121,13 +121,13 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
     /**
      * @dev The sync's inline single-sided add DEPLOYS the premium, and the reason is derivable: the venue prices
      *      the pool's senior leg live through the production IRateProvider.getRate, which inside the sync reads
-     *      the just-cached effective share rate floor(1e18 x 100.8e18 / POST_SYNC_ST_SUPPLY) = 1.0063e18, and the
+     *      the just-cached effective share rate (~1.0063e18, exact offset value below), and the
      *      seeded pool's NAV-per-BPT is exactly 1.0 (the genesis seed backs the dead minimum supply at 1.0), so
      *      the add mints fair value:
      *      the offset share rate floor((100.8e18 + 1) x 1e18 / (POST_SYNC_ST_SUPPLY + 1e6)) = 1006299999999989937,
      *      REINVESTED_BPT = floor(LT_PREMIUM_SHARES x 1006299999999989937 / 1e18) = 89999999999999999
      *      against the gate's minimum of
-     *      ceil(floor(LT_PREMIUM_SHARES x 100.8e18 / POST_SYNC_ST_SUPPLY) x 0.999) = 89910000000000000,
+     *      ceil(floor(LT_PREMIUM_SHARES x (100.8e18 + 1) / (POST_SYNC_ST_SUPPLY + 1e6)) x 0.999) = 89910000000000000,
      *      leaving only wei-level flooring as slippage, far inside the 10bps defaultParams gate. The deployed
      *      senior leg marks the oracle TVL up by the identical amount (same price, same floor), so the committed
      *      post-sync ltRawNAV is exactly SEEDED_LT_RAW_NAV + REINVESTED_BPT and no idle liquidity premium senior

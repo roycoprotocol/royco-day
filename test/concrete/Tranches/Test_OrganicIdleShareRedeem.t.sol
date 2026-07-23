@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { VIRTUAL_SHARES } from "../../../src/libraries/Constants.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
@@ -21,8 +22,9 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *      2. Senior yield is accrued and synced repeatedly. Each sync stages more idle premium (the NET premium after
  *         the LT protocol fee is carved off). A sync mints NO liquidity-tranche shares, so the LT SUPPLY stays frozen
  *         at the seed and tracks the frozen BPT count exactly, while the idle ST-share pile grows without bound.
- *      3. Once `idle >= ltSupply` (so a 1-share idle slice is >= 1 wei), redeeming a single LT share in-kind takes a
- *         proportional BPT slice plus its idle premium slice, a valid redemption shape (a redemption never grows the
+ *      3. Once `idle >= ltSupply + VIRTUAL_SHARES` (so a 1-share idle slice is >= 1 wei against the effective
+ *         supply), redeeming a single LT share in-kind takes its idle premium slice (the 1-share BPT slice floors
+ *         to zero under the virtual-shares offset), a valid redemption shape (a redemption never grows the
  *         LT's deployed raw NAV). The senior effective NAV grew while the pooled depth stayed frozen, so liquidity
  *         utilization has drifted above its limit, and the post-op liquidity requirement rejects the redemption. The
  *         redeemer's premium is not stranded, it waits until the market re-liquifies.
@@ -71,24 +73,26 @@ contract Test_OrganicIdleShareRedeem is DayMarketTestBase {
             idle = _idleShares();
             // A sync mints no LT shares, so the supply never inflates above the frozen BPT count.
             assertEq(supply, bpt, "no sync mints LT shares, so supply tracks the frozen BPT count");
-            // Target state: a single-share idle slice is at least 1 wei (idle >= supply).
-            if (idle >= supply) {
+            // Target state: a single-share idle slice is at least 1 wei against the effective supply
+            // (idle >= supply + VIRTUAL_SHARES, the _scaleAssetClaims denominator).
+            if (idle >= supply + VIRTUAL_SHARES) {
                 reached = true;
                 break;
             }
         }
 
-        assertTrue(reached, "organic accrual must reach idle >= ltSupply == bptCount");
+        assertTrue(reached, "organic accrual must reach idle >= ltSupply + VIRTUAL_SHARES");
 
         // The premium never deployed: the BPT count is exactly the frozen seed depth, all premium is staged idle.
         assertGt(idle, 0, "the staged idle premium ST shares must be positive");
 
-        // Mirror the in-kind redeem's floored slices for a 1-wei LT-share redemption (TrancheClaimsLogic._scaleAssetClaims).
-        // The LT fee no longer mints LT shares, so supply == bpt and a 1-share BPT slice is a positive 1 wei, while the
-        // idle slice is at least 1 wei because idle >= supply.
-        uint256 bptSlice = (bpt * 1) / supply; // == 1 because bpt == supply
-        uint256 idleSlice = (idle * 1) / supply; // >= 1 because idle >= supply
-        assertEq(bptSlice, 1, "the proportional BPT slice is a positive 1 wei");
+        // Mirror the in-kind redeem's floored slices for a 1-wei LT-share redemption: _scaleAssetClaims scales every
+        // leg over the EFFECTIVE supply (supply + VIRTUAL_SHARES). With bpt == supply the 1-share BPT slice floors to
+        // zero under the offset, while the idle slice is at least 1 wei because idle >= supply + VIRTUAL_SHARES, so
+        // the redemption's shape is carried by the idle premium leg alone.
+        uint256 bptSlice = (bpt * 1) / (supply + VIRTUAL_SHARES); // == 0 because bpt == supply < supply + VIRTUAL_SHARES
+        uint256 idleSlice = (idle * 1) / (supply + VIRTUAL_SHARES); // >= 1 because idle >= supply + VIRTUAL_SHARES
+        assertEq(bptSlice, 0, "the 1-share BPT slice floors to zero against the effective supply");
         assertGe(idleSlice, 1, "the proportional idle ST-share slice must be positive");
 
         // Cross-check against the real redeem quote: previewRedeem executes the actual redemption path, so in this
@@ -99,8 +103,8 @@ contract Test_OrganicIdleShareRedeem is DayMarketTestBase {
 
         assertGe(liquidityTranche.balanceOf(LT_PROVIDER), 1, "the redeemer must hold the LT share it redeems");
 
-        // Redeeming that single LT share in-kind reverts, but not on the op-shape invariant. The redemption pulls a
-        // proportional BPT slice and its idle premium slice, a valid shape (a redemption never grows the LT's deployed
+        // Redeeming that single LT share in-kind reverts, but not on the op-shape invariant. The redemption pulls its
+        // idle premium slice (the BPT leg floors to zero), a valid shape (a redemption never grows the LT's deployed
         // raw NAV), so it reaches the liquidity requirement, which the perpetual premium accrual has already driven past
         // its limit: senior effective NAV climbed while the pooled depth stayed frozen. A liquidity-deficient market
         // blocks every LT redemption, so the premium waits until the market re-liquifies rather than being stranded by

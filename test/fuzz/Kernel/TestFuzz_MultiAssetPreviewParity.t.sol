@@ -109,16 +109,11 @@ contract TestFuzz_MultiAssetPreviewParity_Kernel is MarketFuzzTestBase {
         // Size by the multi-asset bound so the sweep also exercises the wedge past the in-kind maximum,
         // and pin the bounds' dominance across every evolved market the fuzzer constructs
         uint256 maxShares = liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER);
-        // Dominance up to the virtual-shares offset. The multi-asset bound is a raw mulDiv (floor(S*W_multi/claimNAV))
-        // while the in-kind bound prices through the offset-aware _convertToShares (floor((S+1e6)*W_inkind/(claimNAV+1))).
-        // When the multi-asset relief is zero the two share the same NAV inputs (W_multi == W_inkind), so the in-kind
-        // bound can sit ABOVE the multi-asset bound purely by the offset: inKind - multi <= 1e6*W/(claimNAV+1) < VIRTUAL_SHARES
-        // (W <= claimNAV). Any nonzero relief only lifts the multi bound further, so VIRTUAL_SHARES bounds the shortfall.
-        assertGe(
-            maxShares + 1e6,
-            liquidityTranche.maxRedeem(LT_PROVIDER),
-            "the multi-asset bound must weakly dominate the in-kind bound up to the virtual-shares offset"
-        );
+        // Exact dominance: both bounds price through the same virtual-shares primitive (floor((S+1e6)*W/(claimNAV+1)))
+        // over identical (claimNAV, supply) inputs, and the multi-asset withdrawable NAV weakly exceeds the in-kind
+        // NAV (zero relief leaves them equal, senior-share relief only lifts the multi bound), so the dominance holds
+        // share for share with no offset slack
+        assertGe(maxShares, liquidityTranche.maxRedeem(LT_PROVIDER), "the multi-asset bound must weakly dominate the in-kind bound");
         if (maxShares < 1e6) return; // no liquidity-respecting redemption capacity this run
         uint256 shares = bound(_sharesSeed, 1e6, maxShares); // dust floor avoids a zero-asset payout the accountant rejects
 

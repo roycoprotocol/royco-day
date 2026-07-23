@@ -101,13 +101,9 @@ contract Test_EntryPointLTMultiAssetRouting is EntryPointTestBase {
     /// @notice Equal-NAV bounds resolve in-kind: with no senior-share value in the removal the two withdrawal bounds
     ///         share identical NAV inputs (same maxLTWithdrawal, same ltRawNAV, same supply), and a maximal redemption
     ///         executes the in-kind bound as a partial in-kind fill.
-    /// @dev Under the virtual-shares offset the two bounds no longer coincide in SHARE terms even though their NAV
-    ///      inputs do: maxRedeem prices the withdrawable NAV through the offset-aware _convertToShares
-    ///      (floor((S+1e6)*W/(claimNAV+1))), while maxRedeemMultiAsset uses a raw mulDiv (floor(S*W/claimNAV)) with no
-    ///      offset. So the in-kind bound WEAKLY DOMINATES the multi-asset bound by the virtual-shares artifact
-    ///      (their share-level gap is ~1e6*W/claimNAV). The routing test is strict (multiAsset > inKind), so a
-    ///      weakly-dominated multi-asset bound defaults the maximal redemption to the in-kind exit exactly as an
-    ///      exact tie did pre-offset. The seed is unchanged; only the coincidence is now a weak-dominance tie.
+    /// @dev Both bounds price the withdrawable NAV through the same virtual-shares primitive
+    ///      (floor((S+1e6)*W/(claimNAV+1))), so identical NAV inputs make them equal share for share. The routing
+    ///      test is strict (multiAsset > inKind), so the exact tie defaults the maximal redemption to the in-kind exit.
     function test_ltRedemption_equalBounds_defaultsInKind() public {
         // Redeploy with quote-only pool legs so a proportional removal returns no senior shares
         _deployMarket(cellA(), defaultParams());
@@ -121,9 +117,9 @@ contract Test_EntryPointLTMultiAssetRouting is EntryPointTestBase {
         (uint256 nonce,) = _requestRedemption(USER_A, address(liquidityTranche), liquidityTranche.balanceOf(USER_A), USER_B, 0);
         _warpPastRedemptionDelay();
         uint256 maxInKindShares = liquidityTranche.maxRedeem(address(entryPoint));
-        // Weak-dominance tie: the multi-asset bound never exceeds the in-kind bound when their NAV inputs coincide,
-        // so the strict-greater routing test defaults to the in-kind exit.
-        require(liquidityTranche.maxRedeemMultiAsset(address(entryPoint)) <= maxInKindShares, "setup: the multi-asset bound must not exceed the in-kind bound");
+        // Exact tie: with no senior-share relief the two bounds coincide share for share, so the strict-greater
+        // routing test defaults to the in-kind exit.
+        require(liquidityTranche.maxRedeemMultiAsset(address(entryPoint)) == maxInKindShares, "setup: the two bounds must tie exactly");
         require(entryPoint.getRedemptionRequest(USER_A, nonce).shares > maxInKindShares, "setup: the escrow must exceed the shared bound");
 
         (AssetClaims memory claims, uint256 quoteAssets) = _executeRedemptionMaxWithQuote(USER_A, USER_A, nonce);

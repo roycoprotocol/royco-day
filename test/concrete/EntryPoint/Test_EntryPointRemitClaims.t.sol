@@ -104,17 +104,19 @@ contract Test_EntryPointRemitClaims is Test {
     }
 
     function test_remit_quoteLeg_splitsWithFloorAndPaysReceiverFirst() public {
-        // The quote leg splits like every claims leg: the executor's slice floors, the receiver takes the remainder,
-        // and the receiver's portion is provably nonzero whenever the leg is (bonus strictly under WAD)
+        // The quote leg's bonus floors over the plain WAD denominator (mulDiv(quote, bonus, WAD)), UNLIKE the three
+        // claims legs, which are a _scaleAssetClaims slice over the virtual-shares effective denominator (WAD + 1e6).
+        // The leg is sized at 10_000_005 so the two denominators produce DIFFERENT slices at a 10% bonus
+        // (1_000_000 vs 999_999), pinning the WAD path against a regression that switched the denominator
         MockKernelAssets kernel = _mockKernel();
-        quoteAsset.mint(address(harness), 105);
+        quoteAsset.mint(address(harness), 10_000_005);
 
         vm.prank(EXECUTOR);
-        (, uint256 bonusQuoteAssets,) = harness.remitRedemptionAndBonusClaims(address(kernel), _claims(0, 0, 0), 105, TEN_PERCENT_WAD, RECEIVER);
+        (, uint256 bonusQuoteAssets,) = harness.remitRedemptionAndBonusClaims(address(kernel), _claims(0, 0, 0), 10_000_005, TEN_PERCENT_WAD, RECEIVER);
 
-        assertEq(bonusQuoteAssets, 10, "the executor's quote slice must be the flooring bonus fraction");
-        assertEq(quoteAsset.balanceOf(EXECUTOR), 10, "the executor must receive its quote slice");
-        assertEq(quoteAsset.balanceOf(RECEIVER), 95, "the receiver must get the post-bonus quote remainder");
+        assertEq(bonusQuoteAssets, 1_000_000, "the executor's quote slice must be the flooring WAD-denominator bonus fraction");
+        assertEq(quoteAsset.balanceOf(EXECUTOR), 1_000_000, "the executor must receive its quote slice");
+        assertEq(quoteAsset.balanceOf(RECEIVER), 9_000_005, "the receiver must get the post-bonus quote remainder");
         assertEq(quoteAsset.balanceOf(address(harness)), 0, "no quote may remain in the entry point after the split");
     }
 

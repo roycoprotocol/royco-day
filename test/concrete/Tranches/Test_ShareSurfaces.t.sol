@@ -241,7 +241,8 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
      * @dev All senior value is backed by senior raw NAV (no losses have occurred), so redeeming 10e18 of the 100e18
      *      senior shares pays out its proportional slice, scaled against the effective supply (100e18 + 1e6) so the
      *      redeemer leaves one virtual-dust sliver behind: floor(100e18 x 10e18 / (100e18 + 1e6)) =
-     *      9999999999999900000 vault shares, and the claim values to the same NAV floor((100e18 + 1) x 10e18 / (100e18 + 1e6))
+     *      9999999999999900000 vault shares, and the claim's nav scales identically: floor(100e18 x 10e18 / (100e18 + 1e6))
+     *      (_scaleAssetClaims scales the nav field with no VIRTUAL_ASSETS term, unlike _convertToValue)
      */
     function test_Redeem_DelegateSpendsAllowanceAndReceivesAssets() public {
         vm.prank(ST_PROVIDER);

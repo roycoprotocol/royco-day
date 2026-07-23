@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { LT_LP_ROLE } from "../../../src/factory/Roles.sol";
+import { MAX_MINT_DILUTION_WAD, VIRTUAL_SHARES, WAD } from "../../../src/libraries/Constants.sol";
 import { NAV_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { ValuationLogic } from "../../../src/libraries/logic/ValuationLogic.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
@@ -12,13 +13,14 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
  * @title Test_ZeroSupplyShareInflation
- * @notice ACCEPTANCE (fail-first) tests for the share-price inflation class rooted in
- *         `ValuationLogic._convertToShares`: when `totalSupply == 0` it mints 1:1 with the deposit value and IGNORES
- *         the tranche's existing NAV basis. Every tranche deposit prices through this primitive, so any state where a
- *         tranche's backing NAV is nonzero while its share supply is 0 (or a bootstrap 1-share) lets that mint capture
- *         the backing, or brick/rob the next depositor.
+ * @notice REGRESSION pins for the share-price inflation class rooted in `ValuationLogic._convertToShares`, closed by
+ *         the virtual shares/assets hardening: the 1:1 bootstrap is now exempt only for a genuinely fresh tranche
+ *         (supply == 0 AND backing == 0), and an empty-with-backing state prices against the (supply + VIRTUAL_SHARES)
+ *         over (backing + VIRTUAL_ASSETS) basis, stranding the pre-existing backing to the virtual shares instead of
+ *         handing it to the bootstrap depositor. Every tranche deposit prices through this primitive, so these pins
+ *         cover ST/JT/LT at once.
  *
- *         The amplifier that makes this reachable WITHOUT an external donation is protocol-credited value that is
+ *         The amplifier that made this reachable WITHOUT an external donation is protocol-credited value that is
  *         independent of a tranche's own share supply:
  *           - LT: the liquidity premium (senior shares the kernel stages for the LT) accrues even with zero LT holders
  *           - JT: the risk premium is booked into jtEffectiveNAV independent of JT tranche supply
@@ -26,13 +28,11 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *         plus loss cross-claims, and the kernel accounts assets internally (`totalCollateralAssets`, not
  *         `balanceOf`), so a raw ERC20 donation cannot inflate it. ST is documented non-vulnerable in ROOT_A_note.
  *
- * @dev Every finding test asserts the DESIRED (safe) invariant and FAILS against current code by design. They go
- *      green when the primitive is hardened (virtual shares/offset, seeding the first mint against the live NAV
- *      basis, or routing pre-existing backing away from the bootstrap depositor). The safe invariants, none
- *      design-specific: (a) no windfall, a depositor's position NAV must not exceed its deposit NAV beyond dust,
- *      (b) no DoS/robbery, after a bootstrap mint, a normal depositor must still enter and keep ~its deposit value.
- * @dev The sibling `totalValue == 0, supply > 0` branch (`shares = supply * value`) is NOT reproduced here: the
- *      mint-dilution clamp (MAX_MINT_DILUTION_WAD) already bounds it, verified by the passing assertion in
+ * @dev Each test asserts the safe invariant the hardening guarantees, none design-specific: (a) no windfall, a
+ *      depositor's position NAV must not exceed its deposit NAV, (b) no DoS/robbery, after a bootstrap mint, a
+ *      normal depositor must still enter and keep ~its deposit value.
+ * @dev The sibling `totalValue == 0, supply > 0` branch (priced against the 1-wei VIRTUAL_ASSETS denominator) is
+ *      bounded by the mint-dilution clamp (MAX_MINT_DILUTION_WAD), pinned to its exact cap in
  *      `test_ZeroBacking_ClampAlreadyBoundsIt` below.
  */
 contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
@@ -53,10 +53,11 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * ROOT (fails today): zero supply against a nonzero backing NAV: the first mint must not hand the depositor a
-     * claim on the pre-existing backing. `_convertToShares(1 wei, 1000e18 backing, supply 0)` returns 1 share today,
-     * so that 1 share owns the whole 1000e18 backing the depositor never funded. This is the single primitive every
-     * tranche deposit prices through, so hardening it fixes ST/JT/LT at once.
+     * ROOT: zero supply against a nonzero backing NAV, the first mint must not hand the depositor a claim on the
+     * pre-existing backing. Under the virtual offset the empty-with-backing state falls through to the priced branch
+     * (floor((0 + 1e6) x deposit / (backing + 1))), so the backing stays stranded to the virtual shares and the
+     * depositor's round-trip claim is strictly below its deposit (both conversions floor). This is the single
+     * primitive every tranche deposit prices through, so this pin covers ST/JT/LT at once.
      */
     function test_Root_ZeroSupply_FirstMintMustNotCaptureBackingNAV() public pure {
         uint256 backingNAV = 1000e18;
@@ -64,20 +65,61 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
         // A first deposit into a tranche that already has `backingNAV` of unowned backing
         uint256 shares = ValuationLogic._convertToShares(toNAVUnits(depositNAV), toNAVUnits(backingNAV), 0, Math.Rounding.Floor);
         // The minted shares, valued back against the post-deposit tranche, must claim no more than the deposit, the
-        // pre-existing backing must NOT be captured (pre-fix the 1:1 bootstrap made these shares own backing + deposit)
+        // pre-existing backing must NOT be captured (pre-hardening the 1:1 bootstrap made these shares own backing + deposit)
         NAV_UNIT roundTrip = ValuationLogic._convertToValue(shares, shares, toNAVUnits(backingNAV + depositNAV), Math.Rounding.Floor);
-        assertLe(toUint256(roundTrip), depositNAV + depositNAV / 100, "ROOT: a bootstrap mint must claim no more than its deposit");
+        assertLe(toUint256(roundTrip), depositNAV, "ROOT: a bootstrap mint must claim no more than its deposit");
     }
 
     /**
-     * CONTROL (passes today, documents the boundary): the sibling zero-backing branch is already bounded by the
-     * mint-dilution clamp, so `shares < supply * value`. This is why only the zero-supply branch above is a live bug.
+     * PRODUCTION PIN: the bootstrap 1:1 branch and the clamp's bind boundary, asserted directly against
+     * `ValuationLogic._convertToShares` (the mirror-level pins live in Test_RoycoTestMath): a genuinely fresh
+     * tranche mints 1:1, the largest non-binding value prices fair to EXACTLY the cap (branch continuity, since
+     * (WAD - MAX_MINT_DILUTION_WAD) / 1e6 = 1e12 - 1 divides the boundary value), and one more wei flips into
+     * the clamp branch returning the same cap.
+     */
+    function test_Primitive_BootstrapAndClampBindBoundary_ProductionPins() public pure {
+        // Bootstrap: supply == 0 AND backing == 0 mints exactly 1:1
+        assertEq(
+            ValuationLogic._convertToShares(toNAVUnits(uint256(123e18)), toNAVUnits(uint256(0)), 0, Math.Rounding.Floor),
+            123e18,
+            "a genuinely fresh tranche must mint 1:1"
+        );
+
+        // Clamp bind boundary at a live (supply, backing): the largest non-binding value is
+        // floor((backing + 1) * MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)), the integer complement of
+        // production's ceil-form bind predicate
+        uint256 supply = 1e18;
+        uint256 backing = 1e18;
+        uint256 boundaryValue = Math.mulDiv(backing + 1, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
+        uint256 cap = Math.mulDiv(supply + VIRTUAL_SHARES, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
+        // The largest non-binding value prices FAIR to exactly the cap: the two branches meet with no discontinuity
+        assertEq(
+            ValuationLogic._convertToShares(toNAVUnits(boundaryValue), toNAVUnits(backing), supply, Math.Rounding.Floor),
+            cap,
+            "the largest non-binding value must price fair to exactly the cap"
+        );
+        // One more wei crosses into the clamp branch and returns the same cap
+        assertEq(
+            ValuationLogic._convertToShares(toNAVUnits(boundaryValue + 1), toNAVUnits(backing), supply, Math.Rounding.Floor),
+            cap,
+            "one wei past the boundary must clamp to the same cap"
+        );
+    }
+
+    /**
+     * CONTROL: the sibling zero-backing branch is bounded by the mint-dilution clamp, the 1-wei VIRTUAL_ASSETS
+     * denominator makes the fair price bind the clamp, which mints exactly the cap on the effective supply,
+     * floor((supply + VIRTUAL_SHARES) x MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)).
      */
     function test_ZeroBacking_ClampAlreadyBoundsIt() public pure {
         uint256 supply = 1e18;
         uint256 value = 1000e18;
         uint256 shares = ValuationLogic._convertToShares(toNAVUnits(value), toNAVUnits(uint256(0)), supply, Math.Rounding.Floor);
-        assertLt(shares, supply * value, "the dilution clamp bounds the zero-backing mint");
+        assertEq(
+            shares,
+            Math.mulDiv(supply + VIRTUAL_SHARES, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD),
+            "the zero-backing mint clamps to the exact dilution cap on the effective supply"
+        );
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -85,10 +127,11 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * INSTANCE LT-WINDFALL (fails today): the liquidity premium (ST shares staged for the LT) accrues while the LT
-     * tranche has ZERO shares (minLiquidity 0, LT yield-share curve nonzero), so `_getLiquidityTrancheEffectiveNAV`
-     * is positive with LT supply 0. The first LT depositor mints 1:1 and captures the entire staged premium.
-     * DESIRED: the first LT depositor's position is worth ~its deposit, not deposit + staged premium
+     * INSTANCE LT-WINDFALL: the liquidity premium (ST shares staged for the LT) accrues while the LT tranche has
+     * ZERO shares (minLiquidity 0, LT yield-share curve nonzero), so `_getLiquidityTrancheEffectiveNAV` is positive
+     * with LT supply 0. Pre-hardening the first LT depositor minted 1:1 and captured the entire staged premium,
+     * under the virtual offset the premium stays stranded to the virtual shares and the first LT depositor's
+     * position is worth ~its deposit (1% slack absorbs the integration path's multiple floors)
      */
     function test_LT_PremiumToEmptyTranche_FirstDepositorMustNotCaptureIt() public {
         _seedMarket(1000 * stUnit, 500 * stUnit);

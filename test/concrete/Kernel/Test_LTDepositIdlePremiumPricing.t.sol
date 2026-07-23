@@ -38,7 +38,7 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
      *         the idle senior shares valued at the senior share rate, not the pool depth alone
      * @dev Arms venue slippage so a +10% senior gain's premium mints but cannot reinvest, leaving
      *      ltOwnedSeniorTrancheShares nonzero. The tranche's previewDeposit quote must then price the shares at
-     *      ltRawNAV + floor(idleShares x stEff / stSupply), the exact effective-NAV pricing. A regression that
+     *      ltRawNAV + floor(idleShares x (stEff + 1) / (stSupply + 1e6)), the exact effective-NAV pricing. A regression that
      *      priced LT deposits off pool depth alone would drop the idle term and undercharge depositors
      */
     function test_LTDeposit_PriceIncludesIdlePremiumLeg() public {
@@ -123,7 +123,7 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
      *         pricing would grant, so the entrant cannot dilute existing holders out of their undeployed premium claim
      * @dev Attacker intent: deposit between the premium mint and its reinvestment, when the pool depth understates the
      *      LT's effective NAV, and capture a slice of the idle senior shares for free. Expected shares are derived
-     *      independently: floor(ltSupply x depositValue / (ltRawNAV + idleValue))
+     *      independently: floor((ltSupply + 1e6) x depositValue / (ltRawNAV + idleValue + 1))
      */
     function test_LTDeposit_WhileIdlePremiumOutstanding_CannotDiluteExistingHolders() public {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
