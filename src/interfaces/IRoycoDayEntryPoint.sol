@@ -100,11 +100,20 @@ interface IRoycoDayEntryPoint {
      * @param nonce The nonce identifying this request
      * @param tranche The tranche for which the deposit was requested
      * @param assets The amount of assets requested to be deposited into the tranche
+     * @param receiver The address that will receive the minted tranche shares
+     * @param navAtRequestTime The value of the escrowed assets when the request was queued
      * @param executableAtTimestamp The timestamp at which the request can be executed
      * @param executorBonusWAD The bonus percentage offered to executors (type(uint64).max if opted out), scaled to WAD precision
      */
     event DepositRequested(
-        address indexed user, uint256 indexed nonce, address indexed tranche, TRANCHE_UNIT assets, uint32 executableAtTimestamp, uint64 executorBonusWAD
+        address indexed user,
+        uint256 indexed nonce,
+        address indexed tranche,
+        TRANCHE_UNIT assets,
+        address receiver,
+        NAV_UNIT navAtRequestTime,
+        uint32 executableAtTimestamp,
+        uint64 executorBonusWAD
     );
 
     /**
@@ -142,11 +151,20 @@ interface IRoycoDayEntryPoint {
      * @param nonce The nonce identifying this request
      * @param tranche The tranche for which the redemption was requested
      * @param shares The amount of shares requested to be redeemed from the tranche
+     * @param receiver The address that will receive the redemption proceeds
+     * @param navAtRequestTime The value of the escrowed shares when the request was queued
      * @param executableAtTimestamp The timestamp at which the request can be executed
      * @param executorBonusWAD The bonus percentage offered to executors (type(uint64).max if opted out), scaled to WAD precision
      */
     event RedemptionRequested(
-        address indexed user, uint256 indexed nonce, address indexed tranche, uint256 shares, uint32 executableAtTimestamp, uint64 executorBonusWAD
+        address indexed user,
+        uint256 indexed nonce,
+        address indexed tranche,
+        uint256 shares,
+        address receiver,
+        NAV_UNIT navAtRequestTime,
+        uint32 executableAtTimestamp,
+        uint64 executorBonusWAD
     );
 
     /**
