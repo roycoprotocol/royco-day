@@ -44,14 +44,6 @@ library FeeAndLiquidityPremiumLogic {
         // Cache the senior share rate at this sync's post-mint value before the reinvestment (or any venue mark read) consumes it, so an inline senior share move cannot shift the venue's senior-leg mark
         Cache._write(CacheKey.ST_SHARE_RATE, toUint256(ValuationLogic._computeTrancheShareRate(stTotalSupplyAfterMints, _state.stEffectiveNAV)));
 
-        // Mint the liquidity premium as senior tranche shares held by the kernel on behalf of the liquidity tranche
-        // The premium is already booked into the senior effective NAV, so minting these shares only reassigns senior appreciation to the LT
-        if (liquidityPremiumShares != 0) {
-            IRoycoSeniorTranche(_immutables.seniorTranche).mintLiquidityPremiumShares(address(this), liquidityPremiumShares);
-            $.ltOwnedSeniorTrancheShares += liquidityPremiumShares;
-            // Attempt to deploy the entire staged premium into the LT's market-making inventory, valuing the idle senior shares at the synced senior share rate (effective NAV over the post-mint supply)
-            IRoycoDayKernel(address(this)).attemptLiquidityPremiumReinvestment(type(uint256).max, _state.stEffectiveNAV, stTotalSupplyAfterMints);
-        }
         // Mint the senior protocol fee shares (the ST protocol fee plus the LT protocol fee carved out of the premium) to the protocol fee recipient, priced identically to the premium shares minted above
         if (stProtocolFeeShares != 0) {
             IRoycoVaultTranche(_immutables.seniorTranche).mintProtocolFeeShares(protocolFeeRecipient, stProtocolFeeShares);
@@ -62,6 +54,14 @@ library FeeAndLiquidityPremiumLogic {
                 _state.jtProtocolFee, (_state.jtEffectiveNAV - _state.jtProtocolFee), IERC20(_immutables.juniorTranche).totalSupply(), Math.Rounding.Floor
             );
             IRoycoVaultTranche(_immutables.juniorTranche).mintProtocolFeeShares(protocolFeeRecipient, jtProtocolFeeShares);
+        }
+        // Mint the liquidity premium as senior tranche shares held by the kernel on behalf of the liquidity tranche
+        // The premium is already booked into the senior effective NAV, so minting these shares only reassigns senior appreciation to the LT
+        if (liquidityPremiumShares != 0) {
+            IRoycoSeniorTranche(_immutables.seniorTranche).mintLiquidityPremiumShares(address(this), liquidityPremiumShares);
+            $.ltOwnedSeniorTrancheShares += liquidityPremiumShares;
+            // Attempt to deploy the entire staged premium into the LT's market-making inventory, valuing the idle senior shares at the synced senior share rate (effective NAV over the post-mint supply)
+            IRoycoDayKernel(address(this)).attemptLiquidityPremiumReinvestment(type(uint256).max, _state.stEffectiveNAV, stTotalSupplyAfterMints);
         }
     }
 
