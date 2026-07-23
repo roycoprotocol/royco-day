@@ -26,6 +26,11 @@ contract TestFuzz_MintDilutionClamp_Logic is Test {
     /// @dev The incumbent residual (the complement of the protocol's max mint dilution), locally aliased for readability in the derivations below
     uint256 internal constant EPS = WAD - MAX_MINT_DILUTION_WAD;
 
+    /// @dev Virtual shares / virtual value, restated inline (see Constants.sol VIRTUAL_SHARES / VIRTUAL_VALUE).
+    ///      The clamp caps and prices against the EFFECTIVE supply (S + VS) over (T + VA)
+    uint256 internal constant VS = 1e6;
+    uint256 internal constant VA = 1;
+
     /**
      * The clamp's defining guarantee, asserted UNCONDITIONALLY (bind or not, every branch except the exempt
      * bootstrap): the minted shares own at most (1 − EPS/WAD) of the post-mint supply. In product form
@@ -38,7 +43,7 @@ contract TestFuzz_MintDilutionClamp_Logic is Test {
         _supply = bound(_supply, 1, MAX_NAV); // live supply: the bootstrap (supply == 0) is exempt by design
 
         uint256 minted = ValuationLogic._convertToShares(toNAVUnits(_value), toNAVUnits(_totalValue), _supply, Math.Rounding.Floor);
-        assertLe(minted * EPS, _supply * (WAD - EPS), "a single mint may own at most (1 - residual) of the post-mint supply");
+        assertLe(minted * EPS, (_supply + VS) * (WAD - EPS), "a single mint may own at most (1 - residual) of the post-mint supply");
     }
 
     /**
@@ -52,15 +57,15 @@ contract TestFuzz_MintDilutionClamp_Logic is Test {
         // under ~1e-12 of the deposit, so a binding value only exists on the domain when
         // threshold = floor(d * (WAD − EPS) / EPS) < MAX_NAV, i.e. d <= floor((MAX_NAV − 1) * EPS / (WAD − EPS)) ~ 1e18.
         // Bounding d there (instead of vm.assume) keeps every run on the binding region with zero rejections
-        uint256 maxBindableTotal = Math.mulDiv(MAX_NAV - 1, EPS, WAD - EPS);
+        uint256 maxBindableTotal = Math.mulDiv(MAX_NAV - 1, EPS, WAD - EPS) - VA;
         _totalValue = bound(_totalValue, 0, maxBindableTotal); // includes 0 => the 1-wei dilution branch
         _supply = bound(_supply, 1, MAX_NAV); // live supply
-        uint256 d = _totalValue == 0 ? 1 : _totalValue;
+        uint256 d = _totalValue + VA;
         uint256 threshold = Math.mulDiv(d, WAD - EPS, EPS); // < MAX_NAV by the d bound above
         _value = bound(_value, threshold + 1, MAX_NAV); // uniform over the binding region
 
         uint256 minted = ValuationLogic._convertToShares(toNAVUnits(_value), toNAVUnits(_totalValue), _supply, Math.Rounding.Floor);
-        assertEq(minted, Math.mulDiv(_supply, WAD - EPS, EPS), "a binding mint returns exactly the cap");
+        assertEq(minted, Math.mulDiv(_supply + VS, WAD - EPS, EPS), "a binding mint returns exactly the cap");
     }
 
     /**
@@ -79,19 +84,19 @@ contract TestFuzz_MintDilutionClamp_Logic is Test {
         // Steer into the bind by construction (the fair-priced region's loss bound is the round-trip property
         // in TestFuzz_Valuation.t.sol): bounding d to the bindable region (see BindReturnsExactCap for the
         // derivation) keeps every run on the binding region with zero rejections
-        uint256 maxBindableTotal = Math.mulDiv(MAX_NAV - 1, EPS, WAD - EPS);
+        uint256 maxBindableTotal = Math.mulDiv(MAX_NAV - 1, EPS, WAD - EPS) - VA;
         _totalValue = bound(_totalValue, 0, maxBindableTotal); // includes 0 => the 1-wei dilution branch
         _supply = bound(_supply, 1, MAX_NAV); // live supply
-        uint256 d = _totalValue == 0 ? 1 : _totalValue;
+        uint256 d = _totalValue + VA;
         uint256 threshold = Math.mulDiv(d, WAD - EPS, EPS); // < MAX_NAV by the d bound above
         _value = bound(_value, threshold + 1, MAX_NAV); // uniform over the binding region
 
         uint256 minted = ValuationLogic._convertToShares(toNAVUnits(_value), toNAVUnits(_totalValue), _supply, Math.Rounding.Floor);
         // The depositor's claim right after the mint, at the post-mint supply over the post-deposit value
-        uint256 received = Math.mulDiv(_totalValue + _value, minted, _supply + minted);
+        uint256 received = Math.mulDiv(_totalValue + VA + _value, minted, _supply + VS + minted);
 
         assertLe(received, _value, "a clamped depositor can never come out ahead");
-        uint256 lossSlackDerivedBound = Math.ceilDiv(_totalValue + _value, _supply + minted) + 1;
+        uint256 lossSlackDerivedBound = Math.ceilDiv(_totalValue + VA + _value, _supply + VS + minted) + 1;
         assertLe(
             _value - received,
             Math.ceilDiv(_value * EPS, WAD) + lossSlackDerivedBound,

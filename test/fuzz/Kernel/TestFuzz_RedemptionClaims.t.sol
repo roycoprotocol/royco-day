@@ -60,23 +60,25 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         assertEq(stEffectiveNAV, toUint256(state.stRawNAV) - jtClaimOnSTRaw, "on the gain path the senior effective NAV is its raw NAV minus the ceded premium");
         uint256 totalSTAssets = (toUint256(state.stRawNAV) - jtClaimOnSTRaw).mulDiv(1e18, rate);
 
-        // The redeemer's slice: every claim leg floors independently over the post-sync supply
+        // The redeemer's slice: every claim leg floors independently over the EFFECTIVE supply (supply + VIRTUAL_SHARES),
+        // mirroring src _scaleAssetClaims, which now prices each field against totalTrancheShares + 1e6 so the virtual-share
+        // sliver stays behind (the redemption-side inflation-attack mitigation)
         uint256 supply = seniorTranche.totalSupply();
         // 1e6 share wei up to the full seeded balance: a smaller redemption can floor to a zero-asset payout,
         // which the accountant rejects by design (INVALID_POST_OP_STATE), so the dust floor keeps every run valid
         uint256 shares = bound(_sharesSeed, 1e6, st);
         uint256 balBefore = stJtVault.balanceOf(ST_PROVIDER);
-        // The Redeem event must carry exactly the derived claims (each leg floor-scaled independently)
+        // The Redeem event must carry exactly the derived claims (each leg floor-scaled independently over supply + 1e6)
         AssetClaims memory expectedClaims;
-        expectedClaims.stAssets = toTrancheUnits(totalSTAssets.mulDiv(shares, supply));
-        expectedClaims.nav = toNAVUnits(stEffectiveNAV.mulDiv(shares, supply));
+        expectedClaims.stAssets = toTrancheUnits(totalSTAssets.mulDiv(shares, supply + 1e6));
+        expectedClaims.nav = toNAVUnits(stEffectiveNAV.mulDiv(shares, supply + 1e6));
         vm.expectEmit(true, true, true, true, address(seniorTranche));
         emit IRoycoVaultTranche.Redeem(ST_PROVIDER, ST_PROVIDER, expectedClaims, shares);
         vm.prank(ST_PROVIDER);
         AssetClaims memory claims = seniorTranche.redeem(shares, ST_PROVIDER, ST_PROVIDER);
 
-        assertEq(toUint256(claims.nav), stEffectiveNAV.mulDiv(shares, supply), "redeemed NAV must be the floor-scaled slice of the senior effective NAV");
-        assertEq(toUint256(claims.stAssets), totalSTAssets.mulDiv(shares, supply), "the senior-asset leg must be the floor-scaled slice of the own-raw claim");
+        assertEq(toUint256(claims.nav), stEffectiveNAV.mulDiv(shares, supply + 1e6), "redeemed NAV must be the floor-scaled slice of the senior effective NAV");
+        assertEq(toUint256(claims.stAssets), totalSTAssets.mulDiv(shares, supply + 1e6), "the senior-asset leg must be the floor-scaled slice of the own-raw claim");
         assertEq(toUint256(claims.jtAssets), 0, "no junior-asset leg exists on the gain path");
         assertEq(stJtVault.balanceOf(ST_PROVIDER) - balBefore, toUint256(claims.stAssets), "the wallet delta must equal the claimed vault shares exactly");
 
@@ -118,22 +120,23 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         uint256 totalSTAssets = jtClaimOnSTRaw.mulDiv(1e18, rate);
         uint256 totalJTAssets = toUint256(state.jtRawNAV).mulDiv(1e18, rate);
 
+        // Every claim leg floors over the EFFECTIVE supply (supply + VIRTUAL_SHARES), mirroring src _scaleAssetClaims
         uint256 supply = juniorTranche.totalSupply();
         uint256 shares = bound(_sharesSeed, 1e6, juniorTranche.maxRedeem(JT_PROVIDER)); // coverage-respecting slices above the zero-payout dust floor
         uint256 balBefore = stJtVault.balanceOf(JT_PROVIDER);
-        // The Redeem event must carry exactly the derived claims (both asset legs floor-scaled independently)
+        // The Redeem event must carry exactly the derived claims (both asset legs floor-scaled independently over supply + 1e6)
         AssetClaims memory expectedClaims;
-        expectedClaims.stAssets = toTrancheUnits(totalSTAssets.mulDiv(shares, supply));
-        expectedClaims.jtAssets = toTrancheUnits(totalJTAssets.mulDiv(shares, supply));
-        expectedClaims.nav = toNAVUnits(jtEffectiveNAV.mulDiv(shares, supply));
+        expectedClaims.stAssets = toTrancheUnits(totalSTAssets.mulDiv(shares, supply + 1e6));
+        expectedClaims.jtAssets = toTrancheUnits(totalJTAssets.mulDiv(shares, supply + 1e6));
+        expectedClaims.nav = toNAVUnits(jtEffectiveNAV.mulDiv(shares, supply + 1e6));
         vm.expectEmit(true, true, true, true, address(juniorTranche));
         emit IRoycoVaultTranche.Redeem(JT_PROVIDER, JT_PROVIDER, expectedClaims, shares);
         vm.prank(JT_PROVIDER);
         AssetClaims memory claims = juniorTranche.redeem(shares, JT_PROVIDER, JT_PROVIDER);
 
-        assertEq(toUint256(claims.nav), jtEffectiveNAV.mulDiv(shares, supply), "redeemed NAV must be the floor-scaled slice of the junior effective NAV");
-        assertEq(toUint256(claims.stAssets), totalSTAssets.mulDiv(shares, supply), "the senior-asset leg must be the floor-scaled premium cross-claim slice");
-        assertEq(toUint256(claims.jtAssets), totalJTAssets.mulDiv(shares, supply), "the junior-asset leg must be the floor-scaled own-raw claim slice");
+        assertEq(toUint256(claims.nav), jtEffectiveNAV.mulDiv(shares, supply + 1e6), "redeemed NAV must be the floor-scaled slice of the junior effective NAV");
+        assertEq(toUint256(claims.stAssets), totalSTAssets.mulDiv(shares, supply + 1e6), "the senior-asset leg must be the floor-scaled premium cross-claim slice");
+        assertEq(toUint256(claims.jtAssets), totalJTAssets.mulDiv(shares, supply + 1e6), "the junior-asset leg must be the floor-scaled own-raw claim slice");
         assertEq(
             stJtVault.balanceOf(JT_PROVIDER) - balBefore,
             toUint256(claims.stAssets) + toUint256(claims.jtAssets),
@@ -155,8 +158,9 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
      * the recipient is the ST fee plus the LT fee carved out of the premium, both priced against the retained
      * senior NAV (stEffectiveNAV - premium - fee) at the pre-sync supply, so
      *   idleShares = floor(st x (premium - ltFee) / (stEffectiveNAV - premium - fee))
-     * and the LT effective NAV adds the idle shares valued at the post-mint senior share price:
-     *   ltEff = depth + floor(idleShares x stEffectiveNAV / stSupplyAfterMints)
+     * and the LT effective NAV adds the idle shares valued at the post-mint senior share price through the
+     * offset-aware _convertToValue (numerator gains VIRTUAL_VALUE = 1, denominator gains VIRTUAL_SHARES = 1e6):
+     *   ltEff = depth + floor((stEffectiveNAV + 1) x idleShares / (stSupplyAfterMints + 1e6))
      */
     function testFuzz_LiquidityRedemption_PaysBPTSliceAndIdleLiquidityPremiumSharesSliceExactly(
         uint256 _stSeed,
@@ -196,27 +200,29 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         assertEq(seniorTranche.totalSupply(), stSupplyAfterMints, "the senior supply must include the net premium and fee-plus-ltfee mints exactly");
         assertEq(toUint256(state.ltRawNAV), depth, "the committed LT raw mark must exclude the idle liquidity premium senior shares");
 
-        // The LT's two-leg effective NAV: pool depth plus the idle shares at the post-mint senior share price
-        uint256 idleValue = idleShares.mulDiv(toUint256(state.stEffectiveNAV), stSupplyAfterMints);
+        // The LT's two-leg effective NAV: pool depth plus the idle shares valued through the offset-aware
+        // _convertToValue (numerator + VIRTUAL_VALUE, denominator + VIRTUAL_SHARES), mirroring src exactly
+        uint256 idleValue = idleShares.mulDiv(toUint256(state.stEffectiveNAV) + 1, stSupplyAfterMints + 1e6);
         uint256 ltEff = depth + idleValue;
 
+        // Every claim leg floors over the EFFECTIVE supply (supply + VIRTUAL_SHARES), mirroring src _scaleAssetClaims
         uint256 supply = liquidityTranche.totalSupply();
         uint256 shares = bound(_sharesSeed, 1e6, liquidityTranche.maxRedeem(LT_PROVIDER)); // liquidity-respecting slices above the zero-payout dust floor
         uint256 bptBefore = bpt.balanceOf(LT_PROVIDER);
         uint256 stSharesBefore = seniorTranche.balanceOf(LT_PROVIDER);
-        // The Redeem event must carry exactly the derived two-leg claims (BPT slice plus idle-share slice)
+        // The Redeem event must carry exactly the derived two-leg claims (BPT slice plus idle-share slice), each over supply + 1e6
         AssetClaims memory expectedClaims;
-        expectedClaims.ltAssets = toTrancheUnits(depth.mulDiv(shares, supply));
-        expectedClaims.stShares = idleShares.mulDiv(shares, supply);
-        expectedClaims.nav = toNAVUnits(ltEff.mulDiv(shares, supply));
+        expectedClaims.ltAssets = toTrancheUnits(depth.mulDiv(shares, supply + 1e6));
+        expectedClaims.stShares = idleShares.mulDiv(shares, supply + 1e6);
+        expectedClaims.nav = toNAVUnits(ltEff.mulDiv(shares, supply + 1e6));
         vm.expectEmit(true, true, true, true, address(liquidityTranche));
         emit IRoycoVaultTranche.Redeem(LT_PROVIDER, LT_PROVIDER, expectedClaims, shares);
         vm.prank(LT_PROVIDER);
         AssetClaims memory claims = liquidityTranche.redeem(shares, LT_PROVIDER, LT_PROVIDER);
 
-        assertEq(toUint256(claims.nav), ltEff.mulDiv(shares, supply), "redeemed NAV must be the floor-scaled slice of the two-leg LT effective NAV");
-        assertEq(toUint256(claims.ltAssets), depth.mulDiv(shares, supply), "the BPT leg must be the floor-scaled slice of the pool depth");
-        assertEq(claims.stShares, idleShares.mulDiv(shares, supply), "the senior-share leg must be the floor-scaled slice of the idle liquidity premium senior shares");
+        assertEq(toUint256(claims.nav), ltEff.mulDiv(shares, supply + 1e6), "redeemed NAV must be the floor-scaled slice of the two-leg LT effective NAV");
+        assertEq(toUint256(claims.ltAssets), depth.mulDiv(shares, supply + 1e6), "the BPT leg must be the floor-scaled slice of the pool depth");
+        assertEq(claims.stShares, idleShares.mulDiv(shares, supply + 1e6), "the senior-share leg must be the floor-scaled slice of the idle liquidity premium senior shares");
         assertEq(bpt.balanceOf(LT_PROVIDER) - bptBefore, toUint256(claims.ltAssets), "the BPT wallet delta must equal the claim exactly");
         assertEq(seniorTranche.balanceOf(LT_PROVIDER) - stSharesBefore, claims.stShares, "the idle liquidity premium senior shares must be sent directly to the redeemer");
 

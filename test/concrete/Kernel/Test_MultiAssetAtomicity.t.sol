@@ -427,11 +427,12 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         assertGt(maxMulti, 0, "a bounded multi-asset exit that relaxes the floor must remain possible");
         assertLt(maxMulti, shares, "the breach must not waive the requirement: the maximum stays below the full balance");
         uint256 supply = liquidityTranche.totalSupply();
-        uint256 expectedIdleAfter = idleBefore - Math.mulDiv(idleBefore, maxMulti, supply);
+        // The redeemer's slice scales against the EFFECTIVE supply (supply + 1e6 virtual shares)
+        uint256 expectedIdleAfter = idleBefore - Math.mulDiv(idleBefore, maxMulti, supply + 1e6);
         vm.prank(actor);
         liquidityTranche.redeemMultiAsset(maxMulti, 0, 0, actor, actor);
 
-        // The exit must debit exactly its pro-rata idle slice: idleBefore - floor(idleBefore * maxMulti / supply)
+        // The exit must debit exactly its pro-rata idle slice: idleBefore - floor(idleBefore * maxMulti / (supply + 1e6))
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, expectedIdleAfter, "the exit's idle senior share debit diverges from its pro-rata slice");
 
         // The enforced gate leaves the pool at or above its senior liquidity floor after the bounded exit

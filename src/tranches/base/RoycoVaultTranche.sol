@@ -219,8 +219,9 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         // We do not allow redemptions if the tranche has no claim on the assets
         if (claimNAV == ZERO_NAV_UNITS) return 0;
 
-        // The maximum redeemable shares are the minimum of the owner's share balance and the globally redeemable shares
-        shares = Math.min(balanceOf(_owner), totalTrancheShares.mulDiv(maxWithdrawableNAV, claimNAV, Math.Rounding.Floor));
+        // The maximum redeemable shares are the minimum of the owner's share balance and the globally redeemable
+        // shares, priced through the same virtual shares primitive as deposits and _scaleAssetClaims
+        shares = Math.min(balanceOf(_owner), ValuationLogic._convertToShares(maxWithdrawableNAV, claimNAV, totalTrancheShares, Math.Rounding.Floor));
     }
 
     // =============================

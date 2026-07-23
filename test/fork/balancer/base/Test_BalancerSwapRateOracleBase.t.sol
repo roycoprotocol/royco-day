@@ -369,12 +369,23 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         uint256 rate = _kernelRate();
         uint256 supply = ST.totalSupply();
         uint256 stEff = toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV);
-        assertEq(rate, Math.mulDiv(WAD, stEff, supply), "getRate must equal the committed senior effective NAV per share (floored)");
+        // _computeTrancheShareRate == _convertToValue(WAD, supply, stEff), which now carries the virtual
+        // shares/value offset: floor((stEff + VIRTUAL_VALUE) * WAD / (supply + VIRTUAL_SHARES))
+        assertEq(
+            rate,
+            Math.mulDiv(WAD, stEff + VIRTUAL_VALUE, supply + VIRTUAL_SHARES),
+            "getRate must equal the committed senior effective NAV per effective share (floored)"
+        );
         // Independent counterweight on plain checked integers (no shared math library): a floored NAV-per-share
-        // must reconstruct the committed senior NAV to within one unit of supply-scale floor loss — scaling the
-        // rate back up by the supply never overshoots WAD * NAV, and undershoots it by less than one full supply.
-        assertLe(rate * supply, WAD * stEff, "rate * supply must never overstate the committed senior NAV");
-        assertGt(rate * supply + supply, WAD * stEff, "rate * supply must undershoot the committed senior NAV by less than one supply unit");
+        // must reconstruct the committed effective senior NAV to within one unit of effective-supply floor loss —
+        // scaling the rate back up by the effective supply never overshoots WAD * effective NAV, and undershoots
+        // it by less than one full effective supply.
+        assertLe(rate * (supply + VIRTUAL_SHARES), WAD * (stEff + VIRTUAL_VALUE), "rate * effective supply must never overstate the committed senior NAV");
+        assertGt(
+            rate * (supply + VIRTUAL_SHARES) + (supply + VIRTUAL_SHARES),
+            WAD * (stEff + VIRTUAL_VALUE),
+            "rate * effective supply must undershoot the committed senior NAV by less than one effective-supply unit"
+        );
     }
 
     /// @notice within a synced transaction the rate is FROZEN: a feed move after the sync does not move
@@ -410,8 +421,9 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         uint256 rate1 = _kernelRate();
         assertGt(rate1, rate0, "senior yield must raise the rate");
         assertGt(ST.totalSupply(), supply0, "arrange: the sync must have minted premium/fee shares");
-        uint256 expected = Math.mulDiv(WAD, toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV), ST.totalSupply());
-        assertEq(rate1, expected, "the refreshed rate must equal committed NAV per post-mint share");
+        // getRate carries the offset: floor((stEff + VIRTUAL_VALUE) * WAD / (postMintSupply + VIRTUAL_SHARES))
+        uint256 expected = Math.mulDiv(WAD, toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV) + VIRTUAL_VALUE, ST.totalSupply() + VIRTUAL_SHARES);
+        assertEq(rate1, expected, "the refreshed rate must equal committed NAV per post-mint effective share");
     }
 
     /**
@@ -429,8 +441,9 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
 
         uint256 rateAfter = _kernelRate();
         assertGt(rateAfter, rateBefore, "the hook's sync must refresh the rate to the moved feed");
-        uint256 expected = Math.mulDiv(WAD, toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV), ST.totalSupply());
-        assertEq(rateAfter, expected, "the swap-refreshed rate must equal the committed NAV per share");
+        // getRate carries the offset: floor((stEff + VIRTUAL_VALUE) * WAD / (supply + VIRTUAL_SHARES))
+        uint256 expected = Math.mulDiv(WAD, toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV) + VIRTUAL_VALUE, ST.totalSupply() + VIRTUAL_SHARES);
+        assertEq(rateAfter, expected, "the swap-refreshed rate must equal the committed NAV per effective share");
     }
 
     /// @notice the Vault's own view of the pool token rates reads the kernel rate provider live: the

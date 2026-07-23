@@ -56,19 +56,22 @@ contract Test_EntryPointRemitClaims is Test {
         MockKernelAssets kernel = new MockKernelAssets(address(stAsset), address(jtAsset), address(ltAsset), address(seniorShare), address(quoteAsset));
         _fundHarness(110, 220, 0, 0);
 
-        // A 10% bonus on totals (110, 220): the executor gets (11, 22) and the receiver gets the (99, 198) remainder
+        // A 10% bonus on totals (110, 220). The bonus is a _scaleAssetClaims slice priced against the virtual-shares
+        // effective denominator (WAD + 1e6): bonusST = floor(110*0.1e18/(1e18+1e6)) = 10, bonusJT =
+        // floor(220*0.1e18/(1e18+1e6)) = 21. The receiver keeps total-minus-bonus, so (100, 199). Conservation
+        // holds exactly per leg (executor + receiver == total): the offset only shifts the floor of the bonus slice.
         vm.prank(EXECUTOR);
         (AssetClaims memory bonusClaims,, AssetClaims memory userClaims) =
             harness.remitRedemptionAndBonusClaims(address(kernel), _claims(110, 220, 0, 0), 0, TEN_PERCENT_WAD, RECEIVER);
 
-        assertEq(stAsset.balanceOf(RECEIVER), 99, "receiver ST asset leg");
-        assertEq(jtAsset.balanceOf(RECEIVER), 198, "receiver JT asset leg");
-        assertEq(stAsset.balanceOf(EXECUTOR), 11, "executor ST asset leg");
-        assertEq(jtAsset.balanceOf(EXECUTOR), 22, "executor JT asset leg");
+        assertEq(stAsset.balanceOf(RECEIVER), 100, "receiver ST asset leg");
+        assertEq(jtAsset.balanceOf(RECEIVER), 199, "receiver JT asset leg");
+        assertEq(stAsset.balanceOf(EXECUTOR), 10, "executor ST asset leg");
+        assertEq(jtAsset.balanceOf(EXECUTOR), 21, "executor JT asset leg");
         // The returned splits must mirror the transfers: the total claims are reduced in place to the receiver's portion
-        assertEq(toUint256(bonusClaims.stAssets), 11, "returned bonus ST leg");
-        assertEq(toUint256(userClaims.stAssets), 99, "returned user ST leg");
-        assertEq(toUint256(userClaims.jtAssets), 198, "returned user JT leg");
+        assertEq(toUint256(bonusClaims.stAssets), 10, "returned bonus ST leg");
+        assertEq(toUint256(userClaims.stAssets), 100, "returned user ST leg");
+        assertEq(toUint256(userClaims.jtAssets), 199, "returned user JT leg");
     }
 
     function test_remit_sameAsset_batchesStAndJtLegs() public {
@@ -78,8 +81,9 @@ contract Test_EntryPointRemitClaims is Test {
         vm.prank(EXECUTOR);
         harness.remitRedemptionAndBonusClaims(address(kernel), _claims(110, 220, 0, 0), 0, TEN_PERCENT_WAD, RECEIVER);
 
-        assertEq(stAsset.balanceOf(RECEIVER), 297, "receiver must get one batched ST+JT transfer");
-        assertEq(stAsset.balanceOf(EXECUTOR), 33, "executor must get one batched ST+JT transfer");
+        // Bonus per leg over (WAD + 1e6): bonusST = 10, bonusJT = 21, batched bonus = 31; receiver keeps 299.
+        assertEq(stAsset.balanceOf(RECEIVER), 299, "receiver must get one batched ST+JT transfer");
+        assertEq(stAsset.balanceOf(EXECUTOR), 31, "executor must get one batched ST+JT transfer");
     }
 
     function test_remit_transfersLtAndSeniorShareLegs() public {
@@ -89,10 +93,12 @@ contract Test_EntryPointRemitClaims is Test {
         vm.prank(EXECUTOR);
         harness.remitRedemptionAndBonusClaims(address(kernel), _claims(0, 0, 300, 400), 0, TEN_PERCENT_WAD, RECEIVER);
 
-        assertEq(ltAsset.balanceOf(RECEIVER), 270, "receiver LT asset leg");
-        assertEq(seniorShare.balanceOf(RECEIVER), 360, "receiver senior share leg");
-        assertEq(ltAsset.balanceOf(EXECUTOR), 30, "executor LT asset leg");
-        assertEq(seniorShare.balanceOf(EXECUTOR), 40, "executor senior share leg");
+        // Bonus over (WAD + 1e6): bonusLT = floor(300*0.1e18/(1e18+1e6)) = 29, bonusShares =
+        // floor(400*0.1e18/(1e18+1e6)) = 39; receiver keeps (271, 361).
+        assertEq(ltAsset.balanceOf(RECEIVER), 271, "receiver LT asset leg");
+        assertEq(seniorShare.balanceOf(RECEIVER), 361, "receiver senior share leg");
+        assertEq(ltAsset.balanceOf(EXECUTOR), 29, "executor LT asset leg");
+        assertEq(seniorShare.balanceOf(EXECUTOR), 39, "executor senior share leg");
     }
 
     function test_remit_zeroBonus_sendsEverythingToReceiver() public {
@@ -163,13 +169,15 @@ contract Test_EntryPointRemitClaims is Test {
         vm.prank(EXECUTOR);
         harness.remitRedemptionAndBonusClaims(address(kernel), _claims(110, 220, 300, 400), 0, TEN_PERCENT_WAD, RECEIVER);
 
-        assertEq(stAsset.balanceOf(RECEIVER), 99, "receiver ST asset leg");
-        assertEq(jtAsset.balanceOf(RECEIVER), 198, "receiver JT asset leg");
-        assertEq(ltAsset.balanceOf(RECEIVER), 270, "receiver LT asset leg");
-        assertEq(seniorShare.balanceOf(RECEIVER), 360, "receiver senior share leg");
-        assertEq(stAsset.balanceOf(EXECUTOR), 11, "executor ST asset leg");
-        assertEq(jtAsset.balanceOf(EXECUTOR), 22, "executor JT asset leg");
-        assertEq(ltAsset.balanceOf(EXECUTOR), 30, "executor LT asset leg");
-        assertEq(seniorShare.balanceOf(EXECUTOR), 40, "executor senior share leg");
+        // Bonus per leg over (WAD + 1e6): (bonusST, bonusJT, bonusLT, bonusShares) = (10, 21, 29, 39); receiver
+        // keeps total-minus-bonus on every leg. Conservation holds per leg (executor + receiver == total).
+        assertEq(stAsset.balanceOf(RECEIVER), 100, "receiver ST asset leg");
+        assertEq(jtAsset.balanceOf(RECEIVER), 199, "receiver JT asset leg");
+        assertEq(ltAsset.balanceOf(RECEIVER), 271, "receiver LT asset leg");
+        assertEq(seniorShare.balanceOf(RECEIVER), 361, "receiver senior share leg");
+        assertEq(stAsset.balanceOf(EXECUTOR), 10, "executor ST asset leg");
+        assertEq(jtAsset.balanceOf(EXECUTOR), 21, "executor JT asset leg");
+        assertEq(ltAsset.balanceOf(EXECUTOR), 29, "executor LT asset leg");
+        assertEq(seniorShare.balanceOf(EXECUTOR), 39, "executor senior share leg");
     }
 }

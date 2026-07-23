@@ -36,11 +36,12 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         _assertSeededGateFixture(idleShares);
 
         // The gate's floor, hand-derived from the pinned fixture state rather than by re-running the production
-        // conversion chain: the whole idle pile values to floor(108e18 x 846660395108184383 / 101599247412982126057)
-        // = 899999999999999999 at the committed senior rate, the 0.9e18 NET premium it was minted for (the 1e18
-        // gross premium less the 0.1e18 LT protocol fee), less a single floor-rounding wei. The pool's NAV per BPT
-        // is exactly 1.0 (6.000001e18 BPT backing 6.000001e18 of value), so the fair BPT is that same figure, and
-        // the 0.1% max reinvestment slippage discount floors the add at
+        // conversion chain: the whole idle pile values through the offset-aware _convertToValue to
+        // floor((108e18 + 1) x 846660395108192850 / (101599247412982142050 + 1e6)) = 899999999999999999 at the committed
+        // senior rate (the offset on the idle count and the supply cancels, so the value is unchanged from the naive ratio),
+        // the 0.9e18 NET premium it was minted for (the 1e18 gross premium less the 0.1e18 LT protocol fee), less a single
+        // floor-rounding wei. The pool's NAV per BPT is exactly 1.0 (6.000001e18 BPT backing 6.000001e18 of value), so the
+        // fair BPT is that same figure, and the 0.1% max reinvestment slippage discount floors the add at
         // ceil(899999999999999999 x 999 / 1000) = 899100000000000000
         uint256 minOut = 0.8991e18;
 
@@ -75,14 +76,14 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
         _assertSeededGateFixture(idleShares);
 
-        // Deploy the floor-rounded half of the pinned pile: 846660395108184383 / 2 = 423330197554092191
-        uint256 half = 423330197554092191;
+        // Deploy the floor-rounded half of the pinned pile: 846660395108192850 / 2 = 423330197554096425
+        uint256 half = 423330197554096425;
 
-        // The gate's floor for the half, hand-derived from the pinned fixture state: the half values to
-        // floor(108e18 x 423330197554092191 / 101599247412982126057) = 449999999999999999 at the committed senior
-        // rate (half the NET premium less a floor-rounding wei), the pool's NAV per BPT is exactly 1.0 so the fair
-        // BPT is the same figure, and the 0.1% discount floors the add at ceil(449999999999999999 x 999 / 1000)
-        // = 449550000000000000
+        // The gate's floor for the half, hand-derived from the pinned fixture state through the offset-aware
+        // _convertToValue: the half values to floor((108e18 + 1) x 423330197554096425 / (101599247412982142050 + 1e6))
+        // = 449999999999999999 at the committed senior rate (half the NET premium less a floor-rounding wei), the pool's
+        // NAV per BPT is exactly 1.0 so the fair BPT is the same figure, and the 0.1% discount floors the add at
+        // ceil(449999999999999999 x 999 / 1000) = 449550000000000000
         uint256 minOut = 0.44955e18;
 
         uint256 ltOwnedBefore = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
@@ -230,19 +231,19 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
      *      - the 10% LT protocol fee carves ltFee = floor(1e18 x 0.1e18 / WAD) = 0.1e18 out of the LT premium, so
      *        the LT is minted the NET premium and the protocol recipient is minted the ST fee PLUS that LT fee, both
      *        as senior shares against the retained NAV and the pre-mint 100e18 supply
-     *      - premium shares minted to the LT (net of the LT fee): floor((1e18 - 0.1e18) x 100e18 / 106.3e18)
-     *        = 846660395108184383 idle senior shares
-     *      - fee shares minted to the protocol recipient (ST fee plus LT fee): floor((0.7e18 + 0.1e18) x 100e18 /
-     *        106.3e18) = 752587017873941674, so the senior supply lands at
-     *        100e18 + 846660395108184383 + 752587017873941674 = 101599247412982126057 (the two independent floors
-     *        drop one wei off the pre-split total, no LT tranche shares mint on a sync)
+     *      - premium shares minted to the LT (net of the LT fee), through the offset-aware _convertToShares (numerator
+     *        supply gains VIRTUAL_SHARES = 1e6, denominator gains VIRTUAL_VALUE = 1):
+     *        floor((100e18 + 1e6) x (1e18 - 0.1e18) / (106.3e18 + 1)) = 846660395108192850 idle senior shares
+     *      - fee shares minted to the protocol recipient (ST fee plus LT fee):
+     *        floor((100e18 + 1e6) x (0.7e18 + 0.1e18) / (106.3e18 + 1)) = 752587017873949200, so the senior supply lands at
+     *        100e18 + 846660395108192850 + 752587017873949200 = 101599247412982142050 (no LT tranche shares mint on a sync)
      *      - the pool holds 6.000001e18 BPT backing 6.000001e18 of quote-leg value (the 6e6-quote-wei auto-seed
      *        plus the genesis backing of the dead minimum supply), so its NAV per BPT is exactly 1.0
      */
     function _assertSeededGateFixture(uint256 _idleShares) internal view {
-        assertEq(_idleShares, 846660395108184383, "fixture pin: the idle premium pile");
+        assertEq(_idleShares, 846660395108192850, "fixture pin: the idle premium pile");
         assertEq(toUint256(accountant.getState().lastSTEffectiveNAV), 108e18, "fixture pin: the committed senior effective NAV");
-        assertEq(seniorTranche.totalSupply(), 101599247412982126057, "fixture pin: the post-mint senior supply");
+        assertEq(seniorTranche.totalSupply(), 101599247412982142050, "fixture pin: the post-mint senior supply");
         assertEq(balancerVault.totalSupply(address(bpt)), 6000001000000000000, "fixture pin: the pool's BPT supply");
         assertEq(bptOracle.computeTVL(), 6000001000000000000, "fixture pin: the pool's oracle TVL (NAV per BPT exactly 1.0)");
     }

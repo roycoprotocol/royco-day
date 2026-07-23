@@ -43,6 +43,22 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
     /// @dev Hand-derived total seeded LT raw NAV: 6e18 (auto-seed) + 20e18 (explicit) at 1.0 quote price
     uint256 internal constant SEEDED_LT_RAW_NAV = 26e18;
 
+    /// @dev The virtual-shares/value offset (Constants.sol VIRTUAL_SHARES / VIRTUAL_VALUE, the OZ ERC4626
+    ///      inflation-attack mitigation): every non-fresh share conversion prices against the effective supply
+    ///      (supply + 1e6) over the effective value (totalValue + 1)
+    uint256 internal constant VIRTUAL_SHARES = 1e6;
+    uint256 internal constant VIRTUAL_VALUE = 1;
+
+    /**
+     * @dev Total seeded LT shares. The 6e18 auto-seed is the FIRST LT deposit (fresh tranche, supply == NAV == 0)
+     *      so it mints 1:1 -> 6e18 shares. The explicit 20e18 BPT then deposits into a live tranche (supply 6e18,
+     *      raw NAV 6e18), so the offset applies: floor((6e18 + 1e6) x 20e18 / (6e18 + 1)) = 20000000000003333329
+     *      shares. Total seeded = 6e18 + 20000000000003333329 = 26000000000003333329 (26e18 + 3333329 of
+     *      virtual-offset dust the fresh-1:1 pin used to hide). The seeded LT RAW NAV is still exactly 26e18 (BPT
+     *      is minted 1:1 with NAV); only the SHARE count drifts
+     */
+    uint256 internal constant SEEDED_LT_SHARES = 26_000_000_000_003_333_329;
+
     // =============================
     // Canonical +100bps Sync Expectations (hand-derived BEFORE execution)
     // =============================
@@ -88,13 +104,15 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      *      100.8e18 - 0.1e18 - 0.07e18 = 100.63e18, each floored. The LT protocol fee is carved out of the
      *      liquidity premium and remitted as SENIOR shares, so the LT receives the premium NET of its own fee
      *      and the fee recipient receives senior shares worth the ST fee PLUS the LT fee:
-     *      LT_PREMIUM_SHARES = floor(100e18 x (0.1e18 - 0.01e18) / 100.63e18) = 89436549736659047
-     *      ST_FEE_SHARES = floor(100e18 x (0.07e18 + 0.01e18) / 100.63e18) = 79499155321474709
-     *      Total senior shares minted this sync is unchanged: (premium - ltFee) + (stFee + ltFee) == premium + stFee,
-     *      so POST_SYNC_ST_SUPPLY is byte-identical to the old split
+     *      Both legs are convertToShares against the pre-sync 100e18 supply, so the virtual-shares offset prices
+     *      each against effective supply (100e18 + 1e6) over effective retained value (100.63e18 + 1):
+     *      LT_PREMIUM_SHARES = floor((100e18 + 1e6) x (0.1e18 - 0.01e18) / (100.63e18 + 1)) = 89436549736659942
+     *      ST_FEE_SHARES = floor((100e18 + 1e6) x (0.07e18 + 0.01e18) / (100.63e18 + 1)) = 79499155321475504
+     *      Total senior shares minted this sync stays (premium - ltFee) + (stFee + ltFee) == premium + stFee in
+     *      NAV terms, but each floored share count ticks up by the offset numerator's +1e6
      */
-    uint256 internal constant LT_PREMIUM_SHARES = 89_436_549_736_659_047;
-    uint256 internal constant ST_FEE_SHARES = 79_499_155_321_474_709;
+    uint256 internal constant LT_PREMIUM_SHARES = 89_436_549_736_659_942;
+    uint256 internal constant ST_FEE_SHARES = 79_499_155_321_475_504;
     uint256 internal constant POST_SYNC_ST_SUPPLY = 100e18 + LT_PREMIUM_SHARES + ST_FEE_SHARES;
 
     /**
@@ -103,7 +121,8 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      *      the just-cached effective share rate floor(1e18 x 100.8e18 / POST_SYNC_ST_SUPPLY) = 1.0063e18, and the
      *      seeded pool's NAV-per-BPT is exactly 1.0 (the genesis seed backs the dead minimum supply at 1.0), so
      *      the add mints fair value:
-     *      REINVESTED_BPT = floor(LT_PREMIUM_SHARES x 1.0063e18 / 1e18) = 89999999999999998
+     *      the offset share rate floor((100.8e18 + 1) x 1e18 / (POST_SYNC_ST_SUPPLY + 1e6)) = 1006299999999989937,
+     *      REINVESTED_BPT = floor(LT_PREMIUM_SHARES x 1006299999999989937 / 1e18) = 89999999999999999
      *      against the gate's minimum of
      *      ceil(floor(LT_PREMIUM_SHARES x 100.8e18 / POST_SYNC_ST_SUPPLY) x 0.999) = 89910000000000000,
      *      leaving only wei-level flooring as slippage, far inside the 10bps defaultParams gate. The deployed
@@ -112,28 +131,31 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      *      shares remain with the kernel. Only the NET premium (premium - ltFee) deploys, so the depth grows by
      *      less than the old full-premium split
      */
-    uint256 internal constant REINVESTED_BPT = 89_999_999_999_999_998;
+    uint256 internal constant REINVESTED_BPT = 89_999_999_999_999_999;
     uint256 internal constant POST_DEPLOY_LT_RAW_NAV = SEEDED_LT_RAW_NAV + REINVESTED_BPT;
 
     /**
      * @dev JT protocol fee share mint, priced against the post-fee NAV over the pre-mint supply:
-     *      JT_FEE_SHARES = floor(30e18 x 0.05e18 / (30.5e18 - 0.05e18)) = 49261083743842364
+     *      Priced through the offset over the pre-mint 30e18 supply:
+     *      JT_FEE_SHARES = floor((30e18 + 1e6) x 0.05e18 / ((30.5e18 - 0.05e18) + 1)) = 49261083743844006
      *      The LT protocol fee no longer mints liquidity-tranche shares: it is remitted as senior shares folded
-     *      into ST_FEE_SHARES, so a sync leaves the LT total supply unchanged at the seeded 26e18
+     *      into ST_FEE_SHARES, so a sync leaves the LT total supply unchanged at the seeded SEEDED_LT_SHARES
      */
-    uint256 internal constant JT_FEE_SHARES = 49_261_083_743_842_364;
+    uint256 internal constant JT_FEE_SHARES = 49_261_083_743_844_006;
     uint256 internal constant POST_SYNC_JT_SUPPLY = 30e18 + JT_FEE_SHARES;
-    uint256 internal constant POST_SYNC_LT_SUPPLY = 26e18;
+    uint256 internal constant POST_SYNC_LT_SUPPLY = SEEDED_LT_SHARES;
 
     /**
      * @dev Exact redemption NAV expectations (shape-independent, all inputs above):
-     *      ST nav, 10e18 of POST_SYNC_ST_SUPPLY: floor(100.8e18 x 10e18 / 100168935705058133756) = 10.063e18
-     *      JT nav, 3e18 of POST_SYNC_JT_SUPPLY: floor(30.5e18 x 3e18 / 30049261083743842364) = 3.045e18
+     *      The redeemer's nav slice scales through _scaleAssetClaims, which now divides by the effective supply
+     *      (totalShares + 1e6), leaving a virtual-share sliver behind:
+     *      ST nav, 10e18 of POST_SYNC_ST_SUPPLY: floor(100.8e18 x 10e18 / (100168935705058135446 + 1e6)) = 10062999999999899370
+     *      JT nav, 3e18 of POST_SYNC_JT_SUPPLY: floor(30.5e18 x 3e18 / (30049261083743844006 + 1e6)) = 3044999999999898500
      *      The LT redemption expectations re-mark the pool's senior leg at the live post-redemption share rate,
      *      which carries the shape's ST-withdrawal truncation, so they are derived inline in the test
      */
-    uint256 internal constant ST_REDEEM_EXPECTED_NAV = 10.063e18;
-    uint256 internal constant JT_REDEEM_EXPECTED_NAV = 3.045e18;
+    uint256 internal constant ST_REDEEM_EXPECTED_NAV = 10_062_999_999_999_899_370;
+    uint256 internal constant JT_REDEEM_EXPECTED_NAV = 3_044_999_999_999_898_500;
 
     // =============================
     // Per-Shape State
@@ -321,15 +343,17 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         // The providers hold exactly their seeded share counts (the premium and fee mints landed elsewhere)
         assertEq(seniorTranche.balanceOf(ST_PROVIDER), 100e18, "ST provider must hold the seeded 100e18 shares");
         assertEq(juniorTranche.balanceOf(JT_PROVIDER), 30e18, "JT provider must hold the seeded 30e18 shares");
-        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 26e18, "LT provider must hold the seeded 26e18 shares");
+        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), SEEDED_LT_SHARES, "LT provider must hold the seeded SEEDED_LT_SHARES");
 
         // Senior: redeem a tenth (10e18 shares). Claim derivation: jtEff 30.5e18 exceeds jtRaw 30.3e18 by the
         // 0.2e18 risk premium, so JT holds a 0.2e18 claim on ST raw and ST's own-raw claim is
         // 101e18 - 0.2e18 = 100.8e18 with no JT leg. The redeemer's slice is proportional and floored:
-        // nav = floor(100.8e18 x 10e18 / POST_SYNC_ST_SUPPLY) = 10.063e18 exactly, and
-        // stAssets = floor(floor(100.8e18 x stUnit / 1.01e18) x 10e18 / POST_SYNC_ST_SUPPLY)
+        // nav = floor(100.8e18 x 10e18 / (POST_SYNC_ST_SUPPLY + 1e6)) = ST_REDEEM_EXPECTED_NAV, and
+        // stAssets = floor(floor(100.8e18 x stUnit / 1.01e18) x 10e18 / (POST_SYNC_ST_SUPPLY + 1e6)) — the slice
+        // divides by the effective supply (the virtual-share offset in _scaleAssetClaims)
         uint256 stShares = seniorTranche.balanceOf(ST_PROVIDER) / 10;
-        uint256 expectedStAssetsWithdrawn = Math.mulDiv(Math.mulDiv(POST_SYNC_ST_EFF_NAV, stUnit, POST_PNL_RATE_WAD), stShares, POST_SYNC_ST_SUPPLY);
+        uint256 expectedStAssetsWithdrawn =
+            Math.mulDiv(Math.mulDiv(POST_SYNC_ST_EFF_NAV, stUnit, POST_PNL_RATE_WAD), stShares, POST_SYNC_ST_SUPPLY + VIRTUAL_SHARES);
         AssetClaims memory stPreviewed = seniorTranche.previewRedeem(stShares);
         uint256 stBalBefore = stJtVault.balanceOf(ST_PROVIDER);
         vm.expectEmit(address(seniorTranche));
@@ -362,10 +386,12 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         // Junior: redeem a tenth (3e18 shares). The ST redemption reduced stRaw and stEff by the same withdrawn
         // NAV and left jtRaw 30.3e18 / jtEff 30.5e18 untouched, so JT's claims are unchanged: the 0.2e18
         // cross-claim on ST raw plus its full 30.3e18 own raw, each floored through the quoter and the
-        // proportional scale. nav = floor(30.5e18 x 3e18 / POST_SYNC_JT_SUPPLY) = 3.045e18 exactly
+        // proportional scale (divided by the effective supply JT_SUPPLY + 1e6).
+        // nav = floor(30.5e18 x 3e18 / (POST_SYNC_JT_SUPPLY + 1e6)) = JT_REDEEM_EXPECTED_NAV exactly
         uint256 jtShares = juniorTranche.balanceOf(JT_PROVIDER) / 10;
-        uint256 expectedJtCrossClaimAssets = Math.mulDiv(Math.mulDiv(JT_CLAIM_ON_ST_RAW_NAV, stUnit, POST_PNL_RATE_WAD), jtShares, POST_SYNC_JT_SUPPLY);
-        uint256 expectedJtOwnClaimAssets = Math.mulDiv(Math.mulDiv(30.3e18, stUnit, POST_PNL_RATE_WAD), jtShares, POST_SYNC_JT_SUPPLY);
+        uint256 expectedJtCrossClaimAssets =
+            Math.mulDiv(Math.mulDiv(JT_CLAIM_ON_ST_RAW_NAV, stUnit, POST_PNL_RATE_WAD), jtShares, POST_SYNC_JT_SUPPLY + VIRTUAL_SHARES);
+        uint256 expectedJtOwnClaimAssets = Math.mulDiv(Math.mulDiv(30.3e18, stUnit, POST_PNL_RATE_WAD), jtShares, POST_SYNC_JT_SUPPLY + VIRTUAL_SHARES);
         AssetClaims memory jtPreviewed = juniorTranche.previewRedeem(jtShares);
         uint256 jtBalBefore = stJtVault.balanceOf(JT_PROVIDER);
         vm.expectEmit(address(juniorTranche));
@@ -410,12 +436,17 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         uint256 expectedLtAssets;
         {
             uint256 stRawAfter = Math.mulDiv(100 * stUnit - expectedStAssetsWithdrawn, POST_PNL_RATE_WAD, stUnit);
-            uint256 rateAfter = Math.mulDiv(1e18, POST_SYNC_ST_EFF_NAV - (101e18 - stRawAfter), POST_SYNC_ST_SUPPLY - 10e18);
+            // The live senior share rate is _computeTrancheShareRate == _convertToValue(WAD, supply, effNAV), which
+            // now carries the offset: (effNAV + 1) x WAD / (supply + 1e6)
+            uint256 rateAfter =
+                Math.mulDiv(POST_SYNC_ST_EFF_NAV - (101e18 - stRawAfter) + VIRTUAL_VALUE, 1e18, (POST_SYNC_ST_SUPPLY - 10e18) + VIRTUAL_SHARES);
             // bptSupplySeeded is the whole seeded supply including the genesis backing, captured above at 1.0 NAV-per-BPT
             uint256 poolTVL = bptSupplySeeded + Math.mulDiv(LT_PREMIUM_SHARES, rateAfter, 1e18);
             uint256 ltRawAtRedeem = Math.mulDiv(poolTVL, POST_DEPLOY_LT_RAW_NAV, bptSupplySeeded + REINVESTED_BPT);
-            expectedLtNav = Math.mulDiv(ltRawAtRedeem, ltShares, POST_SYNC_LT_SUPPLY);
-            expectedLtAssets = Math.mulDiv(Math.mulDiv(bptSupplySeeded + REINVESTED_BPT, ltRawAtRedeem, poolTVL), ltShares, POST_SYNC_LT_SUPPLY);
+            // The redeemer's slice scales through _scaleAssetClaims, dividing by the effective supply (+ 1e6)
+            expectedLtNav = Math.mulDiv(ltRawAtRedeem, ltShares, POST_SYNC_LT_SUPPLY + VIRTUAL_SHARES);
+            expectedLtAssets =
+                Math.mulDiv(Math.mulDiv(bptSupplySeeded + REINVESTED_BPT, ltRawAtRedeem, poolTVL), ltShares, POST_SYNC_LT_SUPPLY + VIRTUAL_SHARES);
         }
         AssetClaims memory ltPreviewed = liquidityTranche.previewRedeem(ltShares);
         uint256 ltBptBefore = bpt.balanceOf(LT_PROVIDER);
@@ -452,26 +483,31 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
     /**
      * @notice An ST deposit mints exactly the previewed shares
      * @dev Derivation: at rate 1.0 the freshly seeded market has supply == stEff == 100e18 (initial mint is
-     *      one share-wei per NAV-wei with no accrued yield or fees), so 5 whole ST assets == 5e18 NAV must mint
-     *      exactly 5e18 shares, and preview must match execution byte-for-byte
+     *      one share-wei per NAV-wei with no accrued yield or fees). The tranche is no longer fresh (supply > 0),
+     *      so 5 whole ST assets == 5e18 NAV mint through the offset:
+     *      floor((100e18 + 1e6) x 5e18 / (100e18 + 1)) = 5000000000000049999 (5e18 + 49999 of virtual-offset
+     *      dust — the incumbent 100e18 supply's price ticks up by the +1e6 numerator), and preview must match
+     *      execution byte-for-byte
      */
     function test_STDeposit_previewMatchesExecutionExactly() public {
         _seedDefault();
         uint256 assets = 5 * stUnit;
         stJtVault.mintShares(ST_PROVIDER, assets);
 
+        // Offset mint against the live 100e18 supply / 100e18 stEff: floor((100e18 + 1e6) x 5e18 / (100e18 + 1))
+        uint256 expectedMinted = Math.mulDiv(100e18 + VIRTUAL_SHARES, 5e18, 100e18 + VIRTUAL_VALUE);
         uint256 previewedShares = seniorTranche.previewDeposit(toTrancheUnits(assets));
         uint256 sharesBefore = seniorTranche.balanceOf(ST_PROVIDER);
         vm.startPrank(ST_PROVIDER);
         stJtVault.approve(address(seniorTranche), assets);
         vm.expectEmit(address(seniorTranche));
-        emit IRoycoVaultTranche.Deposit(ST_PROVIDER, ST_PROVIDER, toTrancheUnits(assets), 5e18);
+        emit IRoycoVaultTranche.Deposit(ST_PROVIDER, ST_PROVIDER, toTrancheUnits(assets), expectedMinted);
         uint256 mintedShares = seniorTranche.deposit(toTrancheUnits(assets), ST_PROVIDER);
         vm.stopPrank();
 
         assertEq(mintedShares, previewedShares, "ST deposit: preview/execute share parity");
         assertEq(seniorTranche.balanceOf(ST_PROVIDER) - sharesBefore, mintedShares, "ST deposit: minted shares must land on the receiver");
-        assertEq(mintedShares, 5e18, "ST deposit: 5 whole assets at a 1.0 share price must mint exactly 5e18 shares");
+        assertEq(mintedShares, expectedMinted, "ST deposit: 5 whole assets must mint the offset-priced share count against the 100e18 supply");
     }
 
     // =============================
@@ -499,8 +535,9 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         uint256 depositAssets = 5 * stUnit;
         uint256 depositNAV = 5.05e18;
         // The deposit's inline pre-op sync produces the canonical post-sync state, so the attacker mints at the
-        // diluted share rate: floor(5.05e18 x 100168935705058133756 / 100.8e18) shares, strictly less than 5.05e18
-        uint256 expectedMintedShares = Math.mulDiv(depositNAV, POST_SYNC_ST_SUPPLY, POST_SYNC_ST_EFF_NAV);
+        // diluted share rate through the offset convertToShares: floor((POST_SYNC_ST_SUPPLY + 1e6) x 5.05e18 /
+        // (100.8e18 + 1)) shares, strictly less than 5.05e18
+        uint256 expectedMintedShares = Math.mulDiv(POST_SYNC_ST_SUPPLY + VIRTUAL_SHARES, depositNAV, POST_SYNC_ST_EFF_NAV + VIRTUAL_VALUE);
         stJtVault.mintShares(attacker, depositAssets);
 
         vm.startPrank(attacker);
@@ -528,10 +565,12 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         // the 5.05e18 deposit to 105.85e18 and the supply by the attacker's mint, so the exit pays
         // nav = floor(105.85e18 x minted / supplyAfter) <= 5.05e18 and
         // assets = floor(floor(105.85e18 x stUnit / 1.01e18) x minted / supplyAfter) <= 5 x stUnit
+        // The exit slice scales through _scaleAssetClaims, dividing by the effective supply (supplyAfter + 1e6)
         uint256 supplyAfterDeposit = POST_SYNC_ST_SUPPLY + expectedMintedShares;
         uint256 stEffAfterDeposit = POST_SYNC_ST_EFF_NAV + depositNAV;
-        uint256 expectedNavOut = Math.mulDiv(stEffAfterDeposit, expectedMintedShares, supplyAfterDeposit);
-        uint256 expectedAssetsOut = Math.mulDiv(Math.mulDiv(stEffAfterDeposit, stUnit, POST_PNL_RATE_WAD), expectedMintedShares, supplyAfterDeposit);
+        uint256 expectedNavOut = Math.mulDiv(stEffAfterDeposit, expectedMintedShares, supplyAfterDeposit + VIRTUAL_SHARES);
+        uint256 expectedAssetsOut =
+            Math.mulDiv(Math.mulDiv(stEffAfterDeposit, stUnit, POST_PNL_RATE_WAD), expectedMintedShares, supplyAfterDeposit + VIRTUAL_SHARES);
 
         vm.expectEmit(address(seniorTranche));
         emit IRoycoVaultTranche.Redeem(
@@ -570,20 +609,28 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice An LT redemption that parks liquidityUtilization at exactly 100% succeeds, and one more wei reverts
+     * @notice An LT redemption that parks liquidityUtilization at exactly 100% succeeds, and one more BPT wei of
+     *         depth removed reverts
      * @dev Attacker intent: drain the market-making depth to the last wei the liquidity requirement allows,
      *      then probe whether rounding lets one more redemption slip under the senior liquidity floor.
-     *      Derivation at rate 1.0: stEff = 100e18 and minLiquidity = 0.05e18, so the floor depth is exactly
-     *      5e18. Redeeming 21e18 of the 26e18 LT shares pays a 21e18 BPT slice (NAV-per-BPT is exactly 1.0)
-     *      and leaves ltRawNAV = 5e18, so liquidityUtilization = ceil(100e18 x 0.05e18 / 5e18) = 1e18 == 100%
-     *      exactly, inside the <= gate. Any further redemption leaves ltRawNAV < 5e18 and must revert with
-     *      LIQUIDITY_REQUIREMENT_VIOLATED, even for a single share wei (ceil rounding favors the senior floor)
+     *      Derivation at rate 1.0: stEff = 100e18 and minLiquidity = 0.05e18, so the floor depth is exactly 5e18.
+     *      The gate is purely on ltRawNAV (depth), independent of the offset: liquidityUtilization =
+     *      ceil(100e18 x 0.05e18 / depth), so depth == 5e18 reads exactly 100% and depth == 5e18 - 1 reads
+     *      1e18 + 1 > WAD. Under the virtual-shares offset a BPT slice is floor(26e18 x shares /
+     *      (SEEDED_LT_SHARES + 1e6)), so parking depth at exactly 5e18 needs PARK_SHARES =
+     *      ceil(21e18 x (SEEDED_LT_SHARES + 1e6) / 26e18) = 21000000000003499997 (the smallest share count whose
+     *      slice floors to a full 21e18 BPT). The offset also means a single-wei-share redemption now claims
+     *      floor(5e18 x 1 / (residual + 1e6)) == 0 BPT — the virtual-share sliver — so it removes no depth and can
+     *      never breach the floor. The minimal depth-reducing probe is therefore 2 shares, which claims exactly
+     *      1 BPT wei, leaves ltRawNAV = 5e18 - 1, and must revert with LIQUIDITY_REQUIREMENT_VIOLATED
      */
     function test_LTRedeem_parkedAtExactlyFullLiquidityUtilization_succeedsAndNextWeiReverts() public {
         _seedDefault();
 
-        // Park the market exactly at the boundary: 21e18 shares of the 26e18 supply claim 21e18 BPT and 21e18 NAV
-        uint256 parkShares = 21e18;
+        // Park depth at exactly the 5e18 floor: PARK_SHARES claims a full 21e18 BPT slice (see the derivation
+        // above) and leaves the residual SEEDED_LT_SHARES - PARK_SHARES shares against the 5e18 depth
+        uint256 parkShares = 21_000_000_000_003_499_997;
+        uint256 residualShares = SEEDED_LT_SHARES - parkShares;
         vm.expectEmit(address(liquidityTranche));
         emit IRoycoVaultTranche.Redeem(
             LT_PROVIDER,
@@ -601,8 +648,8 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         assertEq(toUint256(parkClaims.nav), 21e18, "boundary redeem: the NAV slice must be exactly 21e18 at 1.0 NAV-per-BPT");
         assertEq(parkClaims.stShares, 0, "boundary redeem: no idle premium senior shares exist before any gain sync");
         assertEq(bpt.balanceOf(LT_PROVIDER), 21e18, "boundary redeem: the redeemer must hold the full BPT slice");
-        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 5e18, "boundary redeem: the redeemer keeps the residual 5e18 LT shares");
-        assertEq(liquidityTranche.totalSupply(), 5e18, "boundary redeem: the LT supply must burn down to 5e18");
+        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), residualShares, "boundary redeem: the redeemer keeps the residual LT shares");
+        assertEq(liquidityTranche.totalSupply(), residualShares, "boundary redeem: the LT supply must burn down to the residual shares");
         assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), 5e18, "boundary redeem: the owned BPT ledger must be exactly the 5e18 floor");
         assertEq(bpt.balanceOf(address(kernel)), 5e18, "boundary redeem: the kernel BPT balance must equal the owned ledger");
         assertEq(toUint256(accountant.getState().lastLTRawNAV), 5e18, "boundary redeem: the committed ltRawNAV must be exactly the floor depth");
@@ -613,14 +660,16 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "boundary redeem: parking the boundary must not change the market state");
         assertNAVConservation(state.stRawNAV, state.jtRawNAV, state.stEffectiveNAV, state.jtEffectiveNAV, "boundary sync");
 
-        // One more share wei would leave ltRawNAV = 5e18 - 1, and ceil(5e36 / (5e18 - 1)) = 1e18 + 1 > 100%
+        // The minimal depth-reducing probe (2 shares claims exactly 1 BPT wei under the offset) would leave
+        // ltRawNAV = 5e18 - 1, and ceil(5e36 / (5e18 - 1)) = 1e18 + 1 > 100% (a single share claims 0 BPT and is
+        // inert). ceil rounding favors the senior floor, so it must revert
         vm.prank(LT_PROVIDER);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        liquidityTranche.redeem(1, LT_PROVIDER, LT_PROVIDER);
+        liquidityTranche.redeem(2, LT_PROVIDER, LT_PROVIDER);
 
         // The failed probe must have moved nothing
         assertEq(bpt.balanceOf(LT_PROVIDER), 21e18, "failed probe: the redeemer BPT balance must be unchanged");
-        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 5e18, "failed probe: the redeemer LT shares must be unchanged");
+        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), residualShares, "failed probe: the redeemer LT shares must be unchanged");
         assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), 5e18, "failed probe: the owned BPT ledger must be unchanged");
     }
 

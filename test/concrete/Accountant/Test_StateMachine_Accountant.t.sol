@@ -193,7 +193,7 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
      * the lt premium zeroed, then transitions to PERPETUAL with FixedTermEnded only once the il reaches exactly zero
      * Derivation (dust 30 + 40 = 70): a covered 100e18 loss enters the term; then a mixed sync with
      * dST = +(80e18 - 50) and dJT = +20e18 attributes floor(20e18 * 100e18 / 200e18) = 10e18 of the jt gain to st:
-     * the jt leg's own 10e18 gain recovers il to 90e18 (its provisional 1e18 fee zeroed by the sticky term), then
+     * the jt leg's own 10e18 gain is fully consumed recovering il to 90e18 (so no jt fee books), then
      * the st-side gain 90e18 - 50 recovers il to exactly 50; a final 50 wei gain zeroes the il and ends the term
      */
     function test_StateMachine_fixedTermStickyWithDustILThenEndsAtZero() public {
@@ -214,7 +214,7 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM), "dust il keeps the term sticky");
         assertEq(toUint256(state.jtImpermanentLoss), 50, "il recovered into the dust band");
         assertEq(toUint256(state.jtEffectiveNAV), 200e18 - 50, "the jt gain and the recovery both repay the drawdown");
-        assertEq(toUint256(state.jtProtocolFee), 0, "jt fee zeroed while the term is sticky");
+        assertEq(toUint256(state.jtProtocolFee), 0, "no jt fee books, the gain was fully consumed by the recovery");
         assertEq(state.fixedTermEndTimestamp, end, "end timestamp kept");
         // Full recovery to exactly zero il ends the term
         vm.expectEmit(true, true, true, true, address(accountant));

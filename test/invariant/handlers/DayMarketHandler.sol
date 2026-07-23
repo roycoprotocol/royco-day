@@ -150,6 +150,16 @@ contract DayMarketHandler is DayMarketTestBase {
     uint256 internal ghost_jtPriceHighWater;
     uint256 internal ghost_ltPriceHighWater;
 
+    // The OZ virtual-shares share price floor((effNAV + VIRTUAL_VALUE) * WAD / (supply + VIRTUAL_SHARES)) captured
+    // at each high-water. The naive price floor(effNAV * WAD / supply) the check tracks sits ABOVE this virtual
+    // price by an offset gap that SHRINKS as supply grows on deposits. The virtual price is the monotone-non-decreasing
+    // OZ share price (it never falls on a no-loss deposit), so absent a loss event the naive price can fall by at most
+    // the gap captured at the high-water. Tolerating exactly that stored gap keeps the monotonicity check tight while
+    // absorbing the offset's deposit-dilution dust (a real loss still drops the virtual price and trips the check).
+    uint256 internal ghost_stVirtualHighWater;
+    uint256 internal ghost_jtVirtualHighWater;
+    uint256 internal ghost_ltVirtualHighWater;
+
     /// @dev Set by ops that can legitimately push the senior share price down (an uncovered drawdown)
     bool internal ghost_uncoveredLossSinceLastCheck;
 
@@ -859,8 +869,11 @@ contract DayMarketHandler is DayMarketTestBase {
             // Junior claims decompose into a cross-claim on senior assets plus the self-backed remainder
             uint256 jtClaimOnST = _sat(s.jtEffectiveNAV, s.jtRawNAV);
             uint256 jtClaimOnJT = s.jtRawNAV - _sat(s.stEffectiveNAV, s.stRawNAV);
-            uint256 stA = jtClaimOnST == 0 ? 0 : _quoteNAVToSTUnits(jtClaimOnST).mulDiv(_shares, s.jtSupply);
-            uint256 jtA = jtClaimOnJT == 0 ? 0 : _quoteNAVToJTUnits(jtClaimOnJT).mulDiv(_shares, s.jtSupply);
+            // _scaleAssetClaims divides by the effective supply (jtSupply + VIRTUAL_SHARES); a dust redemption's
+            // slice floors smaller, so the requote sees no raw NAV move and the predictor foresees INVALID_POST_OP
+            uint256 effJtSupply = s.jtSupply + RoycoTestMath.VIRTUAL_SHARES;
+            uint256 stA = jtClaimOnST == 0 ? 0 : _quoteNAVToSTUnits(jtClaimOnST).mulDiv(_shares, effJtSupply);
+            uint256 jtA = jtClaimOnJT == 0 ? 0 : _quoteNAVToJTUnits(jtClaimOnJT).mulDiv(_shares, effJtSupply);
             uint256 rawAfterST = _quoteSTUnits(s.stOwned - stA);
             uint256 rawAfterJT = _quoteJTUnits(s.jtOwned - jtA);
             uint256 totalRedeemed = (s.stRawNAV - rawAfterST) + (s.jtRawNAV - rawAfterJT);
@@ -909,7 +922,8 @@ contract DayMarketHandler is DayMarketTestBase {
             _expect(p, SEL_ERC20_BALANCE);
         } else {
             uint256 ltClaimUnits = s.ltRawNAV == 0 ? 0 : _quoteNAVToLTUnits(s.ltRawNAV);
-            uint256 userLt = ltClaimUnits.mulDiv(_shares, s.ltSupply);
+            // _scaleAssetClaims divides the BPT slice by the effective supply (ltSupply + VIRTUAL_SHARES)
+            uint256 userLt = ltClaimUnits.mulDiv(_shares, s.ltSupply + RoycoTestMath.VIRTUAL_SHARES);
             uint256 ltRawAfter = _quoteLTUnits(s.ltOwned - userLt);
             // A dust in-kind redeem whose BPT and idle-premium slices floor to zero at the src's SHARE
             // granularity trips the no-op guard. This NAV-granular mirror's ltRawAfter cannot resolve that
@@ -1152,9 +1166,11 @@ contract DayMarketHandler is DayMarketTestBase {
     /// @dev Mirrors the proportional removal, the senior unwind, and the exit bonus for gate prediction
     function _mirrorVenueRemoval(Snap memory s, uint256 _shares) internal view returns (RemovalMirror memory r) {
         uint256 ltClaimUnits = s.ltRawNAV == 0 ? 0 : _quoteNAVToLTUnits(s.ltRawNAV);
-        uint256 userLt = ltClaimUnits.mulDiv(_shares, s.ltSupply);
+        // _scaleAssetClaims divides both the BPT slice and the idle-premium-share slice by the effective supply
+        uint256 effLtSupply = s.ltSupply + RoycoTestMath.VIRTUAL_SHARES;
+        uint256 userLt = ltClaimUnits.mulDiv(_shares, effLtSupply);
         r.venueLtUnits = userLt;
-        uint256 idleSlice = s.ltOwnedSeniorTrancheShares.mulDiv(_shares, s.ltSupply);
+        uint256 idleSlice = s.ltOwnedSeniorTrancheShares.mulDiv(_shares, effLtSupply);
         uint256[2] memory balances = balancerVault.getPoolBalances(address(bpt));
         uint256 bptSupply = bpt.totalSupply();
         uint256 stOut = balances[stPoolTokenIndex].mulDiv(userLt, bptSupply);
@@ -1186,10 +1202,15 @@ contract DayMarketHandler is DayMarketTestBase {
         uint256 jtClaimOnST = _sat(s.jtEffectiveNAV, s.jtRawNAV);
         uint256 stClaimOnST = s.stRawNAV - jtClaimOnST;
         uint256 stClaimOnJT = _sat(s.stEffectiveNAV, s.stRawNAV);
-        stA = stClaimOnST == 0 ? 0 : _quoteNAVToSTUnits(stClaimOnST).mulDiv(_shares, _totalShares);
-        jtA = stClaimOnJT == 0 ? 0 : _quoteNAVToJTUnits(stClaimOnJT).mulDiv(_shares, _totalShares);
+        // Production's _scaleAssetClaims divides every claim field by the effective supply (_totalShares +
+        // VIRTUAL_SHARES). Mirroring the offset is load-bearing for the redeem revert prediction: a wei-scale
+        // redemption's slice floors smaller here, so s.stOwned - stA re-quotes to an unchanged raw NAV and the
+        // predictor correctly foresees the accountant's INVALID_POST_OP no-op-exit guard (totalRedemptionNAV == 0)
+        uint256 effTotalShares = _totalShares + RoycoTestMath.VIRTUAL_SHARES;
+        stA = stClaimOnST == 0 ? 0 : _quoteNAVToSTUnits(stClaimOnST).mulDiv(_shares, effTotalShares);
+        jtA = stClaimOnJT == 0 ? 0 : _quoteNAVToJTUnits(stClaimOnJT).mulDiv(_shares, effTotalShares);
         if (s.coverageUtilizationWAD >= s.coverageLiquidationUtilizationWAD) {
-            uint256 navSlice = s.stEffectiveNAV.mulDiv(_shares, _totalShares);
+            uint256 navSlice = s.stEffectiveNAV.mulDiv(_shares, effTotalShares);
             bonusNAV = RoycoTestMath.seniorTrancheSelfLiquidationBonus(
                 RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs({
                     stRawNAV: s.stRawNAV,
@@ -1494,28 +1515,31 @@ contract DayMarketHandler is DayMarketTestBase {
         internal
     {
         uint256 jtEff1 = toUint256(a1.lastJTEffectiveNAV);
-        if (_stSupply == 0) ghost_stPriceHighWater = 0;
+        if (_stSupply == 0) (ghost_stPriceHighWater, ghost_stVirtualHighWater) = (0, 0);
         if (_stSupply > 0) {
-            uint256 pSt = toUint256(a1.lastSTEffectiveNAV).mulDiv(WAD, _stSupply);
-            uint256 dust = PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND.mulDiv(WAD, _stSupply) + 2;
+            uint256 stEff1 = toUint256(a1.lastSTEffectiveNAV);
+            uint256 pSt = stEff1.mulDiv(WAD, _stSupply);
+            // Base flooring budget plus the offset's deposit-dilution dust: absent a loss the naive price can fall by
+            // at most the naive-virtual gap captured at the prior high-water (see ghost_*VirtualHighWater).
+            uint256 dust = PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND.mulDiv(WAD, _stSupply) + 2 + (ghost_stPriceHighWater - ghost_stVirtualHighWater);
             if (pSt + dust < ghost_stPriceHighWater) {
                 _flag(ghost_uncoveredLossSinceLastCheck && jtEff1 == 0, string.concat(_label, ": senior share price fell without an uncovered loss"));
                 if (jtEff1 == 0) ghost_uncoveredLossRealized++;
             }
-            ghost_stPriceHighWater = pSt;
+            (ghost_stPriceHighWater, ghost_stVirtualHighWater) = (pSt, Math.min(pSt, _virtualSharePrice(stEff1, _stSupply)));
         }
         uint256 jtSupply1 = juniorTranche.totalSupply();
-        if (jtSupply1 == 0) ghost_jtPriceHighWater = 0;
+        if (jtSupply1 == 0) (ghost_jtPriceHighWater, ghost_jtVirtualHighWater) = (0, 0);
         if (jtSupply1 > 0) {
             uint256 pJt = jtEff1.mulDiv(WAD, jtSupply1);
-            uint256 dust = PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND.mulDiv(WAD, jtSupply1) + 2;
+            uint256 dust = PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND.mulDiv(WAD, jtSupply1) + 2 + (ghost_jtPriceHighWater - ghost_jtVirtualHighWater);
             if (pJt + dust < ghost_jtPriceHighWater) {
                 _flag(ghost_jtLossSinceLastCheck, string.concat(_label, ": junior share price fell without a junior loss event"));
             }
-            ghost_jtPriceHighWater = pJt;
+            (ghost_jtPriceHighWater, ghost_jtVirtualHighWater) = (pJt, Math.min(pJt, _virtualSharePrice(jtEff1, jtSupply1)));
         }
         uint256 ltSupply1 = liquidityTranche.totalSupply();
-        if (ltSupply1 == 0) ghost_ltPriceHighWater = 0;
+        if (ltSupply1 == 0) (ghost_ltPriceHighWater, ghost_ltVirtualHighWater) = (0, 0);
         if (ltSupply1 > 0) {
             uint256 pLt = _ltEffNav.mulDiv(WAD, ltSupply1);
             // Deploying n idle premium senior shares re-marks them from the exact claimable-leg valuation
@@ -1524,16 +1548,18 @@ contract DayMarketHandler is DayMarketTestBase {
             // n * ((stEffectiveNAV * WAD) mod stSupply) / (stSupply * WAD) < n / WAD NAV wei that is mark
             // quantization, not value leakage. The per-mulDiv flooring residue on the deploy path stays
             // inside the constant PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND budget, so the dust bound widens
-            // by exactly n / WAD NAV wei and a drop even one price wei past it still fails
+            // by exactly n / WAD NAV wei and a drop even one price wei past it still fails. The trailing term
+            // is the offset's deposit-dilution dust: the naive-virtual gap captured at the prior high-water.
             uint256 deployQuantizationNAVWei = ghost_stSharesDeployedSinceLastPriceCheck / WAD;
-            uint256 dust = (PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND + deployQuantizationNAVWei).mulDiv(WAD, ltSupply1) + 2;
+            uint256 dust = (PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND + deployQuantizationNAVWei).mulDiv(WAD, ltSupply1) + 2
+                + (ghost_ltPriceHighWater - ghost_ltVirtualHighWater);
             if (pLt + dust < ghost_ltPriceHighWater) {
                 _flag(
                     ghost_ltVenueLossSinceLastCheck || (ghost_uncoveredLossSinceLastCheck && jtEff1 == 0),
                     string.concat(_label, ": liquidity share price fell without a venue or uncovered loss event")
                 );
             }
-            ghost_ltPriceHighWater = pLt;
+            (ghost_ltPriceHighWater, ghost_ltVirtualHighWater) = (pLt, Math.min(pLt, _virtualSharePrice(_ltEffNav, ltSupply1)));
         }
         ghost_uncoveredLossSinceLastCheck = false;
         ghost_jtLossSinceLastCheck = false;
@@ -1736,10 +1762,20 @@ contract DayMarketHandler is DayMarketTestBase {
         return _ltOwned.mulDiv(tvl, supply);
     }
 
-    /// @dev The senior share rate the pool prices with: effective value per share, floored to one wei
+    /// @dev The OZ virtual-shares share price floor((effNAV + VIRTUAL_VALUE) * WAD / (supply + VIRTUAL_SHARES)),
+    ///      the monotone-non-decreasing price the offset guarantees on a no-loss deposit. The naive price the
+    ///      monotonicity check tracks sits weakly above this, and the gap is the tolerated per-op deposit-dilution dust.
+    function _virtualSharePrice(uint256 _effNAV, uint256 _supply) internal pure returns (uint256) {
+        return (_effNAV + RoycoTestMath.VIRTUAL_VALUE).mulDiv(WAD, _supply + RoycoTestMath.VIRTUAL_SHARES);
+    }
+
+    /// @dev The senior share rate the pool prices with: effective value per share, floored to one wei. Mirrors
+    ///      production ValuationLogic._computeTrancheShareRate == _convertToValue(WAD, supply, effNAV, Floor), which
+    ///      carries the virtual-shares/value offset: floor((stEff + VIRTUAL_VALUE) * WAD / (stSupply + VIRTUAL_SHARES)).
+    ///      The fresh-tranche exemption (supply == 0 && effNAV == 0 -> 0) then the pool's 1-wei floor still apply.
     function _mirrorSeniorRate(uint256 _stEff, uint256 _stSupply) internal pure returns (uint256) {
-        if (_stSupply == 0) return 1;
-        uint256 r = _stEff.mulDiv(WAD, _stSupply);
+        if (_stSupply == 0 && _stEff == 0) return 1;
+        uint256 r = (_stEff + RoycoTestMath.VIRTUAL_VALUE).mulDiv(WAD, _stSupply + RoycoTestMath.VIRTUAL_SHARES);
         return r == 0 ? 1 : r;
     }
 

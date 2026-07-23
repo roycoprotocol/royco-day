@@ -247,9 +247,11 @@ contract Test_ColdCacheRateProvider_Kernel is DayMarketTestBase {
     /**
      * @notice On a freshly seeded market the cold-cache rate is exactly 1.0, the first mint's NAV per share
      * @dev The transient cache written by setUp's deposits cleared when that transaction ended, so this read takes
-     *      the live-derivation path: stEffectiveNAV 100e18 over 100e18 shares = 1e18 per whole share
+     *      the live-derivation path: NAV-per-share is convertToValue(WAD, supply, stEffectiveNAV) against the
+     *      virtual-share/asset offset, floor((100e18 + 1) * 1e18 / (100e18 + 1e6)) = 999999999999990000, a
+     *      virtual-share sliver under 1.0
      */
     function test_GetRate_SeededMarketDerivesCommittedNavPerShare() public view {
-        assertEq(kernel.getRate(), 1e18, "the cold-cache rate must be stEffectiveNAV / supply = 100e18 / 100e18 = 1.0");
+        assertEq(kernel.getRate(), 999_999_999_999_990_000, "the cold-cache rate must be floor((100e18 + 1) * 1e18 / (100e18 + 1e6))");
     }
 }

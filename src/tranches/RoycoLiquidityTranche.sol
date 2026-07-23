@@ -8,7 +8,7 @@ import { IRoycoLiquidityTranche } from "../interfaces/IRoycoLiquidityTranche.sol
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims, TrancheType } from "../libraries/Types.sol";
-import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
+import { Math, NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
 import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
 import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
 import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
@@ -21,7 +21,6 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
  */
 contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     using SafeERC20 for IERC20;
-    using RoycoUnitsMath for uint256;
     using DispatchLogic for address;
 
     /**
@@ -151,7 +150,9 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         // We do not allow redemptions if the tranche has no claim on the assets
         if (claimOnLTNAV == ZERO_NAV_UNITS) return 0;
 
-        shares = Math.min(balanceOf(_owner), totalTrancheSharesAfterMintingFees.mulDiv(ltMaxWithdrawableNAV, claimOnLTNAV, Math.Rounding.Floor));
+        shares = Math.min(
+            balanceOf(_owner), ValuationLogic._convertToShares(ltMaxWithdrawableNAV, claimOnLTNAV, totalTrancheSharesAfterMintingFees, Math.Rounding.Floor)
+        );
     }
 
     // =============================

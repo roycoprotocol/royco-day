@@ -34,6 +34,13 @@ library RoycoTestMath {
     ///         src so a silent production change diverges from this mirror and fails every cross-assert loudly.
     uint256 internal constant MAX_MINT_DILUTION = 1e18 - 1e6;
 
+    /// @notice Virtual shares / virtual value, this library's independent restatement of the src constants
+    ///         (VIRTUAL_SHARES / VIRTUAL_VALUE in Constants.sol). Every conversion prices against
+    ///         (supply + VIRTUAL_SHARES) over (totalValue + VIRTUAL_VALUE); if the src values change without this
+    ///         mirror, every cross-assert fails loudly.
+    uint256 internal constant VIRTUAL_SHARES = 1e6;
+    uint256 internal constant VIRTUAL_VALUE = 1;
+
     /// @notice One below solady expWad's overflow threshold, the clamp on the adaptive yield model's linear adaptation.
     int256 internal constant MAX_LINEAR_ADAPTATION_WAD = 135_305_999_368_893_231_589 - 1;
 
@@ -313,12 +320,17 @@ library RoycoTestMath {
      * @return shares The shares minted for the contribution
      */
     function convertToShares(uint256 value, uint256 totalValue, uint256 supply) internal pure returns (uint256 shares) {
-        if (supply == 0) return value;
-        uint256 denominator = totalValue == 0 ? 1 : totalValue;
+        // A genuinely fresh tranche (no shares, no backing) mints 1:1; the dangerous empty-with-backing state
+        // (supply 0, totalValue > 0) falls through to the priced branch so pre-existing backing is not captured
+        if (supply == 0 && totalValue == 0) return value;
+        // Virtual shares / virtual value: the effective supply is never zero and the denominator always carries
+        // VIRTUAL_VALUE. The bind predicate's effective supply cancels, so its form is unchanged
+        uint256 effectiveSupply = supply + VIRTUAL_SHARES;
+        uint256 denominator = totalValue + VIRTUAL_VALUE;
         if (Math.mulDiv(value, WAD - MAX_MINT_DILUTION, MAX_MINT_DILUTION, Math.Rounding.Ceil) > denominator) {
-            return Math.mulDiv(supply, MAX_MINT_DILUTION, WAD - MAX_MINT_DILUTION);
+            return Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION, WAD - MAX_MINT_DILUTION);
         }
-        shares = Math.mulDiv(supply, value, denominator);
+        shares = Math.mulDiv(effectiveSupply, value, denominator);
     }
 
     /**
@@ -331,8 +343,10 @@ library RoycoTestMath {
      * @return value The value of the shares
      */
     function convertToValue(uint256 shares, uint256 totalValue, uint256 supply) internal pure returns (uint256 value) {
-        if (supply == 0) return 0;
-        value = Math.mulDiv(totalValue, shares, supply);
+        // A fresh tranche (no shares, no backing) has nothing to claim; matches the convertToShares fresh branch
+        if (supply == 0 && totalValue == 0) return 0;
+        // Inverse of convertToShares under the same virtual shares / virtual value
+        value = Math.mulDiv(totalValue + VIRTUAL_VALUE, shares, supply + VIRTUAL_SHARES);
     }
 
     /**
@@ -404,8 +418,11 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice Claim scaling: every one of the five claim fields scales as ⌊claim · shares / totalShares⌋.
+     * @notice Claim scaling: every one of the five claim fields scales as ⌊claim · shares / (totalShares + VIRTUAL_SHARES)⌋.
      * @dev Mirrors src TrancheClaimsLogic._scaleAssetClaims.
+     *      Virtual shares: the redeemer's slice is priced against the effective supply (totalShares + VIRTUAL_SHARES),
+     *      so a sole holder can never redeem the whole tranche 1:1 — the virtual-share sliver stays behind, closing the
+     *      donation/premium extraction vector on the redemption side.
      *      Rounding: Floor on all five fields. Favors: remaining LPs.
      *      Precondition: totalShares > 0 (production scales a redeemer's slice of a live tranche supply).
      * @param total The total claims being sliced
@@ -414,11 +431,12 @@ library RoycoTestMath {
      * @return scaled The redeemer's pro-rata claims
      */
     function scaleClaims(Claims memory total, uint256 shares, uint256 totalShares) internal pure returns (Claims memory scaled) {
-        scaled.stAssets = Math.mulDiv(total.stAssets, shares, totalShares);
-        scaled.jtAssets = Math.mulDiv(total.jtAssets, shares, totalShares);
-        scaled.ltAssets = Math.mulDiv(total.ltAssets, shares, totalShares);
-        scaled.stShares = Math.mulDiv(total.stShares, shares, totalShares);
-        scaled.nav = Math.mulDiv(total.nav, shares, totalShares);
+        uint256 effectiveTotalShares = totalShares + VIRTUAL_SHARES;
+        scaled.stAssets = Math.mulDiv(total.stAssets, shares, effectiveTotalShares);
+        scaled.jtAssets = Math.mulDiv(total.jtAssets, shares, effectiveTotalShares);
+        scaled.ltAssets = Math.mulDiv(total.ltAssets, shares, effectiveTotalShares);
+        scaled.stShares = Math.mulDiv(total.stShares, shares, effectiveTotalShares);
+        scaled.nav = Math.mulDiv(total.nav, shares, effectiveTotalShares);
     }
 
     /**
@@ -443,6 +461,10 @@ library RoycoTestMath {
         pure
         returns (uint256 effNav)
     {
+        // Mirror src's short-circuit: with no idle shares OR no senior supply the effective NAV is just the pool leg.
+        // The guard is load-bearing under the virtual-shares offset — convertToValue(idle, stEff, 0) no longer returns
+        // 0 once stEff > 0 (the fresh exemption requires totalValue == 0 too), so the raw call would overvalue the leg.
+        if (idleShares == 0 || stSupply == 0) return ltRawNAV;
         effNav = ltRawNAV + convertToValue(idleShares, stEffectiveNAV, stSupply);
     }
 
@@ -522,29 +544,27 @@ library RoycoTestMath {
         uint256 stEffectiveNAV = in_.stEffectiveNAVLast;
         uint256 jtEffectiveNAV = in_.jtEffectiveNAVLast;
         uint256 il = in_.jtImpermanentLossLast;
-        uint256 jtNetGain;
 
-        // JT leg first: losses are unfee'd and book IL, gains take the dust-gated jtProtocolFeeWAD fee (Floor) and recover IL first
+        // JT leg first: losses are unfee'd and book IL, gains recover IL first and only the residual takes the dust-gated jtProtocolFeeWAD fee (Floor)
         // IL is JT's drawdown from its high-water mark: JT losses and coverage deepen it, JT gains and ST recoveries repay it
         if (deltaJTEff < 0) {
             uint256 jtLoss = uint256(-deltaJTEff);
             jtEffectiveNAV -= jtLoss;
             il += jtLoss;
         } else if (deltaJTEff > 0) {
-            jtNetGain = uint256(deltaJTEff);
-            if (jtNetGain > in_.effectiveDust) out.jtProtocolFee = Math.mulDiv(jtNetGain, in_.jtProtocolFeeWAD, WAD);
-            il -= Math.min(jtNetGain, il);
-            jtEffectiveNAV += jtNetGain;
+            uint256 jtGain = uint256(deltaJTEff);
+            uint256 jtRecovery = Math.min(jtGain, il);
+            il -= jtRecovery;
+            jtEffectiveNAV += jtRecovery;
+            jtGain -= jtRecovery;
+            if (jtGain > in_.effectiveDust) out.jtProtocolFee = Math.mulDiv(jtGain, in_.jtProtocolFeeWAD, WAD);
+            jtEffectiveNAV += jtGain;
         }
 
         if (deltaSTEff < 0) {
-            // ST loss: coverage from the post-JT-leg jtEffectiveNAV, then the JT-fee recompute, residual loss to ST
+            // ST loss: coverage from the post-JT-leg jtEffectiveNAV, residual loss to ST
             uint256 stLoss = uint256(-deltaSTEff);
             uint256 coverageApplied = Math.min(stLoss, jtEffectiveNAV);
-            if (coverageApplied != 0 && out.jtProtocolFee != 0) {
-                jtNetGain = _sat(jtNetGain, coverageApplied);
-                out.jtProtocolFee = jtNetGain > in_.effectiveDust ? Math.mulDiv(jtNetGain, in_.jtProtocolFeeWAD, WAD) : 0;
-            }
             jtEffectiveNAV -= coverageApplied;
             il += coverageApplied;
             stLoss -= coverageApplied;

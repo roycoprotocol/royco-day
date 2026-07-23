@@ -28,6 +28,10 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
     address internal jtActor;
 
+    /// @dev Virtual shares / virtual value, restated inline (see Constants.sol VIRTUAL_SHARES / VIRTUAL_VALUE)
+    uint256 internal constant VS = 1e6;
+    uint256 internal constant VA = 1;
+
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
         _seedMarket(100_000e18, 30_000e18);
@@ -58,7 +62,7 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
         uint256 predicted = juniorTranche.previewDeposit(toTrancheUnits(assets));
         uint256 minted = _depositJT(assets);
 
-        assertEq(minted, Math.mulDiv(supplyBefore, value, jtEffBefore), "live-market mint is the fair floor formula");
+        assertEq(minted, Math.mulDiv(supplyBefore + VS, value, jtEffBefore + VA), "live-market mint is the fair floor formula");
         assertEq(minted, predicted, "preview parity at the fair-priced mint");
         assertEq(minted, RoycoTestMath.convertToShares(value, jtEffBefore, supplyBefore), "mirror agreement at the fair-priced mint");
     }
@@ -83,7 +87,7 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
         uint256 value = toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets)));
         // The bind holds: value ~ 0.6e18 NAV wei over the 1-wei pinned denominator, far past the ~1e12 bind threshold
         assertGt(value * (WAD - MAX_MINT_DILUTION_WAD), MAX_MINT_DILUTION_WAD, "the dilution deposit must bind the clamp");
-        uint256 cap = Math.mulDiv(supplyBefore, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
+        uint256 cap = Math.mulDiv(supplyBefore + VS, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
 
         uint256 predicted = juniorTranche.previewDeposit(toTrancheUnits(assets));
         uint256 minted = _depositJT(assets);
@@ -94,6 +98,6 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
 
         // The capture guarantee in both directions: the depositor owns at most (1 - residual) of the post-mint
         // supply, and at least that minus the cap's floor dust — near-total capture, bounded growth
-        assertLe(minted * (WAD - MAX_MINT_DILUTION_WAD), supplyBefore * MAX_MINT_DILUTION_WAD, "the mint never exceeds the ownership bound");
+        assertLe(minted * (WAD - MAX_MINT_DILUTION_WAD), (supplyBefore + VS) * MAX_MINT_DILUTION_WAD, "the mint never exceeds the ownership bound");
     }
 }

@@ -153,19 +153,23 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
         // by the live liquidity-respecting max, with the dust floor of flow 4 so the payout cannot floor to zero
         uint256 shares = bound(_sharesSeed, 1e6, liquidityTranche.maxRedeem(LT_PROVIDER));
         uint256 rawNAV = toUint256(accountant.getState().lastLTRawNAV);
-        uint256 idleValue = Math.mulDiv(toUint256(accountant.getState().lastSTEffectiveNAV), idle, seniorTranche.totalSupply(), Math.Rounding.Floor);
+        // The idle senior-share leg is valued through the offset-aware _convertToValue: numerator gains VIRTUAL_VALUE = 1,
+        // denominator gains VIRTUAL_SHARES = 1e6, mirroring src _getLiquidityTrancheEffectiveNAV
+        uint256 idleValue =
+            Math.mulDiv(toUint256(accountant.getState().lastSTEffectiveNAV) + 1, idle, seniorTranche.totalSupply() + 1e6, Math.Rounding.Floor);
 
         AssetClaims memory conv = liquidityTranche.convertToAssets(shares);
         AssetClaims memory prev = liquidityTranche.previewRedeem(shares);
 
+        // Both surfaces floor-scale over the EFFECTIVE LT supply (supply + VIRTUAL_SHARES), mirroring src _scaleAssetClaims
         assertEq(conv.stShares, 0, "the convert surface must never report the idle senior-share leg");
-        assertEq(toUint256(conv.nav), Math.mulDiv(rawNAV, shares, supply, Math.Rounding.Floor), "convertToAssets must price the pro-rata BPT-only raw NAV");
-        assertEq(toUint256(prev.nav), Math.mulDiv(rawNAV + idleValue, shares, supply, Math.Rounding.Floor), "previewRedeem must price the pro-rata idle-inclusive effective NAV");
+        assertEq(toUint256(conv.nav), Math.mulDiv(rawNAV, shares, supply + 1e6, Math.Rounding.Floor), "convertToAssets must price the pro-rata BPT-only raw NAV");
+        assertEq(toUint256(prev.nav), Math.mulDiv(rawNAV + idleValue, shares, supply + 1e6, Math.Rounding.Floor), "previewRedeem must price the pro-rata idle-inclusive effective NAV");
         assertLe(toUint256(conv.nav), toUint256(prev.nav), "the convert quote must never exceed the redemption quote");
 
         // Floor superadditivity guarantees the gap is at least the floored idle slice, so strictness holds exactly
-        // when the redeemer's pro-rata idle slice carries value
-        if (Math.mulDiv(idleValue, shares, supply, Math.Rounding.Floor) > 0) {
+        // when the redeemer's pro-rata idle slice carries value (sliced over the same effective supply)
+        if (Math.mulDiv(idleValue, shares, supply + 1e6, Math.Rounding.Floor) > 0) {
             assertGt(toUint256(prev.nav), toUint256(conv.nav), "the redemption quote must be strictly richer whenever the idle slice carries value");
         }
         if (idle == 0) {

@@ -12,7 +12,7 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 /**
  * @title Test_SyncTrancheAccounting_Accountant
  * @notice The tranche accounting sync scenarios: every (ST loss/flat/gain) x (JT loss/flat/gain) shape
- *         across the six committed IL/state regimes, the PnL attribution arms, the JT fee recomputation,
+ *         across the six committed IL/state regimes, the PnL attribution arms, the JT fee on the post-recovery residual gain,
  *         coverage, IL recovery, the premium branches, and NAV conservation — every scenario asserted
  *         against a hand-derived literal, the RoycoTestMath mirror, and the committed checkpoint at once
  */
@@ -289,10 +289,10 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (ST loss, JT gain, IL 0): the fee recomputation arm where coverage exceeds the JT gain
+     * Sync scenario (ST loss, JT gain, IL 0): coverage exceeds the JT gain and the FIXED_TERM entry zeroes its fee
      * Derivation: jt gain 20e18 books jtFee = floor(20e18 * 0.1) = 2e18 and jtEffectiveNAV = 220e18, then coverage
-     * = min(50e18, 220e18) = 50e18 recomputes jtNetGain = satSub(20e18 - 50e18) = 0 <= dust so jtFee = 0,
-     * jtEffectiveNAV = 170e18, il = 50e18, stEffectiveNAV unchanged, FIXED_TERM entry (fees zeroed regardless)
+     * = min(50e18, 220e18) = 50e18 applies:
+     * jtEffectiveNAV = 170e18, il = 50e18, stEffectiveNAV unchanged, FIXED_TERM entry zeroes the fee
      */
     function test_Sync_NoIL_STLossJTGain() public {
         _seedNoIL();
@@ -510,9 +510,9 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (ST loss, JT gain, dust IL): coverage exceeds the jt gain so the recomputed fee saturates to zero
-     * Derivation: jt gain 20e18 > dust 7 books jtFee = 2e18 and recovers the 5 wei il, coverage 50e18 recomputes
-     * jtNetGain = satSub(20e18 - 50e18) = 0 so jtFee = 0, jtEffectiveNAV = 200e18 - 5 + 20e18 - 50e18 = 170e18 - 5, il = 50e18, FIXED_TERM entry
+     * Sync scenario (ST loss, JT gain, dust IL): coverage exceeds the jt gain and the FIXED_TERM entry zeroes its fee
+     * Derivation: the jt gain recovers the 5 wei il and its 20e18 - 5 residual books jtFee = 2e18 - 1, coverage 50e18 applies:
+     * jtEffectiveNAV = 200e18 - 5 + 20e18 - 50e18 = 170e18 - 5, il = 50e18, FIXED_TERM entry zeroes the fee
      */
     function test_Sync_DustIL_STLossJTGain() public {
         _seedDustIL();
@@ -578,7 +578,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
 
     /**
      * Sync scenario (ST flat, JT gain, dust IL): the fee is kept in PERPETUAL and the jt gain recovers the dust il
-     * Derivation: jtNetGain = 20e18 > dust 7 so jtFee = 2e18, il = 5 - min(20e18, 5) = 0, jtEffectiveNAV = 220e18 - 5
+     * Derivation: the jt gain recovers the 5 wei il first and its 20e18 - 5 residual books jtFee = 2e18 - 1, jtEffectiveNAV = 220e18 - 5
      */
     function test_Sync_DustIL_STFlatJTGain() public {
         _seedDustIL();
@@ -591,7 +591,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
                 il: 0,
                 ltPrem: 0,
                 stFee: 0,
-                jtFee: 2e18,
+                jtFee: 2e18 - 1,
                 ltFee: 0,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0
@@ -652,8 +652,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
 
     /**
      * Sync scenario (ST gain, JT gain, dust IL): the jt gain recovers the 5 wei il so the senior gain pays exact premiums
-     * Derivation: jt gain 20e18 -> fee 2e18 and il = 5 - min(20e18, 5) = 0, jtEffectiveNAV = 220e18 - 5. ST gain 50e18 has no il to
-     * recover: jtRiskPremium 5e18 adds floor(5e18 * 0.1) = 0.5e18 so jtFee = 2.5e18 total, ltPrem = 2.5e18, ltFee = 0.25e18,
+     * Derivation: the jt gain recovers the 5 wei il and its 20e18 - 5 residual books fee 2e18 - 1, jtEffectiveNAV = 220e18 - 5. ST gain 50e18
+     * has no il to recover: jtRiskPremium 5e18 adds floor(5e18 * 0.1) = 0.5e18 so jtFee = 2.5e18 - 1 total, ltPrem = 2.5e18, ltFee = 0.25e18,
      * st residual 42.5e18 -> stFee = 4.25e18, jtEffectiveNAV = 225e18 - 5, stEffectiveNAV = (1000e18 + 5) + 42.5e18 + 2.5e18 = 1045e18 + 5
      */
     function test_Sync_DustIL_STGainJTGain() public {
@@ -667,7 +667,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
                 il: 0,
                 ltPrem: 2.5e18,
                 stFee: 4.25e18,
-                jtFee: 2.5e18,
+                jtFee: 2.5e18 - 1,
                 ltFee: 0.25e18,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0
@@ -729,10 +729,10 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (ST loss, JT gain, large IL): the cross-claim variant of the coverage-exceeds-gain fee arm
+     * Sync scenario (ST loss, JT gain, large IL): the cross-claim variant of the coverage-exceeds-gain arm
      * Derivation: attrST(dJT) = +6666666666666666666 so dSTEff = -43333333333333333334 and
-     *   dJTEff = -30e18 - dSTEff = +13333333333333333334: jtFee = floor(13333333333333333334 * 0.1) = 1333333333333333333, il recovers to 86666666666666666666
-     *   coverage 43333333333333333334 recomputes jtNetGain = satSub to 0 -> jtFee = 0
+     *   dJTEff = -30e18 - dSTEff = +13333333333333333334 is fully consumed recovering il to 86666666666666666666 so no jt fee books
+     *   coverage 43333333333333333334 applies:
      *   jtEffectiveNAV = 200e18 + 13333333333333333334 - 43333333333333333334 = 170e18, il = 130e18, stEffectiveNAV = 1000e18
      */
     function test_Sync_LargeIL_STLossJTGain() public {
@@ -799,10 +799,10 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (ST flat, JT gain, large IL): both shares of the JT gain go to il recovery, jt fee zeroed by FIXED_TERM
-     * Derivation: dSTEff = +6666666666666666666, dJTEff = +13333333333333333334 (jtFee 1333333333333333333 pre-zeroing)
-     *   jt gain recovers il to 86666666666666666666, recovery = min(6666666666666666666, il): il = 80e18, jtEffectiveNAV = 200e18 + 13333333333333333334
-     *   + 6666666666666666666 = 220e18, stGain = 0 so no premiums, stEffectiveNAV = 1000e18, FIXED_TERM zeroes the jt fee
+     * Sync scenario (ST flat, JT gain, large IL): both shares of the JT gain go to il recovery so no jt fee books
+     * Derivation: dSTEff = +6666666666666666666, dJTEff = +13333333333333333334 is fully consumed recovering il
+     *   to 86666666666666666666, recovery = min(6666666666666666666, il): il = 80e18, jtEffectiveNAV = 200e18 + 13333333333333333334
+     *   + 6666666666666666666 = 220e18, stGain = 0 so no premiums, stEffectiveNAV = 1000e18
      */
     function test_Sync_LargeIL_STFlatJTGain() public {
         _seedLargeIL();
@@ -872,9 +872,9 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (ST gain, JT gain, large IL): the cross-claim ST-gain/JT-gain scenario, jt fee zeroed by FIXED_TERM
+     * Sync scenario (ST gain, JT gain, large IL): the cross-claim ST-gain/JT-gain scenario
      * Derivation: attrST(dJT) = +6666666666666666666 so dSTEff = 56666666666666666666 and dJTEff = 13333333333333333334
-     *   jt gain books fee 1333333333333333333 (zeroed by FIXED_TERM) and recovers il to 86666666666666666666, jtEffectiveNAV = 213333333333333333334
+     *   the jt gain is fully consumed recovering il to 86666666666666666666 so no jt fee books, jtEffectiveNAV = 213333333333333333334
      *   recovery = full 56666666666666666666: il = 30e18, jtEffectiveNAV = 270e18, stGain = 0, stEffectiveNAV = 1000e18
      */
     function test_Sync_LargeIL_STGainJTGain() public {
@@ -964,11 +964,11 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (ST loss, JT gain, IL 0, FIXED_TERM): fee-recompute arm plus the liquidation-forced PERPETUAL
-     * (the liquidation disjunct governs, as in the ST-loss/JT-loss scenario)
-     * Derivation: the jt gain 20e18 books provisional jtFee 2e18, jtEffectiveNAV = 120e18-1. coverage = 50e18-1 recomputes
-     * jtNetGain = satSub(20e18 - (50e18-1)) = 0 <= dust so jtFee = 0, jtEffectiveNAV = 70e18, would-be il = 50e18-1.
-     * then coverageUtilization = ceil((950e18 + 120e18) * 0.1e18 / 70e18) = 1528571428571428572 >= 1.1e18 forces PERPETUAL, il erased
+     * Sync scenario (ST loss, JT gain, IL 0, FIXED_TERM): the jt fee survives the liquidation-forced PERPETUAL
+     * (the liquidation disjunct governs, as in the ST-loss/JT-loss scenario, and the forced branch does not zero fees)
+     * Derivation: the jt gain 20e18 books jtFee 2e18, jtEffectiveNAV = 120e18-1. coverage = 50e18-1 applies:
+     * jtEffectiveNAV = 70e18, would-be il = 50e18-1.
+     * then coverageUtilization = ceil((950e18 + 120e18) * 0.1e18 / 70e18) = 1528571428571428572 >= 1.1e18 forces PERPETUAL, il erased, fee kept
      */
     function test_Sync_FixedTermNoIL_STLossJTGain() public {
         _seedNoILFixedTerm();
@@ -981,7 +981,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
                 il: 0,
                 ltPrem: 0,
                 stFee: 0,
-                jtFee: 0,
+                jtFee: 2e18,
                 ltFee: 0,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0
@@ -1207,9 +1207,9 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (ST loss, JT gain, dust IL, FIXED_TERM): fee recompute saturates to zero inside the sticky term
-     * Derivation: the jt gain 20e18 > dust 7 books jtFee 2e18 and recovers the 5 wei il (jtEffectiveNAV 220e18-5), coverage 50e18-5
-     * recomputes jtNetGain = satSub(20e18 - (50e18-5)) = 0 so jtFee = 0, jtEffectiveNAV = 170e18, il = 50e18-5
+     * Sync scenario (ST loss, JT gain, dust IL, FIXED_TERM): the FIXED_TERM commit zeroes the residual gain's fee
+     * Derivation: the jt gain recovers the 5 wei il and its 20e18-5 residual books jtFee 2e18-1 (jtEffectiveNAV 220e18-5), coverage 50e18-5
+     * applies and the FIXED_TERM commit zeroes the fee, jtEffectiveNAV = 170e18, il = 50e18-5
      */
     function test_Sync_FixedTermDustIL_STLossJTGain() public {
         _seedDustILFixedTerm();
@@ -1280,8 +1280,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
 
     /**
      * Sync scenario (ST flat, JT gain, dust IL, FIXED_TERM): the jt gain recovers the dust il and exits the term
-     * Derivation: jtNetGain 20e18 > dust 7 books jtFee 2e18 and recovers the 5 wei il to 0, jtEffectiveNAV = 220e18-5.
-     * il == 0 exits to PERPETUAL, whose branch does NOT zero fees, so the 2e18 jt fee survives and the end is deleted
+     * Derivation: the jt gain recovers the 5 wei il to 0 and its 20e18-5 residual books jtFee 2e18-1, jtEffectiveNAV = 220e18-5.
+     * il == 0 exits to PERPETUAL, whose branch does NOT zero fees, so the jt fee survives and the end is deleted
      */
     function test_Sync_FixedTermDustIL_STFlatJTGain() public {
         _seedDustILFixedTerm();
@@ -1296,7 +1296,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
                 il: 0,
                 ltPrem: 0,
                 stFee: 0,
-                jtFee: 2e18,
+                jtFee: 2e18 - 1,
                 ltFee: 0,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0
@@ -1357,8 +1357,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
 
     /**
      * Sync scenario (ST gain, JT gain, dust IL, FIXED_TERM): both JT fee parts with the jt gain recovering the dust il, exiting the term
-     * Derivation: the jt gain 20e18 > 7 books jtFee 2e18 and recovers the 5 wei il (jtEffectiveNAV 220e18-5), the senior gain
-     * 50e18+5 pays premiums with nothing left to recover: jtPrem 5e18 adds 0.5e18 fee so jtFee = 2.5e18,
+     * Derivation: the jt gain recovers the 5 wei il and its 20e18-5 residual books jtFee 2e18-1 (jtEffectiveNAV 220e18-5), the senior
+     * gain 50e18+5 pays premiums with nothing left to recover: jtPrem 5e18 adds 0.5e18 fee so jtFee = 2.5e18-1,
      * jtEffectiveNAV = 225e18-5, stEffectiveNAV = 1045e18+5, PERPETUAL exit
      */
     function test_Sync_FixedTermDustIL_STGainJTGain() public {
@@ -1372,7 +1372,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
                 il: 0,
                 ltPrem: 2.5e18,
                 stFee: 4.25e18,
-                jtFee: 2.5e18,
+                jtFee: 2.5e18 - 1,
                 ltFee: 0.25e18,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0
@@ -1439,9 +1439,9 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (ST loss, JT gain, IL > dust, PERPETUAL): fee recompute saturates to zero on the FIXED_TERM entry
-     * Derivation: the jt gain 20e18 > dust 0 books jtFee 2e18 and recovers the 5 wei il, coverage 50e18 recomputes the fee to 0,
-     * jtEffectiveNAV = 170e18-5, il = 50e18, FIXED_TERM entry
+     * Sync scenario (ST loss, JT gain, IL > dust, PERPETUAL): the FIXED_TERM entry zeroes the residual gain's fee
+     * Derivation: the jt gain recovers the 5 wei il and its 20e18-5 residual books jtFee 2e18-1, coverage 50e18 applies
+     * and the FIXED_TERM entry zeroes the fee, jtEffectiveNAV = 170e18-5, il = 50e18
      */
     function test_Sync_ShrunkDustIL_STLossJTGain() public {
         _seedShrunkDustIL();
@@ -1515,7 +1515,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
 
     /**
      * Sync scenario (ST flat, JT gain, IL > dust, PERPETUAL): the jt gain recovers the re-classified il so the market stays PERPETUAL
-     * Derivation: jtNetGain 20e18 > dust 0 books jtFee 2e18 and recovers the 5 wei il to 0, so the PERPETUAL
+     * Derivation: the jt gain recovers the 5 wei il to 0 and its 20e18-5 residual books jtFee 2e18-1, so the PERPETUAL
      * branch keeps the fee. jtEffectiveNAV = 220e18-5
      */
     function test_Sync_ShrunkDustIL_STFlatJTGain() public {
@@ -1529,7 +1529,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
                 il: 0,
                 ltPrem: 0,
                 stFee: 0,
-                jtFee: 2e18,
+                jtFee: 2e18 - 1,
                 ltFee: 0,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0
@@ -1588,8 +1588,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
 
     /**
      * Sync scenario (ST gain, JT gain, IL > dust, PERPETUAL)
-     * Derivation: as in the dust-IL ST-gain/JT-gain scenario — the jt gain books fee 2e18 and recovers the 5 wei il, the senior
-     * gain 50e18 pays exact premiums: jtFee = 2e18 + 0.5e18 = 2.5e18, ltPrem = 2.5e18, stFee = 4.25e18, ltFee = 0.25e18,
+     * Derivation: as in the dust-IL ST-gain/JT-gain scenario — the jt gain recovers the 5 wei il and its residual books
+     * fee 2e18-1, the senior gain 50e18 pays exact premiums: jtFee = 2.5e18-1, ltPrem = 2.5e18, stFee = 4.25e18, ltFee = 0.25e18,
      * jtEffectiveNAV = 225e18-5, stEffectiveNAV = 1045e18+5, PERPETUAL
      */
     function test_Sync_ShrunkDustIL_STGainJTGain() public {
@@ -1603,7 +1603,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
                 il: 0,
                 ltPrem: 2.5e18,
                 stFee: 4.25e18,
-                jtFee: 2.5e18,
+                jtFee: 2.5e18 - 1,
                 ltFee: 0.25e18,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0
@@ -2001,54 +2001,54 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * coverage eats part of the junior gain and the fee is recomputed on the reduced net gain
+     * coverage eats part of the junior gain and the fee is unaffected, it was taken on the booked gain
      * Derivation (permanently perpetual so the fee is observable): jt gain 50e18 books fee 5e18, coverage 20e18
-     * recomputes jtNetGain = 30e18 > 0 dust so jtFee = floor(30e18 * 0.1e18 / 1e18) = 3e18; jtEffectiveNAV = 230e18, il erased
+     * applies without repricing it; jtEffectiveNAV = 230e18, il erased
      */
-    function test_Sync_jtFeeRecomputedOnReducedNetGain() public {
+    function test_Sync_jtFeeUnaffectedByCoverage() public {
         _deployPermanentlyPerpetual(0, 0);
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(toNAVUnits(uint256(20e18)));
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(980e18)), toNAVUnits(uint256(250e18)));
-        assertEq(toUint256(state.jtProtocolFee), 3e18, "fee recomputed on the post-coverage net gain");
+        assertEq(toUint256(state.jtProtocolFee), 5e18, "the fee taken on the booked gain survives coverage");
         assertEq(toUint256(state.jtEffectiveNAV), 230e18, "jt effective NAV nets the gain against coverage");
         assertEq(toUint256(state.jtImpermanentLoss), 0, "permanently-perpetual erases the il");
     }
 
     /**
-     * the recomputed net gain at or below dust zeroes the fee
-     * Derivation with dust 30 + 40 = 70: jt gain 100 books fee 10, coverage 40 recomputes jtNetGain = 60 <= 70 -> fee 0
+     * the dust gate applies to the booked gain, coverage reducing the net does not retroactively zero the fee
+     * Derivation with dust 30 + 40 = 70: jt gain 100 books fee 10, coverage 40 leaves it untouched
      */
-    function test_Sync_jtFeeZeroedWhenReducedNetGainWithinDust() public {
+    function test_Sync_jtFeeKeptWhenCoverageReducesNetGainWithinDust() public {
         _deployPermanentlyPerpetual(30, 40);
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_ST_RAW - 40), toNAVUnits(SEED_JT_RAW + 100));
-        assertEq(toUint256(state.jtProtocolFee), 0, "fee zeroed once the reduced net gain is dust");
+        assertEq(toUint256(state.jtProtocolFee), 10, "the fee taken on the booked gain is kept");
         assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW + 60, "jt nets the gain against the covered loss");
     }
 
     /**
-     * coverage exceeding the junior gain saturates the net gain to zero and zeroes the fee
-     * Derivation: jt gain 20e18 books fee 2e18, coverage 50e18 saturates jtNetGain to 0 -> fee 0; jtEffectiveNAV = 170e18
+     * coverage exceeding the junior gain does not claw the fee back
+     * Derivation: jt gain 20e18 books fee 2e18, coverage 50e18 consumes the gain and more; jtEffectiveNAV = 170e18, fee kept
      */
-    function test_Sync_jtFeeZeroedWhenCoverageExceedsGain() public {
+    function test_Sync_jtFeeSurvivesCoverageExceedingGain() public {
         _deployPermanentlyPerpetual(0, 0);
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(950e18)), toNAVUnits(uint256(220e18)));
-        assertEq(toUint256(state.jtProtocolFee), 0, "fee zeroed on a saturated net gain");
+        assertEq(toUint256(state.jtProtocolFee), 2e18, "the fee taken on the booked gain survives the larger coverage");
         assertEq(toUint256(state.jtEffectiveNAV), 170e18, "jt effective NAV nets gain against the larger coverage");
     }
 
     /**
-     * with no fee booked on the junior gain (gain within dust), coverage skips the recomputation entirely
+     * a junior gain within dust books no fee and coverage cannot create one
      * Derivation with dust 70: jt gain 50 books no fee, coverage 30 leaves the fee at zero; jtEffectiveNAV = 200e18 + 20
      */
-    function test_Sync_jtFeeRecomputationSkippedWithoutPriorFee() public {
+    function test_Sync_jtFeeDustGatedOnJuniorGain() public {
         _deployPermanentlyPerpetual(30, 40);
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_ST_RAW - 30), toNAVUnits(SEED_JT_RAW + 50));
-        assertEq(toUint256(state.jtProtocolFee), 0, "no prior fee so nothing to recompute");
+        assertEq(toUint256(state.jtProtocolFee), 0, "a dust gain books no fee");
         assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW + 20, "gain netted against coverage");
     }
 
@@ -2415,8 +2415,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
      * jtEffectiveNAV = 170e18, FIXED_TERM entry. On the full recovery deltaSTEff = 100e18 + floor(30e18 * 100/270)
      * = 111111111111111111111 and JT's own gain 130e18 - deltaSTEff = 18888888888888888889 recovers il to exactly
      * deltaSTEff, so the recovery consumes the entire senior gain: stEffectiveNAV = 1000e18,
-     * jtEffectiveNAV = 300e18, il = 0, PERPETUAL. The JT gain books jtFee = floor(gain * 0.1), no senior yield
-     * remains so no premiums and no ST fee
+     * jtEffectiveNAV = 300e18, il = 0, PERPETUAL. JT's own gain is fully consumed by the recovery so no jt fee
+     * books, no senior yield remains so no premiums and no ST fee
      */
     function test_Sync_ImpermanentLoss_FullRecoveryMakesJTWhole() public {
         _seedSymmetric(1000e18, 300e18, 0);
@@ -2444,7 +2444,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
                 il: 0,
                 ltPrem: 0,
                 stFee: 0,
-                jtFee: 1_888_888_888_888_888_888,
+                jtFee: 0,
                 ltFee: 0,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0
@@ -2460,7 +2460,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
      * coverage = 10e18 takes it to 157e18, the full drawdown 300e18 - jtEffectiveNAV 143e18. The full recovery
      * attributes deltaSTEff = 100e18 + floor(57e18 * 100/243) = 123456790123456790123 and JT's own gain
      * 33543209876543209877 recovers il to exactly deltaSTEff, so the recovery consumes the entire senior gain and
-     * JT is made whole: 1000e18/300e18, il = 0, jtFee = floor(jt gain * 0.1)
+     * JT is made whole: 1000e18/300e18, il = 0, and no jt fee books since JT's own gain was fully consumed by the recovery
      */
     function test_Sync_ImpermanentLoss_DeepensWithPoolAndRecoversWhole() public {
         _seedSymmetric(1000e18, 300e18, 0);
@@ -2503,7 +2503,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
                 il: 0,
                 ltPrem: 0,
                 stFee: 0,
-                jtFee: 3_354_320_987_654_320_987,
+                jtFee: 0,
                 ltFee: 0,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0

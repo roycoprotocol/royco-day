@@ -503,25 +503,31 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
             /// @dev STEP_APPLY_MARK_TO_MARKET: Mark the ST and JT NAVs to market via the PnL waterfall, based on their respective obligations to one another
             {
-                // The net JT gains, the JT protocol fee accrued is calculated using this NAV
-                NAV_UNIT jtNetGain;
                 /// @dev STEP_APPLY_JT_LOSS: The JT assets depreciated in value
                 if (deltaJTEffectiveNAV < 0) {
-                    /// @dev STEP_JT_ABSORB_LOSS: JT's remaning loss-absorption buffer incurs its loss fully
-                    // NOTE: The PnL attribution step above guarantees that this will not underflow
                     NAV_UNIT jtLoss = toNAVUnits(-deltaJTEffectiveNAV);
+                    // NOTE: The PnL attribution step above guarantees that this will not underflow
                     jtEffectiveNAV = (jtEffectiveNAV - jtLoss);
                     // The JT loss is impermanent: recoverable by future JT gains and JT's first claim on ST appreciation
                     jtImpermanentLoss = (jtImpermanentLoss + jtLoss);
                     /// @dev STEP_APPLY_JT_GAIN: The JT assets appreciated in value
                 } else if (deltaJTEffectiveNAV > 0) {
-                    jtNetGain = toNAVUnits(deltaJTEffectiveNAV);
-                    // Compute the protocol fee taken on this JT yield accrual if it is not attributable to any rounding/dust
-                    if (jtNetGain > effectiveNAVDustTolerance) jtProtocolFee = jtNetGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor);
-                    // JT's own gains recover any outstanding JT impermanent loss
-                    jtImpermanentLoss = (jtImpermanentLoss - RoycoUnitsMath.min(jtNetGain, jtImpermanentLoss));
-                    // Book the gains to the JT
-                    jtEffectiveNAV = (jtEffectiveNAV + jtNetGain);
+                    NAV_UNIT jtGain = toNAVUnits(deltaJTEffectiveNAV);
+                    /// @dev STEP_JT_IMPERMANENT_LOSS_RECOVERY: First, recover any JT impermanent losses (first claim on any appreciation)
+                    NAV_UNIT jtImpermanentLossRecovery = RoycoUnitsMath.min(jtGain, jtImpermanentLoss);
+                    if (jtImpermanentLossRecovery != ZERO_NAV_UNITS) {
+                        // Recover as much of the JT impermanent loss as possible
+                        jtImpermanentLoss = (jtImpermanentLoss - jtImpermanentLossRecovery);
+                        // Apply the JT IL recovery
+                        jtEffectiveNAV = (jtEffectiveNAV + jtImpermanentLossRecovery);
+                        jtGain = (jtGain - jtImpermanentLossRecovery);
+                    }
+                    if (jtGain != ZERO_NAV_UNITS) {
+                        // Compute the protocol fee taken on this JT yield accrual if it is not attributable to any rounding/dust
+                        if (jtGain > effectiveNAVDustTolerance) jtProtocolFee = jtGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor);
+                        // Book the gains to the JT
+                        jtEffectiveNAV = (jtEffectiveNAV + jtGain);
+                    }
                 }
 
                 /// @dev STEP_APPLY_ST_LOSS: The ST assets depreciated in value
@@ -530,15 +536,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                     /// @dev STEP_APPLY_JT_COVERAGE_TO_ST: Apply any possible coverage to ST provided by JT's loss-absorption buffer
                     NAV_UNIT coverageApplied = RoycoUnitsMath.min(stLoss, jtEffectiveNAV);
                     if (coverageApplied != ZERO_NAV_UNITS) {
-                        // If there was a JT protocol fee taken on their appreciation, recalculate it using the JT net gain after applying coverage applied
-                        if (jtProtocolFee != ZERO_NAV_UNITS) {
-                            jtNetGain = jtNetGain.saturatingSub(coverageApplied);
-                            jtProtocolFee =
-                                (jtNetGain > effectiveNAVDustTolerance) ? jtNetGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor) : ZERO_NAV_UNITS;
-                        }
                         // Apply the coverage to JT effective NAV
                         jtEffectiveNAV = (jtEffectiveNAV - coverageApplied);
-                        // Any coverage provided is a ST liability to JT
+                        // Any coverage provided is marked as JT impermanent loss
                         jtImpermanentLoss = (jtImpermanentLoss + coverageApplied);
                         stLoss = stLoss - coverageApplied;
                     }
@@ -547,7 +547,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                     /// @dev STEP_APPLY_ST_GAIN: The ST assets appreciated in value
                 } else if (deltaSTEffectiveNAV > 0) {
                     NAV_UNIT stGain = toNAVUnits(deltaSTEffectiveNAV);
-                    /// @dev STEP_JT_IMPERMANENT_LOSS_RECOVERY: First, recover any JT impermanent losses (first claim on ST appreciation)
+                    /// @dev STEP_JT_IMPERMANENT_LOSS_RECOVERY: First, recover any JT impermanent losses (first claim on any appreciation)
                     NAV_UNIT jtImpermanentLossRecovery = RoycoUnitsMath.min(stGain, jtImpermanentLoss);
                     if (jtImpermanentLossRecovery != ZERO_NAV_UNITS) {
                         // Recover as much of the JT impermanent loss as possible
