@@ -166,8 +166,8 @@ contract Test_EntryPointMarketStateGating is EntryPointTestBase {
         assertGe(state.coverageUtilizationWAD, state.coverageLiquidationUtilizationWAD, "setup: the market must remain liquidation-breached after the recovery");
         _warpPastRedemptionDelay();
 
-        // The exact standing-NAV skim: derived purely from the bonus-free value formula
-        uint256 vExec = (toUint256(seniorTranche.totalAssets().nav) * shares) / seniorTranche.totalSupply();
+        // The exact standing-NAV skim: derived purely from the bonus-free value formula (virtual-shares rate)
+        uint256 vExec = RoycoTestMath.convertToValue(shares, toUint256(seniorTranche.totalAssets().nav), seniorTranche.totalSupply());
         assertGt(vExec, vReq, "sanity: the recovery must register as standing-NAV queued yield");
         uint256 expectedFee = Math.mulDiv(shares, vExec - vReq, vExec, Math.Rounding.Floor);
 

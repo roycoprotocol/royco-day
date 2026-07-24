@@ -9,6 +9,7 @@ import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
@@ -16,14 +17,13 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  * @notice The hand-derived redemption value-forfeiture matrix across tranches, redemption modes, and executor
  *         bonuses. Every skim is pinned exactly against the value formula and every claim leg's bonus split is
  *         re-derived independently
- * @dev The value basis: a redemption request snapshots the escrowed shares' pro-rata claim on the gate-free
- *      totalAssets NAV (vReq = floor(nav * shares / supply)); at execution the same formula yields vExec, and the
+ * @dev The value basis: a redemption request snapshots the escrowed shares' claim on the gate-free totalAssets NAV
+ *      at the virtual-shares rate (vReq = ValuationLogic._convertToValue); at execution the same formula yields vExec, and the
  *      protocol skims exactly protocolFeeShares = floor(shares * (vExec - vReq) / vExec) when vExec > vReq (never on
  *      a loss). The skim is share-denominated and route-independent: INKIND and MULTIASSET executions of identical
  *      requests under identical PnL forfeit per the same formula
- * @dev Bonus splits: asset-claim legs (collateral, BPT, idle senior shares) split at the _scaleAssetClaims rate
- *      (bonus / (1e18 + 1e6), the virtual-shares effective denominator); the quote leg splits at the plain
- *      floor(total * bonus / 1e18)
+ * @dev Bonus splits: every leg (asset claims and quote) splits at the plain flooring bonus rate
+ *      floor(total * bonus / 1e18) — the entry point's bonus scale carries no virtual-shares offset
  */
 contract Test_EntryPointRedemptionForfeitureMatrix is EntryPointTestBase {
     uint256 internal stUnit;
@@ -43,9 +43,10 @@ contract Test_EntryPointRedemptionForfeitureMatrix is EntryPointTestBase {
     // Independent derivations
     // ---------------------------------------------------------------------
 
-    /// @dev The redemption value reference: the shares' pro-rata claim on the tranche's totalAssets NAV
+    /// @dev The redemption value reference: the shares' claim on the tranche's totalAssets NAV at the virtual-shares
+    ///      rate (mirrors ValuationLogic._convertToValue, the same basis the tranche's own redeem scales by)
     function _valueOf(address _tranche, uint256 _shares) internal view returns (uint256 value) {
-        return Math.mulDiv(toUint256(IRoycoVaultTranche(_tranche).totalAssets().nav), _shares, IERC20(_tranche).totalSupply(), Math.Rounding.Floor);
+        return RoycoTestMath.convertToValue(_shares, toUint256(IRoycoVaultTranche(_tranche).totalAssets().nav), IERC20(_tranche).totalSupply());
     }
 
     /// @dev The exact skim for a full-request execution: floor(shares * (vExec - vReq) / vExec), zero when value fell
@@ -87,7 +88,7 @@ contract Test_EntryPointRedemptionForfeitureMatrix is EntryPointTestBase {
         uint256 receiverLeg = stJtVault.balanceOf(USER_B);
         assertEq(receiverLeg, toUint256(userClaims.collateralAssets), "the receiver must get exactly the reported user claims");
         if (_bonusWAD != 0) {
-            assertEq(executorLeg, Math.mulDiv(executorLeg + receiverLeg, _bonusWAD, 1e18 + 1e6), "the executor's collateral slice must equal the flooring scaled-claims fraction");
+            assertEq(executorLeg, Math.mulDiv(executorLeg + receiverLeg, _bonusWAD, 1e18), "the executor's collateral slice must equal the flooring scaled-claims fraction");
         }
         assertEq(stJtVault.balanceOf(address(entryPoint)), 0, "no claim assets may remain in the entry point");
         // The forfeited shares stay escrowed as protocol fee shares, nothing else
@@ -158,12 +159,12 @@ contract Test_EntryPointRedemptionForfeitureMatrix is EntryPointTestBase {
         assertEq(seniorTranche.balanceOf(USER_B), userClaims.stShares, "the receiver must get the post-bonus senior-share leg");
         assertEq(
             executorBpt,
-            Math.mulDiv(executorBpt + toUint256(userClaims.lptAssets), DEFAULT_EXECUTOR_BONUS, 1e18 + 1e6),
+            Math.mulDiv(executorBpt + toUint256(userClaims.lptAssets), DEFAULT_EXECUTOR_BONUS, 1e18),
             "the BPT bonus slice must equal the flooring scaled-claims fraction"
         );
         assertEq(
             executorStShares,
-            Math.mulDiv(executorStShares + userClaims.stShares, DEFAULT_EXECUTOR_BONUS, 1e18 + 1e6),
+            Math.mulDiv(executorStShares + userClaims.stShares, DEFAULT_EXECUTOR_BONUS, 1e18),
             "the senior-share bonus slice must equal the flooring scaled-claims fraction"
         );
         assertEq(bpt.balanceOf(address(entryPoint)), 0, "no BPT may remain in the entry point");
@@ -211,7 +212,7 @@ contract Test_EntryPointRedemptionForfeitureMatrix is EntryPointTestBase {
         assertEq(stJtVault.balanceOf(USER_B), toUint256(userClaims.collateralAssets), "the receiver must get the post-bonus constituent leg");
         assertEq(
             executorConstituent,
-            Math.mulDiv(executorConstituent + toUint256(userClaims.collateralAssets), DEFAULT_EXECUTOR_BONUS, 1e18 + 1e6),
+            Math.mulDiv(executorConstituent + toUint256(userClaims.collateralAssets), DEFAULT_EXECUTOR_BONUS, 1e18),
             "the constituent bonus slice must equal the flooring scaled-claims fraction"
         );
         // Nothing stranded beyond the skimmed fee shares

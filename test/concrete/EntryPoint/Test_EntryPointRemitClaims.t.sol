@@ -55,19 +55,18 @@ contract Test_EntryPointRemitClaims is Test {
         MockKernelAssets kernel = _mockKernel();
         _fundHarness(330, 0, 0);
 
-        // A 10% bonus on a 330-wei collateral leg. The bonus is a _scaleAssetClaims slice priced against the
-        // virtual-shares effective denominator (WAD + 1e6): bonus = floor(330*0.1e18/(1e18+1e6)) = 32. The
-        // receiver keeps total-minus-bonus, 298. Conservation holds exactly (executor + receiver == total): the
-        // offset only shifts the floor of the bonus slice.
+        // A 10% bonus on a 330-wei collateral leg. The bonus is a plain flooring WAD fraction (no virtual-shares
+        // offset): bonus = floor(330*0.1e18/1e18) = 33. The receiver keeps total-minus-bonus, 297. Conservation
+        // holds exactly (executor + receiver == total).
         vm.prank(EXECUTOR);
         (AssetClaims memory bonusClaims,, AssetClaims memory userClaims) =
             harness.remitRedemptionAndBonusClaims(address(kernel), _claims(330, 0, 0), 0, TEN_PERCENT_WAD, RECEIVER);
 
-        assertEq(collateralAsset.balanceOf(RECEIVER), 298, "receiver collateral leg");
-        assertEq(collateralAsset.balanceOf(EXECUTOR), 32, "executor collateral leg");
+        assertEq(collateralAsset.balanceOf(RECEIVER), 297, "receiver collateral leg");
+        assertEq(collateralAsset.balanceOf(EXECUTOR), 33, "executor collateral leg");
         // The returned splits must mirror the transfers: the total claims are reduced in place to the receiver's portion
-        assertEq(toUint256(bonusClaims.collateralAssets), 32, "returned bonus collateral leg");
-        assertEq(toUint256(userClaims.collateralAssets), 298, "returned user collateral leg");
+        assertEq(toUint256(bonusClaims.collateralAssets), 33, "returned bonus collateral leg");
+        assertEq(toUint256(userClaims.collateralAssets), 297, "returned user collateral leg");
     }
 
     function test_remit_transfersLptAndSeniorShareLegs() public {
@@ -77,12 +76,12 @@ contract Test_EntryPointRemitClaims is Test {
         vm.prank(EXECUTOR);
         harness.remitRedemptionAndBonusClaims(address(kernel), _claims(0, 300, 400), 0, TEN_PERCENT_WAD, RECEIVER);
 
-        // Bonus over (WAD + 1e6): bonusLPT = floor(300*0.1e18/(1e18+1e6)) = 29, bonusShares =
-        // floor(400*0.1e18/(1e18+1e6)) = 39, receiver keeps (271, 361).
-        assertEq(lptAsset.balanceOf(RECEIVER), 271, "receiver LPT asset leg");
-        assertEq(seniorShare.balanceOf(RECEIVER), 361, "receiver senior share leg");
-        assertEq(lptAsset.balanceOf(EXECUTOR), 29, "executor LPT asset leg");
-        assertEq(seniorShare.balanceOf(EXECUTOR), 39, "executor senior share leg");
+        // Bonus over WAD: bonusLPT = floor(300*0.1e18/1e18) = 30, bonusShares = floor(400*0.1e18/1e18) = 40,
+        // receiver keeps (270, 360).
+        assertEq(lptAsset.balanceOf(RECEIVER), 270, "receiver LPT asset leg");
+        assertEq(seniorShare.balanceOf(RECEIVER), 360, "receiver senior share leg");
+        assertEq(lptAsset.balanceOf(EXECUTOR), 30, "executor LPT asset leg");
+        assertEq(seniorShare.balanceOf(EXECUTOR), 40, "executor senior share leg");
     }
 
     function test_remit_zeroBonus_sendsEverythingToReceiver() public {
@@ -104,10 +103,9 @@ contract Test_EntryPointRemitClaims is Test {
     }
 
     function test_remit_quoteLeg_splitsWithFloorAndPaysReceiverFirst() public {
-        // The quote leg's bonus floors over the plain WAD denominator (mulDiv(quote, bonus, WAD)), UNLIKE the three
-        // claims legs, which are a _scaleAssetClaims slice over the virtual-shares effective denominator (WAD + 1e6).
-        // The leg is sized at 10_000_005 so the two denominators produce DIFFERENT slices at a 10% bonus
-        // (1_000_000 vs 999_999), pinning the WAD path against a regression that switched the denominator
+        // The quote leg's bonus floors over the plain WAD denominator (mulDiv(quote, bonus, WAD)), the same rate
+        // the claims legs now split at (the entry point's bonus scale carries no virtual-shares offset). The leg is
+        // sized at 10_000_005 so the flooring drops the 0.5-wei fraction: bonus = 1_000_000 exactly
         MockKernelAssets kernel = _mockKernel();
         quoteAsset.mint(address(harness), 10_000_005);
 
@@ -158,13 +156,13 @@ contract Test_EntryPointRemitClaims is Test {
         vm.prank(EXECUTOR);
         harness.remitRedemptionAndBonusClaims(address(kernel), _claims(330, 300, 400), 0, TEN_PERCENT_WAD, RECEIVER);
 
-        // Bonus per leg over (WAD + 1e6): (bonusCollateral, bonusLPT, bonusShares) = (32, 29, 39); receiver keeps
+        // Bonus per leg over WAD: (bonusCollateral, bonusLPT, bonusShares) = (33, 30, 40); receiver keeps
         // total-minus-bonus on every leg. Conservation holds per leg (executor + receiver == total).
-        assertEq(collateralAsset.balanceOf(RECEIVER), 298, "receiver collateral leg");
-        assertEq(lptAsset.balanceOf(RECEIVER), 271, "receiver LPT asset leg");
-        assertEq(seniorShare.balanceOf(RECEIVER), 361, "receiver senior share leg");
-        assertEq(collateralAsset.balanceOf(EXECUTOR), 32, "executor collateral leg");
-        assertEq(lptAsset.balanceOf(EXECUTOR), 29, "executor LPT asset leg");
-        assertEq(seniorShare.balanceOf(EXECUTOR), 39, "executor senior share leg");
+        assertEq(collateralAsset.balanceOf(RECEIVER), 297, "receiver collateral leg");
+        assertEq(lptAsset.balanceOf(RECEIVER), 270, "receiver LPT asset leg");
+        assertEq(seniorShare.balanceOf(RECEIVER), 360, "receiver senior share leg");
+        assertEq(collateralAsset.balanceOf(EXECUTOR), 33, "executor collateral leg");
+        assertEq(lptAsset.balanceOf(EXECUTOR), 30, "executor LPT asset leg");
+        assertEq(seniorShare.balanceOf(EXECUTOR), 40, "executor senior share leg");
     }
 }

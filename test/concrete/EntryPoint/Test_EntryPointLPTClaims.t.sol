@@ -7,6 +7,7 @@ import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
@@ -73,11 +74,10 @@ contract Test_EntryPointLPTClaims is EntryPointTestBase {
         uint256 totalStShares = executorStShares + userClaims.stShares;
         assertEq(bpt.balanceOf(USER_B), toUint256(userClaims.lptAssets), "the receiver must get the post-bonus BPT leg");
         assertEq(seniorTranche.balanceOf(USER_B), userClaims.stShares, "the receiver must get the post-bonus senior-share leg");
-        // The executor slice is the flooring bonus fraction of each leg. The bonus is a _scaleAssetClaims slice
-        // priced against the virtual-shares effective denominator (WAD + 1e6), not WAD, so the derivation divides
-        // by (1e18 + 1e6). totalBpt/totalStShares are the actual (bonus + receiver) totals redeemed.
-        assertEq(executorBpt, (totalBpt * DEFAULT_EXECUTOR_BONUS) / (1e18 + 1e6), "the BPT bonus slice must equal the flooring bonus fraction");
-        assertEq(executorStShares, (totalStShares * DEFAULT_EXECUTOR_BONUS) / (1e18 + 1e6), "the senior-share bonus slice must equal the flooring bonus fraction");
+        // The executor slice is the plain flooring bonus fraction of each leg (the entry point's bonus scale
+        // carries no virtual-shares offset). totalBpt/totalStShares are the actual (bonus + receiver) totals redeemed.
+        assertEq(executorBpt, (totalBpt * DEFAULT_EXECUTOR_BONUS) / 1e18, "the BPT bonus slice must equal the flooring bonus fraction");
+        assertEq(executorStShares, (totalStShares * DEFAULT_EXECUTOR_BONUS) / 1e18, "the senior-share bonus slice must equal the flooring bonus fraction");
         // Nothing may be left stranded in the entry point
         assertEq(bpt.balanceOf(address(entryPoint)), 0, "no BPT may remain in the entry point after the split");
         assertEq(seniorTranche.balanceOf(address(entryPoint)), 0, "no senior shares may remain in the entry point after the split");
@@ -87,13 +87,14 @@ contract Test_EntryPointLPTClaims is EntryPointTestBase {
         uint256 shares = _acquireTrancheShares(USER_A, address(liquidityProviderTranche), 20e18);
         (uint256 nonce,) = _requestRedemption(USER_A, address(liquidityProviderTranche), shares, USER_A, 0);
 
-        // The quote basis is the gate-free totalAssets view scaled by the share fraction: it INCLUDES the idle premium
-        // leg (so it sits strictly above the BPT-only convertToAssets floor while a premium is staged)
+        // The quote basis is the gate-free totalAssets view scaled at the virtual-shares rate (mirroring
+        // ValuationLogic._convertToValue): it INCLUDES the idle premium leg (so it sits strictly above the BPT-only
+        // convertToAssets floor while a premium is staged)
         IRoycoDayEntryPoint.RedemptionRequest memory request = entryPoint.getRedemptionRequest(USER_A, nonce);
         assertEq(
             toUint256(request.valueAtRequestTime),
-            (toUint256(liquidityProviderTranche.totalAssets().nav) * shares) / liquidityProviderTranche.totalSupply(),
-            "the LT nav snapshot must use the totalAssets basis scaled by the share fraction"
+            RoycoTestMath.convertToValue(shares, toUint256(liquidityProviderTranche.totalAssets().nav), liquidityProviderTranche.totalSupply()),
+            "the LT nav snapshot must use the totalAssets basis at the virtual-shares rate"
         );
         assertGt(
             toUint256(request.valueAtRequestTime),

@@ -61,7 +61,7 @@ library RedemptionLogic {
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
+        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares, true);
 
         // Apply any ST self-liquidation bonus to the redeeming user's asset claims and retrieve the bonus NAV applied
         NAV_UNIT stSelfLiquidationBonusNAV;
@@ -108,7 +108,7 @@ library RedemptionLogic {
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
+        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares, true);
 
         // Withdraw the asset claims from each tranche and transfer them to the receiver
         TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
@@ -150,7 +150,7 @@ library RedemptionLogic {
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
+        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares, true);
 
         // Withdraw the asset claims from each tranche and transfer them to the receiver
         TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
@@ -197,7 +197,7 @@ library RedemptionLogic {
 
         // An LPT share claims both LPT effective-NAV legs: the deployed LPT assets and the idle liquidity-premium senior shares
         // Compute the LPT assets
-        AssetClaims memory userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(lptClaims, _lptShares, totalLPTShares);
+        AssetClaims memory userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(lptClaims, _lptShares, totalLPTShares, true);
         // Mark the user's LPT asset claims as withdrawn
         TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, address(this));
 
@@ -212,7 +212,8 @@ library RedemptionLogic {
         stClaims = TrancheClaimsLogic._scaleAssetClaims(
             TrancheClaimsLogic._deriveTrancheAssetClaims($, _immutables, TrancheType.SENIOR, state),
             stSharesToRedeem,
-            IERC20(_immutables.seniorTranche).totalSupply()
+            IERC20(_immutables.seniorTranche).totalSupply(),
+            true
         );
 
         // Apply any ST self-liquidation bonus to the redeeming user's ST shares claims and retrieve the bonus NAV applied

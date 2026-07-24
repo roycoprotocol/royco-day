@@ -222,11 +222,11 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
         // Each slice deposits half the escrow in full
         uint256 sliceAssets = amount / 2;
 
-        // Slice 1: the pro-rata storage rescale floors the unfilled half's reference to storage
-        // (mulDiv(sharesRef, sliceAssets, amount) = floor(sharesRef / 2)), leaving the remainder as the filled
-        // portion's reference (ceil(sharesRef / 2)). Slice 2 then consumes the whole stored remainder
+        // Slice 1: both sides of the pro-rata rescale floor independently — the unfilled half's reference floors to
+        // storage and the filled portion's reference floors for the execution (protocol-favoring flooring dust).
+        // Slice 2 then consumes the whole stored remainder
         uint256 sharesLeftAfterSlice1 = Math.mulDiv(sharesRef, sliceAssets, amount, Math.Rounding.Floor);
-        uint256 sharesRefFilled1 = sharesRef - sharesLeftAfterSlice1;
+        uint256 sharesRefFilled1 = Math.mulDiv(sharesRef, sliceAssets, amount, Math.Rounding.Floor);
         uint256 sharesRefFilled2 = sharesLeftAfterSlice1;
 
         // Each slice's execution mint is previewDeposit of its full asset slice, captured at that slice's state

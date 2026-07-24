@@ -318,9 +318,10 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         );
     }
 
-    /// @dev The redemption value reference: the shares' pro-rata claim on the tranche's totalAssets NAV
+    /// @dev The redemption value reference: the shares' claim on the tranche's totalAssets NAV at the virtual-shares
+    ///      rate (mirrors ValuationLogic._convertToValue, the same basis the tranche's own redeem scales by)
     function _valueOf(address _tranche, uint256 _shares) internal view returns (uint256 value) {
-        return Math.mulDiv(toUint256(IRoycoVaultTranche(_tranche).totalAssets().nav), _shares, IERC20(_tranche).totalSupply(), Math.Rounding.Floor);
+        return RoycoTestMath.convertToValue(_shares, toUint256(IRoycoVaultTranche(_tranche).totalAssets().nav), IERC20(_tranche).totalSupply());
     }
 
     /// @dev The exact redemption skim: floor(shares * (vExec - vReq) / vExec), zero when value fell
@@ -464,7 +465,7 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         uint256 executorLeg = IERC20(COLLATERAL_ASSET).balanceOf(EP_EXECUTOR);
         uint256 receiverLeg = IERC20(COLLATERAL_ASSET).balanceOf(EP_RECEIVER);
         assertEq(receiverLeg, toUint256(userClaims.collateralAssets), "the receiver must get exactly the reported user claims");
-        assertEq(executorLeg, Math.mulDiv(executorLeg + receiverLeg, 0.01e18, 1e18 + 1e6), "the executor's slice must equal the flooring scaled-claims fraction");
+        assertEq(executorLeg, Math.mulDiv(executorLeg + receiverLeg, 0.01e18, 1e18), "the executor's slice must equal the flooring scaled-claims fraction");
         assertEq(IERC20(COLLATERAL_ASSET).balanceOf(address(ENTRY_POINT)), 0, "no claim assets may remain in the entry point");
     }
 

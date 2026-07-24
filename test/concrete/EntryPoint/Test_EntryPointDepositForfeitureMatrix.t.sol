@@ -164,11 +164,12 @@ contract Test_EntryPointDepositForfeitureMatrix is EntryPointTestBase {
         _applyAdversePnL(_tranche);
         _warpPastDepositDelay();
 
-        // Slice 1 (explicit half): the pro-rata storage rescale floors the unfilled half's reference into storage,
-        // leaving the ceil remainder as the filled portion's reference
+        // Slice 1 (explicit half): BOTH sides of the pro-rata rescale floor independently — the unfilled half's
+        // reference floors into storage and the filled portion's reference floors for this execution (the ≤1 wei of
+        // flooring dust drops out of the user's reference, a protocol-favoring rounding)
         uint256 slice = c.amount / 2;
         c.refLeft = Math.mulDiv(c.storedRef, c.amount - slice, c.amount, Math.Rounding.Floor);
-        c.refFilled1 = c.storedRef - c.refLeft;
+        c.refFilled1 = Math.mulDiv(c.storedRef, slice, c.amount, Math.Rounding.Floor);
         c.sharesExec1 = IRoycoVaultTranche(_tranche).previewDeposit(toTrancheUnits(slice));
         c.feeBefore = entryPoint.getProtocolFeeSharesPendingCollection(_tranche);
         c.userShares1 = _executeDeposit(c.executor, USER_A, c.nonce, slice);

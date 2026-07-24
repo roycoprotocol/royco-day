@@ -175,7 +175,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
             trancheClaims.stShares = 0;
             trancheClaims.nav = state.lptRawNAV;
         }
-        return TrancheClaimsLogic._scaleAssetClaims(trancheClaims, _shares, trancheTotalShares);
+        return TrancheClaimsLogic._scaleAssetClaims(trancheClaims, _shares, trancheTotalShares, true);
     }
 
     /// @inheritdoc IRoycoVaultTranche

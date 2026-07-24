@@ -363,8 +363,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @param _pool The pre-created pool
      * @param _seniorTranche The senior tranche share expected as the pool's first token
      * @param _quoteAsset The quote asset expected as the pool's second token
+     * @param _hook The hook expected as the pool's hook
      */
-    function _verifyPool(address _pool, address _seniorTranche, address _quoteAsset) internal view {
+    function _verifyPool(address _pool, address _seniorTranche, address _quoteAsset, address _hook) internal view {
         // Provenance: the pool was created by our Gyro E-CLP pool factory
         require(BALANCER_V3_POOL_FACTORY.isPoolFromFactory(_pool), POOL_NOT_FROM_FACTORY(_pool));
 

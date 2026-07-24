@@ -408,16 +408,19 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Return early without reverting if maxDeposit is 0 due to market conditions
         if (_assetsToDeposit == ZERO_TRANCHE_UNITS) return 0;
 
-        // Mark the assets as deposited
+        // Ensure the resolved amount is not greater than the request's assets
+        require(request.assets >= _assetsToDeposit, INVALID_REQUEST(_requestNonce));
         TRANCHE_UNIT assetsLeftToDeposit = request.assets - _assetsToDeposit;
+
+        // Mark the assets as deposited
         if (assetsLeftToDeposit == ZERO_TRANCHE_UNITS) {
             delete $.userToNonceToDepositRequest[_user][_requestNonce];
         } else {
             $.userToNonceToDepositRequest[_user][_requestNonce].assets = assetsLeftToDeposit;
             // Scale the request-time share reference by the assets left to deposit
-            uint256 sharesOfAssetsLeftToDeposit = request.equivalentSharesAtRequestTime.mulDiv(assetsLeftToDeposit, request.assets, Math.Rounding.Floor);
-            $.userToNonceToDepositRequest[_user][_requestNonce].equivalentSharesAtRequestTime = sharesOfAssetsLeftToDeposit;
-            request.equivalentSharesAtRequestTime = request.equivalentSharesAtRequestTime - sharesOfAssetsLeftToDeposit;
+            $.userToNonceToDepositRequest[_user][_requestNonce].equivalentSharesAtRequestTime =
+                request.equivalentSharesAtRequestTime.mulDiv(assetsLeftToDeposit, request.assets, Math.Rounding.Floor);
+            request.equivalentSharesAtRequestTime = request.equivalentSharesAtRequestTime.mulDiv(_assetsToDeposit, request.assets, Math.Rounding.Floor);
         }
 
         // A third party execution requires the user to have opted in (checked before the deposit mutates anything)
@@ -518,16 +521,19 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Return early without reverting if the resolved amount is 0 due to market conditions
         if (_sharesToRedeem == 0) return (AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS), 0);
 
-        // Mark the shares as redeemed
+        // Ensure the resolved amount is not greater than the request's shares
+        require(request.shares >= _sharesToRedeem, INVALID_REQUEST(_requestNonce));
         uint256 sharesLeftToRedeem = request.shares - _sharesToRedeem;
+
+        // Mark the shares as redeemed
         if (sharesLeftToRedeem == 0) {
             delete $.userToNonceToRedemptionRequest[_user][_requestNonce];
         } else {
             $.userToNonceToRedemptionRequest[_user][_requestNonce].shares = sharesLeftToRedeem;
             // Scale the request-time value reference by the shares left to redeem
-            NAV_UNIT valueOfSharesLeftToRedeem = request.valueAtRequestTime.mulDiv(sharesLeftToRedeem, request.shares, Math.Rounding.Floor);
-            $.userToNonceToRedemptionRequest[_user][_requestNonce].valueAtRequestTime = valueOfSharesLeftToRedeem;
-            request.valueAtRequestTime = request.valueAtRequestTime - valueOfSharesLeftToRedeem;
+            $.userToNonceToRedemptionRequest[_user][_requestNonce].valueAtRequestTime =
+                request.valueAtRequestTime.mulDiv(sharesLeftToRedeem, request.shares, Math.Rounding.Floor);
+            request.valueAtRequestTime = request.valueAtRequestTime.mulDiv(_sharesToRedeem, request.shares, Math.Rounding.Floor);
         }
 
         // If this is a self-redemption or there is no executor bonus configured, withdraw assets directly to the specified recipient
@@ -729,9 +735,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     /// @dev Resolves the redemption value reference - the escrowed shares' pro-rata claim on the tranche's total effective NAV
     /// @dev Ensures that the NAV does not include any self-liquidation bonus applied when the redemption is executed.
     function _redemptionValueReference(address _tranche, uint256 _shares) internal view returns (NAV_UNIT value) {
-        uint256 totalShares = IERC20(_tranche).totalSupply();
-        if (totalShares == 0) return ZERO_NAV_UNITS;
-        return IRoycoVaultTranche(_tranche).totalAssets().nav.mulDiv(_shares, totalShares, Math.Rounding.Floor);
+        return ValuationLogic._convertToValue(_shares, IERC20(_tranche).totalSupply(), IRoycoVaultTranche(_tranche).totalAssets().nav, Math.Rounding.Floor);
     }
 
     /**
@@ -804,7 +808,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         returns (AssetClaims memory bonusClaims, uint256 bonusQuoteAssets)
     {
         // Scale the asset claims to compute the executor bonus and the receiver's portion
-        bonusClaims = TrancheClaimsLogic._scaleAssetClaims(_userClaims, _executorBonusWAD, WAD);
+        bonusClaims = TrancheClaimsLogic._scaleAssetClaims(_userClaims, _executorBonusWAD, WAD, false);
         // Deduct the NAV of the bonus claims from the user's claims
         _userClaims.collateralAssets = _userClaims.collateralAssets - bonusClaims.collateralAssets;
         _userClaims.lptAssets = _userClaims.lptAssets - bonusClaims.lptAssets;

@@ -17,6 +17,6 @@ contract TrancheClaimsExposer {
         pure
         returns (AssetClaims memory scaledClaims)
     {
-        return TrancheClaimsLogic._scaleAssetClaims(_claims, _shares, _totalTrancheShares);
+        return TrancheClaimsLogic._scaleAssetClaims(_claims, _shares, _totalTrancheShares, true);
     }
 }
