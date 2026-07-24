@@ -510,7 +510,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             isMultiAssetRedemption = (request.mode == RedemptionMode.MULTIASSET);
             if (_sharesToRedeem == type(uint256).max) {
                 _sharesToRedeem =
-                    Math.min(isMultiAssetRedemption ? _maxRedeemMultiAsset(tranche) : IRoycoVaultTranche(tranche).maxRedeem(address(this)), request.shares);
+                    Math.min((isMultiAssetRedemption ? _maxRedeemMultiAsset(tranche) : IRoycoVaultTranche(tranche).maxRedeem(address(this))), request.shares);
             }
         }
         // Return early without reverting if the resolved amount is 0 due to market conditions
@@ -714,9 +714,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         return ValuationLogic._convertToSharesUnclamped(depositValue, trancheClaims.nav, totalTrancheShares, Math.Rounding.Floor);
     }
 
-    /// @dev Resolves the redemption value reference: the escrowed shares' pro-rata claim on the tranche's full post-sync claims
-    /// @dev The full claims basis mirrors execution, an LPT redemption claims both effective-NAV legs including the idle liquidity premium senior shares
-    /// @dev The reference excludes any self-liquidation bonus applied when the redemption executes, so the bonus is never skimmed as queue-time accrual
+    /**
+     * @dev Resolves the redemption value reference: the escrowed shares' pro-rata claim on the tranche's full post-sync claims
+     * @dev The full claims basis mirrors execution, an LPT redemption claims both effective-NAV legs including the idle liquidity premium senior shares
+     * @dev The reference excludes any self-liquidation bonus applied when the redemption executes, so the bonus is never skimmed as queue-time accrual
+     */
     function _redemptionValueReference(address _kernel, TrancheType _trancheType, uint256 _shares) internal returns (NAV_UNIT value) {
         // Read the post-sync state so the claims and supply come from one accounting state
         (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(_kernel).syncTrancheAccountingFor(_trancheType);
