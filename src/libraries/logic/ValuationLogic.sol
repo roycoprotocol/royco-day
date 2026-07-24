@@ -93,7 +93,8 @@ library ValuationLogic {
 
     /**
      * @notice Returns the number of shares that have a claim on the specified value, clamped by the protocol's max mint dilution
-     * @dev The single share-conversion primitive, shared by the tranches and the kernel-side mint sizing so both resolve identical share counts
+     * @dev The mint-sizing share conversion, shared by the tranches and the kernel-side mint sizing so both resolve identical share counts
+     * @dev See _convertToSharesUnclamped for the clamp-free variant, used only as a valuation reference and never to size a real mint
      * @dev The mint-dilution clamp: any single mint may own at most MAX_MINT_DILUTION_WAD / WAD of the POST-mint supply, leaving
      *      pre-existing holders at least the complementary (WAD − MAX_MINT_DILUTION_WAD) / WAD sliver
      *      The minted shares therefore
@@ -119,7 +120,33 @@ library ValuationLogic {
             // The mint binds the clamp: the mint owns at most MAX_MINT_DILUTION_WAD of the post-mint EFFECTIVE supply
             return Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION_WAD, (WAD - MAX_MINT_DILUTION_WAD));
         }
-        return effectiveSupply.mulDiv(_value, denominator, _rounding);
+        // Below the clamp: the fair, unclamped virtual-shares price
+        return _convertToSharesUnclamped(_value, _totalValue, _totalSupply, _rounding);
+    }
+
+    /**
+     * @notice Returns the shares that have a claim on the specified value under fair (unclamped) virtual-shares pricing
+     * @dev Identical to _convertToShares but WITHOUT the mint-dilution clamp
+     * @param _value The value to convert in NAV units
+     * @param _totalValue The total tranche controlled value in NAV units
+     * @param _totalSupply The total supply of tranche shares
+     * @param _rounding The rounding mode to use
+     * @return shares The number of shares that have a claim on the specified value at the fair, unclamped price
+     */
+    function _convertToSharesUnclamped(
+        NAV_UNIT _value,
+        NAV_UNIT _totalValue,
+        uint256 _totalSupply,
+        Math.Rounding _rounding
+    )
+        internal
+        pure
+        returns (uint256 shares)
+    {
+        // A genuinely fresh tranche (no shares AND no backing) mints 1:1
+        if (_totalSupply == 0 && _totalValue == ZERO_NAV_UNITS) return toUint256(_value);
+        // The fair virtual-shares price, matching _convertToShares' unclamped branch
+        return (_totalSupply + VIRTUAL_SHARES).mulDiv(_value, (_totalValue + VIRTUAL_VALUE), _rounding);
     }
 
     /**

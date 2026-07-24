@@ -342,8 +342,16 @@ abstract contract MarketDeploymentConfig {
 
     /// @notice The default entry point config a tranche is enabled with at market deployment
     /// @dev The collateral asset oracle gate starts disabled and is armed post-deployment (the oracle itself is resolved live from the kernel)
+    /// @dev Requests get a finite execution window (one delay-length each): once it elapses they may only be cancelled
     function _defaultEntryPointTrancheConfig() internal pure returns (IRoycoDayEntryPoint.TrancheConfig memory) {
-        return IRoycoDayEntryPoint.TrancheConfig({ enabled: true, depositDelaySeconds: 5 minutes, redemptionDelaySeconds: 24 hours, gateByOracleUpdate: false });
+        return IRoycoDayEntryPoint.TrancheConfig({
+            enabled: true,
+            depositDelaySeconds: 5 minutes,
+            depositExpirySeconds: 5 minutes,
+            redemptionDelaySeconds: 24 hours,
+            redemptionExpirySeconds: 24 hours,
+            gateByOracleUpdate: false
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
