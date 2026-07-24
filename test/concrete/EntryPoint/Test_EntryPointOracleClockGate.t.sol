@@ -43,7 +43,7 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
 
     /// @dev Rotates the market's collateral asset oracle to the specified replacement through the kernel admin surface
     function _rotateOracle(address _oracle) internal {
-        vm.prank(ORACLE_QUOTER_ADMIN);
+        vm.prank(ORACLE_ADMIN);
         kernel.setCollateralAssetOracle(_oracle, ORACLE_STALENESS_THRESHOLD_SECONDS, false);
     }
 

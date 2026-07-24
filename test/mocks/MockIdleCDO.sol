@@ -9,7 +9,7 @@ import { IIdleCDO } from "../../src/interfaces/external/idle-finance/IIdleCDO.so
  *         move the CDO's yield without a real strategy
  * @dev The virtual price is the value of one whole AA tranche token in underlying token units, scaled to the
  *      underlying token's decimals exactly as the real CDO returns it. A revert mode lets override tests prove
- *      the quoter never consults the CDO while an admin rate is stored
+ *      the venue never consults the CDO while an admin rate is stored
  */
 contract MockIdleCDO is IIdleCDO {
     /// @notice Thrown by virtualPrice when revert mode is armed

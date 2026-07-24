@@ -131,7 +131,7 @@ contract Test_DeployScriptConfig is Test {
         }
 
         // The emitted role set itself, hand-listed from the deployment's operational surface (pause/unpause,
-        // upgrade, sync, kernel/accountant/fee/quoter admin, LP admin + the three LP roles, guardian, deployer +
+        // upgrade, sync, kernel/accountant/fee/venue admin, LP admin + the three LP roles, guardian, deployer +
         // its admin, Balancer pool manager, market ops + blacklist admin, entry point config + fee collection,
         // liquidity-premium reinvestment). Order-pinned so a silent drop or reorder is loud.
         uint64[21] memory expectedRoles = [

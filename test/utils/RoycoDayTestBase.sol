@@ -54,8 +54,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     Vm.Wallet internal PROTOCOL_FEE_SETTER;
     address internal PROTOCOL_FEE_SETTER_ADDRESS;
 
-    Vm.Wallet internal ORACLE_QUOTER_ADMIN;
-    address internal ORACLE_QUOTER_ADMIN_ADDRESS;
+    Vm.Wallet internal ORACLE_ADMIN;
+    address internal ORACLE_ADMIN_ADDRESS;
 
     Vm.Wallet internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
     address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS;
@@ -185,8 +185,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         PROTOCOL_FEE_SETTER = _initWallet("PROTOCOL_FEE_SETTER", 1000 ether);
         PROTOCOL_FEE_SETTER_ADDRESS = PROTOCOL_FEE_SETTER.addr;
 
-        ORACLE_QUOTER_ADMIN = _initWallet("ORACLE_QUOTER_ADMIN", 1000 ether);
-        ORACLE_QUOTER_ADMIN_ADDRESS = ORACLE_QUOTER_ADMIN.addr;
+        ORACLE_ADMIN = _initWallet("ORACLE_ADMIN", 1000 ether);
+        ORACLE_ADMIN_ADDRESS = ORACLE_ADMIN.addr;
 
         MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = _initWallet("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN", 1000 ether);
         MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS = MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN.addr;
@@ -359,7 +359,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 adminKernelAddress: KERNEL_ADMIN_ADDRESS,
                 adminAccountantAddress: ACCOUNTANT_ADMIN_ADDRESS,
                 adminProtocolFeeSetterAddress: PROTOCOL_FEE_SETTER_ADDRESS,
-                adminOracleAddress: ORACLE_QUOTER_ADMIN_ADDRESS,
+                adminOracleAddress: ORACLE_ADMIN_ADDRESS,
                 lpRoleAdminAddress: LP_ROLE_ADMIN_ADDRESS,
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
                 deployerAddress: DEPLOYER_ADDRESS,

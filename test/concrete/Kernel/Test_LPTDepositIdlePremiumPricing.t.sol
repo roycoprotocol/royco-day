@@ -76,7 +76,7 @@ contract Test_LPTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
      * @notice Pins the idle-leg-inclusive LPT deposit price to hand-computed literals on the fixture's exact numbers,
      *         so the pricing cannot silently share an arithmetic bug with the kernel's own conversion primitives
      * @dev Every expected value below is worked out with plain integer arithmetic from the seed and the +10% senior
-     *      gain, none is recomputed through the kernel's or the quoter's own math. A shared rounding or scaling bug
+     *      gain, none is recomputed through the kernel's or the venue's own math. A shared rounding or scaling bug
      *      in the conversion chain (premium share mint, idle-leg valuation, deposit price) would shift one of these
      *      literals and fail here even if a formula-mirroring assertion still agreed with itself
      */

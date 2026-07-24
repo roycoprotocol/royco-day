@@ -9,10 +9,10 @@ import { WAD, WAD_DECIMALS } from "../../src/libraries/Constants.sol";
 
 /**
  * @title MockERC4626C
- * @notice ERC4626-shaped test vault over a MockERC20C underlying, implementing only what the identical-shares quoter family touches
+ * @notice ERC4626-shaped test vault over a MockERC20C underlying, implementing only what the identical-shares venue family touches
  * @dev The rate (assets per share, WAD-normalized) moves ONLY via setRate and accrue, never on its own, so PnL injection is an explicit test action
- * @dev Satisfies the quoter identity, convertToAssets(10 ** (18 + shareDecimals - underlyingDecimals)) == the intended WAD tranche-unit to base-asset rate
- * @dev Fidelity gaps vs a real ERC4626 vault: no preview/max surface and no Deposit/Withdraw events (the quoters
+ * @dev Satisfies the venue identity, convertToAssets(10 ** (18 + shareDecimals - underlyingDecimals)) == the intended WAD tranche-unit to base-asset rate
+ * @dev Fidelity gaps vs a real ERC4626 vault: no preview/max surface and no Deposit/Withdraw events (the venues
  *      never call them), the rate is a pinned knob rather than a balance-derived value, and mintShares mints
  *      without pulling underlying so redeeming free-minted shares requires funding the vault separately
  */
@@ -35,7 +35,7 @@ contract MockERC4626C {
     /// @notice Thrown when the rate is set to zero or an accrual would drive it to or below zero
     error INVALID_RATE();
 
-    /// @notice Thrown when the decimal configuration breaks the quoter's WAD scaling assumption (18 + shareDecimals >= underlyingDecimals)
+    /// @notice Thrown when the decimal configuration breaks the venue's WAD scaling assumption (18 + shareDecimals >= underlyingDecimals)
     error INVALID_DECIMAL_CONFIGURATION();
 
     /// @dev The underlying asset the vault shares convert to
@@ -46,7 +46,7 @@ contract MockERC4626C {
 
     /**
      * @dev The share amount that converts to exactly rateWAD assets, 10 ** (18 + shareDecimals - underlyingDecimals)
-     * @dev This is the same scalar the quoter derives, so convertToAssets(RATE_SCALAR) == rateWAD by construction
+     * @dev This is the same scalar the venue derives, so convertToAssets(RATE_SCALAR) == rateWAD by construction
      */
     uint256 private immutable RATE_SCALAR;
 
@@ -87,7 +87,7 @@ contract MockERC4626C {
     }
 
     // =============================
-    // ERC4626 Surface (the subset the quoter family touches)
+    // ERC4626 Surface (the subset the venue family touches)
     // =============================
 
     /// @notice Returns the underlying asset the vault shares convert to

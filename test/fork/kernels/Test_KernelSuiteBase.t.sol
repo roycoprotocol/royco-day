@@ -1027,7 +1027,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      *      a wrong role binding), which fails the test loudly instead of silently skipping the premium tests.
      */
     function _trySetReinvestmentSlippage(uint64 _slippageWAD) internal virtual returns (bool ok) {
-        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        vm.prank(ORACLE_ADMIN_ADDRESS);
         bytes memory returnData;
         (ok, returnData) = address(KERNEL).call(abi.encodeWithSignature("setMaxReinvestmentSlippage(uint64)", _slippageWAD));
         if (!ok && returnData.length != 0) fail("the reinvestment slippage seam exists but its setter reverted");

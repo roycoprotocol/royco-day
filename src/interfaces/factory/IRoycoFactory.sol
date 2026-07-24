@@ -128,9 +128,11 @@ interface IRoycoFactory {
      */
     function grantMarketRole(uint64[] calldata _roleIds, address[] calldata _accounts, uint32[] calldata _executionDelays) external;
 
-    /// @notice Forwards an arbitrary call as the factory, callable only by the active template
-    /// @dev The access manager is a forbidden target: role grants and bindings go through the typed role primitives
-    /// @dev A target failure bubbles verbatim
+    /**
+     * @notice Forwards an arbitrary call as the factory, callable only by the active template
+     * @dev The access manager is a forbidden target: role grants and bindings go through the typed role primitives
+     * @dev A target failure bubbles verbatim
+     */
     function executeAsFactory(address _target, bytes calldata _data) external returns (bytes memory result);
 
     /// @notice Returns the kernel a factory-deployed tranche belongs to (zero for unknown addresses)

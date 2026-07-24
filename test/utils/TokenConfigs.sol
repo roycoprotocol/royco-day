@@ -47,7 +47,7 @@ function cellC() pure returns (FixtureCell memory) {
 
 /**
  * @notice Cell D, 8-decimal shares, 4626(8,8) ST/JT shares against a 6-decimal quote
- * @dev The kernel constructor requires identical ST/JT assets and the shipped quoter family only supports identical assets
+ * @dev The kernel constructor requires identical ST/JT assets and the shipped venue family only supports identical assets
  */
 function cellD() pure returns (FixtureCell memory) {
     TokenConfig memory vault = _vaultToken(8, 8);

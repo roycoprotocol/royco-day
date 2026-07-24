@@ -180,7 +180,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice Applies senior PnL and re-syncs, so quoter-cache state models the real transaction boundary
+     * @notice Applies senior PnL and re-syncs, so venue-cache state models the real transaction boundary
      * @dev The kernel's transient price cache clears at transaction end on-chain, but a forge test without isolation
      *      runs as ONE transaction: a cache warmed by an earlier kernel call in the same test would leak the pre-PnL
      *      rate into the entry point's execution-time forfeiture quotes (making forfeitures silently read as zero)

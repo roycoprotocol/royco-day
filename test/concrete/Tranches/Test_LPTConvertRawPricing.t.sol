@@ -272,7 +272,7 @@ contract Test_LPTConvertRawPricing_Tranches is DayMarketTestBase {
     // =============================
 
     /// @dev The independently recomputed BPT-only raw NAV: floor(TVL x ownedBpt / bptSupply) from the oracle and
-    ///      vault primitives, never from the production quoter
+    ///      vault primitives, never from the production venue
     function _independentRawNAV() internal view returns (uint256) {
         return Math.mulDiv(bptOracle.computeTVL(), toUint256(kernel.getState().totalLPTAssets), balancerVault.totalSupply(address(bpt)), Math.Rounding.Floor);
     }

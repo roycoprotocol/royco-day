@@ -111,12 +111,12 @@ abstract contract DayMarketTestBase is Assertions {
     /// @notice The underlying of the shared ST/JT ERC4626 vault
     MockERC20C internal stJtUnderlying;
 
-    /// @notice The live collateral NAV through the production quoter path (the kernel's collateral ledger valued by its quoter)
+    /// @notice The live collateral NAV through the production venue path (the kernel's collateral ledger valued by its venue)
     function _liveCollateralNAV() internal view returns (uint256) {
         return toUint256(kernel.convertCollateralAssetsToValue(kernel.getState().totalCollateralAssets));
     }
 
-    /// @notice The live LPT raw NAV through the production quoter path (the kernel's LPT ledger valued by its quoter)
+    /// @notice The live LPT raw NAV through the production venue path (the kernel's LPT ledger valued by its venue)
     function _liveLPTRawNAV() internal view returns (uint256) {
         return toUint256(kernel.convertLPTAssetsToValue(kernel.getState().totalLPTAssets));
     }
@@ -139,7 +139,7 @@ abstract contract DayMarketTestBase is Assertions {
     MockAggregatorV3 internal priceFeed;
 
     /// @notice A spare sequencer-uptime feed handle, NOT wired at init (the kernel skips sequencer checks for address(0))
-    /// @dev Wire it later through the kernel's setSequencerUptimeFeed via ORACLE_QUOTER_ADMIN
+    /// @dev Wire it later through the kernel's setSequencerUptimeFeed via ORACLE_ADMIN
     MockAggregatorV3 internal sequencerFeed;
 
     /// @notice The mock Balancer V3 vault backing the LPT venue
@@ -205,7 +205,7 @@ abstract contract DayMarketTestBase is Assertions {
     address internal MARKET_OPS_ADMIN;
     address internal ACCOUNTANT_ADMIN;
     address internal PROTOCOL_FEE_SETTER;
-    address internal ORACLE_QUOTER_ADMIN;
+    address internal ORACLE_ADMIN;
     address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
     address internal PROTOCOL_FEE_RECIPIENT;
 
@@ -306,10 +306,10 @@ abstract contract DayMarketTestBase is Assertions {
         );
         vm.label(address(accountant), "Accountant");
 
-        // 9. Register the pool BEFORE kernel impl construction (the LPT quoter constructor validates the registration
+        // 9. Register the pool BEFORE kernel impl construction (the LPT venue constructor validates the registration
         //    and that the pool pairs the senior tranche, BalancerV3LiquidityVenue.sol:89-107).
         //    Production Balancer registers pool tokens sorted ascending by address (InputHelpers.ensureSortedTokens),
-        //    so the senior tranche can land at index 1 and the quoter's tokens[1] == SENIOR_TRANCHE branch is real
+        //    so the senior tranche can land at index 1 and the venue's tokens[1] == SENIOR_TRANCHE branch is real
         bool stSortsFirst = address(seniorTranche) < address(quoteToken);
         stPoolTokenIndex = stSortsFirst ? 0 : 1;
         IERC20[2] memory poolTokens =
@@ -317,7 +317,7 @@ abstract contract DayMarketTestBase is Assertions {
         balancerVault.registerPool(address(bpt), poolTokens);
         // Documenting assertion: the recorded index must resolve the senior share in the registered order. Under
         // the deterministic forge test deployer every standard token shape (A-D) sorts the quote token below the
-        // tranche proxies, so ST lands at index 1 and the quoter constructor's tokens[1] == SENIOR_TRANCHE branch
+        // tranche proxies, so ST lands at index 1 and the venue constructor's tokens[1] == SENIOR_TRANCHE branch
         // (BalancerV3LiquidityVenue.sol:103) is exercised by every market lifecycle suite, not forced artificially
         require(
             address(balancerVault.getPoolTokens(address(bpt))[stPoolTokenIndex]) == address(seniorTranche),
@@ -605,7 +605,7 @@ abstract contract DayMarketTestBase is Assertions {
     /**
      * @notice Acquires at least _shares senior tranche shares for the fixture through the production deposit path
      * @dev Sizes the vault-share deposit from the current effective NAV per share with a one-unit cushion for the
-     *      quoter's floor rounding, then verifies the mint covered the request
+     *      venue's floor rounding, then verifies the mint covered the request
      * @param _shares The senior tranche shares the fixture must end up holding
      */
     function _acquireSTShares(uint256 _shares) internal virtual {
@@ -854,7 +854,7 @@ abstract contract DayMarketTestBase is Assertions {
         MARKET_OPS_ADMIN = _generateActor("MARKET_OPS_ADMIN", ADMIN_MARKET_OPS_ROLE);
         ACCOUNTANT_ADMIN = _generateActor("ACCOUNTANT_ADMIN", ADMIN_ACCOUNTANT_ROLE);
         PROTOCOL_FEE_SETTER = _generateActor("PROTOCOL_FEE_SETTER", ADMIN_PROTOCOL_FEE_SETTER_ROLE);
-        ORACLE_QUOTER_ADMIN = _generateActor("ORACLE_QUOTER_ADMIN", ADMIN_ORACLE_ROLE);
+        ORACLE_ADMIN = _generateActor("ORACLE_ADMIN", ADMIN_ORACLE_ROLE);
         MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = _generateActor("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN", ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
 
         // LP actors

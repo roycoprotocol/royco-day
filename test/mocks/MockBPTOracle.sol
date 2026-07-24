@@ -10,7 +10,7 @@ import { MockBalancerVault } from "./MockBalancerVault.sol";
 
 /**
  * @title MockBPTOracle
- * @notice BPT oracle test mock satisfying LPOracleBase's computeTVL, the 18-decimal NAV of the whole pool the kernel quoter consumes
+ * @notice BPT oracle test mock satisfying LPOracleBase's computeTVL, the 18-decimal NAV of the whole pool the kernel venue consumes
  * @dev AUTO mode derives the TVL live from the MockBalancerVault's pool balances at per-token WAD prices, so lptRawNAV stays consistent
  *      through adds and removes. MANUAL mode pins the TVL exactly for tests asserting hand-derived literals
  * @dev Fidelity gap vs the real E-CLP oracle: pricing is linear (balance x per-token price), not curve-implied, and the
@@ -46,7 +46,7 @@ contract MockBPTOracle {
     /// @dev Whether computeTVL reverts
     bool private _revertMode;
 
-    /// @dev Whether the oracle reverts its reads while the vault is unlocked, the LPOracleBase flag the quoter rejects at wiring
+    /// @dev Whether the oracle reverts its reads while the vault is unlocked, the LPOracleBase flag the venue rejects at wiring
     bool private _shouldRevertIfVaultUnlocked;
 
     /// @dev Per-token WAD prices used in AUTO mode, zero reads as the WAD (1.0) default
@@ -67,18 +67,18 @@ contract MockBPTOracle {
     // LPOracleBase Surface
     // =============================
 
-    /// @notice Returns the pool this oracle values, the LPOracleBase surface the kernel quoter validates when the oracle is wired
+    /// @notice Returns the pool this oracle values, the LPOracleBase surface the kernel venue validates when the oracle is wired
     function pool() external view returns (address) {
         return POOL;
     }
 
-    /// @notice Returns whether the oracle reverts its reads while the vault is unlocked, the LPOracleBase surface the kernel quoter rejects when true
+    /// @notice Returns whether the oracle reverts its reads while the vault is unlocked, the LPOracleBase surface the kernel venue rejects when true
     function getShouldRevertIfVaultUnlocked() external view returns (bool) {
         return _shouldRevertIfVaultUnlocked;
     }
 
     /**
-     * @notice Returns the 18-decimal NAV of the whole pool, the LPOracleBase surface the kernel quoter consumes
+     * @notice Returns the 18-decimal NAV of the whole pool, the LPOracleBase surface the kernel venue consumes
      * @dev MANUAL returns the pinned value, AUTO sums each pool balance at its effective WAD price read live from the mock vault
      * @return tvl The pool's total value, 18-decimal
      */
@@ -154,7 +154,7 @@ contract MockBPTOracle {
         }
     }
 
-    /// @notice Arms or disarms the unlocked-vault revert flag the quoter rejects at wiring
+    /// @notice Arms or disarms the unlocked-vault revert flag the venue rejects at wiring
     function setShouldRevertIfVaultUnlocked(bool _shouldRevert) external {
         _shouldRevertIfVaultUnlocked = _shouldRevert;
     }

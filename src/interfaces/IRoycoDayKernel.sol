@@ -110,14 +110,18 @@ interface IRoycoDayKernel {
     /// @param roycoBlacklist The new blacklist contract address (the null address if screening is disabled)
     event RoycoBlacklistUpdated(address roycoBlacklist);
 
-    /// @notice Emitted when the collateral asset oracle is updated
-    /// @param collateralAssetOracle The new collateral asset oracle pricing 1 whole collateral asset in NAV units
-    /// @param stalenessThresholdSeconds The new staleness threshold seconds
+    /**
+     * @notice Emitted when the collateral asset oracle is updated
+     * @param collateralAssetOracle The new collateral asset oracle pricing 1 whole collateral asset in NAV units
+     * @param stalenessThresholdSeconds The new staleness threshold seconds
+     */
     event CollateralAssetOracleUpdated(address indexed collateralAssetOracle, uint48 stalenessThresholdSeconds);
 
-    /// @notice Emitted when the L2 sequencer uptime feed (and its grace period) used to gate price queries is updated
-    /// @param sequencerUptimeFeed The new L2 sequencer uptime feed (the null address if the check is disabled)
-    /// @param gracePeriodSeconds The new grace period seconds
+    /**
+     * @notice Emitted when the L2 sequencer uptime feed (and its grace period) used to gate price queries is updated
+     * @param sequencerUptimeFeed The new L2 sequencer uptime feed (the null address if the check is disabled)
+     * @param gracePeriodSeconds The new grace period seconds
+     */
     event SequencerUptimeFeedUpdated(address indexed sequencerUptimeFeed, uint48 gracePeriodSeconds);
 
     /**

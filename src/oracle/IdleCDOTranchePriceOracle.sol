@@ -51,18 +51,22 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
         CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION = 10 ** (WAD_DECIMALS - IERC20Metadata(IIdleCDO(_idleCDO).token()).decimals());
     }
 
-    /// @notice Initializes the Idle CDO tranche virtual price to Chainlink (compatible) oracle composed collateral oracle
-    /// @param _initialAuthority The initial authority for the oracle
-    /// @param _minDeviationWAD The minimum relative deviation from the checkpointed virtual price that counts as an update, scaled to WAD precision (zero counts any change)
-    /// @param _lastUpdate The admin-attested timestamp of the virtual price's last update (zero if unknown, which holds pricing and the execution gate shut until the first observed deviation)
+    /**
+     * @notice Initializes the Idle CDO tranche virtual price to Chainlink (compatible) oracle composed collateral oracle
+     * @param _initialAuthority The initial authority for the oracle
+     * @param _minDeviationWAD The minimum relative deviation from the checkpointed virtual price that counts as an update, scaled to WAD precision (zero counts any change)
+     * @param _lastUpdate The admin-attested timestamp of the virtual price's last update (zero if unknown, which holds pricing and the execution gate shut until the first observed deviation)
+     */
     function initialize(address _initialAuthority, uint256 _minDeviationWAD, uint32 _lastUpdate) external initializer {
         __RoycoBase_init(_initialAuthority);
         __OracleClockBase_init_unchained(_lastUpdate, _minDeviationWAD);
     }
 
-    /// @inheritdoc ChainlinkPriceOracleBase
-    /// @notice The price returned is the composed tranche price and updatedAt is the tranche price's last observed update
-    /// @dev The staleness of the tranche price is what gates pricing, so the checkpointed clock replaces the Chainlink leg's update timestamp
+    /**
+     * @inheritdoc ChainlinkPriceOracleBase
+     * @notice The price returned is the composed tranche price and updatedAt is the tranche price's last observed update
+     * @dev The staleness of the tranche price is what gates pricing, so the checkpointed clock replaces the Chainlink leg's update timestamp
+     */
     function getPrice() public view override(ChainlinkPriceOracleBase) returns (NAV_UNIT price, uint256 updatedAt) {
         (price,) = ChainlinkPriceOracleBase.getPrice();
         updatedAt = previewPoke();

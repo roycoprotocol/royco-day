@@ -138,7 +138,7 @@ contract MockBalancerVault {
         _poolTokens[_pool] = _tokens;
     }
 
-    /// @notice Returns whether the pool is registered, validated by the kernel quoter constructor
+    /// @notice Returns whether the pool is registered, validated by the kernel venue constructor
     function isPoolRegistered(address _pool) external view returns (bool) {
         return _registered[_pool];
     }
@@ -148,7 +148,7 @@ contract MockBalancerVault {
         return _initialized[_pool];
     }
 
-    /// @notice Returns the pool's tokens in registration order, validated by the kernel quoter constructor
+    /// @notice Returns the pool's tokens in registration order, validated by the kernel venue constructor
     function getPoolTokens(address _pool) external view returns (IERC20[] memory tokens) {
         require(_registered[_pool], IVaultErrors.PoolNotRegistered(_pool));
         tokens = new IERC20[](2);
