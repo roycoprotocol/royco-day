@@ -2,10 +2,10 @@
 pragma solidity ^0.8.28;
 
 // Throwaway diagnostic, delete after use: prints the predicted factories and checks the baked prod marketId sorting.
-import { console2 } from "lib/forge-std/src/console2.sol";
 import { CREATE3 } from "../lib/solady/src/utils/CREATE3.sol";
 import { TAG_ST_PROXY } from "../src/factory/templates/base/Constants.sol";
 import { DeployScript } from "./Deploy.s.sol";
+import { console2 } from "lib/forge-std/src/console2.sol";
 
 contract CheckMinedIds is DeployScript {
     function check() external view {
