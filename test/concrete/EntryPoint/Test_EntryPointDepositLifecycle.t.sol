@@ -290,8 +290,8 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
         uint256 amount = _depositAmount(address(juniorTranche));
         (uint256 nonce,) = _requestDepositDefault(USER_A, address(juniorTranche), amount);
         _warpPastDepositDelay();
-        // Specifically the escrow-remainder underflow: over-execution must never be admitted by an earlier gate
-        vm.expectRevert(stdError.arithmeticError);
+        // The explicit bounds guard rejects an over-execution with a typed revert (mirroring the redemption path)
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.INVALID_REQUEST.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(amount + 1));
     }
