@@ -14,7 +14,7 @@ import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint
 import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AggregatorV3Interface } from "../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
-import { AssetClaims, SyncedAccountingState } from "../../../src/libraries/Types.sol";
+import { AssetClaims, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { RoycoDayTestBase } from "../../utils/RoycoDayTestBase.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
@@ -307,21 +307,34 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
     // INDEPENDENT DERIVATIONS (RoycoTestMath over raw state reads)
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /// @dev Snapshot-probes the committed post-sync claims and supply the entry point's references price against,
+    ///      leaving no trace. The entry point syncs for real, and that sync reinvests the staged liquidity premium into
+    ///      the venue, a mutation the preview cannot model, so on a real pool a previewed LPT claims NAV drifts from
+    ///      the committed one
+    function _probeSyncedClaims(address _tranche) internal returns (AssetClaims memory claims, uint256 supply) {
+        // Resolve the tranche type before the prank: an argument-position call would consume it ahead of the sync
+        TrancheType trancheType = ENTRY_POINT.getTrancheConfig(_tranche).trancheType;
+        uint256 snapshotId = vm.snapshotState();
+        vm.prank(SYNC_ROLE_ADDRESS);
+        (, claims, supply) = KERNEL.syncTrancheAccountingFor(trancheType);
+        vm.revertToState(snapshotId);
+    }
+
     /// @dev The deposit share reference: the kernel-priced deposit value over the post-sync mint basis at the
-    ///      UNCLAMPED fair virtual-shares rate (LPT prices on raw NAV, others on effective NAV, supply includes the sync mints)
-    function _derivedDepositReference(address _tranche, uint256 _assets) internal view returns (uint256 shares) {
-        bool isLPT = (_tranche == address(LPT));
-        NAV_UNIT depositValue = isLPT ? KERNEL.convertLPTAssetsToValue(toTrancheUnits(_assets)) : KERNEL.convertCollateralAssetsToValue(toTrancheUnits(_assets));
-        (SyncedAccountingState memory state, AssetClaims memory claims, uint256 supply) =
-            KERNEL.previewSyncTrancheAccountingFor(ENTRY_POINT.getTrancheConfig(_tranche).trancheType);
-        NAV_UNIT navBasis = (isLPT ? state.lptRawNAV : claims.nav);
-        return RoycoTestMath.convertToSharesUnclamped(toUint256(depositValue), toUint256(navBasis), supply);
+    ///      UNCLAMPED fair virtual-shares rate (the basis is the tranche's claims NAV, which for the LPT carries the
+    ///      idle premium senior shares the mint prices against, and the supply includes the sync mints)
+    function _derivedDepositReference(address _tranche, uint256 _assets) internal returns (uint256 shares) {
+        NAV_UNIT depositValue = (_tranche == address(LPT))
+            ? KERNEL.convertLPTAssetsToValue(toTrancheUnits(_assets))
+            : KERNEL.convertCollateralAssetsToValue(toTrancheUnits(_assets));
+        (AssetClaims memory claims, uint256 supply) = _probeSyncedClaims(_tranche);
+        return RoycoTestMath.convertToSharesUnclamped(toUint256(depositValue), toUint256(claims.nav), supply);
     }
 
     /// @dev The redemption value reference: the shares' claim on the post-sync full tranche claims at the virtual-shares
     ///      rate (mirrors _redemptionValueReference via TrancheClaimsLogic._scaleAssetClaims, post-sync supply and claims)
-    function _valueOf(address _tranche, uint256 _shares) internal view returns (uint256 value) {
-        (, AssetClaims memory claims, uint256 supply) = KERNEL.previewSyncTrancheAccountingFor(ENTRY_POINT.getTrancheConfig(_tranche).trancheType);
+    function _valueOf(address _tranche, uint256 _shares) internal returns (uint256 value) {
+        (AssetClaims memory claims, uint256 supply) = _probeSyncedClaims(_tranche);
         return RoycoTestMath.scaleClaimNav(_shares, toUint256(claims.nav), supply);
     }
 

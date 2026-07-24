@@ -189,17 +189,20 @@ contract Test_IdleCDOMarketDeployment is Test {
 
         // The composed price is live against the real CDO: the AA virtual price lifted from the underlying token's
         // decimals to WAD, times the real feed's answer lifted from feed decimals, floored in one mulDiv. The report's
-        // timestamp is the deviation clock's, NOT the feed's (the virtual price is what gates staleness).
+        // timestamp is the OLDER of the deviation clock and the Chainlink leg, so a stale feed gates pricing even while
+        // the virtual price keeps deviating. At this pinned block the USDC feed sits inside its heartbeat but behind the
+        // clock, so the feed is the binding hop.
         uint256 virtualPriceWAD =
             IIdleCDO(PARETO_FALCONX_CDO).virtualPrice(AA_TRANCHE_TOKEN) * 10 ** (18 - IERC20Metadata(IIdleCDO(PARETO_FALCONX_CDO).token()).decimals());
-        (, int256 answer,,,) = AggregatorV3Interface(USDC_USD_FEED).latestRoundData();
+        (, int256 answer,, uint256 feedUpdatedAt,) = AggregatorV3Interface(USDC_USD_FEED).latestRoundData();
         (NAV_UNIT price, uint256 updatedAt) = oracle.getPrice();
         assertEq(
             NAV_UNIT.unwrap(price),
             virtualPriceWAD.mulDiv(uint256(answer), 10 ** AggregatorV3Interface(USDC_USD_FEED).decimals()),
             "composed price != CDO virtual price x feed"
         );
-        assertEq(updatedAt, oracle.previewPoke(), "report timestamp must be the deviation clock's");
+        assertLt(feedUpdatedAt, oracle.previewPoke(), "the feed must be the older hop at this pinned block");
+        assertEq(updatedAt, Math.min(feedUpdatedAt, oracle.previewPoke()), "report timestamp must be the older of the deviation clock and the feed");
         assertGt(NAV_UNIT.unwrap(price), 0.01e18, "composed price implausibly low");
         assertLt(NAV_UNIT.unwrap(price), 100e18, "composed price implausibly high");
 

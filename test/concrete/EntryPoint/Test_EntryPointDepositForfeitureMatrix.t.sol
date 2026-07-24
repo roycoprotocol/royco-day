@@ -61,15 +61,15 @@ contract Test_EntryPointDepositForfeitureMatrix is EntryPointTestBase {
     // ---------------------------------------------------------------------
 
     /// @dev Independently derives the entry point's request-time share reference: the deposit's kernel-priced value
-    ///      over the post-sync mint-basis share price at the UNCLAMPED fair virtual-shares rate (the LPT basis is the
-    ///      raw NAV excluding idle premium senior shares, and the supply includes the sync's fee and premium mints)
+    ///      over the post-sync mint-basis share price at the UNCLAMPED fair virtual-shares rate (the basis is the
+    ///      tranche's post-sync claims NAV, which for the LPT carries the idle premium senior shares the mint prices
+    ///      against in addition to the pool depth, and the supply includes the sync's fee and premium mints)
     function _derivedDepositReference(address _tranche, uint256 _assets) internal view returns (uint256 shares) {
         bool isLPT = (entryPoint.getTrancheConfig(_tranche).trancheType == TrancheType.LIQUIDITY_PROVIDER);
         NAV_UNIT depositValue = isLPT ? kernel.convertLPTAssetsToValue(toTrancheUnits(_assets)) : kernel.convertCollateralAssetsToValue(toTrancheUnits(_assets));
-        (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 totalTrancheShares) =
+        (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) =
             kernel.previewSyncTrancheAccountingFor(entryPoint.getTrancheConfig(_tranche).trancheType);
-        NAV_UNIT navBasis = (isLPT ? state.lptRawNAV : trancheClaims.nav);
-        return RoycoTestMath.convertToSharesUnclamped(toUint256(depositValue), toUint256(navBasis), totalTrancheShares);
+        return RoycoTestMath.convertToSharesUnclamped(toUint256(depositValue), toUint256(trancheClaims.nav), totalTrancheShares);
     }
 
     /// @dev Ensures the senior liquidity bound cannot gate the cell's deposit: the ST cells run on top of the staged
@@ -282,29 +282,23 @@ contract Test_EntryPointDepositForfeitureMatrix is EntryPointTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // The matrix: LIQUIDITY PROVIDER (BPT PnL moves the deposit value and the raw NAV basis together, so
-    // queue-time BPT moves in either direction are forfeiture-neutral)
+    // The matrix: LIQUIDITY PROVIDER (diluted by the idle premium, forfeits on a BPT gain)
     // ---------------------------------------------------------------------
 
-    /// @dev A BPT gain during the queue must not manufacture forfeiture: the deposit value and the LPT's raw NAV
-    ///      basis are both BPT-denominated, so they move together and the mint can never exceed the reference
-    function test_depositMatrix_lptBptGain_forfeitureNeutral() public {
-        uint256 amount = 10e18;
-        _ensureCellCapacity(address(liquidityProviderTranche), amount);
-        (uint256 nonce,) = _requestDeposit(USER_A, address(liquidityProviderTranche), amount, USER_A, 0);
-        uint256 storedRef = entryPoint.getDepositRequest(USER_A, nonce).equivalentSharesAtRequestTime;
+    function test_depositMatrix_lptBptGain_self_singleShot() public {
+        _runSingleShotCell(address(liquidityProviderTranche), 0);
+    }
 
-        applyLPTPnL(1000);
-        _warpPastDepositDelay();
+    function test_depositMatrix_lptBptGain_self_partialSlices() public {
+        _runSplitCell(address(liquidityProviderTranche), 0);
+    }
 
-        uint256 sharesExec = IRoycoVaultTranche(address(liquidityProviderTranche)).previewDeposit(toTrancheUnits(amount));
-        uint256 feeBefore = entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityProviderTranche));
-        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
+    function test_depositMatrix_lptBptGain_bonus_singleShot() public {
+        _runSingleShotCell(address(liquidityProviderTranche), DEFAULT_EXECUTOR_BONUS);
+    }
 
-        assertLe(sharesExec, storedRef, "a BPT gain must not make execution mint more than the reference");
-        assertEq(userShares, sharesExec, "with no excess the user must keep the whole execution mint");
-        assertEq(entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityProviderTranche)), feeBefore, "a BPT gain queue must forfeit nothing");
-        assertEq(IERC20(address(liquidityProviderTranche)).balanceOf(USER_A), userShares, "the whole mint must land on the receiver");
+    function test_depositMatrix_lptBptGain_bonus_partialSlices() public {
+        _runSplitCell(address(liquidityProviderTranche), DEFAULT_EXECUTOR_BONUS);
     }
 
     function test_depositMatrix_lptBptLoss_noForfeitureControl() public {
