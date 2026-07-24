@@ -5,6 +5,7 @@ import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/prox
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
+import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { toTrancheUnits } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
@@ -109,7 +110,7 @@ contract Test_EntryPointComplianceGating is EntryPointTestBase {
         vm.startPrank(USER_A);
         seniorTranche.approve(address(entryPoint), stShares);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayKernel.ACCOUNT_NOT_WHITELISTED_TRANCHE_LP.selector, address(entryPoint)));
-        entryPoint.requestRedemption(address(seniorTranche), stShares, USER_A, 0);
+        entryPoint.requestRedemption(address(seniorTranche), stShares, USER_A, 0, IRoycoDayEntryPoint.RedemptionMode.INKIND);
         vm.stopPrank();
     }
 
@@ -141,7 +142,7 @@ contract Test_EntryPointComplianceGating is EntryPointTestBase {
         vm.startPrank(USER_A);
         juniorTranche.approve(address(entryPoint), shares);
         vm.expectRevert(abi.encodeWithSelector(IRoycoBlacklist.ACCOUNT_BLACKLISTED.selector, USER_A));
-        entryPoint.requestRedemption(address(juniorTranche), shares, USER_A, 0);
+        entryPoint.requestRedemption(address(juniorTranche), shares, USER_A, 0, IRoycoDayEntryPoint.RedemptionMode.INKIND);
         vm.stopPrank();
     }
 

@@ -36,7 +36,8 @@ contract TestFuzz_EntryPointAmountsAndBonuses is EntryPointTestBase {
         assertEq(entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche)), 0, "a flat queue must forfeit nothing");
     }
 
-    /// @notice Third-party deposit execution conserves escrow: bonus assets + deposited assets == requested assets
+    /// @notice Third-party deposit execution conserves the mint: bonus shares + receiver shares == the user's minted
+    ///         shares exactly, and the full asset escrow reaches the tranche (the bonus never touches the assets)
     function testFuzz_thirdPartyDeposit_bonusConservation(uint256 _assets, uint64 _bonusWAD) public {
         _assets = bound(_assets, 1e6, 100 * stUnit);
         // The request-time validation enforces strictly-below-100% bonuses
@@ -45,13 +46,24 @@ contract TestFuzz_EntryPointAmountsAndBonuses is EntryPointTestBase {
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), _assets, USER_A, _bonusWAD);
         _warpPastDepositDelay();
 
-        uint256 executorBefore = stJtVault.balanceOf(EXECUTOR);
+        uint256 executorBefore = juniorTranche.balanceOf(EXECUTOR);
+        uint256 receiverBefore = juniorTranche.balanceOf(USER_A);
         uint256 escrowBefore = stJtVault.balanceOf(address(entryPoint));
-        _executeDepositMax(EXECUTOR, USER_A, nonce);
+        uint256 userShares = _executeDepositMax(EXECUTOR, USER_A, nonce);
 
-        uint256 bonusPaid = stJtVault.balanceOf(EXECUTOR) - executorBefore;
-        assertEq(bonusPaid, (_assets * _bonusWAD) / 1e18, "the bonus must be the flooring fraction of the executed assets");
+        uint256 executorDelta = juniorTranche.balanceOf(EXECUTOR) - executorBefore;
+        uint256 receiverDelta = juniorTranche.balanceOf(USER_A) - receiverBefore;
+        // The executor's bonus is the flooring share fraction of the user's post-forfeiture mint
+        assertEq(executorDelta, (userShares * _bonusWAD) / 1e18, "the bonus must be the flooring share fraction of the user's minted shares");
+        // Conservation: a single bonus floor splits the mint wei-exactly between the executor and receiver
+        assertEq(executorDelta + receiverDelta, userShares, "bonus shares plus receiver shares must equal the minted shares exactly");
         assertEq(escrowBefore - stJtVault.balanceOf(address(entryPoint)), _assets, "the full escrow must leave the entry point");
+        // Nothing is stranded: the entry point holds only the forfeited protocol fee shares
+        assertEq(
+            juniorTranche.balanceOf(address(entryPoint)),
+            entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche)),
+            "only forfeited fee shares may remain in the entry point"
+        );
     }
 
     /// @notice Third-party redemption execution conserves claims: executor slice + receiver slice == total delivered

@@ -92,6 +92,9 @@ contract Test_EntryPointMarketStateGating is EntryPointTestBase {
     // Liquidation breach (forced PERPETUAL)
     // ---------------------------------------------------------------------
 
+    /// @dev The forfeiture reference is the gate-free totalAssets view, which EXCLUDES the per-redemption
+    ///      self-liquidation bonus (the kernel folds the bonus into stRedeem, not into the tranche total NAV), so the
+    ///      bonus is never skimmed as queued yield and flows through to the redeemer on top of the request-time claim
     function test_liquidation_stRedemptionPaysSelfLiquidationBonusThroughEntryPoint() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(seniorTranche), shares, USER_A, 0);

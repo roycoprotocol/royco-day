@@ -39,9 +39,20 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
         liquidityProviderTranche.transfer(USER_A, seededShares);
     }
 
-    /// @dev Queues USER_A's whole LPT position for redemption to USER_B and returns the nonce with both post-escrow bounds
+    /// @dev Queues USER_A's whole LPT position (OPTIMIZED mode) for redemption to USER_B, returning the nonce and both post-escrow bounds
     function _requestWholePosition(uint64 _executorBonusWAD) internal returns (uint256 nonce, uint256 maxInKindShares, uint256 maxMultiAssetShares) {
-        (nonce,) = _requestRedemption(USER_A, address(liquidityProviderTranche), liquidityProviderTranche.balanceOf(USER_A), USER_B, _executorBonusWAD);
+        return _requestWholePosition(_executorBonusWAD, IRoycoDayEntryPoint.RedemptionMode.OPTIMIZED);
+    }
+
+    /// @dev Queues USER_A's whole LPT position under an explicit redemption mode, returning the nonce and both post-escrow bounds
+    function _requestWholePosition(
+        uint64 _executorBonusWAD,
+        IRoycoDayEntryPoint.RedemptionMode _mode
+    )
+        internal
+        returns (uint256 nonce, uint256 maxInKindShares, uint256 maxMultiAssetShares)
+    {
+        (nonce,) = _requestRedemption(USER_A, address(liquidityProviderTranche), liquidityProviderTranche.balanceOf(USER_A), USER_B, _executorBonusWAD, _mode);
         _warpPastRedemptionDelay();
         maxInKindShares = liquidityProviderTranche.maxRedeem(address(entryPoint));
         maxMultiAssetShares = liquidityProviderTranche.maxRedeemMultiAsset(address(entryPoint));
@@ -133,20 +144,19 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
     // Explicit amounts: the same route rule, and true excess still reverts
     // =============================
 
-    /// @notice Explicit amounts always exit in-kind: the multi-asset fallback is exclusively the maximal
-    ///         redemption's, so an explicit amount inside the wedge window reverts at the in-kind gate even
-    ///         though a maximal execution could serve it
-    function test_lptRedemption_explicitAmounts_alwaysExitInKind() public {
-        (uint256 nonce, uint256 maxInKindShares, uint256 maxMultiAssetShares) = _requestWholePosition(0);
+    /// @notice INKIND mode holds every explicit amount to the in-kind gate: an amount inside the wedge (beyond the
+    ///         in-kind bound but within the multi-asset bound) reverts, while an amount within the in-kind bound exits in-kind
+    function test_lptRedemption_inKindMode_explicitHoldsToInKindGate() public {
+        (uint256 nonce, uint256 maxInKindShares, uint256 maxMultiAssetShares) = _requestWholePosition(0, IRoycoDayEntryPoint.RedemptionMode.INKIND);
 
         // An explicit amount inside the wedge window holds to the in-kind gate and reverts
         vm.prank(USER_A);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         entryPoint.executeRedemption(USER_A, nonce, maxMultiAssetShares);
 
-        // An explicit amount within the in-kind bound exits in-kind, wedge or not
+        // An explicit amount within the in-kind bound exits in-kind
         (AssetClaims memory inKindClaims, uint256 inKindQuote) = _executeRedemptionWithQuote(USER_A, USER_A, nonce, maxInKindShares / 2);
-        assertEq(inKindQuote, 0, "an explicit amount must exit in-kind");
+        assertEq(inKindQuote, 0, "an explicit amount must exit in-kind under INKIND mode");
         assertGt(toUint256(inKindClaims.lptAssets), 0, "the in-kind exit must pay the LP-token leg");
     }
 
@@ -167,10 +177,10 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
         assertEq(entryPoint.getRedemptionRequest(USER_A, nonce).shares, 0, "the whole remaining request must fill: clamped, never exceeded");
     }
 
-    /// @notice An explicit amount past even the multi-asset bound still reverts at the market's liquidity gate:
-    ///         the fallback widens what can execute, it never overrides the requirement
-    function test_lptRedemption_explicitBeyondMultiAssetBound_reverts() public {
-        (uint256 nonce,, uint256 maxMultiAssetShares) = _requestWholePosition(0);
+    /// @notice MULTIASSET mode routes an explicit amount through the multi-asset exit, but an amount past even the
+    ///         multi-asset bound still reverts at the market's liquidity gate: the mode widens what can execute, it never overrides the requirement
+    function test_lptRedemption_multiAssetMode_explicitBeyondBoundReverts() public {
+        (uint256 nonce,, uint256 maxMultiAssetShares) = _requestWholePosition(0, IRoycoDayEntryPoint.RedemptionMode.MULTIASSET);
 
         // The slack covers the accountant's one-NAV-wei dust tolerance plus the flow's quote and share quantization floors
         uint256 breachShares =
@@ -178,6 +188,49 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
         vm.prank(USER_A);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         entryPoint.executeRedemption(USER_A, nonce, breachShares);
+    }
+
+    /// @notice MULTIASSET mode forces the multi-asset exit even for an amount the in-kind bound could serve: an
+    ///         explicit slice within the in-kind bound still pays a quote leg (INKIND would pay none)
+    function test_lptRedemption_multiAssetMode_forcesMultiAssetWithinInKindBound() public {
+        (uint256 nonce, uint256 maxInKindShares,) = _requestWholePosition(0, IRoycoDayEntryPoint.RedemptionMode.MULTIASSET);
+        (, uint256 quoteAssets) = _executeRedemptionWithQuote(USER_A, USER_A, nonce, maxInKindShares / 2);
+        assertGt(quoteAssets, 0, "MULTIASSET mode must exit multi-asset even within the in-kind bound");
+    }
+
+    /// @notice MULTIASSET mode with the MAX sentinel caps the fill at the multi-asset bound and exits multi-asset
+    function test_lptRedemption_multiAssetMode_maxSentinelCapsAtMultiAssetBound() public {
+        (uint256 nonce,, uint256 maxMultiAssetShares) = _requestWholePosition(0, IRoycoDayEntryPoint.RedemptionMode.MULTIASSET);
+        uint256 escrow = entryPoint.getRedemptionRequest(USER_A, nonce).shares;
+        (, uint256 quoteAssets) = _executeRedemptionMaxWithQuote(USER_A, USER_A, nonce);
+        assertGt(quoteAssets, 0, "the MAX multi-asset fill must exit multi-asset");
+        assertEq(
+            entryPoint.getRedemptionRequest(USER_A, nonce).shares,
+            escrow - Math.min(maxMultiAssetShares, escrow),
+            "the MAX multi-asset fill must cap at the multi-asset bound"
+        );
+    }
+
+    /// @notice OPTIMIZED mode with an explicit amount past every bound fills to whichever bound is wider (multi-asset)
+    ///         instead of reverting: the max-withdrawal semantics extend to explicit targets
+    function test_lptRedemption_optimizedMode_explicitBeyondAllBoundsFillsToWiderBoundNoRevert() public {
+        (uint256 nonce,, uint256 maxMultiAssetShares) = _requestWholePosition(0, IRoycoDayEntryPoint.RedemptionMode.OPTIMIZED);
+        uint256 escrow = entryPoint.getRedemptionRequest(USER_A, nonce).shares;
+
+        // A target past both bounds resolves to the wider (multi-asset) bound, never exceeding the escrow, and never reverts
+        (, uint256 quoteAssets) = _executeRedemptionWithQuote(USER_A, USER_A, nonce, maxMultiAssetShares + 1e24);
+        assertGt(quoteAssets, 0, "OPTIMIZED must take the wider multi-asset route past the in-kind bound");
+        assertEq(entryPoint.getRedemptionRequest(USER_A, nonce).shares, escrow - maxMultiAssetShares, "the fill caps at the wider (multi-asset) bound, leaving the rest open");
+    }
+
+    /// @notice The senior and junior tranches reject every non-in-kind redemption mode at request time
+    function test_stJtRedemption_nonInKindModeReverts() public {
+        vm.startPrank(USER_A);
+        vm.expectRevert(IRoycoDayEntryPoint.UNSUPPORTED_REDEMPTION_MODE.selector);
+        entryPoint.requestRedemption(address(seniorTranche), 1, USER_A, 0, IRoycoDayEntryPoint.RedemptionMode.MULTIASSET);
+        vm.expectRevert(IRoycoDayEntryPoint.UNSUPPORTED_REDEMPTION_MODE.selector);
+        entryPoint.requestRedemption(address(juniorTranche), 1, USER_A, 0, IRoycoDayEntryPoint.RedemptionMode.OPTIMIZED);
+        vm.stopPrank();
     }
 
     // =============================
@@ -299,18 +352,21 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
     ///         plus quote) never exceeds the executed slice of the request-time NAV snapshot, up to quantization dust
     function test_lptRedemption_multiAsset_yieldNeutralByMagnitude() public {
         (uint256 nonce,,) = _requestWholePosition(0);
-        uint256 navAtRequest = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        uint256 navAtRequest = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).valueAtRequestTime);
 
         // The LP-token mark appreciates while the request is queued
         applyLPTPnL(1000);
         _sync();
 
         (AssetClaims memory claims, uint256 quoteAssets) = _executeRedemptionMaxWithQuote(USER_A, USER_A, nonce);
-        uint256 navLeft = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        uint256 navLeft = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).valueAtRequestTime);
 
         // The receiver's value: the claims NAV plus the quote leg lifted to NAV precision (6 -> 18 decimals at par)
         uint256 settledNAV = toUint256(claims.nav) + quoteAssets * 1e12;
-        // One quote quantum plus one share's NAV of slack covers the flow's floor roundings
+        // navAtRequest and navLeft are the previewRedeem-basis snapshot, so the reference now includes the idle
+        // liquidity-premium senior-share leg convertToAssets excludes. Request and execution price on the same
+        // previewRedeem basis, so the magnitude bound holds. One quote quantum plus one share's NAV of slack
+        // covers the flow's floor roundings
         uint256 dust = 1e12 + toUint256(liquidityProviderTranche.convertToAssets(1).nav) + 1;
         assertLe(settledNAV, (navAtRequest - navLeft) + dust, "the settled value must never exceed the executed slice of the snapshot");
         assertGt(entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityProviderTranche)), 0, "the queued yield must land as protocol fee shares");
@@ -327,8 +383,8 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
         _executeRedemptionWithQuote(USER_A, USER_A, nonce, fillShares);
         uint256 sharesLeft = before.shares - fillShares;
         assertEq(
-            toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime),
-            Math.mulDiv(toUint256(before.baseRequest.navAtRequestTime), sharesLeft, before.shares),
+            toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).valueAtRequestTime),
+            Math.mulDiv(toUint256(before.valueAtRequestTime), sharesLeft, before.shares),
             "the remaining snapshot must floor-scale by the unfilled shares"
         );
 
@@ -379,8 +435,13 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
 
     /// @notice A remainder whose floor-scaled snapshot hits zero is fully forfeited and settles without a redeem
     ///         call instead of bricking: the zero-NAV edge mirrors the deposit path's graceful degradation
-    function test_lptRedemption_zeroNavSnapshotRemainder_fullyForfeitsWithoutReverting() public {
-        // A sub-par share price makes a one-share remainder's floor-scaled snapshot exactly zero
+    function test_ltRedemption_zeroNavSnapshotRemainder_fullyForfeitsWithoutReverting() public {
+        // The snapshot basis is previewRedeem, whose LT reference adds the idle liquidity-premium senior-share leg
+        // convertToAssets excludes. That premium is senior yield routed to the LT, and this fixture accrues no
+        // senior yield (only the LT mark loss below), so no idle premium is staged and the previewRedeem reference
+        // equals the convertToAssets one. A 1% sub-par mark then keeps the whole-request previewRedeem NAV strictly
+        // below the requested share count (navAtRequest < requestedShares, i.e. per-share price < 1.0), so the
+        // one-share remainder floor-scales navAtRequest * 1 / requestedShares to exactly zero
         applyLPTPnL(-100);
         _sync();
         uint256 requestedShares = 1000e18;
@@ -388,7 +449,7 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
         _warpPastRedemptionDelay();
         _executeRedemptionWithQuote(USER_A, USER_A, nonce, requestedShares - 1);
         require(
-            toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime) == 0, "setup: the remainder's snapshot must floor to zero"
+            toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).valueAtRequestTime) == 0, "setup: the remainder's snapshot must floor to zero"
         );
 
         // The mark appreciates: the whole remainder reads as yield and is forfeited, settling without a redeem

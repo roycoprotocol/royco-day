@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
-import { toUint256 } from "../../../src/libraries/Units.sol";
+import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
@@ -13,10 +14,11 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  * @notice Day-specific multi-leg claim semantics through the entry point: an LPT redemption pays BOTH a BPT leg
  *         (lptAssets) and a senior-tranche-share leg (stShares, the idle liquidity premium paid in kind), and the
  *         executor bonus split must scale and forward every leg
- * @dev Also pins the entry point's LPT forfeiture quote basis: convertToAssets is the BPT-only raw-NAV floor
- *      (idle premium excluded, stShares == 0), so an idle premium held constant across the request lifecycle
- *      registers no fake yield. The accepted caveat is that a premium REINVESTED into the pool between request
- *      and execution appears as forfeitable yield under this basis
+ * @dev Also pins the entry point's LT forfeiture quote basis: previewRedeem runs the real redemption path, so the
+ *      snapshot INCLUDES the idle liquidity-premium senior-share leg (unlike convertToAssets, whose LT branch zeroes
+ *      stShares and floors to ltRawNAV). Because the idle leg is in the reference at both request and execution, a
+ *      premium held constant registers no fake yield AND a premium reinvested into the pool during the queue (a
+ *      value-neutral rebalance) is no longer mis-read as forfeitable yield
  */
 contract Test_EntryPointLPTClaims is EntryPointTestBase {
     uint256 internal stUnit;
@@ -85,15 +87,21 @@ contract Test_EntryPointLPTClaims is EntryPointTestBase {
         uint256 shares = _acquireTrancheShares(USER_A, address(liquidityProviderTranche), 20e18);
         (uint256 nonce,) = _requestRedemption(USER_A, address(liquidityProviderTranche), shares, USER_A, 0);
 
-        // The quote basis is pinned to the BPT-only floor: the idle premium is excluded from the snapshot
+        // The quote basis is the gate-free totalAssets view scaled by the share fraction: it INCLUDES the idle premium
+        // leg (so it sits strictly above the BPT-only convertToAssets floor while a premium is staged)
         IRoycoDayEntryPoint.RedemptionRequest memory request = entryPoint.getRedemptionRequest(USER_A, nonce);
         assertEq(
-            toUint256(request.baseRequest.navAtRequestTime),
+            toUint256(request.valueAtRequestTime),
+            (toUint256(liquidityProviderTranche.totalAssets().nav) * shares) / liquidityProviderTranche.totalSupply(),
+            "the LT nav snapshot must use the totalAssets basis scaled by the share fraction"
+        );
+        assertGt(
+            toUint256(request.valueAtRequestTime),
             toUint256(liquidityProviderTranche.convertToAssets(shares).nav),
-            "the LPT nav snapshot must use the convertToAssets BPT-only floor"
+            "the totalAssets basis must sit strictly above the BPT-only floor while an idle premium is staged"
         );
 
-        // Nothing moves while queued: the same floor at execution must register zero forfeiture
+        // Nothing moves while queued: the same basis at execution must register zero forfeiture
         _warpPastRedemptionDelay();
         _executeRedemptionMax(USER_A, USER_A, nonce);
         assertEq(
@@ -103,23 +111,56 @@ contract Test_EntryPointLPTClaims is EntryPointTestBase {
         );
     }
 
-    function test_lptDepositForfeiture_monetizableValuePinnedToSnapshot() public {
-        // The protocol retains the forfeited shares (supply unchanged), so the proportional split is exact in redeemable terms too
+    /// @notice The reason for the previewRedeem basis: a premium REINVESTED into the pool during the queue is a
+    ///         value-neutral rebalance (idle senior shares become BPT depth at the manipulation-resistant mark), so
+    ///         including the idle leg in the reference means it registers (near) zero forfeiture rather than the fake
+    ///         yield the old BPT-only convertToAssets floor booked. The tiny reinvest slippage reads as negative
+    ///         yield borne by the redeemer, so forfeiture stays zero
+    function test_ltForfeitureBasis_premiumReinvestedDuringQueue_registersNoFakeYield() public {
+        uint256 shares = _acquireTrancheShares(USER_A, address(liquidityProviderTranche), 20e18);
+        (uint256 nonce,) = _requestRedemption(USER_A, address(liquidityProviderTranche), shares, USER_A, 0);
+        require(kernel.getState().lptOwnedSeniorTrancheShares > 0, "setup: an idle premium must be staged at request time");
+
+        // Disarm the venue slippage and reinvest the staged idle premium into the pool during the queue (an explicit
+        // reinvest of the whole idle balance, a plain sync does not re-attempt reinvestment of an already-idle pile)
+        setVenueSlippageMode(false);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
+        kernel.reinvestLiquidityPremium(type(uint256).max);
+        _warpPastRedemptionDelay();
+        require(kernel.getState().lptOwnedSeniorTrancheShares == 0, "setup: the idle premium must have reinvested into the pool during the queue");
+
+        // The reinvestment moved value from the idle leg into the BPT leg with no net gain, so the previewRedeem
+        // reference tracks it and no fake yield is forfeited (the old convertToAssets floor would have booked the
+        // whole reinvested premium as forfeitable yield here)
+        _executeRedemptionMax(USER_A, USER_A, nonce);
+        assertEq(
+            entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityProviderTranche)),
+            0,
+            "a value-neutral premium reinvestment during the queue must not be forfeited as fake yield"
+        );
+    }
+
+    function test_ltDepositForfeiture_cappedAtRequestTimeShareReference() public {
+        // Share basis: the depositor keeps min(shares the deposit would have minted at request, shares it mints now),
+        // and any excess minted now is forfeited to the protocol. The BPT appreciates during the queue while the LT
+        // share price rises less (the staged idle premium dilutes the gain), so execution mints more than the
+        // request-time reference and the excess is skimmed
         (uint256 nonce,) = _requestDeposit(USER_A, address(liquidityProviderTranche), 10e18, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        uint256 sharesRef = entryPoint.getDepositRequest(USER_A, nonce).equivalentSharesAtRequestTime;
 
         applyLPTPnL(1000);
         _warpPastDepositDelay();
-        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
 
-        vm.prank(USER_A);
-        AssetClaims memory redeemed = liquidityProviderTranche.redeem(userShares, USER_A, USER_A);
-        assertLe(
-            toUint256(redeemed.nav),
-            navAtRequest + toUint256(liquidityProviderTranche.convertToAssets(1).nav) + 1,
-            "the LPT depositor must never redeem more than the snapshot plus rounding dust"
-        );
-        assertApproxEqRel(toUint256(redeemed.nav), navAtRequest, 0.001e18, "the LPT depositor's redeemable value must be pinned to the request-time NAV");
+        // The shares this deposit mints at execution, the execution-stage leg of the min (equals the amount the
+        // execute below mints, by construction of previewDeposit)
+        uint256 sharesExec = liquidityProviderTranche.previewDeposit(toTrancheUnits(10e18));
+        uint256 feeBefore = entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityProviderTranche));
+        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
+        uint256 forfeited = entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityProviderTranche)) - feeBefore;
+
+        assertLe(userShares, sharesRef, "the LT depositor is capped at the request-time share reference");
+        assertEq(userShares, Math.min(sharesRef, sharesExec), "the user keeps the lower of the request-time and execution-time share counts");
+        assertEq(userShares + forfeited, sharesExec, "the minted shares split exactly into the user's capped amount and the forfeited excess");
     }
 
     function test_stClaims_coveredLoss_navHeldWholeByJuniorCoverage() public {

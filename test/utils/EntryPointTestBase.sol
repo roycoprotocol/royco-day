@@ -45,6 +45,13 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     /// @dev Default redemption delay (kept well under the 1-day oracle staleness threshold)
     uint24 internal constant DEFAULT_REDEMPTION_DELAY = 1 hours;
 
+    /// @dev Default expiry windows are maximal: the resolved expiry saturates at type(uint32).max, so requests
+    ///      effectively never expire and the base suites keep their behavior
+    uint32 internal constant DEFAULT_DEPOSIT_EXPIRY = type(uint32).max;
+
+    /// @dev Default redemption expiry window is maximal (never expires); see DEFAULT_DEPOSIT_EXPIRY
+    uint32 internal constant DEFAULT_REDEMPTION_EXPIRY = type(uint32).max;
+
     /// @dev Default executor bonus (1%)
     uint64 internal constant DEFAULT_EXECUTOR_BONUS = 0.01e18;
 
@@ -161,9 +168,31 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         configs = new IRoycoDayEntryPoint.TrancheConfig[](3);
         for (uint256 i = 0; i < 3; ++i) {
             configs[i] = IRoycoDayEntryPoint.TrancheConfig({
-                enabled: true, depositDelaySeconds: DEFAULT_DEPOSIT_DELAY, redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY, gateByOracleUpdate: false
+                enabled: true,
+                depositDelaySeconds: DEFAULT_DEPOSIT_DELAY,
+                depositExpirySeconds: DEFAULT_DEPOSIT_EXPIRY,
+                redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY,
+                redemptionExpirySeconds: DEFAULT_REDEMPTION_EXPIRY,
+                gateByOracleUpdate: false
             });
         }
+    }
+
+    /// @notice Re-configures a single tranche with finite deposit/redemption expiry windows, leaving delays at their defaults
+    /// @dev Applied through the factory (which holds ADMIN_ENTRY_POINT_ROLE), mirroring the deployment-time config path
+    function _setTrancheExpiry(address _tranche, uint32 _depositExpirySeconds, uint32 _redemptionExpirySeconds) internal {
+        address[] memory tranches = new address[](1);
+        tranches[0] = _tranche;
+        IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](1);
+        configs[0] = IRoycoDayEntryPoint.TrancheConfig({
+            enabled: true,
+            depositDelaySeconds: DEFAULT_DEPOSIT_DELAY,
+            depositExpirySeconds: _depositExpirySeconds,
+            redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY,
+            redemptionExpirySeconds: _redemptionExpirySeconds,
+            gateByOracleUpdate: false
+        });
+        entryPointFactory.executeAsFactory(address(entryPoint), abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
     }
 
     /// @notice Creates a labeled, funded actor holding all three tranche LP roles
@@ -260,7 +289,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         address asset = IRoycoVaultTranche(_tranche).asset();
         vm.startPrank(_user);
         IERC20Like(asset).approve(address(entryPoint), _assets);
-        (nonce, executableAt) = entryPoint.requestDeposit(_tranche, toTrancheUnits(_assets), _receiver, _executorBonusWAD);
+        (nonce, executableAt,) = entryPoint.requestDeposit(_tranche, toTrancheUnits(_assets), _receiver, _executorBonusWAD);
         vm.stopPrank();
     }
 
@@ -269,7 +298,9 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         return _requestDeposit(_user, _tranche, _assets, _user, DEFAULT_EXECUTOR_BONUS);
     }
 
-    /// @notice Requests a redemption as _user, acquiring and approving the tranche shares first
+    /// @notice Requests a redemption as _user, auto-selecting the redemption mode by tranche
+    /// @dev The liquidity provider tranche defaults to OPTIMIZED (matching the pre-mode max-routing behavior); the
+    ///      senior and junior tranches default to INKIND (the only mode they support). Use the mode overload to pin one
     function _requestRedemption(
         address _user,
         address _tranche,
@@ -281,9 +312,28 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         virtual
         returns (uint256 nonce, uint32 executableAt)
     {
+        IRoycoDayEntryPoint.RedemptionMode mode = (_tranche == address(liquidityProviderTranche))
+            ? IRoycoDayEntryPoint.RedemptionMode.OPTIMIZED
+            : IRoycoDayEntryPoint.RedemptionMode.INKIND;
+        return _requestRedemption(_user, _tranche, _shares, _receiver, _executorBonusWAD, mode);
+    }
+
+    /// @notice Requests a redemption as _user with an explicit redemption mode, acquiring and approving the tranche shares first
+    function _requestRedemption(
+        address _user,
+        address _tranche,
+        uint256 _shares,
+        address _receiver,
+        uint64 _executorBonusWAD,
+        IRoycoDayEntryPoint.RedemptionMode _mode
+    )
+        internal
+        virtual
+        returns (uint256 nonce, uint32 executableAt)
+    {
         vm.startPrank(_user);
         IERC20Like(_tranche).approve(address(entryPoint), _shares);
-        (nonce, executableAt) = entryPoint.requestRedemption(_tranche, _shares, _receiver, _executorBonusWAD);
+        (nonce, executableAt,) = entryPoint.requestRedemption(_tranche, _shares, _receiver, _executorBonusWAD, _mode);
         vm.stopPrank();
     }
 

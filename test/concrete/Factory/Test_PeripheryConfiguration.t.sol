@@ -73,7 +73,12 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
     /// @dev Builds a TrancheConfig with a marker deposit delay so a test can prove which tranche received which config
     function _markerConfig(uint24 _depositDelay) internal pure returns (IRoycoDayEntryPoint.TrancheConfig memory) {
         return IRoycoDayEntryPoint.TrancheConfig({
-            enabled: true, depositDelaySeconds: _depositDelay, redemptionDelaySeconds: 1 hours, gateByOracleUpdate: false
+            enabled: true,
+            depositDelaySeconds: _depositDelay,
+            depositExpirySeconds: 0,
+            redemptionDelaySeconds: 1 hours,
+            redemptionExpirySeconds: 0,
+            gateByOracleUpdate: false
         });
     }
 

@@ -235,7 +235,7 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
 
         vm.expectRevert(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE.selector);
         vm.prank(USER_A);
-        entryPoint.requestRedemption(address(juniorTranche), shares, USER_A, 0);
+        entryPoint.requestRedemption(address(juniorTranche), shares, USER_A, 0, IRoycoDayEntryPoint.RedemptionMode.INKIND);
     }
 
     // ---------------------------------------------------------------------
