@@ -5,7 +5,7 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
-import { TrancheType } from "../../../src/libraries/Types.sol";
+import { AssetClaims, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
@@ -61,14 +61,15 @@ contract Test_EntryPointDepositForfeitureMatrix is EntryPointTestBase {
     // ---------------------------------------------------------------------
 
     /// @dev Independently derives the entry point's request-time share reference: the deposit's kernel-priced value
-    ///      over the tranche's totalAssets-implied share price at the UNCLAMPED fair virtual-shares rate
+    ///      over the post-sync mint-basis share price at the UNCLAMPED fair virtual-shares rate (the LPT basis is the
+    ///      raw NAV excluding idle premium senior shares, and the supply includes the sync's fee and premium mints)
     function _derivedDepositReference(address _tranche, uint256 _assets) internal view returns (uint256 shares) {
-        NAV_UNIT depositValue = (entryPoint.getTrancheConfig(_tranche).trancheType == TrancheType.LIQUIDITY_PROVIDER)
-            ? kernel.convertLPTAssetsToValue(toTrancheUnits(_assets))
-            : kernel.convertCollateralAssetsToValue(toTrancheUnits(_assets));
-        return RoycoTestMath.convertToSharesUnclamped(
-            toUint256(depositValue), toUint256(IRoycoVaultTranche(_tranche).totalAssets().nav), IERC20(_tranche).totalSupply()
-        );
+        bool isLPT = (entryPoint.getTrancheConfig(_tranche).trancheType == TrancheType.LIQUIDITY_PROVIDER);
+        NAV_UNIT depositValue = isLPT ? kernel.convertLPTAssetsToValue(toTrancheUnits(_assets)) : kernel.convertCollateralAssetsToValue(toTrancheUnits(_assets));
+        (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 totalTrancheShares) =
+            kernel.previewSyncTrancheAccounting(entryPoint.getTrancheConfig(_tranche).trancheType);
+        NAV_UNIT navBasis = (isLPT ? state.lptRawNAV : trancheClaims.nav);
+        return RoycoTestMath.convertToSharesUnclamped(toUint256(depositValue), toUint256(navBasis), totalTrancheShares);
     }
 
     /// @dev Ensures the senior liquidity bound cannot gate the cell's deposit: the ST cells run on top of the staged
@@ -139,7 +140,9 @@ contract Test_EntryPointDepositForfeitureMatrix is EntryPointTestBase {
 
         // The bonus is a flooring share slice of the post-forfeiture mint; the receiver keeps the remainder
         c.expectedBonus = (_bonusWAD == 0) ? 0 : Math.mulDiv(c.userShares1, _bonusWAD, 1e18, Math.Rounding.Floor);
-        if (_bonusWAD != 0) assertEq(IERC20(_tranche).balanceOf(EXECUTOR), c.expectedBonus, "the executor must receive the flooring share slice of the user's mint");
+        if (_bonusWAD != 0) {
+            assertEq(IERC20(_tranche).balanceOf(EXECUTOR), c.expectedBonus, "the executor must receive the flooring share slice of the user's mint");
+        }
         assertEq(IERC20(_tranche).balanceOf(USER_A), c.userShares1 - c.expectedBonus, "the receiver must keep the remainder of the user's mint");
         // Nothing stranded: the entry point holds exactly the forfeited fee shares
         assertEq(
@@ -189,14 +192,20 @@ contract Test_EntryPointDepositForfeitureMatrix is EntryPointTestBase {
         // Whole-request partition: both slices' excesses land as protocol fee shares
         uint256 forfeited = entryPoint.getProtocolFeeSharesPendingCollection(_tranche) - c.feeBefore;
         assertGt(forfeited, 0, "the adverse split cell must forfeit a nonzero excess");
-        assertEq(c.userShares1 + c.userShares2 + forfeited, c.sharesExec1 + c.sharesExec2, "the two slices' mints must split exactly into user pins and forfeited excess");
+        assertEq(
+            c.userShares1 + c.userShares2 + forfeited,
+            c.sharesExec1 + c.sharesExec2,
+            "the two slices' mints must split exactly into user pins and forfeited excess"
+        );
 
         // The bonus floors per slice off each slice's post-forfeiture mint
         c.expectedBonus = (_bonusWAD == 0)
             ? 0
             : Math.mulDiv(c.userShares1, _bonusWAD, 1e18, Math.Rounding.Floor) + Math.mulDiv(c.userShares2, _bonusWAD, 1e18, Math.Rounding.Floor);
         if (_bonusWAD != 0) assertEq(IERC20(_tranche).balanceOf(EXECUTOR), c.expectedBonus, "the executor must receive each slice's flooring share slice");
-        assertEq(IERC20(_tranche).balanceOf(USER_A), c.userShares1 + c.userShares2 - c.expectedBonus, "the receiver must keep the remainder of both slices' mints");
+        assertEq(
+            IERC20(_tranche).balanceOf(USER_A), c.userShares1 + c.userShares2 - c.expectedBonus, "the receiver must keep the remainder of both slices' mints"
+        );
         assertEq(
             IERC20(_tranche).balanceOf(address(entryPoint)),
             entryPoint.getProtocolFeeSharesPendingCollection(_tranche),
@@ -273,23 +282,29 @@ contract Test_EntryPointDepositForfeitureMatrix is EntryPointTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // The matrix: LIQUIDITY PROVIDER (idle premium dilutes a BPT gain, forfeits on BPT appreciation)
+    // The matrix: LIQUIDITY PROVIDER (BPT PnL moves the deposit value and the raw NAV basis together, so
+    // queue-time BPT moves in either direction are forfeiture-neutral)
     // ---------------------------------------------------------------------
 
-    function test_depositMatrix_lptUnderperformance_self_singleShot() public {
-        _runSingleShotCell(address(liquidityProviderTranche), 0);
-    }
+    /// @dev A BPT gain during the queue must not manufacture forfeiture: the deposit value and the LPT's raw NAV
+    ///      basis are both BPT-denominated, so they move together and the mint can never exceed the reference
+    function test_depositMatrix_lptBptGain_forfeitureNeutral() public {
+        uint256 amount = 10e18;
+        _ensureCellCapacity(address(liquidityProviderTranche), amount);
+        (uint256 nonce,) = _requestDeposit(USER_A, address(liquidityProviderTranche), amount, USER_A, 0);
+        uint256 storedRef = entryPoint.getDepositRequest(USER_A, nonce).equivalentSharesAtRequestTime;
 
-    function test_depositMatrix_lptUnderperformance_self_partialSlices() public {
-        _runSplitCell(address(liquidityProviderTranche), 0);
-    }
+        applyLPTPnL(1000);
+        _warpPastDepositDelay();
 
-    function test_depositMatrix_lptUnderperformance_bonus_singleShot() public {
-        _runSingleShotCell(address(liquidityProviderTranche), DEFAULT_EXECUTOR_BONUS);
-    }
+        uint256 sharesExec = IRoycoVaultTranche(address(liquidityProviderTranche)).previewDeposit(toTrancheUnits(amount));
+        uint256 feeBefore = entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityProviderTranche));
+        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
 
-    function test_depositMatrix_lptUnderperformance_bonus_partialSlices() public {
-        _runSplitCell(address(liquidityProviderTranche), DEFAULT_EXECUTOR_BONUS);
+        assertLe(sharesExec, storedRef, "a BPT gain must not make execution mint more than the reference");
+        assertEq(userShares, sharesExec, "with no excess the user must keep the whole execution mint");
+        assertEq(entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityProviderTranche)), feeBefore, "a BPT gain queue must forfeit nothing");
+        assertEq(IERC20(address(liquidityProviderTranche)).balanceOf(USER_A), userShares, "the whole mint must land on the receiver");
     }
 
     function test_depositMatrix_lptBptLoss_noForfeitureControl() public {

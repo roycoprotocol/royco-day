@@ -12,7 +12,7 @@ import { IRoycoPriceOracle } from "../interfaces/IRoycoPriceOracle.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
-import { AssetClaims, TrancheType } from "../libraries/Types.sol";
+import { AssetClaims, SyncedAccountingState, TrancheType } from "../libraries/Types.sol";
 import { NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
 import { TrancheClaimsLogic } from "../libraries/logic/TrancheClaimsLogic.sol";
 import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
@@ -22,22 +22,17 @@ import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
  * @author Shivaansh Kapoor, Ankur Dubey
  * @notice Periphery contract enabling asynchronous deposit and redemption flows on Royco Tranches
  * @dev Enforces configurable delays between request and execution to prevent oracle front-running attacks
- *      Tranches configured with an oracle clock additionally gate execution on at least one observed oracle update
- *      after the request, so any information known at request time is priced into the mark before execution
- *      A queued request can never capture favorable price movement during its delay: a deposit is pinned to the tranche
- *      shares it would have minted at request time (any shares minted in excess at execution are forfeited on a share
- *      basis), and a redemption is pinned to the value its shares were worth at request time (any value accrued in
- *      excess is forfeited on a value basis), each surrendered to the protocol as fee shares
- *      A request also carries an expiry window: once it elapses the request is terminal and may only be cancelled
- *      (the resolved expiry saturates at type(uint32).max, so a maximal window effectively never expires)
- *      Supports third-party executors (keepers) with configurable bonus incentives
- *      Partial execution is supported, allowing requests to be fulfilled incrementally as tranche capacity is freed up
- *      Screens interacting addresses against the market's blacklist through the tranche's kernel, covering the request
- *      operators and every value flow that settles outside the kernel's own screened paths
+ * @dev Tranches configured with an oracle clock additionally gate execution on at least one observed oracle update after the request, so any information known at request time is priced into the mark before execution
+ * @dev A queued request can never capture favorable price movement during its delay:
+ *          1. A deposit is pinned to the tranche shares it would have minted at request time: any shares minted in excess at execution are forfeited on a share basis
+ *          2. A redemption is pinned to the value its shares were worth at request time: any value accrued in excess is forfeited on a value basis
+ * @dev Each tranche also carries an expiry window for it requests: once it elapses the request is terminal and may only be cancelled
+ * @dev Supports third-party executors (keepers) with configurable bonus incentives for executing the request
+ * @dev Partial execution is supported, allowing requests to be fulfilled incrementally as tranche capacity is freed up
+ * @dev Screens interacting accounts against the market's blacklist, covering the request operators and every value flow that settles outside the kernel's own screened paths
  */
 contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     using SafeCast for uint256;
-
     using SafeERC20 for IERC20;
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for TRANCHE_UNIT;
@@ -227,7 +222,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         request.shares = _shares;
         request.mode = _mode;
         // Snapshot the value of the escrowed shares
-        request.valueAtRequestTime = _redemptionValueReference(_tranche, _shares);
+        request.valueAtRequestTime = _redemptionValueReference(config.kernel, config.trancheType, _shares);
         request.baseRequest = BaseRequest({
             tranche: _tranche,
             queuedAtTimestamp: uint32(block.timestamp),
@@ -687,7 +682,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Initialize the user's shares redeemed as the input
         userSharesRedeemed = _shares;
         // Compute the value of the shares at execution, without any self-liquidation bonus applied
-        NAV_UNIT valueAtExecutionTime = _redemptionValueReference(_tranche, _shares);
+        EnrichedTrancheConfig storage config = _getRoycoDayEntryPointStorage().trancheToConfig[_tranche];
+        NAV_UNIT valueAtExecutionTime = _redemptionValueReference(config.kernel, config.trancheType, _shares);
         if (valueAtExecutionTime > _valueAtRequestTime) {
             protocolFeeShares = _shares.mulDiv((valueAtExecutionTime - _valueAtRequestTime), valueAtExecutionTime, Math.Rounding.Floor);
         }
@@ -705,37 +701,28 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         if (protocolFeeShares != 0) _getRoycoDayEntryPointStorage().trancheToProtocolFeeShares[_tranche] += protocolFeeShares;
     }
 
-    /**
-     * @dev Converts an amount of a tranche's assets to NAV units using the market kernel's pricing for that asset
-     * @dev The senior and junior tranches price through the single coinvested collateral asset oracle
-     * @param _kernel The kernel of the market that the tranche belongs to
-     * @param _trancheType The type of the tranche (senior, junior, or liquidity)
-     * @param _assets The amount of assets to convert, denominated in the tranche's base asset units
-     * @return value The value of the specified assets, denominated in the kernel's NAV units
-     */
-    function _convertAssetsToValue(address _kernel, TrancheType _trancheType, TRANCHE_UNIT _assets) internal view returns (NAV_UNIT value) {
-        return (_trancheType == TrancheType.LIQUIDITY_PROVIDER)
-            ? IRoycoDayKernel(_kernel).convertLPTAssetsToValue(_assets)
-            : IRoycoDayKernel(_kernel).convertCollateralAssetsToValue(_assets);
-    }
-
-    /// @dev Resolves the request-time SHARE reference for a deposit: the shares the deposit would mint at request-time
-    ///      pricing, the basis the execution-time forfeiture is measured against.
+    /// @dev Resolves the request-time SHARE reference for a deposit: the shares the deposit would mint at request-time pricing, the basis the execution-time forfeiture is measured against.
     function _depositSharesReference(address _kernel, TrancheType _trancheType, address _tranche, TRANCHE_UNIT _assets) internal view returns (uint256 shares) {
         // Convert the assets to NAV units
-        NAV_UNIT depositValue = _convertAssetsToValue(_kernel, _trancheType, _assets);
-        uint256 totalShares = IERC20(_tranche).totalSupply();
-        // This is exclusive of any-self liquidation bonus applied when the redemption is executed.
-        NAV_UNIT totalNav = IRoycoVaultTranche(_tranche).totalAssets().nav;
-        // The mint dilution clamp applied at the time of execution is still applied to the shares actually minted,
-        //  so we need to use the clamp-free conversion here to avoid any potential for forfeiture due to mint dilution.
-        return ValuationLogic._convertToSharesUnclamped(depositValue, totalNav, totalShares, Math.Rounding.Floor);
+        NAV_UNIT depositValue = (_trancheType == TrancheType.LIQUIDITY_PROVIDER)
+            ? IRoycoDayKernel(_kernel).convertLPTAssetsToValue(_assets)
+            : IRoycoDayKernel(_kernel).convertCollateralAssetsToValue(_assets);
+        // Read the post-sync state so the NAV basis and supply come from one accounting state, a pre-sync supply would understate the reference by the sync's fee and premium mints
+        (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 totalTrancheShares) =
+            IRoycoDayKernel(_kernel).previewSyncTrancheAccounting(_trancheType);
+        // Mirror the mint's pricing basis: the LPT mints against its raw NAV, excluding the idle liquidity premium senior shares
+        NAV_UNIT navBasis = ((_trancheType == TrancheType.LIQUIDITY_PROVIDER) ? state.lptRawNAV : trancheClaims.nav);
+        // Use the clamp-free conversion so the dilution clamp never manufactures forfeiture, the real mint at execution is still clamped
+        return ValuationLogic._convertToSharesUnclamped(depositValue, navBasis, totalTrancheShares, Math.Rounding.Floor);
     }
 
-    /// @dev Resolves the redemption value reference - the escrowed shares' pro-rata claim on the tranche's total effective NAV
-    /// @dev Ensures that the NAV does not include any self-liquidation bonus applied when the redemption is executed.
-    function _redemptionValueReference(address _tranche, uint256 _shares) internal view returns (NAV_UNIT value) {
-        return ValuationLogic._convertToValue(_shares, IERC20(_tranche).totalSupply(), IRoycoVaultTranche(_tranche).totalAssets().nav, Math.Rounding.Floor);
+    /// @dev Resolves the redemption value reference: the escrowed shares' pro-rata claim on the tranche's full post-sync claims
+    /// @dev The full claims basis mirrors execution, an LPT redemption claims both effective-NAV legs including the idle liquidity premium senior shares
+    /// @dev The reference excludes any self-liquidation bonus applied when the redemption executes, so the bonus is never skimmed as queue-time accrual
+    function _redemptionValueReference(address _kernel, TrancheType _trancheType, uint256 _shares) internal view returns (NAV_UNIT value) {
+        // Read the post-sync state so the claims and supply come from one accounting state, a pre-sync supply would overstate the reference and hide genuine post-request gains
+        (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(_kernel).previewSyncTrancheAccounting(_trancheType);
+        return TrancheClaimsLogic._scaleAssetClaims(trancheClaims, _shares, totalTrancheShares, true).nav;
     }
 
     /**
