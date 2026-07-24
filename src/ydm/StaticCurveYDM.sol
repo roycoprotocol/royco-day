@@ -25,13 +25,13 @@ contract StaticCurveYDM is BaseYDM {
     /**
      * @notice Represents the state of a market's YDM
      * @custom:field yieldShareAtZeroUtilWAD - The yield share at zero utilization, scaled to WAD precision
-     * @custom:field slopeLptTargetUtilWAD - The slope when the market's utilization is less than the target utilization, scaled to WAD precision
+     * @custom:field slopeLtTargetUtilWAD - The slope when the market's utilization is less than the target utilization, scaled to WAD precision
      * @custom:field yieldShareAtTargetWAD - The yield share at target utilization, scaled to WAD precision
      * @custom:field slopeGteTargetUtilWAD - The slope when the market's utilization is greater than or equal to the target utilization, scaled to WAD precision
      */
     struct StaticYieldCurve {
         uint64 yieldShareAtZeroUtilWAD;
-        uint64 slopeLptTargetUtilWAD;
+        uint64 slopeLtTargetUtilWAD;
         uint64 yieldShareAtTargetWAD;
         uint64 slopeGteTargetUtilWAD;
     }
@@ -44,10 +44,10 @@ contract StaticCurveYDM is BaseYDM {
      * @notice Emitted when the static curve YDM is initialized for a market
      * @param accountant The accountant for the market that the YDM was initialized for
      * @param yieldShareAtZeroUtilWAD The yield share at zero utilization, scaled to WAD precision
-     * @param slopeLptTargetUtilWAD The slope when the market's utilization is less than the target utilization, scaled to WAD precision
+     * @param slopeLtTargetUtilWAD The slope when the market's utilization is less than the target utilization, scaled to WAD precision
      * @param slopeGteTargetUtilWAD The slope when the market's utilization is greater than or equal to the target utilization, scaled to WAD precision
      */
-    event StaticCurveYdmInitialized(address indexed accountant, uint256 yieldShareAtZeroUtilWAD, uint256 slopeLptTargetUtilWAD, uint256 slopeGteTargetUtilWAD);
+    event StaticCurveYdmInitialized(address indexed accountant, uint256 yieldShareAtZeroUtilWAD, uint256 slopeLtTargetUtilWAD, uint256 slopeGteTargetUtilWAD);
 
     /**
      * @notice Emitted when the yield share is updated
@@ -82,11 +82,11 @@ contract StaticCurveYDM is BaseYDM {
         // Initialize the YDM curve for this market (all four fields pack into one storage slot)
         StaticYieldCurve storage curve = accountantToCurve[msg.sender];
         curve.yieldShareAtZeroUtilWAD = _yieldShareAtZeroUtilWAD;
-        curve.slopeLptTargetUtilWAD = _computeSlope(_yieldShareAtZeroUtilWAD, _yieldShareAtTargetWAD, 0, TARGET_UTILIZATION_WAD);
+        curve.slopeLtTargetUtilWAD = _computeSlope(_yieldShareAtZeroUtilWAD, _yieldShareAtTargetWAD, 0, TARGET_UTILIZATION_WAD);
         curve.yieldShareAtTargetWAD = _yieldShareAtTargetWAD;
         curve.slopeGteTargetUtilWAD = _computeSlope(_yieldShareAtTargetWAD, _yieldShareAtFullUtilWAD, TARGET_UTILIZATION_WAD, WAD);
 
-        emit StaticCurveYdmInitialized(msg.sender, _yieldShareAtZeroUtilWAD, curve.slopeLptTargetUtilWAD, curve.slopeGteTargetUtilWAD);
+        emit StaticCurveYdmInitialized(msg.sender, _yieldShareAtZeroUtilWAD, curve.slopeLtTargetUtilWAD, curve.slopeGteTargetUtilWAD);
     }
 
     /// @inheritdoc IYDM
@@ -133,7 +133,7 @@ contract StaticCurveYDM is BaseYDM {
         // Compute Y(U), rounding down in favor of the paying tranche
         if (utilizationWAD < TARGET_UTILIZATION_WAD) {
             // If utilization is below the target (kink), apply the first leg of Y(U)
-            return uint256(curve.slopeLptTargetUtilWAD).mulDiv(utilizationWAD, WAD, Math.Rounding.Floor) + curve.yieldShareAtZeroUtilWAD;
+            return uint256(curve.slopeLtTargetUtilWAD).mulDiv(utilizationWAD, WAD, Math.Rounding.Floor) + curve.yieldShareAtZeroUtilWAD;
         } else {
             // If utilization is at or above the target (kink), apply the second leg of Y(U)
             return uint256(curve.slopeGteTargetUtilWAD).mulDiv((utilizationWAD - TARGET_UTILIZATION_WAD), WAD, Math.Rounding.Floor) + yieldShareAtTargetWAD;
