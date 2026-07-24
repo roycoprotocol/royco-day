@@ -707,7 +707,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         NAV_UNIT depositValue = (_trancheType == TrancheType.LIQUIDITY_PROVIDER)
             ? IRoycoDayKernel(_kernel).convertLPTAssetsToValue(_assets)
             : IRoycoDayKernel(_kernel).convertCollateralAssetsToValue(_assets);
-        // Read the post-sync state so the NAV basis and supply come from one accounting state, a pre-sync supply would understate the reference by the sync's fee and premium mints
+        // Read the post-sync state so the NAV basis and supply come from one accounting state
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 totalTrancheShares) =
             IRoycoDayKernel(_kernel).syncTrancheAccountingFor(_trancheType);
         // Use the clamp-free conversion so the dilution clamp never manufactures forfeiture, the real mint at execution is still clamped
@@ -718,7 +718,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     /// @dev The full claims basis mirrors execution, an LPT redemption claims both effective-NAV legs including the idle liquidity premium senior shares
     /// @dev The reference excludes any self-liquidation bonus applied when the redemption executes, so the bonus is never skimmed as queue-time accrual
     function _redemptionValueReference(address _kernel, TrancheType _trancheType, uint256 _shares) internal returns (NAV_UNIT value) {
-        // Read the post-sync state so the claims and supply come from one accounting state, a pre-sync supply would overstate the reference and hide genuine post-request gains
+        // Read the post-sync state so the claims and supply come from one accounting state
         (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(_kernel).syncTrancheAccountingFor(_trancheType);
         return TrancheClaimsLogic._scaleAssetClaims(trancheClaims, _shares, totalTrancheShares, true).nav;
     }

@@ -14,7 +14,8 @@ import {
     JT_LP_ROLE,
     LPT_LP_ROLE,
     PUBLIC_ROLE,
-    ST_LP_ROLE
+    ST_LP_ROLE,
+    SYNC_ROLE
 } from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -142,6 +143,8 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         accessManager.grantRole(ST_LP_ROLE, ep, 0);
         accessManager.grantRole(JT_LP_ROLE, ep, 0);
         accessManager.grantRole(LPT_LP_ROLE, ep, 0);
+        // The entry point syncs the kernel to price its request-time references, mirroring the template's entry point SYNC grant
+        accessManager.grantRole(SYNC_ROLE, ep, 0);
 
         // Apply the initial tranche configs through the factory, as production market deployments do: the factory
         // holds ADMIN_ENTRY_POINT_ROLE (mirroring RoycoFactory.initialize) and forwards the admin-gated call

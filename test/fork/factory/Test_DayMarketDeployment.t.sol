@@ -391,6 +391,9 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         (bool jt,) = ACCESS_MANAGER.hasRole(JT_LP_ROLE, ep);
         (bool lt,) = ACCESS_MANAGER.hasRole(LPT_LP_ROLE, ep);
         assertTrue(st && jt && lt, "entry point holds the tranche LP roles");
+        // The entry point holds SYNC_ROLE so it can sync the kernel when pricing its request-time references.
+        (bool epSync,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, ep);
+        assertTrue(epSync, "entry point holds SYNC_ROLE");
         // The syncer holds SYNC_ROLE so its batch syncs can drive each kernel's SYNC_ROLE-gated accounting sync.
         (bool sync,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(MARKET_SYNCER));
         assertTrue(sync, "syncer holds SYNC_ROLE");
@@ -425,6 +428,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(KERNEL), IRoycoDayKernel.setProtocolFeeRecipient.selector, ADMIN_KERNEL_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector, ADMIN_KERNEL_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.syncTrancheAccounting.selector, SYNC_ROLE);
+        _assertRole(address(KERNEL), IRoycoDayKernel.syncTrancheAccountingFor.selector, SYNC_ROLE);
         _assertRole(address(KERNEL), IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
 
         // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE.

@@ -758,7 +758,9 @@ abstract contract DayMarketTestBase is Assertions {
         accessManager.setTargetFunctionRole(
             k, _sels(IRoycoDayKernel.setProtocolFeeRecipient.selector, IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector), ADMIN_KERNEL_ROLE
         );
-        accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.syncTrancheAccounting.selector), SYNC_ROLE);
+        accessManager.setTargetFunctionRole(
+            k, _sels(IRoycoDayKernel.syncTrancheAccounting.selector, IRoycoDayKernel.syncTrancheAccountingFor.selector), SYNC_ROLE
+        );
         accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.reinvestLiquidityPremium.selector), ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.setRoycoBlacklist.selector), ADMIN_MARKET_OPS_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);

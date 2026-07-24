@@ -55,6 +55,7 @@ contract Test_MockMarketRoleMatrix is DayMarketTestBase {
 
     function test_KernelSync_boundToSyncRole_and_TrancheBurn_boundToBurnerRole() public view {
         assertEq(_role(address(kernel), IRoycoDayKernel.syncTrancheAccounting.selector), SYNC_ROLE, "kernel sync -> SYNC_ROLE");
+        assertEq(_role(address(kernel), IRoycoDayKernel.syncTrancheAccountingFor.selector), SYNC_ROLE, "kernel tranche-scoped sync -> SYNC_ROLE");
         assertEq(_role(address(seniorTranche), ERC20BurnableUpgradeable.burn.selector), BURNER_ROLE, "ST burn -> BURNER_ROLE");
         assertEq(_role(address(juniorTranche), ERC20BurnableUpgradeable.burnFrom.selector), BURNER_ROLE, "JT burnFrom -> BURNER_ROLE");
     }

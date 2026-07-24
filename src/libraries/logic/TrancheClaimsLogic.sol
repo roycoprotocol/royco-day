@@ -40,16 +40,16 @@ library TrancheClaimsLogic {
         view
         returns (AssetClaims memory claims)
     {
-        if (_trancheType == TrancheType.SENIOR || _trancheType == TrancheType.JUNIOR) {
-            // A tranche's claim is its effective NAV, granted in the coinvested collateral asset
-            claims.nav = _trancheType == TrancheType.SENIOR ? _state.stEffectiveNAV : _state.jtEffectiveNAV;
-            if (claims.nav != ZERO_NAV_UNITS) claims.collateralAssets = IRoycoDayKernel(address(this)).convertValueToCollateralAssets(claims.nav);
-        } else {
+        if (_trancheType == TrancheType.LIQUIDITY_PROVIDER) {
             if (_state.lptRawNAV != ZERO_NAV_UNITS) claims.lptAssets = IRoycoDayKernel(address(this)).convertValueToLPTAssets(_state.lptRawNAV);
             claims.stShares = $.lptOwnedSeniorTrancheShares;
             claims.nav = ValuationLogic._getLiquidityProviderTrancheEffectiveNAV(
                 $, _state.stEffectiveNAV, IRoycoVaultTranche(_immutables.seniorTranche).totalSupply(), claims.stShares
             );
+        } else {
+            // A tranche's claim is its effective NAV, granted in the coinvested collateral asset
+            claims.nav = _trancheType == TrancheType.SENIOR ? _state.stEffectiveNAV : _state.jtEffectiveNAV;
+            if (claims.nav != ZERO_NAV_UNITS) claims.collateralAssets = IRoycoDayKernel(address(this)).convertValueToCollateralAssets(claims.nav);
         }
     }
 
@@ -78,7 +78,7 @@ library TrancheClaimsLogic {
         if (lptAssetsToClaim != ZERO_TRANCHE_UNITS) $.totalLPTAssets = $.totalLPTAssets - lptAssetsToClaim;
         if (stSharesToClaim != 0) $.lptOwnedSeniorTrancheShares -= stSharesToClaim;
 
-        // No need to execute a transfer if the caller is the receiver
+        // No need to execute the asset transfers if the caller is the receiver
         if (_receiver != address(this)) {
             // Credit the collateral assets being withdrawn to the receiver
             if (collateralAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(_immutables.collateralAsset).safeTransfer(_receiver, toUint256(collateralAssetsToClaim));
@@ -112,9 +112,9 @@ library TrancheClaimsLogic {
 
         // Scale the claims by the redeemer's fraction of the EFFECTIVE supply
         uint256 effectiveTrancheShares = _totalTrancheShares + (_includeVirtualShares ? VIRTUAL_SHARES : 0);
-        scaledClaims.nav = _claims.nav.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
         scaledClaims.collateralAssets = _claims.collateralAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
         scaledClaims.lptAssets = _claims.lptAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
         scaledClaims.stShares = _claims.stShares.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
+        scaledClaims.nav = _claims.nav.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
     }
 }
