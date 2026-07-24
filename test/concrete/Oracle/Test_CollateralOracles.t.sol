@@ -238,8 +238,14 @@ contract Test_CollateralOracles is Test {
         // Nothing was committed, so the same deviation re-previews at the new current timestamp
         vm.warp(T0 + 200);
         assertEq(cdoOracle.previewPoke(), T0 + 200, "an uncommitted deviation floats with block.timestamp");
+        // getPrice reports the OLDER hop: the feed was stamped at construction (T0), older than the floating clock
         (, uint256 updatedAt) = cdoOracle.getPrice();
-        assertEq(updatedAt, T0 + 200, "getPrice's updatedAt is previewPoke's answer");
+        assertEq(updatedAt, T0, "getPrice's updatedAt is the older of the feed and the clock");
+        // With a feed stamped fresher than the clock, the clock becomes the older hop and getPrice reports it
+        feed.setUpdatedAt(T0 + 300);
+        (, updatedAt) = cdoOracle.getPrice();
+        assertEq(updatedAt, T0 + 200, "getPrice's updatedAt is the older of the feed and the clock");
+        feed.setUpdatedAt(T0);
 
         // A poke commits the checkpoint, after which previewPoke reports the stored value
         assertEq(cdoOracle.poke(), T0 + 200, "the poke commits the floating deviation");

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
+import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IIdleCDO } from "../interfaces/external/idle-finance/IIdleCDO.sol";
 import { WAD_DECIMALS } from "../libraries/Constants.sol";
 import { NAV_UNIT } from "../libraries/Units.sol";
@@ -64,12 +65,13 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
 
     /**
      * @inheritdoc ChainlinkPriceOracleBase
-     * @notice The price returned is the composed tranche price and updatedAt is the tranche price's last observed update
-     * @dev The staleness of the tranche price is what gates pricing, so the checkpointed clock replaces the Chainlink leg's update timestamp
+     * @notice The price returned is the composed tranche price and updatedAt is the oldest hop's last update
+     * @dev Reports the older of the checkpointed tranche price clock and the Chainlink leg's update timestamp, so a stale feed gates pricing even while the virtual price keeps deviating
      */
     function getPrice() public view override(ChainlinkPriceOracleBase) returns (NAV_UNIT price, uint256 updatedAt) {
-        (price,) = ChainlinkPriceOracleBase.getPrice();
-        updatedAt = previewPoke();
+        (price, updatedAt) = ChainlinkPriceOracleBase.getPrice();
+        uint256 tranchePriceUpdatedAt = previewPoke();
+        updatedAt = Math.min(updatedAt, tranchePriceUpdatedAt);
     }
 
     /// @inheritdoc ChainlinkPriceOracleBase
