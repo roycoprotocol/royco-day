@@ -552,6 +552,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             name: _config.liquidityProviderTrancheName, symbol: _config.liquidityProviderTrancheSymbol, initialAuthority: address(0)
         });
         params.collateralAsset = _config.collateralAsset;
+        // The intended quote asset: the template pins the pool's second token against it during pool verification
+        params.quoteAsset = _config.gyroECLPPoolParams.quoteAsset;
         params.marketContracts = _marketContracts;
 
         // Accountant init params. `jtYDM`/`lptYDM` are overwritten by the template with the deployed instances. BOTH YDMs get

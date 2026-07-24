@@ -109,6 +109,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @custom:field jtTranche - The junior tranche initialization params
      * @custom:field lptTranche - The liquidity provider tranche initialization params
      * @custom:field collateralAsset - The coinvested collateral asset underlying both the senior and junior tranches
+     * @custom:field quoteAsset - The quote asset expected as the pool's second token, pinned during pool verification
      * @custom:field accountant - The accountant initialization params (coverage, premiums, and state machine config)
      * @custom:field marketContracts - The externally (script) deployed implementations, YDMs, and Gyro E-CLP pool the template wires and verifies
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
@@ -133,6 +134,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         IRoycoVaultTranche.RoycoTrancheInitParams jtTranche;
         IRoycoVaultTranche.RoycoTrancheInitParams lptTranche;
         address collateralAsset;
+        address quoteAsset;
         IRoycoDayAccountant.RoycoDayAccountantInitParams accountant;
         MarketContracts marketContracts;
         address protocolFeeRecipient;
@@ -273,10 +275,11 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         require(result.seniorTranche.code.length > 0, INVALID_SENIOR_TRANCHE_PROXY(result.seniorTranche));
         require(balancerHook.code.length > 0, INVALID_HOOK_PROXY(balancerHook));
 
-        // 3. Verify the pre-created Gyro E-CLP pool: from our pool factory, unseeded, `{ST_share, quote}`, hooked to
-        //    this market's stand-in hook proxy. The pool is inert until this transaction: its senior leg's rate
-        //    provider is the still-codeless kernel proxy, so any value-bearing pool op reverts until step 6 below
-        _verifyPool(mc.balancerPool, result.seniorTranche, balancerHook);
+        // 3. Verify the pre-created Gyro E-CLP pool: from our pool factory, unseeded, exactly `{ST_share, quote}`
+        //    with the deployer-intended quote asset, hooked to this market's stand-in hook proxy. The pool is inert
+        //    until this transaction: its senior leg's rate provider is the still-codeless kernel proxy, so any
+        //    value-bearing pool op reverts until step 6 below
+        _verifyPool(mc.balancerPool, result.seniorTranche, p.quoteAsset, balancerHook);
 
         // 4. Deploy the JT and LPT tranche proxies against the script-deployed implementations
         result.juniorTranche = _deployProxy(mc.jtImpl, _encodeTrancheInitData(p.jtTranche), _marketComponentSalt(p.marketId, TAG_JT_PROXY));
@@ -356,12 +359,12 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /**
      * @notice Verifies the pre-created Gyro E-CLP pool before the market is wired against it
-     * @dev The quote leg's identity is pinned later, in `_validateDeployment`, against the kernel's resolved `QUOTE_ASSET`
      * @param _pool The pre-created pool
-     * @param _seniorTranche The senior tranche share expected as one of the pool's two tokens
+     * @param _seniorTranche The senior tranche share expected as the pool's first token
+     * @param _quoteAsset The quote asset expected as the pool's second token
      * @param _hook The stand-in hook proxy the pool must be registered against
      */
-    function _verifyPool(address _pool, address _seniorTranche, address _hook) internal view {
+    function _verifyPool(address _pool, address _seniorTranche, address _quoteAsset, address _hook) internal view {
         // Provenance: the pool was created by our Gyro E-CLP pool factory
         require(BALANCER_V3_POOL_FACTORY.isPoolFromFactory(_pool), POOL_NOT_FROM_FACTORY(_pool));
 
@@ -372,9 +375,10 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         BalancerV3HooksConfig memory hooksConfig = BALANCER_V3_VAULT.getHooksConfig(_pool);
         require(hooksConfig.hooksContract == _hook, INVALID_POOL_CONFIGURATION(_pool));
 
-        // The market id should guarantee that the deployed ST share is "less" than the quote token
+        // Exactly {ST share, quote asset}: the market id guarantees the deployed ST share sorts "less" than the
+        // quote token, and the quote leg must be the deployer-intended asset
         IERC20[] memory tokens = BALANCER_V3_VAULT.getPoolTokens(_pool);
-        require(tokens.length == 2 && address(tokens[0]) == _seniorTranche, INVALID_POOL_CONFIGURATION(_pool));
+        require(tokens.length == 2 && address(tokens[0]) == _seniorTranche && address(tokens[1]) == _quoteAsset, INVALID_POOL_CONFIGURATION(_pool));
     }
 
     /**

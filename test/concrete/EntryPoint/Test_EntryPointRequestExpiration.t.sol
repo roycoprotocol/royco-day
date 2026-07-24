@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
-import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase, IERC20Like } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
@@ -259,5 +259,148 @@ contract Test_EntryPointRequestExpiration is EntryPointTestBase {
         uint256 balBefore = IERC20Like(address(seniorTranche)).balanceOf(USER_A);
         _cancelRedemption(USER_A, nonce, USER_A);
         assertEq(IERC20Like(address(seniorTranche)).balanceOf(USER_A) - balBefore, shares - firstLeg, "the expired remainder must still be cancellable");
+    }
+
+    // ---------------------------------------------------------------------
+    // Expiry x executor bonus
+    // ---------------------------------------------------------------------
+
+    /// @notice Expiry is terminal regardless of the executor bonus: both the third party and the owner are locked
+    ///         out, and cancellation returns the FULL escrow (the bonus never leaks a slice of an expired request)
+    function test_deposit_expiryWithBonus_terminalForAllExecutors_cancelReturnsFullEscrow() public {
+        _setTrancheExpiry(address(juniorTranche), DEP_EXPIRY, RED_EXPIRY);
+        uint256 amount = 5 * stUnit;
+        (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, DEFAULT_EXECUTOR_BONUS);
+        _warpAndRefreshFeed(uint256(DEFAULT_DEPOSIT_DELAY) + DEP_EXPIRY + 1);
+
+        // Third-party and self execution are both terminally locked out
+        vm.prank(EXECUTOR);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.REQUEST_EXPIRED.selector, nonce));
+        entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
+        vm.prank(USER_A);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.REQUEST_EXPIRED.selector, nonce));
+        entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(amount));
+
+        // Cancellation returns the full asset escrow: no bonus was ever carved out
+        address asset = entryPoint.getTrancheConfig(address(juniorTranche)).asset;
+        uint256 balBefore = IERC20Like(asset).balanceOf(USER_A);
+        _cancelDeposit(USER_A, nonce, USER_A);
+        assertEq(IERC20Like(asset).balanceOf(USER_A) - balBefore, amount, "the expired bonus-bearing deposit must return its full escrow on cancel");
+        assertEq(IERC20Like(asset).balanceOf(EXECUTOR), 0, "no bonus may leak from an expired request");
+    }
+
+    /// @notice Redemption mirror: an expired bonus-bearing redemption is terminal for everyone and cancels whole
+    function test_redemption_expiryWithBonus_terminalForAllExecutors_cancelReturnsFullEscrow() public {
+        _setTrancheExpiry(address(seniorTranche), DEP_EXPIRY, RED_EXPIRY);
+        uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
+        (uint256 nonce,) = _requestRedemption(USER_A, address(seniorTranche), shares, USER_A, DEFAULT_EXECUTOR_BONUS);
+        _warpAndRefreshFeed(uint256(DEFAULT_REDEMPTION_DELAY) + RED_EXPIRY + 1);
+
+        vm.prank(EXECUTOR);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.REQUEST_EXPIRED.selector, nonce));
+        entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
+        vm.prank(USER_A);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.REQUEST_EXPIRED.selector, nonce));
+        entryPoint.executeRedemption(USER_A, nonce, shares);
+
+        uint256 balBefore = IERC20Like(address(seniorTranche)).balanceOf(USER_A);
+        _cancelRedemption(USER_A, nonce, USER_A);
+        assertEq(IERC20Like(address(seniorTranche)).balanceOf(USER_A) - balBefore, shares, "the expired bonus-bearing redemption must return its full share escrow");
+        assertEq(IERC20Like(address(seniorTranche)).balanceOf(EXECUTOR), 0, "no bonus may leak from an expired request");
+    }
+
+    /// @notice A third-party partial fill followed by expiry: the filled slice's bonus is settled and stays settled,
+    ///         the remainder is cancel-only
+    function test_deposit_partialBonusThenExpiry_remainderCancelOnly_bonusStandsOnFilledSlice() public {
+        _setTrancheExpiry(address(juniorTranche), DEP_EXPIRY, RED_EXPIRY);
+        uint256 amount = 6 * stUnit;
+        (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, DEFAULT_EXECUTOR_BONUS);
+        _warpPastDepositDelay();
+
+        // The executor fills a third of the escrow inside the window and earns its share slice of that fill
+        uint256 slice = amount / 3;
+        uint256 userShares = _executeDeposit(EXECUTOR, USER_A, nonce, slice);
+        uint256 expectedBonus = (userShares * DEFAULT_EXECUTOR_BONUS) / 1e18;
+        assertEq(juniorTranche.balanceOf(EXECUTOR), expectedBonus, "the filled slice's bonus must settle in shares");
+
+        // The window elapses: the remainder is terminal for both parties
+        _warpAndRefreshFeed(DEP_EXPIRY);
+        vm.prank(EXECUTOR);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.REQUEST_EXPIRED.selector, nonce));
+        entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
+
+        // Cancellation returns exactly the unfilled escrow; the settled bonus is untouched
+        address asset = entryPoint.getTrancheConfig(address(juniorTranche)).asset;
+        uint256 balBefore = IERC20Like(asset).balanceOf(USER_A);
+        _cancelDeposit(USER_A, nonce, USER_A);
+        assertEq(IERC20Like(asset).balanceOf(USER_A) - balBefore, amount - slice, "the expired remainder must return exactly the unfilled escrow");
+        assertEq(juniorTranche.balanceOf(EXECUTOR), expectedBonus, "the settled bonus must be untouched by the cancellation");
+    }
+
+    // ---------------------------------------------------------------------
+    // Expiry x batches
+    // ---------------------------------------------------------------------
+
+    /// @notice One expired request poisons a whole execution batch (mirroring the unmatured/oracle-blocked poisoning):
+    ///         the batch loop reverts REQUEST_EXPIRED rather than skipping the terminal entry
+    function test_batchExecution_oneExpiredRequestPoisonsTheBatch() public {
+        _setTrancheExpiry(address(juniorTranche), DEP_EXPIRY, RED_EXPIRY);
+        // Request A first; request B mid-window so A expires while B is live and executable
+        (uint256 nonceA,) = _requestDeposit(USER_A, address(juniorTranche), 2 * stUnit, USER_A, 0);
+        _warpAndRefreshFeed(uint256(DEFAULT_DEPOSIT_DELAY) + DEP_EXPIRY / 2);
+        (uint256 nonceB,) = _requestDeposit(USER_B, address(juniorTranche), 2 * stUnit, USER_B, 0);
+        // Now: A past its expiry, B past its delay and inside its window
+        _warpAndRefreshFeed(uint256(DEFAULT_DEPOSIT_DELAY) + DEP_EXPIRY / 2 + 1);
+        assertGe(block.timestamp, entryPoint.getDepositRequest(USER_A, nonceA).baseRequest.expiresAtTimestamp, "setup: A must be expired");
+        assertLt(block.timestamp, entryPoint.getDepositRequest(USER_B, nonceB).baseRequest.expiresAtTimestamp, "setup: B must still be live");
+
+        address[] memory users = new address[](2);
+        users[0] = USER_B;
+        users[1] = USER_A;
+        uint256[] memory nonces = new uint256[](2);
+        nonces[0] = nonceB;
+        nonces[1] = nonceA;
+        TRANCHE_UNIT[] memory amounts = new TRANCHE_UNIT[](2);
+        amounts[0] = toTrancheUnits(type(uint256).max);
+        amounts[1] = toTrancheUnits(type(uint256).max);
+
+        vm.prank(USER_A);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.REQUEST_EXPIRED.selector, nonceA));
+        entryPoint.executeDeposits(users, nonces, amounts);
+
+        // The live request alone still executes
+        assertGt(_executeDepositMax(USER_B, USER_B, nonceB), 0, "the live request must execute once the poisoned batch is split");
+    }
+
+    // ---------------------------------------------------------------------
+    // Expiry x config changes
+    // ---------------------------------------------------------------------
+
+    /// @notice The stored expiry is immutable: re-configuring the tranche's window never moves an in-flight request's
+    ///         expiresAtTimestamp — only new requests pick the new window up
+    function test_configChange_doesNotMoveInFlightExpiry() public {
+        _setTrancheExpiry(address(juniorTranche), DEP_EXPIRY, RED_EXPIRY);
+        (uint256 nonce, uint32 executableAt) = _requestDeposit(USER_A, address(juniorTranche), 5 * stUnit, USER_A, 0);
+        uint32 storedExpiry = entryPoint.getDepositRequest(USER_A, nonce).baseRequest.expiresAtTimestamp;
+        assertEq(storedExpiry, executableAt + DEP_EXPIRY, "sanity: the request must carry the original window");
+
+        // Shrink the tranche's window to a quarter: the in-flight request keeps its stored expiry
+        _setTrancheExpiry(address(juniorTranche), DEP_EXPIRY / 4, RED_EXPIRY / 4);
+        assertEq(
+            entryPoint.getDepositRequest(USER_A, nonce).baseRequest.expiresAtTimestamp, storedExpiry, "a config change must never move an in-flight expiry"
+        );
+
+        // Execution honors the STORED window: warp past the would-be shorter expiry but inside the original one
+        _warpAndRefreshFeed(uint256(DEFAULT_DEPOSIT_DELAY) + DEP_EXPIRY / 2);
+        assertGt(block.timestamp, uint256(executableAt) + DEP_EXPIRY / 4, "sanity: past the would-be shorter window");
+        assertGt(_executeDepositMax(USER_A, USER_A, nonce), 0, "the in-flight request must execute inside its original window");
+
+        // A fresh request picks up the new, shorter window
+        (uint256 freshNonce, uint32 freshExecutableAt) = _requestDeposit(USER_A, address(juniorTranche), 5 * stUnit, USER_A, 0);
+        assertEq(
+            entryPoint.getDepositRequest(USER_A, freshNonce).baseRequest.expiresAtTimestamp,
+            freshExecutableAt + DEP_EXPIRY / 4,
+            "a fresh request must carry the re-configured window"
+        );
     }
 }

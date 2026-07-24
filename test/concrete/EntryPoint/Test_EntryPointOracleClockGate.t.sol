@@ -449,4 +449,74 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
         vm.prank(USER_A);
         entryPoint.executeDeposits(users, nonces, amounts);
     }
+
+    // ---------------------------------------------------------------------
+    // The gate x a finite expiry window
+    // ---------------------------------------------------------------------
+
+    /// @dev Arms the oracle gate AND a finite expiry window on all three tranches (delays stay at the defaults)
+    function _setGatedFiniteExpiry(uint32 _expirySeconds) internal {
+        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        for (uint256 i = 0; i < configs.length; ++i) {
+            configs[i].gateByOracleUpdate = true;
+            configs[i].depositExpirySeconds = _expirySeconds;
+            configs[i].redemptionExpirySeconds = _expirySeconds;
+        }
+        vm.prank(ENTRY_POINT_ADMIN);
+        entryPoint.modifyTrancheConfigs(tranches, configs);
+    }
+
+    /// @notice A gated request whose oracle never advances inside its execution window is stranded terminally: once
+    ///         the window elapses the revert flips from the oracle gate to REQUEST_EXPIRED (expiry is checked before
+    ///         the oracle poke), a late oracle update can no longer revive it, and only cancellation remains
+    function test_oracleGate_finiteExpiry_gateStrandsRequestPastExpiry_terminalAndCancellable() public {
+        uint32 expiryWindow = 2 hours;
+        _setGatedFiniteExpiry(expiryWindow);
+        uint256 amount = 10 * stUnit;
+        (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, 0);
+
+        // Inside the window the oracle gate holds the request (the delay elapsed, the oracle never advanced)
+        vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
+        vm.prank(USER_A);
+        entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
+
+        // The window elapses with the oracle still silent: the terminal expiry now binds BEFORE the oracle gate
+        vm.warp(block.timestamp + expiryWindow);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.REQUEST_EXPIRED.selector, nonce));
+        vm.prank(USER_A);
+        entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
+
+        // A late oracle update cannot revive a terminal request
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.REQUEST_EXPIRED.selector, nonce));
+        vm.prank(USER_A);
+        entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
+
+        // Cancellation stays ungated by both the oracle and the expiry
+        address asset = entryPoint.getTrancheConfig(address(juniorTranche)).asset;
+        uint256 balBefore = stJtVault.balanceOf(USER_A);
+        vm.prank(USER_A);
+        entryPoint.cancelDepositRequest(nonce, USER_A);
+        assertEq(stJtVault.balanceOf(USER_A) - balBefore, amount, "the stranded request must still return its full escrow on cancel");
+        assertEq(asset, address(stJtVault), "sanity: the JT asset is the shared vault share");
+    }
+
+    /// @notice The redemption mirror: a gated redemption stranded past its window is terminal and cancel-only
+    function test_oracleGate_finiteExpiry_redemptionStrandsPastExpiry_cancelOnly() public {
+        uint32 expiryWindow = 2 hours;
+        uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
+        _setGatedFiniteExpiry(expiryWindow);
+        (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
+
+        vm.warp(block.timestamp + DEFAULT_REDEMPTION_DELAY + expiryWindow + 1);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.REQUEST_EXPIRED.selector, nonce));
+        vm.prank(USER_A);
+        entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
+
+        uint256 balBefore = juniorTranche.balanceOf(USER_A);
+        vm.prank(USER_A);
+        entryPoint.cancelRedemptionRequest(nonce, USER_A);
+        assertEq(juniorTranche.balanceOf(USER_A) - balBefore, shares, "the stranded redemption must still return its share escrow on cancel");
+    }
 }
