@@ -361,27 +361,32 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
     // cancelRedemptionRequest
     // ---------------------------------------------------------------------
 
-    /// @notice A flagged canceller self-cancelling is stopped by the return transfer's kernel screen on the
-    /// flagged destination, while a clean receiver leg settles because only the transfer parties are screened
-    function test_cancelRedemptionRequest_flaggedCancellerScreenedOnlyAsReturnDestination() public {
+    /// @notice A flagged canceller is stopped by the entry point screen regardless of the receiver, so the
+    /// escrow can never route a flagged party's shares to a clean address
+    function test_cancelRedemptionRequest_revertsOnFlaggedCancellerForAnyReceiver() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(seniorTranche), shares, USER_A, 0);
         _wireBlacklist();
         _flag(USER_A);
 
-        // The self-cancel routes the escrow back to the flagged canceller, the kernel screen stops that leg
+        // The self-cancel routes the escrow back to the flagged canceller, the screen stops it
         vm.expectRevert(_blacklistedError(USER_A));
         vm.prank(USER_A);
         entryPoint.cancelRedemptionRequest(nonce, USER_A);
 
-        // A clean receiver leg settles, the entry point screens only the parties to the return transfer
-        uint256 receiverSharesBefore = seniorTranche.balanceOf(RECEIVER);
+        // A clean receiver cannot launder the flagged canceller's escrow out, the canceller screen stops it before the return leg
+        vm.expectRevert(_blacklistedError(USER_A));
         vm.prank(USER_A);
         entryPoint.cancelRedemptionRequest(nonce, RECEIVER);
-        assertEq(seniorTranche.balanceOf(RECEIVER), receiverSharesBefore + shares, "the cancelled escrow must land on the clean receiver");
+
+        // Unblacklisting the canceller releases the escrow to the clean receiver
+        roycoBlacklist.unblacklistAccounts(_one(USER_A));
+        uint256 receiverSharesBefore = seniorTranche.balanceOf(RECEIVER);
+        _cancelRedemption(USER_A, nonce, RECEIVER);
+        assertEq(seniorTranche.balanceOf(RECEIVER), receiverSharesBefore + shares, "the released share escrow must land on the receiver");
     }
 
-    /// @notice A flagged receiver is stopped by the share escrow return's kernel screen, no entry point screen needed
+    /// @notice A flagged receiver is stopped by the entry point screen, redundantly backstopped by the share escrow return's kernel screen
     function test_cancelRedemptionRequest_flaggedReceiverStoppedByReturnTransferScreen() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(seniorTranche), shares, USER_A, 0);

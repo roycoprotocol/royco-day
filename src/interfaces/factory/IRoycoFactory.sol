@@ -52,8 +52,6 @@ interface IRoycoFactory {
     error TEMPLATE_NOT_ENABLED();
     /// @notice Thrown when a deployment is started while another is in progress
     error NO_ACTIVE_TEMPLATE();
-    /// @notice Thrown when a factory-forwarded call reverts
-    error FACTORY_CALL_FAILED(bytes returnData);
     /// @notice Thrown when a factory-forwarded call targets the access manager, which is only administrable through the typed role primitives
     error FACTORY_CALL_TARGET_FORBIDDEN();
     /// @notice Thrown when a market role grant targets ADMIN_ROLE, which no template ever legitimately mints
@@ -123,7 +121,7 @@ interface IRoycoFactory {
     /**
      * @notice Grants each role to an account on the AccessManager, callable only by the active template
      * @dev The three arrays are index-aligned: `_roleIds[i]` is granted to `_accounts[i]` with `_executionDelays[i]`
-     * @dev ADMIN_ROLE is a forbidden grant: a template can never escalate an account to the access manager's super-admin
+     * @dev ADMIN_ROLE is a forbidden grant
      * @param _roleIds The role ids to grant, index-aligned with `_accounts`/`_executionDelays`
      * @param _accounts The accounts receiving each role, index-aligned with `_roleIds`/`_executionDelays`
      * @param _executionDelays The access-manager execution delay applied to each grant, index-aligned with `_roleIds`/`_accounts`
@@ -132,6 +130,7 @@ interface IRoycoFactory {
 
     /// @notice Forwards an arbitrary call as the factory, callable only by the active template
     /// @dev The access manager is a forbidden target: role grants and bindings go through the typed role primitives
+    /// @dev A target failure bubbles verbatim
     function executeAsFactory(address _target, bytes calldata _data) external returns (bytes memory result);
 
     /// @notice Returns the kernel a factory-deployed tranche belongs to (zero for unknown addresses)

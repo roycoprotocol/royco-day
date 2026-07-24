@@ -11,15 +11,15 @@ import { SafeERC20 } from "../../../../../lib/openzeppelin-contracts/contracts/t
 import { IRoycoDayAccountant } from "../../../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoPriceOracle } from "../../../../interfaces/IRoycoPriceOracle.sol";
+import { IBalancerV3VenueCallbacks } from "../../../../interfaces/liquidity-venue/IBalancerV3VenueCallbacks.sol";
 import { Cache, CacheKey } from "../../../../libraries/Cache.sol";
 import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../../libraries/Constants.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../libraries/Units.sol";
 import { DispatchLogic } from "../../../../libraries/logic/DispatchLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "../../../../libraries/logic/FeeAndLiquidityPremiumLogic.sol";
 import { ValuationLogic } from "../../../../libraries/logic/ValuationLogic.sol";
+import { BalancerV3VenueLogic } from "../../../../libraries/logic/liquidity-venue/BalancerV3VenueLogic.sol";
 import { RoycoDayKernel, SyncedAccountingState } from "../../RoycoDayKernel.sol";
-import { IBalancerV3VenueCallbacks } from "./interfaces/IBalancerV3VenueCallbacks.sol";
-import { BalancerV3VenueLogic } from "./libraries/BalancerV3VenueLogic.sol";
 
 /**
  * @title BalancerV3LiquidityVenue

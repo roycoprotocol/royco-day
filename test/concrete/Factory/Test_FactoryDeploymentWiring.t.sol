@@ -14,7 +14,7 @@ import { UninitializedERC1967Proxy } from "../../mocks/UninitializedERC1967Proxy
  * @title Test_FactoryDeploymentWiring
  * @notice Always-running (no-RPC) coverage for the factory's active-template role-wiring primitives and its
  *         previously fork-only revert branches: the `onlyActiveTemplate` guard (ONLY_ACTIVE_TEMPLATE), the
- *         `executeAsFactory` failure path (FACTORY_CALL_FAILED), and the `executeMarketDeployment` reentrancy
+ *         `executeAsFactory` failure path (a verbatim-bubbled target revert), and the `executeMarketDeployment` reentrancy
  *         guard (NO_ACTIVE_TEMPLATE). The production template exercises these only on a mainnet fork.
  */
 contract Test_FactoryDeploymentWiring is Test {
@@ -149,7 +149,8 @@ contract Test_FactoryDeploymentWiring is Test {
 
     function test_Hook_revertUnwindsRegistryWritesAtomically() public {
         template.setMode(template.MODE_EXEC_FAIL_IN_HOOK());
-        vm.expectPartialRevert(IRoycoFactory.FACTORY_CALL_FAILED.selector);
+        // The mock's deadbeef target has no fallback, so the dispatch bubbles its empty revert data verbatim
+        vm.expectRevert(bytes(""));
         factory.executeMarketDeployment(address(template), "");
 
         // The registry writes that preceded the failing hook were unwound with the whole deployment.
@@ -157,12 +158,13 @@ contract Test_FactoryDeploymentWiring is Test {
     }
 
     // ---------------------------------------------------------------------
-    // FACTORY_CALL_FAILED: a reverting executeAsFactory target bubbles the named error
+    // executeAsFactory failure: a reverting target bubbles its revert data verbatim
     // ---------------------------------------------------------------------
 
-    function test_FACTORY_CALL_FAILED_onRevertingExecuteAsFactoryTarget() public {
+    function test_ExecuteAsFactory_bubblesTargetRevertVerbatim() public {
         template.setMode(template.MODE_EXEC_FAIL());
-        vm.expectPartialRevert(IRoycoFactory.FACTORY_CALL_FAILED.selector);
+        // The mock's deadbeef target has no fallback, so the dispatch bubbles its empty revert data verbatim
+        vm.expectRevert(bytes(""));
         factory.executeMarketDeployment(address(template), "");
     }
 

@@ -22,10 +22,9 @@ import { RedemptionLogic } from "../../libraries/logic/RedemptionLogic.sol";
 /**
  * @title RoycoDayKernel
  * @author Ankur Dubey, Shivaansh Kapoor
- * @notice Abstract contract serving as the base for all Royco kernel implementations
- * @dev Provides the foundational logic for kernel contracts including pre and post operation NAV reconciliation, coverage enforcement logic,
- *      and base wiring for tranche synchronization
- *      All concrete kernel implementations should inherit from the Royco Kernel
+ * @notice Abstract contract serving as the base for all Royco Day Kernel implementations
+ * @dev Provides the foundational logic for kernel contracts including pre and post operation NAV reconciliation, coverage enforcement logic, and base wiring for tranche synchronization
+ * @dev All concrete kernel implementations inherit this base kernel
  */
 abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardTransient {
     using RoycoUnitsMath for NAV_UNIT;

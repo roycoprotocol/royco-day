@@ -487,8 +487,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         targetBindings[7] = TargetBinding({ target: targets[7], selectors: s, roleIds: r });
         (s, r) = _kernelPricingBinding(); // 8: kernel pricing admin surface
         targetBindings[8] = TargetBinding({ target: targets[8], selectors: s, roleIds: r });
-        // 9: collateral asset oracle restricted surface, declared per oracle kind by the deployer since only it knows
-        // the kind (an empty binding flattens to nothing for the kinds with no restricted surface)
+        // 9: collateral asset oracle restricted surface, declared per oracle kind by the deployer (empty for kinds with no restricted surface)
         targetBindings[9] =
             TargetBinding({ target: targets[9], selectors: _p.collateralAssetOracleBindingSelectors, roleIds: _p.collateralAssetOracleBindingRoleIds });
 

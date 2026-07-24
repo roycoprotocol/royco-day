@@ -10,7 +10,7 @@ import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProto
  * @notice A concrete deployment template that, inside the factory's active-template window, drives the factory's
  *         role-wiring primitives (`setMarketTargetFunctionRole`, `grantMarketRole`, `executeAsFactory`) or a
  *         reentrant `executeMarketDeployment` — so tests can exercise the factory's success-wiring path and its
- *         `FACTORY_CALL_FAILED` / `NO_ACTIVE_TEMPLATE` revert branches off-fork (the production template exercises
+ *         verbatim-bubbling / `NO_ACTIVE_TEMPLATE` revert branches off-fork (the production template exercises
  *         these only in the RPC-gated fork factory suite).
  */
 contract MockWiringTemplate is BaseDeploymentTemplate {
@@ -57,8 +57,8 @@ contract MockWiringTemplate is BaseDeploymentTemplate {
             // Re-entering while this template is the active one trips the singleton guard.
             ROYCO_FACTORY.executeMarketDeployment(address(this), "");
         } else if (mode == MODE_EXEC_FAIL) {
-            // A call to a selector this contract does not implement (no fallback) reverts, so the factory's
-            // executeAsFactory sees success == false and reverts FACTORY_CALL_FAILED.
+            // A call to a selector this contract does not implement (no fallback) reverts with empty data, which
+            // executeAsFactory's dispatch bubbles verbatim.
             ROYCO_FACTORY.executeAsFactory(address(this), hex"deadbeef");
         }
         result = _result;

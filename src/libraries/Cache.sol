@@ -60,7 +60,6 @@ library Cache {
      * @param _value The value to cache
      */
     function _write(CacheKey _key, uint256 _value) internal {
-        // The value must be strictly less than 2^255 so it cannot collide with the populated marker, reject an out-of-domain value loudly rather than reading it back corrupted
         require(_value < CACHE_SET_MASK, CACHE_VALUE_OUT_OF_DOMAIN());
         _getTransientStorageSlot(_key).asUint256().tstore((_value | CACHE_SET_MASK));
     }

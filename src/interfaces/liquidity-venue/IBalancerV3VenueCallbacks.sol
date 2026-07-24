@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import { IVault } from "../../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
-import { NAV_UNIT, TRANCHE_UNIT } from "../../../../../libraries/Units.sol";
+import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
+import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
 
 /**
  * @title IBalancerV3VenueCallbacks

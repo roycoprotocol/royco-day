@@ -12,6 +12,7 @@ import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../interfaces/factory/IRoycoProtocolTemplate.sol";
+import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
 import {
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_FACTORY_ROLE,
@@ -29,6 +30,8 @@ import {
  * @notice Extensible template-driven factory for Royco markets
  */
 contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
+    using DispatchLogic for address;
+
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoFactoryV2State")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_FACTORY_STORAGE_SLOT = 0x40ecf137e43ccc3fb8e0ec956edc7094cfc159472690a44f90b2be053a987500;
 
@@ -289,9 +292,8 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         // The access manager is never a legitimate target for an arbitrary call
         require(_target != authority(), FACTORY_CALL_TARGET_FORBIDDEN());
 
-        bool success;
-        (success, result) = _target.call(_data);
-        require(success, FACTORY_CALL_FAILED(result));
+        // Forward as an execution dispatch
+        return _target._dispatch(false, _data);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

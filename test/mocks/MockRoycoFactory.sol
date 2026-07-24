@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { DispatchLogic } from "../../src/libraries/logic/DispatchLogic.sol";
+
 /**
  * @title MockRoycoFactory
  * @notice Minimal stand-in for the Royco factory's entry-point-facing surface: the ROYCO_AUTHORITY getter and the
@@ -9,8 +11,7 @@ pragma solidity ^0.8.28;
  *      tranches here to satisfy RoycoDayEntryPoint's provenance validation
  */
 contract MockRoycoFactory {
-    /// @notice Thrown when a factory-forwarded call reverts (mirrors IRoycoFactory.FACTORY_CALL_FAILED)
-    error FACTORY_CALL_FAILED(bytes returnData);
+    using DispatchLogic for address;
 
     /// @notice The AccessManager that governs this factory and its markets
     address public immutable ROYCO_AUTHORITY;
@@ -31,8 +32,7 @@ contract MockRoycoFactory {
     ///         without the active-template gate): entry point suites route initial tranche configuration through
     ///         this, mirroring how production templates configure the entry point during market deployments
     function executeAsFactory(address _target, bytes calldata _data) external returns (bytes memory result) {
-        bool success;
-        (success, result) = _target.call(_data);
-        require(success, FACTORY_CALL_FAILED(result));
+        // Mirrors the production factory's dispatch, bubbling any target failure verbatim
+        return _target._dispatch(false, _data);
     }
 }

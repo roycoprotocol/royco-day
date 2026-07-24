@@ -118,16 +118,12 @@ contract Test_EntryPointConstructionAndAdmin is EntryPointTestBase {
     }
 
     function test_factoryRoute_revertsWhenFactoryLacksRole() public {
-        // Without ADMIN_ENTRY_POINT_ROLE the factory's forwarded call fails the entry point's access check
+        // Without ADMIN_ENTRY_POINT_ROLE the factory's forwarded call fails the entry point's access check, which
+        // the factory's dispatch bubbles verbatim
         accessManager.revokeRole(ADMIN_ENTRY_POINT_ROLE, address(entryPointFactory));
 
         (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                MockRoycoFactory.FACTORY_CALL_FAILED.selector,
-                abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(entryPointFactory))
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(entryPointFactory)));
         entryPointFactory.executeAsFactory(address(entryPoint), abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
     }
 

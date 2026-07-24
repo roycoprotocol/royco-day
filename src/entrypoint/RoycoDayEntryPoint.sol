@@ -115,7 +115,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Transfer the requested amount of tranche assets into the entry point to queue the deposit
         IERC20(config.asset).safeTransferFrom(msg.sender, address(this), toUint256(_assets));
 
-        // Emit the deposit request event
         emit DepositRequested(msg.sender, requestNonce, _tranche, _assets, executableAtTimestamp, _executorBonusWAD);
     }
 
@@ -218,7 +217,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Transfer the requested amount of tranche shares into the entry point to queue the redemption
         IERC20(_tranche).safeTransferFrom(msg.sender, address(this), _shares);
 
-        // Emit the redemption request event
         emit RedemptionRequested(msg.sender, requestNonce, _tranche, _shares, executableAtTimestamp, _executorBonusWAD);
     }
 
@@ -273,22 +271,16 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         _cancelRedemptionRequest(_requestNonce, _receiver);
     }
 
+    /// @inheritdoc IRoycoDayEntryPoint
+    function pokeCollateralAssetOracle(address _tranche) external override(IRoycoDayEntryPoint) whenNotPaused returns (uint32 lastUpdatedAtTimestamp) {
+        return _pokeOracle(_tranche, _getRoycoDayEntryPointStorage().trancheToConfig[_tranche]);
+    }
+
     /**
      * =============================
      * Admin Functions
      * =============================
      */
-
-    /// @inheritdoc IRoycoDayEntryPoint
-    function pokeCollateralAssetOracle(address _tranche)
-        external
-        override(IRoycoDayEntryPoint)
-        whenNotPaused
-        restricted
-        returns (uint32 lastUpdatedAtTimestamp)
-    {
-        return _pokeOracle(_tranche, _getRoycoDayEntryPointStorage().trancheToConfig[_tranche]);
-    }
 
     /// @inheritdoc IRoycoDayEntryPoint
     function modifyTrancheConfigs(address[] calldata _tranches, TrancheConfig[] calldata _configs) external override(IRoycoDayEntryPoint) restricted {
@@ -427,7 +419,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
                 _depositWithYieldForfeiture(tranche, config, _assetsToDeposit, request.baseRequest.navAtRequestTime, request.baseRequest.receiver);
         }
 
-        // Emit the deposit execution event
         emit DepositExecuted(_user, _requestNonce, msg.sender, _assetsToDeposit, trancheSharesMinted, protocolFeeShares, bonusAssets);
     }
 
@@ -453,7 +444,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         address asset = $.trancheToConfig[request.baseRequest.tranche].asset;
         IERC20(asset).safeTransfer(_receiver, toUint256(request.assets));
 
-        // Emit the deposit request cancellation event
         emit DepositRequestCancelled(msg.sender, _requestNonce, _receiver, request.assets);
     }
 
@@ -562,7 +552,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             quoteAssets -= bonusQuoteAssets;
         }
 
-        // Emit the redemption execution event
         emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets, bonusClaims, bonusQuoteAssets);
     }
 
@@ -578,7 +567,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
         RedemptionRequest memory request = $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
         require(request.shares != 0, INVALID_REQUEST(_requestNonce));
-        // The share escrow return below screens the canceller through the kernel's balance update hook
+        // Screen the canceller and receiver against the market's blacklist, the share escrow return below only screens the receiver through the kernel's balance update hook
+        _enforceNotBlacklisted($.trancheToConfig[request.baseRequest.tranche].kernel, msg.sender, _receiver);
 
         // Mark the request as cancelled
         delete $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
@@ -586,7 +576,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Return the shares from the cancelled request to the specified receiver
         IERC20(request.baseRequest.tranche).safeTransfer(_receiver, request.shares);
 
-        // Emit the redemption request cancellation event
         emit RedemptionRequestCancelled(msg.sender, _requestNonce, _receiver, request.shares);
     }
 
@@ -619,7 +608,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     function _pokeOracle(address _tranche, EnrichedTrancheConfig memory _config) internal returns (uint32 lastUpdatedAtTimestamp) {
         if (!_config.baseConfig.gateByOracleUpdate) return 0;
         // The oracle must never report a future update timestamp: it would satisfy the execution gate without a genuine update
-        // The cast must fail loudly, truncating garbage could disguise a future timestamp as past and defeat the fail-shut check
         require(
             (lastUpdatedAtTimestamp = IRoycoPriceOracle(IRoycoDayKernel(_config.kernel).getCollateralAssetOracle()).poke().toUint32()) <= block.timestamp,
             COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE()

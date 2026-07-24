@@ -438,7 +438,8 @@ contract Test_RoycoFactory is Test {
         // check targets the junior tranche proxy, which the template deploys INSIDE `executeMarketDeployment`.
         address predictedJT = factory.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", MARKET_ID_A, TAG_JT_PROXY)));
         vm.prank(DEPLOYER);
-        vm.expectPartialRevert(IRoycoFactory.FACTORY_CALL_FAILED.selector);
+        // The syncer's access check rejects the role-stripped factory, and the dispatch bubbles it verbatim
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(factory)));
         factory.executeMarketDeployment(address(template), p);
 
         // Atomic unwind: the wiring transaction's contracts and registry entries are gone.
