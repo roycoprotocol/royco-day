@@ -6,14 +6,14 @@ import { TransientSlot } from "../../lib/openzeppelin-contracts/contracts/utils/
 
 /**
  * @notice Indexes a slot in the unified transient cache: each key occupies the transient slot at the cache base slot offset by the key's ordinal
- * @custom:type COLLATERAL_ASSET_RATE - The collateral asset's tranche unit to NAV unit conversion rate shared by the coinvested senior and junior tranches
- * @custom:type ST_SHARE_RATE - The senior tranche share rate (senior NAV per share)
+ * @custom:type COLLATERAL_ASSET_TO_NAV_RATE - The collateral asset's tranche unit to NAV unit conversion rate shared by the coinvested senior and junior tranches
+ * @custom:type ST_SHARE_TO_NAV_RATE - The senior tranche share rate (senior NAV per share)
  * @dev The ordinal is the key's transient slot offset from the cache base slot, so the enum is bounded to 256 members by the reserved ERC-7201 slot window
  * @dev Ordering is unconstrained: the cache is transient and auto-clears every transaction, so no persistent layout depends on the ordinals
  */
 enum CacheKey {
-    COLLATERAL_ASSET_RATE,
-    ST_SHARE_RATE
+    COLLATERAL_ASSET_TO_NAV_RATE,
+    ST_SHARE_TO_NAV_RATE
 }
 
 /**

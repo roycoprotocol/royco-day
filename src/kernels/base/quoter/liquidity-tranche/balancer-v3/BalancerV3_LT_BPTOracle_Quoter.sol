@@ -167,7 +167,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     function getRate() external view override(IRateProvider) whenNotPaused returns (uint256 rate) {
         // Query the cache for the ST share rate
         bool cacheHit;
-        (cacheHit, rate) = Cache._read(CacheKey.ST_SHARE_RATE);
+        (cacheHit, rate) = Cache._read(CacheKey.ST_SHARE_TO_NAV_RATE);
 
         // On a cache miss, value the senior share against the post-sync ST effective NAV and total supply
         if (!cacheHit) {
@@ -336,11 +336,11 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
      */
     function setBPTOracle(address _bptOracle, bool _syncBeforeUpdate) external restricted {
         // If specified, sync the tranche accounting against the outgoing oracle before updating it
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccounting();
+        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithFreshCache();
         // Update the BPT oracle
         _setBPTOracle(_bptOracle);
         // Sync the tranche accounting against the incoming oracle so the committed liquidity tranche raw NAV reflects it
-        _preOpSyncTrancheAccounting();
+        _preOpSyncTrancheAccountingWithFreshCache();
     }
 
     /// @notice Sets the maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT

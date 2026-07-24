@@ -2,14 +2,18 @@
 pragma solidity ^0.8.28;
 
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
+import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
+import { IRoycoPriceOracle } from "../../interfaces/IRoycoPriceOracle.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { WAD } from "../../libraries/Constants.sol";
+import { AggregatorV3Interface } from "../../interfaces/external/chainlink/AggregatorV3Interface.sol";
+import { Cache, CacheKey } from "../../libraries/Cache.sol";
+import { WAD, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../libraries/Units.sol";
 import { AccountingSyncLogic } from "../../libraries/logic/AccountingSyncLogic.sol";
 import { BlacklistLogic } from "../../libraries/logic/BlacklistLogic.sol";
 import { DepositLogic } from "../../libraries/logic/DepositLogic.sol";
@@ -24,9 +28,16 @@ import { RedemptionLogic } from "../../libraries/logic/RedemptionLogic.sol";
  *      All concrete kernel implementations should inherit from the Royco Kernel
  */
 abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardTransient {
+    using RoycoUnitsMath for NAV_UNIT;
+    using RoycoUnitsMath for TRANCHE_UNIT;
+
     /// @dev Storage slot for RoycoDayKernelState using ERC-7201 pattern
     /// @dev keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayKernelState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_DAY_KERNEL_STORAGE_SLOT = 0xc366ce7b07de4bd3f36c874874355fb088fd2057e716d8a9786c17b22e6fec00;
+
+    /// @dev Value representing the scale factor of one whole collateral asset: 10^(COLLATERAL_ASSET_DECIMALS)
+    /// @dev A single conversion rate prices the coinvested collateral both the senior and junior tranches deposit
+    uint256 internal immutable COLLATERAL_ASSET_SCALE_FACTOR;
 
     /// @inheritdoc IRoycoDayKernel
     address public immutable override(IRoycoDayKernel) SENIOR_TRANCHE;
@@ -116,6 +127,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         LIQUIDITY_TRANCHE = _params.liquidityTranche;
         LT_ASSET = _params.ltAsset;
         ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _params.enforceVaultSharesTransferWhitelist;
+        COLLATERAL_ASSET_SCALE_FACTOR = 10 ** IERC20Metadata(_params.collateralAsset).decimals();
     }
 
     /**
@@ -146,6 +158,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         emit ProtocolFeeRecipientUpdated(_params.protocolFeeRecipient);
         emit SeniorTrancheSelfLiquidationBonusUpdated(_params.stSelfLiquidationBonusWAD);
         emit RoycoBlacklistUpdated(_params.roycoBlacklist);
+
+        // Initialize the collateral asset oracle configuration (the setters validate and emit)
+        _setCollateralAssetOracle(_params.collateralAssetOracle, _params.stalenessThresholdSeconds);
+        _setSequencerUptimeFeed(_params.sequencerUptimeFeed, _params.gracePeriodSeconds);
     }
 
     // =============================
@@ -153,13 +169,18 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // =============================
 
     /// @inheritdoc IRoycoDayKernel
-    function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
+    function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT value) {
+        return
+            toNAVUnits(toUint256(_collateralAssets.mulDiv(_getCollateralAssetToNAVUnitConversionRateWAD(), COLLATERAL_ASSET_SCALE_FACTOR, Math.Rounding.Floor)));
+    }
+
+    /// @inheritdoc IRoycoDayKernel
+    function convertValueToCollateralAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT collateralAssets) {
+        return toTrancheUnits(toUint256(_value.mulDiv(COLLATERAL_ASSET_SCALE_FACTOR, _getCollateralAssetToNAVUnitConversionRateWAD(), Math.Rounding.Floor)));
+    }
 
     /// @inheritdoc IRoycoDayKernel
     function convertLTAssetsToValue(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
-
-    /// @inheritdoc IRoycoDayKernel
-    function convertValueToCollateralAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
     function convertValueToLTAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
@@ -458,6 +479,31 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         emit RoycoBlacklistUpdated(_roycoBlacklist);
     }
 
+    /// @inheritdoc IRoycoDayKernel
+    /// @dev Executes an accounting sync after (and optionally before) the update so the fresh oracle's rate is committed immediately
+    function setCollateralAssetOracle(
+        address _collateralAssetOracle,
+        uint48 _stalenessThresholdSeconds,
+        bool _syncBeforeUpdate
+    )
+        external
+        override(IRoycoDayKernel)
+        restricted
+    {
+        // If specified, sync the tranche accounting to reflect the PNL up to this point in time at the outgoing oracle's rate
+        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithFreshCache();
+        // Update the collateral asset oracle
+        _setCollateralAssetOracle(_collateralAssetOracle, _stalenessThresholdSeconds);
+        // Sync the tranche accounting to reflect the PNL from the updated oracle's rate (the sync re-initializes the quoter cache to the new rate)
+        _preOpSyncTrancheAccountingWithFreshCache();
+    }
+
+    /// @inheritdoc IRoycoDayKernel
+    /// @dev The sequencer uptime feed and grace period do not affect the conversion rate, so no accounting sync is performed
+    function setSequencerUptimeFeed(address _sequencerUptimeFeed, uint48 _gracePeriodSeconds) external virtual override(IRoycoDayKernel) restricted {
+        _setSequencerUptimeFeed(_sequencerUptimeFeed, _gracePeriodSeconds);
+    }
+
     // =============================
     // Internal Utility Functions
     // =============================
@@ -468,7 +514,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @dev Uses the quoter cache since it is called by admin setters outside a cached operation, so it re-initializes the quoter cache to the live rate before syncing
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function _preOpSyncTrancheAccounting() internal virtual withQuoterCache returns (SyncedAccountingState memory state) {
+    function _preOpSyncTrancheAccountingWithFreshCache() internal virtual withQuoterCache returns (SyncedAccountingState memory state) {
         return AccountingSyncLogic._preOpSyncTrancheAccounting(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState());
     }
 
@@ -533,13 +579,103 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      */
     function _isTrancheShareCustodian(address _account) internal view virtual returns (bool) { }
 
+    // =============================
+    // Collateral Oracle Functions
+    // =============================
+
     /**
-     * @notice Initializes the quoter
-     * @dev Should be called at the start of a call
-     * @dev Typically used to initialize the cached tranche unit to NAV unit conversion rate
-     * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function: the cache is a pure optimization and quoters that do not cache read live
+     * @notice Initializes the quoter cache for the operation
+     * @dev Pokes the collateral asset oracle first so its clock observes the operation and any oracle-level circuit breaker can halt it, then caches the conversion rate so every conversion in the operation values against one consistent rate
+     * @dev No teardown is needed since each operation re-caches and the transient cache auto-clears at transaction end
      */
-    function _initializeQuoterCache() internal virtual { }
+    function _initializeQuoterCache() internal virtual {
+        // Poke the collateral asset oracle as the operation's first action: can revert as a circuit-breaker
+        IRoycoPriceOracle(_getRoycoDayKernelStorage().collateralAssetOracle).poke();
+        // Cache the collateral asset to NAV unit conversion rate for the operation
+        Cache._write(CacheKey.COLLATERAL_ASSET_TO_NAV_RATE, _queryCollateralAssetOracle());
+    }
+
+    /**
+     * @notice Returns the collateral asset to NAV unit conversion rate, scaled to WAD precision
+     * @dev If the operation's cache slot is populated returns the cached rate, otherwise falls back to querying the rate live for view function compatibility
+     * @return The collateral asset to NAV unit conversion rate, scaled to WAD precision
+     */
+    function _getCollateralAssetToNAVUnitConversionRateWAD() internal view returns (uint256) {
+        // If the cache slot is populated use the cached value
+        (bool cacheHit, uint256 conversionRateWAD) = Cache._read(CacheKey.COLLATERAL_ASSET_TO_NAV_RATE);
+        if (cacheHit) return conversionRateWAD;
+        // Otherwise fall back to querying the rate directly (for view functions)
+        // Simulate the poke first so a circuit-breaking oracle fails the preview shut identically to the real operation
+        IRoycoPriceOracle(_getRoycoDayKernelStorage().collateralAssetOracle).previewPoke();
+        return _queryCollateralAssetOracle();
+    }
+
+    /**
+     * @notice Queries the collateral asset oracle for the value of 1 whole collateral asset in NAV units, scaled to WAD precision
+     * @dev The reported price is gated by the L2 sequencer, staleness, and non-zero price checks
+     * @return collateralAssetToNAVUnitConversionRateWAD The collateral asset to NAV unit conversion rate, scaled to WAD precision
+     */
+    function _queryCollateralAssetOracle() internal view returns (uint256 collateralAssetToNAVUnitConversionRateWAD) {
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
+
+        // If a sequencer uptime feed is set, ensure the L2 sequencer is up and its grace period has elapsed before trusting the price
+        address sequencerUptimeFeed = $.sequencerUptimeFeed;
+        if (sequencerUptimeFeed != address(0)) {
+            (, int256 sequencerStatus, uint256 sequencerStartedAt,,) = AggregatorV3Interface(sequencerUptimeFeed).latestRoundData();
+            // A sequencer status of 0 indicates that the sequencer is up, and 1 indicates that it is down
+            require(sequencerStatus == 0, SEQUENCER_DOWN());
+            // Ensure the round is initialized (startedAt is 0 only for an uninitialized uptime feed) and that the grace
+            // period has fully elapsed since the sequencer was last restored
+            require(sequencerStartedAt != 0 && (block.timestamp - sequencerStartedAt) > $.gracePeriodSeconds, GRACE_PERIOD_NOT_OVER());
+        }
+
+        // Fetch the collateral asset price in NAV units
+        (NAV_UNIT price, uint256 updatedAt) = IRoycoPriceOracle($.collateralAssetOracle).getPrice();
+
+        // Conduct sanity checks
+        require((updatedAt + $.stalenessThresholdSeconds) >= block.timestamp, STALE_PRICE());
+        require(price != ZERO_NAV_UNITS, INVALID_PRICE());
+
+        // NAV units always have WAD precision, so the price is the conversion rate
+        return toUint256(price);
+    }
+
+    /**
+     * @notice Sets the new collateral asset oracle
+     * @dev The oracle must price this market's collateral asset
+     * @param _collateralAssetOracle The new collateral asset oracle
+     * @param _stalenessThresholdSeconds The new staleness threshold seconds
+     */
+    function _setCollateralAssetOracle(address _collateralAssetOracle, uint48 _stalenessThresholdSeconds) internal {
+        // The kernel has no fallback price source, so the oracle can never be set to the null address
+        require(_collateralAssetOracle != address(0), NULL_ADDRESS());
+        require(_stalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
+        require(IRoycoPriceOracle(_collateralAssetOracle).COLLATERAL_ASSET() == COLLATERAL_ASSET, COLLATERAL_ASSET_ORACLE_MISMATCH());
+
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
+        $.collateralAssetOracle = _collateralAssetOracle;
+        $.stalenessThresholdSeconds = _stalenessThresholdSeconds;
+
+        emit CollateralAssetOracleUpdated(_collateralAssetOracle, _stalenessThresholdSeconds);
+    }
+
+    /**
+     * @notice Sets the new L2 sequencer uptime feed and grace period
+     * @dev A null sequencer uptime feed disables the L2 sequencer check
+     *      When a feed is set, the grace period must be a positive
+     *      duration (mirroring the treatment of the staleness threshold for the price feed)
+     * @param _sequencerUptimeFeed The new L2 sequencer uptime feed (set to the null address to disable the check)
+     * @param _gracePeriodSeconds The new grace period seconds
+     */
+    function _setSequencerUptimeFeed(address _sequencerUptimeFeed, uint48 _gracePeriodSeconds) internal virtual {
+        require(_sequencerUptimeFeed == address(0) || _gracePeriodSeconds > 0, INVALID_GRACE_PERIOD_SECONDS());
+
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
+        $.sequencerUptimeFeed = _sequencerUptimeFeed;
+        $.gracePeriodSeconds = _gracePeriodSeconds;
+
+        emit SequencerUptimeFeedUpdated(_sequencerUptimeFeed, _gracePeriodSeconds);
+    }
 
     // =============================
     // State Accessor Functions
@@ -559,6 +695,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             ltAsset: LT_ASSET,
             accountant: ACCOUNTANT
         });
+    }
+
+    /// @inheritdoc IRoycoDayKernel
+    function getCollateralAssetOracle() external view override(IRoycoDayKernel) returns (address collateralAssetOracle) {
+        return _getRoycoDayKernelStorage().collateralAssetOracle;
     }
 
     /// @inheritdoc IRoycoDayKernel

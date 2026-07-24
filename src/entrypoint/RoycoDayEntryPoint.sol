@@ -3,11 +3,12 @@ pragma solidity ^0.8.28;
 
 import { IERC20, SafeERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { SafeCast } from "../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
-import { IOracleClock } from "../interfaces/IOracleClock.sol";
 import { IRoycoDayEntryPoint } from "../interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityTranche } from "../interfaces/IRoycoLiquidityTranche.sol";
+import { IRoycoPriceOracle } from "../interfaces/IRoycoPriceOracle.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
@@ -30,6 +31,8 @@ import { TrancheClaimsLogic } from "../libraries/logic/TrancheClaimsLogic.sol";
  *      operators and every value flow that settles outside the kernel's own screened paths
  */
 contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
+    using SafeCast for uint256;
+
     using SafeERC20 for IERC20;
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for TRANCHE_UNIT;
@@ -610,7 +613,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     function _pokeOracleClock(address _tranche, address _oracleClock) internal returns (uint32 lastUpdatedAtTimestamp) {
         if (_oracleClock == address(0)) return 0;
         // The clock must never report a future update timestamp: it would satisfy the execution gate without a genuine update
-        require((lastUpdatedAtTimestamp = IOracleClock(_oracleClock).poke()) <= block.timestamp, ORACLE_CLOCK_IN_THE_FUTURE());
+        // The cast must fail loudly, truncating garbage could disguise a future timestamp as past and defeat the fail-shut check
+        require((lastUpdatedAtTimestamp = IRoycoPriceOracle(_oracleClock).poke().toUint32()) <= block.timestamp, ORACLE_CLOCK_IN_THE_FUTURE());
         emit OracleClockTick(_tranche, lastUpdatedAtTimestamp);
     }
 

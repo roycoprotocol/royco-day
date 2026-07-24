@@ -112,6 +112,10 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The ST self-liquidation bonus remitted to redeeming ST LPs once the liquidation coverage threshold is breached, scaled to WAD
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables screening)
+     * @custom:field collateralAssetOracle - The collateral asset oracle pricing one whole collateral asset in NAV units
+     * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
+     * @custom:field sequencerUptimeFeed - The L2 sequencer uptime feed used to gate price queries (the null address when not applicable)
+     * @custom:field gracePeriodSeconds - The grace period in seconds after the L2 sequencer is back up before oracle prices are trusted again
      * @custom:field kernelSpecificParams - ABI-encoded kernel/quoter-specific initialization params
      * @custom:field enforceVaultSharesTransferWhitelist - Whether to enforce the vault shares transfer whitelist (verified against the kernel's immutable)
      * @custom:field entryPointTrancheConfigs - The per-tranche entry point configurations applied after the market is deployed (any oracle clock is deployed externally and passed by address)
@@ -130,6 +134,10 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         address roycoBlacklist;
+        address collateralAssetOracle;
+        uint48 stalenessThresholdSeconds;
+        address sequencerUptimeFeed;
+        uint48 gracePeriodSeconds;
         bytes kernelSpecificParams;
         bool enforceVaultSharesTransferWhitelist;
         EntryPointTrancheConfigs entryPointTrancheConfigs;
@@ -320,7 +328,11 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
             initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY(),
             protocolFeeRecipient: _p.protocolFeeRecipient,
             stSelfLiquidationBonusWAD: _p.stSelfLiquidationBonusWAD,
-            roycoBlacklist: _p.roycoBlacklist
+            roycoBlacklist: _p.roycoBlacklist,
+            collateralAssetOracle: _p.collateralAssetOracle,
+            stalenessThresholdSeconds: _p.stalenessThresholdSeconds,
+            sequencerUptimeFeed: _p.sequencerUptimeFeed,
+            gracePeriodSeconds: _p.gracePeriodSeconds
         });
         kernel = _deployProxy(_p.marketContracts.kernelImpl, _kernelInitData(kip, _p.kernelSpecificParams, _bptOracle), _kernelProxySalt);
     }

@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { AggregatorV3Interface } from "../../../../../interfaces/external/chainlink/AggregatorV3Interface.sol";
+import { RoycoDayKernel } from "../../../RoycoDayKernel.sol";
 import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./IdenticalAssets_ST_JT_Oracle_Quoter.sol";
 
 /**
@@ -34,30 +35,6 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
 
     /// @notice Emitted when the identical assets Chainlink (compatible) oracle is updated
     event ChainlinkOracleUpdated(address indexed oracle, uint48 stalenessThresholdSeconds);
-
-    /// @notice Emitted when the L2 sequencer uptime feed (and its grace period) used to gate price queries is updated
-    event SequencerUptimeFeedUpdated(address indexed sequencerUptimeFeed, uint48 gracePeriodSeconds);
-
-    /// @notice Thrown when the staleness threshold seconds is zero
-    error INVALID_STALENESS_THRESHOLD_SECONDS();
-
-    /// @notice Thrown when the price is stale
-    error STALE_PRICE();
-
-    /// @notice Thrown when the price is invalid
-    error INVALID_PRICE();
-
-    /// @notice Thrown when the price is incomplete
-    error INCOMPLETE_PRICE();
-
-    /// @notice Thrown when the L2 sequencer is reported down by the configured sequencer uptime feed
-    error SEQUENCER_DOWN();
-
-    /// @notice Thrown when the L2 sequencer's grace period has not fully elapsed since it was last restored
-    error GRACE_PERIOD_NOT_OVER();
-
-    /// @notice Thrown when a sequencer uptime feed is configured with a non-positive grace period
-    error INVALID_GRACE_PERIOD_SECONDS();
 
     /// @notice Thrown when the oracle is set to the null address without a stored conversion rate to price through
     error NULL_ORACLE_WITHOUT_STORED_RATE();
@@ -133,11 +110,11 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
      */
     function setChainlinkOracle(address _oracle, uint48 _stalenessThresholdSeconds, bool _syncBeforeUpdate) external restricted {
         // If specified, sync the tranche accounting before updating the Chainlink (compatible) oracle
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccounting();
+        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithFreshCache();
         // Update the Chainlink (compatible) oracle
         _setChainlinkOracle(_oracle, _stalenessThresholdSeconds);
         // Sync the tranche accounting after updating the Chainlink (compatible) oracle
-        _preOpSyncTrancheAccounting();
+        _preOpSyncTrancheAccountingWithFreshCache();
     }
 
     /**
@@ -146,7 +123,7 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
      * @param _sequencerUptimeFeed The new L2 sequencer uptime feed (set to the null address to disable the check)
      * @param _gracePeriodSeconds The new grace period in seconds that must elapse after the L2 sequencer is restored before trusting the price
      */
-    function setSequencerUptimeFeed(address _sequencerUptimeFeed, uint48 _gracePeriodSeconds) external restricted {
+    function setSequencerUptimeFeed(address _sequencerUptimeFeed, uint48 _gracePeriodSeconds) external virtual override(RoycoDayKernel) restricted {
         _setSequencerUptimeFeed(_sequencerUptimeFeed, _gracePeriodSeconds);
     }
 
@@ -216,7 +193,7 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
      * @param _sequencerUptimeFeed The new L2 sequencer uptime feed (set to the null address to disable the check)
      * @param _gracePeriodSeconds The new grace period seconds
      */
-    function _setSequencerUptimeFeed(address _sequencerUptimeFeed, uint48 _gracePeriodSeconds) internal {
+    function _setSequencerUptimeFeed(address _sequencerUptimeFeed, uint48 _gracePeriodSeconds) internal virtual override(RoycoDayKernel) {
         require(_sequencerUptimeFeed == address(0) || _gracePeriodSeconds > 0, INVALID_GRACE_PERIOD_SECONDS());
 
         IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState storage $ = _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage();

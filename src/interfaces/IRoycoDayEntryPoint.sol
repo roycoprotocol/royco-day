@@ -32,13 +32,13 @@ interface IRoycoDayEntryPoint {
      * @custom:field enabled - Whether the tranche is enabled for deposits and redemptions
      * @custom:field depositDelaySeconds - The delay in seconds between deposit request and execution
      * @custom:field redemptionDelaySeconds - The delay in seconds between redemption request and execution
-     * @custom:field oracleClock - The oracle clock gating execution on at least one observed oracle update after the request (the null address disables the gate)
+     * @custom:field collateralAssetOracleEnabled - Whether execution is gated on at least one collateral asset oracle update observed after the request
      */
     struct TrancheConfig {
         bool enabled;
         uint24 depositDelaySeconds;
         uint24 redemptionDelaySeconds;
-        address oracleClock;
+        bool collateralAssetOracleEnabled;
     }
 
     /**
@@ -78,7 +78,7 @@ interface IRoycoDayEntryPoint {
     /**
      * @notice Base request data shared across deposit and redemption requests
      * @custom:field tranche - The Royco tranche that this request is for
-     * @custom:field queuedAtTimestamp - The timestamp at which the request was queued: execution requires the tranche's oracle clock to report an update strictly after it
+     * @custom:field queuedAtTimestamp - The timestamp at which the request was queued: execution requires the tranche's collateral asset oracle to report an update strictly after it
      * @custom:field executableAtTimestamp - The timestamp after which the request can be executed
      * @custom:field executorBonusWAD - The bonus percentage (0-100%) paid to third-party executors, scaled to WAD precision
      *                                  Set to type(uint64).max to restrict execution to the request owner only
@@ -190,11 +190,11 @@ interface IRoycoDayEntryPoint {
     event TrancheConfigUpdated(address indexed tranche, TrancheConfig config);
 
     /**
-     * @notice Emitted when a tranche's oracle clock is poked
-     * @param tranche The tranche whose oracle clock was poked
+     * @notice Emitted when a tranche's collateral asset oracle is poked
+     * @param tranche The tranche whose collateral asset oracle was poked
      * @param lastUpdateTimestamp The clock's last update timestamp after the poke
      */
-    event OracleClockTick(address indexed tranche, uint32 lastUpdateTimestamp);
+    event CollateralAssetOraclePoked(address indexed tranche, uint32 lastUpdateTimestamp);
 
     /**
      * @notice Emitted when protocol fee shares are collected
@@ -219,11 +219,11 @@ interface IRoycoDayEntryPoint {
     /// @dev Thrown when a request does not exist, was already executed/cancelled, or is not yet executable
     error INVALID_REQUEST(uint256 requestNonce);
 
-    /// @dev Thrown when executing a request before the tranche's oracle clock has observed an oracle update after the request was placed
-    error ORACLE_CLOCK_NOT_ADVANCED(uint256 requestNonce);
+    /// @dev Thrown when executing a request before the tranche's collateral asset oracle has observed an oracle update after the request was placed
+    error COLLATERAL_ASSET_ORACLE_NOT_ADVANCED(uint256 requestNonce);
 
-    /// @dev Thrown when a poked oracle clock reports a future update timestamp
-    error ORACLE_CLOCK_IN_THE_FUTURE();
+    /// @dev Thrown when a poked collateral asset oracle reports a future update timestamp
+    error COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE();
 
     /// @dev Thrown when the executor bonus is not strictly less than 100% (WAD) and is not the opt-out sentinel value
     error INVALID_EXECUTOR_BONUS();
@@ -368,11 +368,11 @@ interface IRoycoDayEntryPoint {
     function cancelRedemptionRequest(uint256 _requestNonce, address _receiver) external;
 
     /**
-     * @notice Pokes the tranche's oracle clock, checkpointing any pending source update
-     * @param _tranche The tranche whose oracle clock to poke
+     * @notice Pokes the tranche's collateral asset oracle, checkpointing any pending source update
+     * @param _tranche The tranche whose collateral asset oracle to poke
      * @return lastUpdatedAt The clock's last update timestamp after the poke (zero when the tranche has no clock or it has observed no update yet)
      */
-    function pokeOracleClock(address _tranche) external returns (uint32 lastUpdatedAt);
+    function pokeCollateralAssetOracle(address _tranche) external returns (uint32 lastUpdatedAt);
 
     /**
      * @notice Modifies the entry point configuration for the specified tranches

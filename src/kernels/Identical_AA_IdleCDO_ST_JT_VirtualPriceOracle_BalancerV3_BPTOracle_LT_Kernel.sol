@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { BalancerPoolToken } from "../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
+import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
 import { RoycoDayKernel } from "./base/RoycoDayKernel.sol";
 import {
     IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter
@@ -74,4 +75,26 @@ contract Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_K
     function _isTrancheShareCustodian(address _account) internal view override(RoycoDayKernel, BalancerV3_LT_BPTOracle_Quoter) returns (bool) {
         return BalancerV3_LT_BPTOracle_Quoter._isTrancheShareCustodian(_account);
     }
+
+    /// @inheritdoc RoycoDayKernel
+    /// @dev The two quoter paths both reach the kernel base, so the ST/JT quoter's pricing is selected explicitly
+    function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets)
+        public
+        view
+        override(RoycoDayKernel, IdenticalAssets_ST_JT_Oracle_Quoter)
+        returns (NAV_UNIT value)
+    {
+        return IdenticalAssets_ST_JT_Oracle_Quoter.convertCollateralAssetsToValue(_collateralAssets);
+    }
+
+    /// @inheritdoc RoycoDayKernel
+    function convertValueToCollateralAssets(NAV_UNIT _value)
+        public
+        view
+        override(RoycoDayKernel, IdenticalAssets_ST_JT_Oracle_Quoter)
+        returns (TRANCHE_UNIT collateralAssets)
+    {
+        return IdenticalAssets_ST_JT_Oracle_Quoter.convertValueToCollateralAssets(_value);
+    }
+
 }

@@ -26,9 +26,6 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     /// @notice A sentinel value for the conversion rate, indicating that the conversion rate should be queried in real time from the specified oracle
     uint256 internal constant SENTINEL_CONVERSION_RATE = 0;
 
-    /// @dev Value representing the scale factor of the tranche unit: 10^(TRANCHE_UNIT_DECIMALS)
-    uint256 internal immutable TRANCHE_UNIT_SCALE_FACTOR;
-
     /**
      * @dev Storage state for the Royco identical assets overridable oracle quoter
      * @custom:storage-location erc7201:Royco.storage.IdenticalAssets_ST_JT_Oracle_QuoterState
@@ -42,12 +39,6 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     /// @param conversionRateWAD The updated conversion rate as defined by the oracle, scaled to WAD precision
     event ConversionRateUpdated(uint256 conversionRateWAD);
 
-    /// @dev Constructs the identical assets oracle quoter
-    constructor() {
-        // A single conversion rate prices the coinvested collateral both tranches deposit, so compute its tranche unit scale factor
-        TRANCHE_UNIT_SCALE_FACTOR = 10 ** IERC20Metadata(COLLATERAL_ASSET).decimals();
-    }
-
     /// @notice Initializes the identical assets oracle quoter
     /// @param _initialConversionRateWAD The initial conversion rate as defined by the oracle, scaled to WAD precision
     function __IdenticalAssets_ST_JT_Oracle_Quoter_init_unchained(uint256 _initialConversionRateWAD) internal onlyInitializing {
@@ -58,14 +49,14 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     }
 
     /// @inheritdoc RoycoDayKernel
-    function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) public view override(RoycoDayKernel) returns (NAV_UNIT value) {
+    function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) public view virtual override(RoycoDayKernel) returns (NAV_UNIT value) {
         return
-            toNAVUnits(toUint256(_collateralAssets.mulDiv(_getCachedTrancheUnitToNAVUnitConversionRateWAD(), TRANCHE_UNIT_SCALE_FACTOR, Math.Rounding.Floor)));
+            toNAVUnits(toUint256(_collateralAssets.mulDiv(_getCollateralAssetToNAVUnitConversionRateWAD(), COLLATERAL_ASSET_SCALE_FACTOR, Math.Rounding.Floor)));
     }
 
     /// @inheritdoc RoycoDayKernel
-    function convertValueToCollateralAssets(NAV_UNIT _value) public view override(RoycoDayKernel) returns (TRANCHE_UNIT collateralAssets) {
-        return toTrancheUnits(toUint256(_value.mulDiv(TRANCHE_UNIT_SCALE_FACTOR, _getCachedTrancheUnitToNAVUnitConversionRateWAD(), Math.Rounding.Floor)));
+    function convertValueToCollateralAssets(NAV_UNIT _value) public view virtual override(RoycoDayKernel) returns (TRANCHE_UNIT collateralAssets) {
+        return toTrancheUnits(toUint256(_value.mulDiv(COLLATERAL_ASSET_SCALE_FACTOR, _getCollateralAssetToNAVUnitConversionRateWAD(), Math.Rounding.Floor)));
     }
 
     /**
@@ -78,12 +69,12 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
      */
     function setConversionRate(uint256 _conversionRateWAD, bool _syncBeforeUpdate) public virtual restricted {
         // If specified, sync the tranche accounting to reflect the PNL up to this point in time
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccounting();
+        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithFreshCache();
         // Set the new conversion rate
         _getIdenticalAssets_ST_JT_Oracle_QuoterStorage().conversionRateWAD = _conversionRateWAD;
         emit ConversionRateUpdated(_conversionRateWAD);
         // Sync the tranche accounting to reflect the PNL from the updated conversion rate (the sync entrypoint refreshes the quoter cache to this new rate)
-        _preOpSyncTrancheAccounting();
+        _preOpSyncTrancheAccountingWithFreshCache();
     }
 
     /**
@@ -108,20 +99,7 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     /// @dev Called at the start of a synchronized operation to cache the tranche unit to NAV unit conversion rate, so every conversion in the operation values against one consistent rate, no teardown is needed, since each operation re-caches and the transient cache auto-clears at transaction end
     function _initializeQuoterCache() internal virtual override {
         // Cache the tranche unit to NAV unit conversion rate for the operation
-        Cache._write(CacheKey.COLLATERAL_ASSET_RATE, getTrancheUnitToNAVUnitConversionRateWAD());
-    }
-
-    /**
-     * @notice Returns the cached tranche unit to NAV unit conversion rate
-     * @dev If the cache slot is populated returns the cached value, otherwise falls back to querying the rate live for view function compatibility
-     * @return The tranche unit to NAV unit conversion rate
-     */
-    function _getCachedTrancheUnitToNAVUnitConversionRateWAD() internal view returns (uint256) {
-        // If the cache slot is populated use the cached value
-        (bool cacheHit, uint256 conversionRateWAD) = Cache._read(CacheKey.COLLATERAL_ASSET_RATE);
-        if (cacheHit) return conversionRateWAD;
-        // Otherwise fall back to querying the rate directly (for view functions)
-        return getTrancheUnitToNAVUnitConversionRateWAD();
+        Cache._write(CacheKey.COLLATERAL_ASSET_TO_NAV_RATE, getTrancheUnitToNAVUnitConversionRateWAD());
     }
 
     /**

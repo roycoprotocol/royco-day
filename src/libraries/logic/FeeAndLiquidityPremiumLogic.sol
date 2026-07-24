@@ -42,7 +42,7 @@ library FeeAndLiquidityPremiumLogic {
             _computeSTFeeAndLiquidityPremiumSharesToMint(_state, IERC20(_immutables.seniorTranche).totalSupply());
 
         // Cache the senior share rate at this sync's post-mint value before the reinvestment (or any venue mark read) consumes it, so an inline senior share move cannot shift the venue's senior-leg mark
-        Cache._write(CacheKey.ST_SHARE_RATE, toUint256(ValuationLogic._computeTrancheShareRate(stTotalSupplyAfterMints, _state.stEffectiveNAV)));
+        Cache._write(CacheKey.ST_SHARE_TO_NAV_RATE, toUint256(ValuationLogic._computeTrancheShareRate(stTotalSupplyAfterMints, _state.stEffectiveNAV)));
 
         // Mint the senior protocol fee shares (the ST protocol fee plus the LT protocol fee carved out of the premium) to the protocol fee recipient, priced identically to the premium shares minted above
         if (stProtocolFeeShares != 0) {

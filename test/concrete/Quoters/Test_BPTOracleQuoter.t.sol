@@ -301,7 +301,7 @@ contract Test_SeniorShareRateProvider_BPTOracleQuoter is DayMarketTestBase {
      * @notice With no sync in the transaction the cache is unset, so getRate() previews the senior-share rate live off
      *         current supply: doubling the senior supply against unchanged backing NAV halves the previewed rate
      * @dev The miss path a standalone off-chain read or a pre-sync pool interaction takes. No sync runs in the body, so
-     *      the ST_SHARE_RATE cache stays unset (Foundry clears transient storage at the setUp->test boundary) and both
+     *      the ST_SHARE_TO_NAV_RATE cache stays unset (Foundry clears transient storage at the setUp->test boundary) and both
      *      reads recompute live from committed state and the live supply
      */
     function test_GetRate_MissPathPreviewsLiveOffCurrentSeniorSupply() public {

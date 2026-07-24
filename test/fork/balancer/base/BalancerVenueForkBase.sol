@@ -28,7 +28,7 @@ import {
  *         assert against. Everything runs on the real forked Vault + Gyro E-CLP pool + E-CLP LP oracle the
  *         deploy template ships — nothing here touches a mock.
  * @dev Transient-cache discipline: foundry executes a whole test as ONE
- *      transaction, so the quoter's transient `ST_SHARE_RATE` cache persists across helper calls. `getRate()`
+ *      transaction, so the quoter's transient `ST_SHARE_TO_NAV_RATE` cache persists across helper calls. `getRate()`
  *      reads taken BEFORE any kernel op/sync in a test are cache-miss (fresh preview) reads; any read AFTER a
  *      sync observes the frozen cached mark of that sync. Each test states which regime it reads under.
  */

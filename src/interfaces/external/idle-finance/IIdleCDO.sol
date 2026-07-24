@@ -10,6 +10,9 @@ interface IIdleCDO {
     /// @notice Address of the AA (senior) tranche token contract
     function AATranche() external view returns (address);
 
+    /// @notice Address of the BB (junior) tranche token
+    function BBTranche() external view returns (address);
+
     /// @notice Underlying token of the CDO (e.g. USDC)
     function token() external view returns (address);
 

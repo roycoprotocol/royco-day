@@ -36,12 +36,20 @@ interface IRoycoDayKernel {
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
+     * @custom:field collateralAssetOracle - The collateral asset oracle pricing 1 whole collateral asset in NAV units
+     * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
+     * @custom:field sequencerUptimeFeed - The L2 sequencer uptime feed used to gate price queries (the null address when not applicable)
+     * @custom:field gracePeriodSeconds - The grace period in seconds after the L2 sequencer is back up before oracle prices are trusted again
      */
     struct RoycoDayKernelInitParams {
         address initialAuthority;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         address roycoBlacklist;
+        address collateralAssetOracle;
+        uint48 stalenessThresholdSeconds;
+        address sequencerUptimeFeed;
+        uint48 gracePeriodSeconds;
     }
 
     /**
@@ -53,6 +61,10 @@ interface IRoycoDayKernel {
      * @custom:field totalLTAssets - The yield bearing assets held by the liquidity tranche, in LT's asset units
      * @custom:field ltOwnedSeniorTrancheShares - The senior tranche shares held by the liquidity tranche (accumulated liquidity premium payments)
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
+     * @custom:field collateralAssetOracle - The collateral asset oracle pricing 1 whole collateral asset in NAV units, also the clock the kernel pokes on every quoter-cached operation
+     * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
+     * @custom:field sequencerUptimeFeed - The L2 sequencer uptime feed used to gate price queries (the null address when not applicable)
+     * @custom:field gracePeriodSeconds - The grace period in seconds after the L2 sequencer is back up before oracle prices are trusted again
      */
     struct RoycoDayKernelState {
         address protocolFeeRecipient;
@@ -61,6 +73,10 @@ interface IRoycoDayKernel {
         TRANCHE_UNIT totalLTAssets;
         uint256 ltOwnedSeniorTrancheShares;
         address roycoBlacklist;
+        address collateralAssetOracle;
+        uint48 stalenessThresholdSeconds;
+        address sequencerUptimeFeed;
+        uint48 gracePeriodSeconds;
     }
 
     /**
@@ -93,6 +109,16 @@ interface IRoycoDayKernel {
     /// @notice Emitted when the market's blacklist contract is updated
     /// @param roycoBlacklist The new blacklist contract address (the null address if screening is disabled)
     event RoycoBlacklistUpdated(address roycoBlacklist);
+
+    /// @notice Emitted when the collateral asset oracle is updated
+    /// @param collateralAssetOracle The new collateral asset oracle pricing 1 whole collateral asset in NAV units
+    /// @param stalenessThresholdSeconds The new staleness threshold seconds
+    event CollateralAssetOracleUpdated(address indexed collateralAssetOracle, uint48 stalenessThresholdSeconds);
+
+    /// @notice Emitted when the L2 sequencer uptime feed (and its grace period) used to gate price queries is updated
+    /// @param sequencerUptimeFeed The new L2 sequencer uptime feed (the null address if the check is disabled)
+    /// @param gracePeriodSeconds The new grace period seconds
+    event SequencerUptimeFeedUpdated(address indexed sequencerUptimeFeed, uint48 gracePeriodSeconds);
 
     /**
      * @notice Emitted when the kernel deploys its held liquidity-premium senior shares into the liquidity tranche's venue
@@ -135,6 +161,30 @@ interface IRoycoDayKernel {
 
     /// @notice Thrown when the senior tranche self-liquidation bonus is set above 100% (WAD)
     error INVALID_SELF_LIQUIDATION_BONUS();
+
+    /// @notice Thrown when the collateral asset oracle does not price this market's collateral asset
+    error COLLATERAL_ASSET_ORACLE_MISMATCH();
+
+    /// @notice Thrown when the staleness threshold seconds is zero
+    error INVALID_STALENESS_THRESHOLD_SECONDS();
+
+    /// @notice Thrown when a sequencer uptime feed is configured with a non-positive grace period
+    error INVALID_GRACE_PERIOD_SECONDS();
+
+    /// @notice Thrown when the collateral asset oracle's price is stale
+    error STALE_PRICE();
+
+    /// @notice Thrown when the collateral asset oracle's price is invalid
+    error INVALID_PRICE();
+
+    /// @notice Thrown when the price is incomplete
+    error INCOMPLETE_PRICE();
+
+    /// @notice Thrown when the L2 sequencer is reported down by the configured sequencer uptime feed
+    error SEQUENCER_DOWN();
+
+    /// @notice Thrown when the L2 sequencer's grace period has not fully elapsed since it was last restored
+    error GRACE_PERIOD_NOT_OVER();
 
     /// @notice Thrown when an LT multi-asset deposit is made with zero of both constituent assets (collateral and quote)
     error MUST_DEPOSIT_NON_ZERO_ASSETS();
@@ -179,18 +229,18 @@ interface IRoycoDayKernel {
     function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) external view returns (NAV_UNIT value);
 
     /**
-     * @notice Converts the specified LT assets denominated in its tranche units to their value in the kernel's NAV units
-     * @param _ltAssets The LT assets denominated in tranche units to convert to the kernel's NAV units
-     * @return value The specified LT assets denominated in its tranche units converted to the kernel's NAV units
-     */
-    function convertLTAssetsToValue(TRANCHE_UNIT _ltAssets) external view returns (NAV_UNIT value);
-
-    /**
      * @notice Converts the specified value denominated in the kernel's NAV units to collateral assets denominated in tranche units
      * @param _value The value denominated in the kernel's NAV units to convert to collateral assets denominated in tranche units
      * @return collateralAssets The specified value denominated in the kernel's NAV units converted to collateral assets denominated in tranche units
      */
     function convertValueToCollateralAssets(NAV_UNIT _value) external view returns (TRANCHE_UNIT collateralAssets);
+
+    /**
+     * @notice Converts the specified LT assets denominated in its tranche units to their value in the kernel's NAV units
+     * @param _ltAssets The LT assets denominated in tranche units to convert to the kernel's NAV units
+     * @return value The specified LT assets denominated in its tranche units converted to the kernel's NAV units
+     */
+    function convertLTAssetsToValue(TRANCHE_UNIT _ltAssets) external view returns (NAV_UNIT value);
 
     /**
      * @notice Converts the specified value denominated in the kernel's NAV units to assets denominated in LT's tranche units
@@ -434,6 +484,25 @@ interface IRoycoDayKernel {
      * @param _roycoBlacklist The address of the market's blacklist contract (or the null address to disable screening)
      */
     function setRoycoBlacklist(address _roycoBlacklist) external;
+
+    /**
+     * @notice Sets the collateral asset oracle pricing 1 whole collateral asset in NAV units
+     * @param _collateralAssetOracle The new collateral asset oracle
+     * @param _stalenessThresholdSeconds The new staleness threshold seconds
+     * @param _syncBeforeUpdate Whether to sync the tranche accounting before updating the collateral asset oracle
+     */
+    function setCollateralAssetOracle(address _collateralAssetOracle, uint48 _stalenessThresholdSeconds, bool _syncBeforeUpdate) external;
+
+    /**
+     * @notice Sets the L2 sequencer uptime feed and grace period used to gate price queries
+     * @param _sequencerUptimeFeed The new L2 sequencer uptime feed (set to the null address to disable the check)
+     * @param _gracePeriodSeconds The new grace period in seconds that must elapse after the L2 sequencer is restored before trusting the price
+     */
+    function setSequencerUptimeFeed(address _sequencerUptimeFeed, uint48 _gracePeriodSeconds) external;
+
+    /// @notice Returns the collateral asset oracle pricing 1 whole collateral asset in NAV units
+    /// @return collateralAssetOracle The collateral asset oracle
+    function getCollateralAssetOracle() external view returns (address collateralAssetOracle);
 
     /**
      * @notice Pre-balance update hook for the tranche

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { ChainlinkOracleClock } from "../../../src/entrypoint/clock/ChainlinkOracleClock.sol";
+import { MockFeedClock } from "../../mocks/MockFeedClock.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -25,7 +25,7 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  */
 contract Test_EntryPointOracleClockGate is EntryPointTestBase {
     uint256 internal stUnit;
-    ChainlinkOracleClock internal chainlinkClock;
+    MockFeedClock internal chainlinkClock;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
@@ -33,7 +33,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
         // The market's Chainlink feed is the steppy pricing layer for every tranche in this kernel family
-        chainlinkClock = new ChainlinkOracleClock(address(priceFeed));
+        chainlinkClock = new MockFeedClock(address(priceFeed));
     }
 
     /// @dev Deploys a checkpoint clock over the specified source behind an ERC1967 proxy, mirroring the production pattern
@@ -206,7 +206,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         // A clock reporting a future update timestamp would satisfy the execution gate without a genuine update:
         // the configuration must fail shut on the one half of clock honesty that is checkable on-chain
         MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
-        address clock = address(new ChainlinkOracleClock(address(feed2)));
+        address clock = address(new MockFeedClock(address(feed2)));
         feed2.setUpdatedAt(block.timestamp + 1 days);
         (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
         for (uint256 i = 0; i < configs.length; ++i) {
@@ -222,7 +222,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         // the request-time poke must fail shut rather than queue against a clock that can falsely open the gate
         MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
         feed2.setUpdatedAt(block.timestamp);
-        _setOracleClock(address(new ChainlinkOracleClock(address(feed2))));
+        _setOracleClock(address(new MockFeedClock(address(feed2))));
         feed2.setUpdatedAt(block.timestamp + 1 days);
 
         vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_IN_THE_FUTURE.selector);
@@ -235,7 +235,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         // cannot weaken the gate, it conservatively holds execution shut until the feed revives with a genuine update
         MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
         feed2.setUpdatedAt(block.timestamp);
-        _setOracleClock(address(new ChainlinkOracleClock(address(feed2))));
+        _setOracleClock(address(new MockFeedClock(address(feed2))));
         feed2.setUpdatedAt(0);
 
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
@@ -278,7 +278,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
         MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
         feed2.setUpdatedAt(block.timestamp);
-        _setOracleClock(address(new ChainlinkOracleClock(address(feed2))));
+        _setOracleClock(address(new MockFeedClock(address(feed2))));
         feed2.setUpdatedAt(block.timestamp + 1 days);
 
         vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_IN_THE_FUTURE.selector);

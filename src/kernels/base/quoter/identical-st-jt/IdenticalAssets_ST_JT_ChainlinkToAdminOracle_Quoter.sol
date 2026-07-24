@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
+import { RoycoDayKernel } from "../../RoycoDayKernel.sol";
 import { IdenticalAssets_ST_JT_AdminOracle_Quoter } from "./base/IdenticalAssets_ST_JT_AdminOracle_Quoter.sol";
 import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter } from "./base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
 import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
@@ -60,9 +61,36 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter is
     function getTrancheUnitToNAVUnitConversionRateWAD()
         public
         view
+        virtual
         override(IdenticalAssets_ST_JT_Oracle_Quoter, IdenticalAssets_ST_JT_ChainlinkOracle_Quoter)
         returns (uint256 trancheToNAVUnitConversionRateWAD)
     {
         return IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.getTrancheUnitToNAVUnitConversionRateWAD();
+    }
+
+    /// @inheritdoc RoycoDayKernel
+    /// @dev The admin and Chainlink quoter paths both reach the kernel base, so the Chainlink quoter's sequencer wiring is selected explicitly
+    function setSequencerUptimeFeed(
+        address _sequencerUptimeFeed,
+        uint48 _gracePeriodSeconds
+    )
+        external
+        virtual
+        override(RoycoDayKernel, IdenticalAssets_ST_JT_ChainlinkOracle_Quoter)
+        restricted
+    {
+        _setSequencerUptimeFeed(_sequencerUptimeFeed, _gracePeriodSeconds);
+    }
+
+    /// @inheritdoc RoycoDayKernel
+    function _setSequencerUptimeFeed(
+        address _sequencerUptimeFeed,
+        uint48 _gracePeriodSeconds
+    )
+        internal
+        virtual
+        override(RoycoDayKernel, IdenticalAssets_ST_JT_ChainlinkOracle_Quoter)
+    {
+        IdenticalAssets_ST_JT_ChainlinkOracle_Quoter._setSequencerUptimeFeed(_sequencerUptimeFeed, _gracePeriodSeconds);
     }
 }

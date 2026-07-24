@@ -3,10 +3,12 @@ pragma solidity ^0.8.28;
 
 import { BalancerPoolToken } from "../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
+import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
 import { RoycoDayKernel } from "./base/RoycoDayKernel.sol";
 import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "./base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
+import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter } from "./base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
 import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "./base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 
@@ -66,5 +68,49 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracl
     /// @inheritdoc RoycoDayKernel
     function _isTrancheShareCustodian(address _account) internal view override(RoycoDayKernel, BalancerV3_LT_BPTOracle_Quoter) returns (bool) {
         return BalancerV3_LT_BPTOracle_Quoter._isTrancheShareCustodian(_account);
+    }
+
+    /// @inheritdoc RoycoDayKernel
+    /// @dev The two quoter paths both reach the kernel base, so the ST/JT quoter's pricing is selected explicitly
+    function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets)
+        public
+        view
+        override(RoycoDayKernel, IdenticalAssets_ST_JT_Oracle_Quoter)
+        returns (NAV_UNIT value)
+    {
+        return IdenticalAssets_ST_JT_Oracle_Quoter.convertCollateralAssetsToValue(_collateralAssets);
+    }
+
+    /// @inheritdoc RoycoDayKernel
+    function convertValueToCollateralAssets(NAV_UNIT _value)
+        public
+        view
+        override(RoycoDayKernel, IdenticalAssets_ST_JT_Oracle_Quoter)
+        returns (TRANCHE_UNIT collateralAssets)
+    {
+        return IdenticalAssets_ST_JT_Oracle_Quoter.convertValueToCollateralAssets(_value);
+    }
+
+    /// @inheritdoc RoycoDayKernel
+    function setSequencerUptimeFeed(
+        address _sequencerUptimeFeed,
+        uint48 _gracePeriodSeconds
+    )
+        external
+        override(RoycoDayKernel, IdenticalAssets_ST_JT_ChainlinkOracle_Quoter)
+        restricted
+    {
+        _setSequencerUptimeFeed(_sequencerUptimeFeed, _gracePeriodSeconds);
+    }
+
+    /// @inheritdoc RoycoDayKernel
+    function _setSequencerUptimeFeed(
+        address _sequencerUptimeFeed,
+        uint48 _gracePeriodSeconds
+    )
+        internal
+        override(RoycoDayKernel, IdenticalAssets_ST_JT_ChainlinkOracle_Quoter)
+    {
+        IdenticalAssets_ST_JT_ChainlinkOracle_Quoter._setSequencerUptimeFeed(_sequencerUptimeFeed, _gracePeriodSeconds);
     }
 }
