@@ -35,6 +35,12 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
     uint24 internal constant NEW_DEPOSIT_DELAY = 5 minutes;
     uint24 internal constant NEW_REDEMPTION_DELAY = 5 minutes;
 
+    /// @dev The execution-window length applied to each configured tranche, measured from when a request becomes
+    ///      executable. The resolved expiry saturates at type(uint32).max, so a maximal window means requests
+    ///      effectively never expire.
+    uint32 internal constant NEW_DEPOSIT_EXPIRY = type(uint32).max;
+    uint32 internal constant NEW_REDEMPTION_EXPIRY = type(uint32).max;
+
     /// @dev Whether the collateral asset oracle execution gate is armed for every configured tranche (the oracle
     ///      itself is resolved live from each tranche's kernel).
     /// @dev TODO: arm the gate once the per-market collateral asset oracles are verified live.
@@ -99,7 +105,9 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
                 configs[3 * i + j] = IRoycoDayEntryPoint.TrancheConfig({
                     enabled: true,
                     depositDelaySeconds: NEW_DEPOSIT_DELAY,
+                    depositExpirySeconds: NEW_DEPOSIT_EXPIRY,
                     redemptionDelaySeconds: NEW_REDEMPTION_DELAY,
+                    redemptionExpirySeconds: NEW_REDEMPTION_EXPIRY,
                     gateByOracleUpdate: NEW_COLLATERAL_ASSET_ORACLE_ENABLED
                 });
             }

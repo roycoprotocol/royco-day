@@ -7,7 +7,11 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
 /**
  * @title IRoycoDayEntryPoint
  * @notice Interface for the RoycoDayEntryPoint contract enabling asynchronous deposit and redemption flows on Royco Tranches
- * @dev Requests escrow assets or shares behind per-tranche delays and oracle-clock gating, with queued yield forfeited to the protocol as fee shares
+ * @dev Requests escrow assets or shares behind per-tranche delays, an optional oracle-clock gate, and an expiry window
+ *      that saturates at type(uint32).max (a maximal window effectively never expires).
+ *      A queued request can never capture favorable price movement during its delay: a deposit is pinned to the shares it
+ *      would have minted at request time and a redemption to the value its shares were worth at request time, with any
+ *      excess forfeited to the protocol as fee shares. Once a request's expiry window elapses it may only be cancelled
  */
 interface IRoycoDayEntryPoint {
     /**
@@ -31,13 +35,19 @@ interface IRoycoDayEntryPoint {
      * @notice Configuration for a tranche on this entry point
      * @custom:field enabled - Whether the tranche is enabled for deposits and redemptions
      * @custom:field depositDelaySeconds - The delay in seconds between deposit request and execution
+     * @custom:field depositExpirySeconds - The length in seconds of a deposit request's execution window, measured from
+     *                                      the moment it becomes executable, saturates at type(uint32).max
      * @custom:field redemptionDelaySeconds - The delay in seconds between redemption request and execution
+     * @custom:field redemptionExpirySeconds - The length in seconds of a redemption request's execution window, measured
+     *                                         from the moment it becomes executable, saturates at type(uint32).max
      * @custom:field gateByOracleUpdate - Whether execution is gated on at least one collateral asset oracle update observed after the request
      */
     struct TrancheConfig {
         bool enabled;
         uint24 depositDelaySeconds;
+        uint32 depositExpirySeconds;
         uint24 redemptionDelaySeconds;
+        uint32 redemptionExpirySeconds;
         bool gateByOracleUpdate;
     }
 
@@ -58,20 +68,42 @@ interface IRoycoDayEntryPoint {
     /**
      * @notice A pending deposit request
      * @custom:field assets - The amount of assets requested to be deposited
+     * @custom:field equivalentSharesAtRequestTime - The amount of tranche shares equivalent to the requested assets at request time
      * @custom:field baseRequest - The base request data shared across request types
      */
     struct DepositRequest {
         TRANCHE_UNIT assets;
+        uint256 equivalentSharesAtRequestTime;
         BaseRequest baseRequest;
+    }
+
+    /**
+     * @notice The asset composition a redemption exits to
+     * @dev The senior and junior tranches only ever redeem in-kind, so their requests must use INKIND. MULTIASSET and
+     *      OPTIMIZED are liquidity-provider-tranche only
+     * @custom:field INKIND - Redeem in-kind: collateral assets for the senior and junior tranches, and the LP token plus
+     *                        the idle senior shares for the liquidity provider tranche
+     * @custom:field MULTIASSET - Liquidity provider tranche only: exit to the LP token's underlying constituent plus the quote asset
+     * @custom:field OPTIMIZED - Liquidity provider tranche only: redeem in-kind when the in-kind bound serves the whole
+     *                           request, otherwise take whichever of the in-kind or multi-asset bound redeems more shares
+     */
+    enum RedemptionMode {
+        INKIND,
+        MULTIASSET,
+        OPTIMIZED
     }
 
     /**
      * @notice A pending redemption request
      * @custom:field shares - The amount of escrowed shares pending redemption
+     * @custom:field valueAtRequestTime - The total value of the escrowed shares at request time
+     * @custom:field mode - The asset composition this redemption exits to (see RedemptionMode)
      * @custom:field baseRequest - The base request data shared across request types
      */
     struct RedemptionRequest {
         uint256 shares;
+        NAV_UNIT valueAtRequestTime;
+        RedemptionMode mode;
         BaseRequest baseRequest;
     }
 
@@ -80,18 +112,18 @@ interface IRoycoDayEntryPoint {
      * @custom:field tranche - The Royco tranche that this request is for
      * @custom:field queuedAtTimestamp - The timestamp at which the request was queued: execution requires the tranche's collateral asset oracle to report an update strictly after it
      * @custom:field executableAtTimestamp - The timestamp after which the request can be executed
+     * @custom:field expiresAtTimestamp - The timestamp at or after which the request can no longer be executed and may only be cancelled (saturated at type(uint32).max: a maximal value effectively never arrives)
      * @custom:field executorBonusWAD - The bonus percentage (0-100%) paid to third-party executors, scaled to WAD precision
      *                                  Set to type(uint64).max to restrict execution to the request owner only
      * @custom:field receiver - The address that will receive the output assets or shares
-     * @custom:field navAtRequestTime - The total NAV of the escrowed assets or shares at request time, used to calculate yield forfeiture on execution
      */
     struct BaseRequest {
         address tranche;
         uint32 queuedAtTimestamp;
         uint32 executableAtTimestamp;
+        uint32 expiresAtTimestamp;
         uint64 executorBonusWAD;
         address receiver;
-        NAV_UNIT navAtRequestTime;
     }
 
     /**
@@ -101,10 +133,17 @@ interface IRoycoDayEntryPoint {
      * @param tranche The tranche for which the deposit was requested
      * @param assets The amount of assets requested to be deposited into the tranche
      * @param executableAtTimestamp The timestamp at which the request can be executed
+     * @param expiresAtTimestamp The timestamp at or after which the request can no longer be executed and may only be cancelled (saturated at type(uint32).max: a maximal value effectively never arrives)
      * @param executorBonusWAD The bonus percentage offered to executors (type(uint64).max if opted out), scaled to WAD precision
      */
     event DepositRequested(
-        address indexed user, uint256 indexed nonce, address indexed tranche, TRANCHE_UNIT assets, uint32 executableAtTimestamp, uint64 executorBonusWAD
+        address indexed user,
+        uint256 indexed nonce,
+        address indexed tranche,
+        TRANCHE_UNIT assets,
+        uint32 executableAtTimestamp,
+        uint32 expiresAtTimestamp,
+        uint64 executorBonusWAD
     );
 
     /**
@@ -112,10 +151,10 @@ interface IRoycoDayEntryPoint {
      * @param user The user whose deposit request was executed
      * @param nonce The nonce identifying the executed request
      * @param executor The address that executed the request (user or executor)
-     * @param assetsDeposited The amount of assets deposited into the tranche (after bonus deduction if applicable)
-     * @param sharesMinted The amount of tranche shares minted to the receiver (after yield forfeiture if applicable)
-     * @param protocolFeeShares The shares forfeited to the protocol equating to the yield accrued during the request lifecycle (zero if NAV decreased)
-     * @param bonusAssets The amount of assets paid to the executor as a bonus (0 if self-executed)
+     * @param assetsDeposited The amount of assets deposited into the tranche
+     * @param sharesMinted The tranche shares minted for the user after share forfeiture (the receiver's and the executor's portions combined)
+     * @param protocolFeeShares The shares minted in excess of the request-time equivalent share count, forfeited to the protocol (zero if the tranche's share price did not fall during the request lifecycle)
+     * @param bonusShares The tranche shares paid to the executor as a bonus (0 if self-executed)
      */
     event DepositExecuted(
         address indexed user,
@@ -124,7 +163,7 @@ interface IRoycoDayEntryPoint {
         TRANCHE_UNIT assetsDeposited,
         uint256 sharesMinted,
         uint256 protocolFeeShares,
-        TRANCHE_UNIT bonusAssets
+        uint256 bonusShares
     );
 
     /**
@@ -142,11 +181,20 @@ interface IRoycoDayEntryPoint {
      * @param nonce The nonce identifying this request
      * @param tranche The tranche for which the redemption was requested
      * @param shares The amount of shares requested to be redeemed from the tranche
+     * @param mode The asset composition this redemption exits to (see RedemptionMode)
      * @param executableAtTimestamp The timestamp at which the request can be executed
+     * @param expiresAtTimestamp The timestamp at or after which the request can no longer be executed and may only be cancelled (saturated at type(uint32).max: a maximal value effectively never arrives)
      * @param executorBonusWAD The bonus percentage offered to executors (type(uint64).max if opted out), scaled to WAD precision
      */
     event RedemptionRequested(
-        address indexed user, uint256 indexed nonce, address indexed tranche, uint256 shares, uint32 executableAtTimestamp, uint64 executorBonusWAD
+        address indexed user,
+        uint256 indexed nonce,
+        address indexed tranche,
+        uint256 shares,
+        RedemptionMode mode,
+        uint32 executableAtTimestamp,
+        uint32 expiresAtTimestamp,
+        uint64 executorBonusWAD
     );
 
     /**
@@ -155,7 +203,7 @@ interface IRoycoDayEntryPoint {
      * @param nonce The nonce identifying the executed request
      * @param executor The address that executed the request (user or executor)
      * @param sharesRedeemed The shares redeemed for the user (the receiver's and the executor's portions combined)
-     * @param protocolFeeShares The shares forfeited to the protocol equating to the yield accrued during the request lifecycle (zero if NAV decreased)
+     * @param protocolFeeShares The shares forfeited to the protocol equating to the value the escrowed shares accrued during the request lifecycle (zero if their value did not increase)
      * @param userClaims The asset claims withdrawn to the receiver
      * @param quoteAssets The quote withdrawn to the receiver (zero unless a liquidity provider tranche redemption exits multi-asset)
      * @param bonusClaims The asset claims paid to the executor as a bonus (zero if self-executed)
@@ -219,6 +267,12 @@ interface IRoycoDayEntryPoint {
     /// @dev Thrown when a request does not exist, was already executed/cancelled, or is not yet executable
     error INVALID_REQUEST(uint256 requestNonce);
 
+    /// @dev Thrown when executing a request whose execution window has elapsed: an expired request may only be cancelled
+    error REQUEST_EXPIRED(uint256 requestNonce);
+
+    /// @dev Thrown when requesting a redemption mode the tranche does not support (only the liquidity provider tranche supports MULTIASSET and OPTIMIZED)
+    error UNSUPPORTED_REDEMPTION_MODE();
+
     /// @dev Thrown when executing a request before the tranche's collateral asset oracle has observed an oracle update after the request was placed
     error COLLATERAL_ASSET_ORACLE_NOT_ADVANCED(uint256 requestNonce);
 
@@ -240,6 +294,7 @@ interface IRoycoDayEntryPoint {
      * @param _executorBonusWAD The bonus percentage (0-100%), scaled to WAD precision, to pay executors for executing this request (use type(uint64).max to restrict execution to self only)
      * @return requestNonce The unique nonce identifying this deposit request
      * @return executableAtTimestamp The timestamp at which this request can be executed
+     * @return expiresAtTimestamp The timestamp at or after which this request can no longer be executed and may only be cancelled (saturated at type(uint32).max: a maximal value effectively never arrives)
      */
     function requestDeposit(
         address _tranche,
@@ -248,7 +303,7 @@ interface IRoycoDayEntryPoint {
         uint64 _executorBonusWAD
     )
         external
-        returns (uint256 requestNonce, uint32 executableAtTimestamp);
+        returns (uint256 requestNonce, uint32 executableAtTimestamp, uint32 expiresAtTimestamp);
 
     /**
      * @notice Executes multiple pending deposit requests across the specified users
@@ -268,12 +323,13 @@ interface IRoycoDayEntryPoint {
     /**
      * @notice Executes a pending deposit request for the specified user
      * @dev The request must exist and the configured delay period must have elapsed
-     *      If executed by a third party, the executor bonus is paid in assets before depositing the remainder
-     *      The executor and request owner are screened against the market's blacklist through the tranche's kernel (the tranche deposit screens the receiver)
+     *      If executed by a third party, the executor bonus is paid in freshly minted tranche shares: the full asset
+     *      amount is deposited and the executor takes a share slice of the user's post-forfeiture mint
+     *      The executor and request owner are screened against the market's blacklist through the tranche's kernel (the share transfers screen the receiver and executor through the kernel's balance update hook)
      * @param _user The user whose deposit request should be executed
      * @param _requestNonce The nonce of the deposit request to execute
      * @param _assetsToDeposit The amount of assets to deposit (use MAX_TRANCHE_UNITS to deposit the maximum possible)
-     * @return trancheSharesMinted The amount of tranche shares minted to the receiver
+     * @return trancheSharesMinted The tranche shares minted for the user (the receiver's and the executor's portions combined)
      */
     function executeDeposit(address _user, uint256 _requestNonce, TRANCHE_UNIT _assetsToDeposit) external returns (uint256 trancheSharesMinted);
 
@@ -299,22 +355,24 @@ interface IRoycoDayEntryPoint {
      * @param _shares The amount of tranche shares to redeem
      * @param _receiver The address that will receive the assets withdrawn upon redemption
      * @param _executorBonusWAD The bonus percentage, scaled to WAD precision, to pay executors for executing this request (use type(uint64).max to opt out of executor execution entirely)
+     * @param _mode The asset composition this redemption exits to; the senior and junior tranches only support INKIND (see RedemptionMode)
      * @return requestNonce The unique nonce identifying this redemption request
      * @return executableAtTimestamp The timestamp at which this request can be executed
+     * @return expiresAtTimestamp The timestamp at or after which this request can no longer be executed and may only be cancelled (saturated at type(uint32).max: a maximal value effectively never arrives)
      */
     function requestRedemption(
         address _tranche,
         uint256 _shares,
         address _receiver,
-        uint64 _executorBonusWAD
+        uint64 _executorBonusWAD,
+        RedemptionMode _mode
     )
         external
-        returns (uint256 requestNonce, uint32 executableAtTimestamp);
+        returns (uint256 requestNonce, uint32 executableAtTimestamp, uint32 expiresAtTimestamp);
 
     /**
      * @notice Executes multiple pending redemption requests across the specified users
-     * @dev A maximal liquidity provider tranche redemption may fall back to the multi-asset exit when the in-kind bound
-     *      cannot serve the entire remaining request (see executeRedemption)
+     * @dev Each request's exit route is fixed by its own RedemptionMode chosen at request time (see executeRedemption)
      * @param _users The users whose redemption requests should be executed
      * @param _requestNonces The nonces of the redemption requests to execute
      * @param _sharesToRedeem The amount of shares to redeem for the redemption requests to execute (use type(uint256).max to redeem the maximum possible)
@@ -332,11 +390,12 @@ interface IRoycoDayEntryPoint {
     /**
      * @notice Executes a pending redemption request for the specified user
      * @dev The request must exist and the configured delay period must have elapsed
-     *      A maximal liquidity provider tranche redemption exits in-kind whenever the in-kind bound serves the entire
-     *      remaining request, and otherwise fills up to the dominant bound capped at the remaining request,
-     *      exiting to the LP token's constituents only when the multi-asset bound is strictly wider (equal bounds
-     *      stay in-kind), so a redemption the market can serve is never left behind by the in-kind gate. Explicit
-     *      amounts always exit in-kind
+     *      The exit route follows the request's RedemptionMode (fixed at request time): INKIND redeems in-kind;
+     *      MULTIASSET exits the liquidity provider tranche to the LP token's constituent plus quote; OPTIMIZED redeems
+     *      in-kind when the in-kind bound serves the whole target and otherwise fills up to whichever of the in-kind or
+     *      multi-asset bound is wider (equal bounds stay in-kind), so a redemption the market can serve is never left
+     *      behind by the in-kind gate. A type(uint256).max amount targets the whole remaining request capped at the
+     *      mode's bound; an explicit amount targets exactly that many shares
      *      The executor and request owner are screened against the market's blacklist through the tranche's kernel, and a bonus-remitting third party execution screens the receiver as well (a self execution's redemption screens the receiver)
      * @param _user The user whose redemption request should be executed
      * @param _requestNonce The nonce of the redemption request to execute

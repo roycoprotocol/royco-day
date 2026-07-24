@@ -2,16 +2,17 @@
 pragma solidity ^0.8.28;
 
 import { AssetClaims } from "../../../src/libraries/Types.sol";
-import { toUint256 } from "../../../src/libraries/Units.sol";
+import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
  * @title TestFuzz_EntryPointPartialsAndForfeiture
- * @notice Fuzzes the yield-neutrality property over PnL magnitudes and partial-execution splits: the requester
- *         never captures queued yield (their proceeds are pinned to the request-time NAV within rounding), splitting
- *         an execution never changes the total forfeited, and the nav snapshot's pro-rata scaling conserves value
+ * @notice Fuzzes the yield-neutrality property over PnL magnitudes and partial-execution splits: the requester never
+ *         captures queued yield (a deposit's minted shares never exceed the request-time SHARE reference, a redemption's
+ *         proceeds are pinned to the request-time NAV within rounding), splitting an execution never changes the total
+ *         forfeited, and the snapshot's pro-rata scaling conserves value
  */
 contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
     uint256 internal stUnit;
@@ -23,7 +24,7 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
         _deployEntryPoint();
     }
 
-    /// @notice For any queued gain, the depositor's minted shares are worth the request-time NAV, never more
+    /// @notice For any queued gain, the depositor's minted shares never exceed the request-time SHARE reference
     function testFuzz_depositYieldNeutrality(uint256 _assets, uint256 _gainBps) public {
         _assets = bound(_assets, stUnit, 100 * stUnit);
         _gainBps = bound(_gainBps, 1, 5000);
@@ -47,22 +48,24 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
 
     function _checkDepositYieldNeutrality(uint256 _assets, uint256 _gainBps) internal {
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), _assets, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        uint256 sharesRef = entryPoint.getDepositRequest(USER_A, nonce).equivalentSharesAtRequestTime;
 
         applySTPnL(int256(_gainBps));
         _warpPastDepositDelay();
-        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
 
-        // The user's share value is pinned to the request-time NAV: forfeiture flooring may leave them dust above,
-        // bounded by one share-wei of NAV, so assert the hard gain-direction ceiling plus a tight relative envelope
-        uint256 userNav = toUint256(juniorTranche.convertToAssets(userShares).nav);
-        assertLe(
-            userNav,
-            navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1,
-            "the depositor must never clear more than the snapshot plus rounding dust"
-        );
-        assertApproxEqRel(userNav, navAtRequest, 0.001e18, "the depositor's proceeds must be pinned to the request-time NAV");
-        assertGt(entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche)), 0, "a queued gain must always forfeit");
+        // The shares the deposit mints now, the execution-stage leg of the min against the request-time reference.
+        // Equals what the entry point's internal previewDeposit reads and what deposit mints, by construction
+        uint256 forfeitedBefore = entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche));
+        uint256 sharesExec = juniorTranche.previewDeposit(toTrancheUnits(_assets));
+        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
+        // The full request executes, so sharesExec is the exact execution reference the forfeiture conserves
+        assertEq(toUint256(entryPoint.getDepositRequest(USER_A, nonce).assets), 0, "the deposit must fully execute for the share-exec reference to hold");
+        uint256 forfeited = entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche)) - forfeitedBefore;
+
+        // The depositor's minted shares never exceed the request-time reference: any queued appreciation over the
+        // collateral is capped away, never captured. Forfeiture conserves the shares minted now
+        assertLe(userShares, sharesRef, "the depositor's minted shares must never exceed the request-time reference");
+        assertEq(userShares + forfeited, sharesExec, "forfeiture must conserve the shares minted now");
     }
 
     /// @notice For any queued gain, the redeemer's claims are worth the request-time NAV, never more
@@ -75,7 +78,7 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
     function _checkRedemptionYieldNeutrality(uint256 _assets, uint256 _gainBps) internal {
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), _assets);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        uint256 navAtRequest = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).valueAtRequestTime);
 
         applySTPnL(int256(_gainBps));
         _warpPastRedemptionDelay();
@@ -89,26 +92,26 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
         );
     }
 
-    /// @notice The deposit-side forfeiture must pin the depositor to the request-time NAV at ANY pool share:
-    ///         the deposit sweeps from dust to whale territory (~10x the seeded JT pool)
+    /// @notice The deposit-side forfeiture must cap the depositor at the request-time SHARE reference at ANY pool
+    ///         share: the deposit sweeps from dust to whale territory (~10x the seeded JT pool)
     function testFuzz_depositForfeiture_neutralityAtAnyPoolShare(uint256 _assets, uint256 _gainBps) public {
         _assets = bound(_assets, stUnit, 5000 * stUnit);
         _gainBps = bound(_gainBps, 1, 5000);
 
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), _assets, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        uint256 sharesRef = entryPoint.getDepositRequest(USER_A, nonce).equivalentSharesAtRequestTime;
 
         applySTPnL(int256(_gainBps));
         _warpPastDepositDelay();
-        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
 
-        uint256 userNav = toUint256(juniorTranche.convertToAssets(userShares).nav);
-        assertLe(
-            userNav,
-            navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1,
-            "the depositor must never clear more than the snapshot plus rounding dust"
-        );
-        assertApproxEqRel(userNav, navAtRequest, 0.001e18, "the depositor's share value must be pinned to the request-time NAV");
+        uint256 forfeitedBefore = entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche));
+        uint256 sharesExec = juniorTranche.previewDeposit(toTrancheUnits(_assets));
+        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
+        assertEq(toUint256(entryPoint.getDepositRequest(USER_A, nonce).assets), 0, "the deposit must fully execute for the share-exec reference to hold");
+        uint256 forfeited = entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche)) - forfeitedBefore;
+
+        assertLe(userShares, sharesRef, "the depositor's minted shares must never exceed the request-time reference");
+        assertEq(userShares + forfeited, sharesExec, "forfeiture must conserve the shares minted now");
     }
 
     /// @notice Splitting an execution into two arbitrary slices forfeits the same total as a single execution
@@ -144,7 +147,7 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
 
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), _assets);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
-        uint256 navBefore = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        uint256 navBefore = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).valueAtRequestTime);
         _warpPastRedemptionDelay();
 
         uint256 slice = (shares * _splitBps) / 10_000;
@@ -152,7 +155,7 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
         _executeRedemption(USER_A, USER_A, nonce, slice);
 
         // remaining snapshot == floor(navBefore * remainingShares / shares); the executed slice consumed the rest
-        uint256 navAfter = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        uint256 navAfter = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).valueAtRequestTime);
         uint256 expectedRemaining = (navBefore * (shares - slice)) / shares;
         assertEq(navAfter, expectedRemaining, "the remaining nav snapshot must be the floor-scaled pro-rata value");
     }

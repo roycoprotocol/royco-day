@@ -552,6 +552,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             name: _config.liquidityProviderTrancheName, symbol: _config.liquidityProviderTrancheSymbol, initialAuthority: address(0)
         });
         params.collateralAsset = _config.collateralAsset;
+        // The intended quote asset: the template pins the pool's second token against it during pool verification
+        params.quoteAsset = _config.gyroECLPPoolParams.quoteAsset;
+        params.deployPoolHook = _config.deployPoolHook;
         params.marketContracts = _marketContracts;
 
         // Accountant init params. `jtYDM`/`lptYDM` are overwritten by the template with the deployed instances. BOTH YDMs get
@@ -882,10 +885,14 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         _logCreated("SeniorTranche (proxy)  ", stProxy);
     }
 
-    /// @notice Pre-deploys the pool-hook proxy against the stand-in impl, creates the market's Gyro E-CLP pool, and
-    ///         deploys the pool's BPT oracle
-    /// @dev The hook proxy's init data is a non-empty no-op: the hardened ERC1967Proxy rejects empty init data, and the
-    ///      stand-in's fallback swallows the delegatecall (the proxy is upgraded to the real hook in the wiring tx).
+    /// @notice Optionally pre-deploys the pool-hook proxy against the stand-in impl, creates the market's Gyro E-CLP
+    ///         pool, and deploys the pool's BPT oracle
+    /// @dev When the market opts out of the hook (`deployPoolHook == false`) the stand-in proxy step is skipped
+    ///      entirely and the pool registers hookless (`poolHooksContract == address(0)`): the Vault then never
+    ///      consults hook callbacks, so external pool ops execute without the pre-op accounting sync.
+    ///      When hooked: the hook proxy's init data is a non-empty no-op (the hardened ERC1967Proxy rejects empty
+    ///      init data, and the stand-in's fallback swallows the delegatecall; the proxy is upgraded to the real hook
+    ///      in the wiring tx).
     ///      The pool's senior leg rate provider is the predicted (still codeless) kernel; its role accounts are the AM.
     ///      The BPT oracle is deployed here (co-located with pool creation) to keep `_deployMarketContracts` under the stack limit
     function _createPoolWithHookProxy(
@@ -900,10 +907,13 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         internal
         returns (address balancerPool, address bptOracle)
     {
-        address hookProxy = _factory.deployDeterministicProxy(
-            RoycoDayBalancerV3MarketDeploymentTemplate(_template).BALANCER_HOOK_STANDIN_IMPL(), bytes("no-op"), _salt(_marketId, TAG_BALANCER_HOOK_PROXY)
-        );
-        _logCreated("Pool hook (proxy)      ", hookProxy);
+        address hookProxy;
+        if (_config.deployPoolHook) {
+            hookProxy = _factory.deployDeterministicProxy(
+                RoycoDayBalancerV3MarketDeploymentTemplate(_template).BALANCER_HOOK_STANDIN_IMPL(), bytes("no-op"), _salt(_marketId, TAG_BALANCER_HOOK_PROXY)
+            );
+            _logCreated("Pool hook (proxy)      ", hookProxy);
+        }
 
         balancerPool =
             _createBalancerV3Pool(_config.gyroECLPPoolParams, _seniorTranche, _kernelProxy, hookProxy, _accessManager, _salt(_marketId, TAG_BALANCER_V3_POOL));

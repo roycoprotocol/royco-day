@@ -269,6 +269,8 @@ struct MarketConfig {
     uint256 lptYdmTargetUtilizationWAD; // LDM target-utilization kink
     // Liquidity provider tranche: the Gyro E-CLP {ST_share, quote} pool the LPT BPT is minted from.
     GyroECLPPoolParams gyroECLPPoolParams;
+    // Whether to deploy the Balancer pool hook
+    bool deployPoolHook;
     // Entry point config per tranche
     IRoycoDayEntryPoint.TrancheConfig stEntryPointConfig;
     IRoycoDayEntryPoint.TrancheConfig jtEntryPointConfig;

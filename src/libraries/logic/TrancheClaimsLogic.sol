@@ -94,12 +94,14 @@ library TrancheClaimsLogic {
      * @param _claims The asset claims of the tranche
      * @param _shares The number of shares to scale the claims by
      * @param _totalTrancheShares The total number of shares that exist in the tranche
+     * @param _includeVirtualShares Whether to use virtual shares for the scaling
      * @return scaledClaims The scaled asset claims of the tranche
      */
     function _scaleAssetClaims(
         AssetClaims memory _claims,
         uint256 _shares,
-        uint256 _totalTrancheShares
+        uint256 _totalTrancheShares,
+        bool _includeVirtualShares
     )
         internal
         pure
@@ -109,7 +111,7 @@ library TrancheClaimsLogic {
         if (_totalTrancheShares == 0) return scaledClaims;
 
         // Scale the claims by the redeemer's fraction of the EFFECTIVE supply
-        uint256 effectiveTrancheShares = _totalTrancheShares + VIRTUAL_SHARES;
+        uint256 effectiveTrancheShares = _totalTrancheShares + (_includeVirtualShares ? VIRTUAL_SHARES : 0);
         scaledClaims.nav = _claims.nav.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
         scaledClaims.collateralAssets = _claims.collateralAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
         scaledClaims.lptAssets = _claims.lptAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);

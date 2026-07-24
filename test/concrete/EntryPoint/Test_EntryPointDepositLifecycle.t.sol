@@ -59,7 +59,7 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
             assertEq(request.baseRequest.receiver, USER_A, "request receiver");
             assertEq(request.baseRequest.executableAtTimestamp, executableAt, "request executableAt");
             assertEq(executableAt, uint32(block.timestamp + DEFAULT_DEPOSIT_DELAY), "executableAt must be now + deposit delay");
-            assertGt(toUint256(request.baseRequest.navAtRequestTime), 0, "the nav snapshot must be taken on every request");
+            assertGt(request.equivalentSharesAtRequestTime, 0, "the share reference must be snapshotted on every request");
         }
     }
 
@@ -189,16 +189,80 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(1));
     }
 
-    function test_executeDeposit_partial_scalesNavSnapshotProRata() public {
+    function test_executeDeposit_partial_scalesShareReferenceProRata() public {
         uint256 amount = _depositAmount(address(juniorTranche));
         (uint256 nonce,) = _requestDepositDefault(USER_A, address(juniorTranche), amount);
-        uint256 navBefore = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        uint256 sharesBefore = entryPoint.getDepositRequest(USER_A, nonce).equivalentSharesAtRequestTime;
         _warpPastDepositDelay();
 
         _executeDeposit(USER_A, USER_A, nonce, amount / 2);
-        uint256 navAfter = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        uint256 sharesAfter = entryPoint.getDepositRequest(USER_A, nonce).equivalentSharesAtRequestTime;
         // Exact floor: the remaining slice floors so the executed slice keeps the rounding, keeping forfeiture conservative
-        assertEq(navAfter, Math.mulDiv(navBefore, amount - (amount / 2), amount), "nav snapshot must floor-scale by the remaining assets");
+        assertEq(
+            sharesAfter,
+            Math.mulDiv(sharesBefore, amount - (amount / 2), amount, Math.Rounding.Floor),
+            "the share reference must floor-scale by the remaining assets"
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // executeDeposit: share-basis forfeiture
+    // ---------------------------------------------------------------------
+
+    /// @notice Deposit forfeiture is measured on the request-time SHARE reference: execution caps the user at
+    ///         min(equivalentSharesAtRequestTime, sharesMintedNow) and forfeits the positive excess to the protocol
+    /// @dev A SENIOR deposit while the collateral appreciates. The senior yield is capped (the surplus premium is paid
+    ///      to JT/LT), so the senior share NAV grows SLOWER than the collateral asset being deposited. A fixed asset
+    ///      count therefore mints MORE senior shares at execution than the request-time reference, so the excess is
+    ///      forfeited and the user is capped at the reference, never capturing the queued relative appreciation
+    function test_executeDeposit_shareBasisForfeiture_underperformanceForfeitsExcess() public {
+        uint256 amount = _depositAmount(address(seniorTranche));
+        (uint256 nonce,) = _requestDeposit(USER_A, address(seniorTranche), amount, USER_A, 0);
+        uint256 sharesRef = entryPoint.getDepositRequest(USER_A, nonce).equivalentSharesAtRequestTime;
+        assertGt(sharesRef, 0, "arrange: the senior deposit must snapshot a share reference");
+
+        // +10% collateral appreciation: the capped senior lags it, so the same assets mint more senior shares now
+        applySTPnL(1000);
+        _warpPastDepositDelay();
+
+        uint256 protocolBefore = entryPoint.getProtocolFeeSharesPendingCollection(address(seniorTranche));
+        // The shares the deposit mints now, the execution-stage leg of the min against the request-time reference
+        uint256 sharesExec = seniorTranche.previewDeposit(toTrancheUnits(amount));
+        assertGt(sharesExec, sharesRef, "arrange: the underperforming senior must mint more shares at execution");
+        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
+        assertEq(toUint256(entryPoint.getDepositRequest(USER_A, nonce).assets), 0, "the deposit must fully execute in one shot");
+        uint256 forfeited = entryPoint.getProtocolFeeSharesPendingCollection(address(seniorTranche)) - protocolBefore;
+
+        // The user is capped at the request-time reference and the positive excess is forfeited, conserving the mint
+        assertEq(userShares, Math.min(sharesRef, sharesExec), "the user must receive min(reference, execution)");
+        assertEq(userShares, sharesRef, "underperformance caps the user at the request-time reference");
+        assertEq(userShares + forfeited, sharesExec, "forfeiture must conserve the shares minted now");
+        assertGt(forfeited, 0, "an underperforming tranche must forfeit the share excess");
+    }
+
+    /// @notice When the tranche does not underperform the collateral, execution mints no more than the request-time
+    ///         reference, the min binds with no excess, and nothing is forfeited: the depositor gets the fair entry
+    /// @dev A SENIOR deposit with no collateral PnL during the delay. Absent any relative underperformance the senior
+    ///      share NAV can only hold flat or drift up (senior never underperforms the collateral without a collateral
+    ///      loss), so the same assets mint no MORE shares at execution than the reference, hence no excess to forfeit
+    function test_executeDeposit_shareBasisForfeiture_noExcessWhenNotUnderperforming() public {
+        uint256 amount = _depositAmount(address(seniorTranche));
+        (uint256 nonce,) = _requestDeposit(USER_A, address(seniorTranche), amount, USER_A, 0);
+        uint256 sharesRef = entryPoint.getDepositRequest(USER_A, nonce).equivalentSharesAtRequestTime;
+        _warpPastDepositDelay();
+
+        uint256 protocolBefore = entryPoint.getProtocolFeeSharesPendingCollection(address(seniorTranche));
+        uint256 sharesExec = seniorTranche.previewDeposit(toTrancheUnits(amount));
+        // No collateral PnL, so the senior does not underperform: execution mints no more than the reference
+        assertLe(sharesExec, sharesRef, "a non-underperforming senior must mint no more than the request-time reference");
+        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
+        assertEq(toUint256(entryPoint.getDepositRequest(USER_A, nonce).assets), 0, "the deposit must fully execute in one shot");
+        uint256 forfeited = entryPoint.getProtocolFeeSharesPendingCollection(address(seniorTranche)) - protocolBefore;
+
+        // The min binds on the execution amount, so the user gets the full execution amount and nothing is forfeited
+        assertEq(userShares, Math.min(sharesRef, sharesExec), "the user must receive min(reference, execution)");
+        assertEq(userShares, sharesExec, "with no excess the user gets the full execution amount");
+        assertEq(forfeited, 0, "a non-underperforming tranche forfeits nothing");
     }
 
     function test_executeDeposit_maxSentinel_capacityBound_partialFillsAndQueuesRemainder() public {
@@ -207,7 +271,7 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
         assertGt(capacity, 0, "arrange: the market must have senior deposit capacity");
         uint256 amount = capacity * 2;
         (uint256 nonce,) = _requestDeposit(USER_A, address(seniorTranche), amount, USER_A, 0);
-        uint256 navBefore = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        uint256 sharesBefore = entryPoint.getDepositRequest(USER_A, nonce).equivalentSharesAtRequestTime;
         _warpPastDepositDelay();
 
         uint256 minted = _executeDepositMax(USER_A, USER_A, nonce);
@@ -216,9 +280,9 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
         assertGt(executed, 0, "the sentinel must fill the market's capacity");
         assertLt(executed, amount, "the capacity, not the request, must bind the fill");
         assertEq(
-            toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime),
-            Math.mulDiv(navBefore, amount - executed, amount),
-            "the queued remainder's snapshot must floor-scale by the unfilled assets"
+            entryPoint.getDepositRequest(USER_A, nonce).equivalentSharesAtRequestTime,
+            Math.mulDiv(sharesBefore, amount - executed, amount, Math.Rounding.Floor),
+            "the queued remainder's share reference must floor-scale by the unfilled assets"
         );
     }
 
@@ -226,8 +290,8 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
         uint256 amount = _depositAmount(address(juniorTranche));
         (uint256 nonce,) = _requestDepositDefault(USER_A, address(juniorTranche), amount);
         _warpPastDepositDelay();
-        // Specifically the escrow-remainder underflow: over-execution must never be admitted by an earlier gate
-        vm.expectRevert(stdError.arithmeticError);
+        // The explicit bounds guard rejects an over-execution with a typed revert (mirroring the redemption path)
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.INVALID_REQUEST.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(amount + 1));
     }
@@ -254,37 +318,40 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
     // executeDeposit: third-party execution
     // ---------------------------------------------------------------------
 
-    function test_executeDeposit_thirdParty_paysBonusInAssets() public {
+    function test_executeDeposit_thirdParty_paysBonusInShares() public {
         uint256 amount = _depositAmount(address(juniorTranche));
         (uint256 nonce,) = _requestDepositDefault(USER_A, address(juniorTranche), amount);
         _warpPastDepositDelay();
 
-        uint256 executorAssetsBefore = stJtVault.balanceOf(EXECUTOR);
+        uint256 executorSharesBefore = juniorTranche.balanceOf(EXECUTOR);
+        uint256 receiverSharesBefore = juniorTranche.balanceOf(USER_A);
         uint256 shares = _executeDepositMax(EXECUTOR, USER_A, nonce);
 
-        uint256 expectedBonus = (amount * DEFAULT_EXECUTOR_BONUS) / 1e18;
-        assertEq(stJtVault.balanceOf(EXECUTOR) - executorAssetsBefore, expectedBonus, "executor must receive the flooring bonus in assets");
-        assertGt(shares, 0, "the remainder must be deposited for the receiver");
+        // The full escrow is deposited; the executor's bonus is a flooring share slice of the user's minted shares
+        uint256 expectedBonus = (shares * DEFAULT_EXECUTOR_BONUS) / 1e18;
+        assertGt(expectedBonus, 0, "sanity: the bonus slice must be nonzero at this size");
+        assertEq(juniorTranche.balanceOf(EXECUTOR) - executorSharesBefore, expectedBonus, "executor must receive the flooring bonus in tranche shares");
+        assertEq(juniorTranche.balanceOf(USER_A) - receiverSharesBefore, shares - expectedBonus, "the receiver must keep the remainder of the minted shares");
     }
 
-    function test_executeDeposit_thirdParty_zeroBonusPathMintsDirectly() public {
+    function test_executeDeposit_thirdParty_zeroBonusPathPaysExecutorNothing() public {
         uint256 amount = _depositAmount(address(juniorTranche));
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, 0);
         _warpPastDepositDelay();
 
-        uint256 executorAssetsBefore = stJtVault.balanceOf(EXECUTOR);
+        uint256 executorSharesBefore = juniorTranche.balanceOf(EXECUTOR);
         uint256 shares = _executeDepositMax(EXECUTOR, USER_A, nonce);
-        assertEq(stJtVault.balanceOf(EXECUTOR), executorAssetsBefore, "a zero-bonus execution pays the executor nothing");
+        assertEq(juniorTranche.balanceOf(EXECUTOR), executorSharesBefore, "a zero-bonus execution pays the executor nothing");
         assertGt(shares, 0, "the full amount must be deposited for the receiver");
     }
 
     function test_executeDeposit_thirdParty_tinyAmountBonusRoundsToZero() public {
-        // 50 wei at a 1% bonus floors to 0 bonus assets
+        // 50 wei mints ~50 share wei, so a 1% bonus floors to 0 bonus shares
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 50, USER_A, DEFAULT_EXECUTOR_BONUS);
         _warpPastDepositDelay();
-        uint256 executorAssetsBefore = stJtVault.balanceOf(EXECUTOR);
+        uint256 executorSharesBefore = juniorTranche.balanceOf(EXECUTOR);
         _executeDepositMax(EXECUTOR, USER_A, nonce);
-        assertEq(stJtVault.balanceOf(EXECUTOR), executorAssetsBefore, "a dust bonus must floor to zero");
+        assertEq(juniorTranche.balanceOf(EXECUTOR), executorSharesBefore, "a dust bonus must floor to zero");
     }
 
     // ---------------------------------------------------------------------

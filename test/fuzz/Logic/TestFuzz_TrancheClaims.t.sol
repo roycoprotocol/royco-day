@@ -66,7 +66,7 @@ contract TestFuzz_TrancheClaims_Logic is Test {
         _shares = bound(_shares, 0, _totalShares); // full redeemer slice range: 0 through the entire supply
 
         AssetClaims memory total = _claims(_collateral, _lt, _stShares, _nav);
-        AssetClaims memory scaled = TrancheClaimsLogic._scaleAssetClaims(total, _shares, _totalShares);
+        AssetClaims memory scaled = TrancheClaimsLogic._scaleAssetClaims(total, _shares, _totalShares, true);
 
         RoycoTestMath.Claims memory want = RoycoTestMath.scaleClaims(
             RoycoTestMath.Claims({ collateralAssets: _collateral, lptAssets: _lt, stShares: _stShares, nav: _nav }), _shares, _totalShares
@@ -113,9 +113,9 @@ contract TestFuzz_TrancheClaims_Logic is Test {
         uint256 sharesC = _totalShares - _sharesA - _sharesB; // third slice completes the exact partition
 
         AssetClaims memory total = _claims(_collateral, _lt, _stShares, _nav);
-        AssetClaims memory a = TrancheClaimsLogic._scaleAssetClaims(total, _sharesA, _totalShares);
-        AssetClaims memory b = TrancheClaimsLogic._scaleAssetClaims(total, _sharesB, _totalShares);
-        AssetClaims memory c = TrancheClaimsLogic._scaleAssetClaims(total, sharesC, _totalShares);
+        AssetClaims memory a = TrancheClaimsLogic._scaleAssetClaims(total, _sharesA, _totalShares, true);
+        AssetClaims memory b = TrancheClaimsLogic._scaleAssetClaims(total, _sharesB, _totalShares, true);
+        AssetClaims memory c = TrancheClaimsLogic._scaleAssetClaims(total, sharesC, _totalShares, true);
 
         // Per-field bound: the withheld virtual-share sliver ceil(field*VIRTUAL_SHARES/(totalShares+VIRTUAL_SHARES))
         // plus < 3 floor dust from the three slices (integer bound + 2).
@@ -125,7 +125,9 @@ contract TestFuzz_TrancheClaims_Logic is Test {
             _partitionDustBound(_collateral, _totalShares),
             "collateralAssets"
         );
-        _assertPartitionField(toUint256(a.lptAssets) + toUint256(b.lptAssets) + toUint256(c.lptAssets), _lt, _partitionDustBound(_lt, _totalShares), "lptAssets");
+        _assertPartitionField(
+            toUint256(a.lptAssets) + toUint256(b.lptAssets) + toUint256(c.lptAssets), _lt, _partitionDustBound(_lt, _totalShares), "lptAssets"
+        );
         _assertPartitionField(a.stShares + b.stShares + c.stShares, _stShares, _partitionDustBound(_stShares, _totalShares), "stShares");
         _assertPartitionField(toUint256(a.nav) + toUint256(b.nav) + toUint256(c.nav), _nav, _partitionDustBound(_nav, _totalShares), "nav");
     }

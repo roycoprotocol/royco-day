@@ -315,6 +315,28 @@ library RoycoTestMath {
     }
 
     /**
+     * @notice Shares a value maps to at the fair virtual-shares price WITHOUT the mint-dilution clamp:
+     *         ⌊(supply + VIRTUAL_SHARES) · value / (totalValue + VIRTUAL_ASSETS)⌋.
+     * @dev Mirrors src ValuationLogic._convertToSharesUnclamped — the entry point's deposit-forfeiture reference
+     *      (equivalentSharesAtRequestTime). The clamp only ever lowers a real mint, so the unclamped reference is
+     *      never below the actual mint and never causes spurious forfeiture.
+     *      Edges: identical to convertToShares minus the clamp — a genuinely fresh tranche (supply == 0 AND
+     *      totalValue == 0) maps 1:1; empty-with-backing falls through to the priced branch; totalValue == 0 with a
+     *      live supply pins the denominator to the 1-wei VIRTUAL_ASSETS.
+     *      Rounding: Floor.
+     * @param value The value being referenced
+     * @param totalValue The total value backing the supply
+     * @param supply The share supply
+     * @return shares The shares the value maps to at the fair, unclamped price
+     */
+    function convertToSharesUnclamped(uint256 value, uint256 totalValue, uint256 supply) internal pure returns (uint256 shares) {
+        // A genuinely fresh tranche (no shares, no backing) maps 1:1; matches the convertToShares fresh branch
+        if (supply == 0 && totalValue == 0) return value;
+        // The fair virtual-shares price: convertToShares' unclamped branch
+        shares = Math.mulDiv(supply + VIRTUAL_SHARES, value, totalValue + VIRTUAL_VALUE);
+    }
+
+    /**
      * @notice Value redeemed for shares: ⌊(totalValue + VIRTUAL_ASSETS) · shares / (supply + VIRTUAL_SHARES)⌋.
      * @dev Mirrors src ValuationLogic._convertToValue.
      *      Edge: only a genuinely fresh tranche (supply == 0 AND totalValue == 0) returns 0; with backing but no

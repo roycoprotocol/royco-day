@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
@@ -92,6 +94,9 @@ contract Test_EntryPointMarketStateGating is EntryPointTestBase {
     // Liquidation breach (forced PERPETUAL)
     // ---------------------------------------------------------------------
 
+    /// @dev The forfeiture reference is the gate-free totalAssets view, which EXCLUDES the per-redemption
+    ///      self-liquidation bonus (the kernel folds the bonus into stRedeem, not into the tranche total NAV), so the
+    ///      bonus is never skimmed as queued yield and flows through to the redeemer on top of the request-time claim
     function test_liquidation_stRedemptionPaysSelfLiquidationBonusThroughEntryPoint() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(seniorTranche), shares, USER_A, 0);
@@ -106,6 +111,76 @@ contract Test_EntryPointMarketStateGating is EntryPointTestBase {
 
         assertGt(toUint256(claims.nav), proRataNAV, "the liquidation-state redemption must carry the JT-funded self-liquidation bonus");
         assertEq(entryPoint.getRedemptionRequest(USER_A, nonce).shares, 0, "the request must be fully executed");
+    }
+
+    /// @notice The self-liquidation bonus is EXCLUDED from the forfeiture skim: the reference is the bonus-free
+    ///         totalAssets view, so a liquidation-state redemption forfeits nothing and the whole JT-funded bonus
+    ///         reaches the redeemer on top of the pro-rata claim (hand-derived via the RoycoTestMath bonus mirror)
+    function test_liquidation_selfLiqBonus_notSkimmedAsProtocolFees() public {
+        uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
+        (uint256 nonce,) = _requestRedemption(USER_A, address(seniorTranche), shares, USER_A, 0);
+        _warpPastRedemptionDelay();
+        _enterLiquidation();
+
+        // The bonus-free reference legs: the drawdown leaves vExec below vReq, so the skim must be zero
+        SyncedAccountingState memory state = _sync();
+        uint256 stSupply = seniorTranche.totalSupply();
+        uint256 proRataNAV = (toUint256(seniorTranche.totalAssets().nav) * shares) / stSupply;
+        // The expected bonus, independently derived from the synced state (the whole share count redeems: no skim)
+        uint256 expectedBonusNAV = RoycoTestMath.seniorTrancheSelfLiquidationBonus(
+            RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs({
+                stEffectiveNAV: toUint256(state.stEffectiveNAV),
+                jtEffectiveNAV: toUint256(state.jtEffectiveNAV),
+                coverageUtilizationWAD: state.coverageUtilizationWAD,
+                coverageLiquidationUtilizationWAD: state.coverageLiquidationUtilizationWAD,
+                bonusWAD: defaultParams().stSelfLiquidationBonusWAD,
+                userClaimNAV: RoycoTestMath.convertToValue(shares, toUint256(state.stEffectiveNAV), stSupply)
+            })
+        );
+        assertGt(expectedBonusNAV, 0, "sanity: the breached market must grant a nonzero self-liquidation bonus");
+
+        AssetClaims memory claims = _executeRedemptionMax(USER_A, USER_A, nonce);
+
+        // The load-bearing exclusion: the bonus never registers as forfeitable queued yield
+        assertEq(entryPoint.getProtocolFeeSharesPendingCollection(address(seniorTranche)), 0, "the self-liquidation bonus must never be skimmed as protocol fee shares");
+        assertEq(entryPoint.getRedemptionRequest(USER_A, nonce).shares, 0, "the request must be fully executed");
+        // The delivered claim is the pro-rata leg plus the whole bonus (tolerance covers the asset-quantization round trip)
+        assertGt(toUint256(claims.nav), proRataNAV, "the redemption must carry the JT-funded bonus on top of the pro-rata claim");
+        assertApproxEqRel(toUint256(claims.nav), proRataNAV + expectedBonusNAV, 0.001e18, "the delivered claim must equal pro-rata plus the derived bonus");
+    }
+
+    /// @notice A gain in the queue followed by a still-breached market skims ONLY the standing-NAV gain: the fee
+    ///         shares equal the exact value-formula skim (no bonus component), and the bonus rides on the post-skim
+    ///         shares the user actually redeems
+    function test_liquidation_gainThenBreach_skimIsStandingNavOnly_bonusRidesPostSkimShares() public {
+        uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
+        // Breach FIRST, then queue: the request snapshots the depressed value so a small recovery inside the
+        // still-breached band produces a genuine standing-NAV gain over the queue
+        _enterLiquidation();
+        (uint256 nonce,) = _requestRedemption(USER_A, address(seniorTranche), shares, USER_A, 0);
+        uint256 vReq = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).valueAtRequestTime);
+
+        // A small recovery: the standing NAV rises but the market stays breached
+        applySTPnL(100);
+        SyncedAccountingState memory state = _sync();
+        assertGe(state.coverageUtilizationWAD, state.coverageLiquidationUtilizationWAD, "setup: the market must remain liquidation-breached after the recovery");
+        _warpPastRedemptionDelay();
+
+        // The exact standing-NAV skim: derived purely from the bonus-free value formula (virtual-shares rate)
+        uint256 vExec = RoycoTestMath.convertToValue(shares, toUint256(seniorTranche.totalAssets().nav), seniorTranche.totalSupply());
+        assertGt(vExec, vReq, "sanity: the recovery must register as standing-NAV queued yield");
+        uint256 expectedFee = Math.mulDiv(shares, vExec - vReq, vExec, Math.Rounding.Floor);
+
+        AssetClaims memory claims = _executeRedemptionMax(USER_A, USER_A, nonce);
+
+        // The skim is exactly the standing-NAV formula: no bonus component inflates it
+        assertEq(
+            entryPoint.getProtocolFeeSharesPendingCollection(address(seniorTranche)), expectedFee, "the skim must equal the exact bonus-free value-formula fee"
+        );
+        // The bonus rides on the post-skim shares: the delivered claim exceeds their bonus-free pro-rata value
+        uint256 userSharesRedeemed = shares - expectedFee;
+        uint256 postSkimProRata = Math.mulDiv(vExec, userSharesRedeemed, shares, Math.Rounding.Floor);
+        assertGt(toUint256(claims.nav), postSkimProRata, "the post-skim redemption must still carry the self-liquidation bonus");
     }
 
     function test_liquidation_jtRedemptionGracefullySkips() public {
