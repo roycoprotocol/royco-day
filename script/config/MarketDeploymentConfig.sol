@@ -334,6 +334,7 @@ abstract contract MarketDeploymentConfig {
                 chargeYieldFeeOnSeniorTrancheShares: false,
                 chargeYieldFeeOnQuoteAsset: false
             }),
+            deployPoolHook: true, // the production default: external pool ops sync-then-execute and stay pausable
             stEntryPointConfig: _defaultEntryPointTrancheConfig(),
             jtEntryPointConfig: _defaultEntryPointTrancheConfig(),
             lptEntryPointConfig: _defaultEntryPointTrancheConfig()
