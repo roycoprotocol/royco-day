@@ -3,14 +3,15 @@ pragma solidity ^0.8.28;
 
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
-import { ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
+import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { toTrancheUnits } from "../../../src/libraries/Units.sol";
+import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 
 /**
  * @title Test_EntryPointComplianceGating
@@ -31,7 +32,7 @@ contract Test_EntryPointComplianceGating is EntryPointTestBase {
         MarketParamsConfig memory params = defaultParams();
         params.enforceWhitelistOnTransfer = true;
         _deployMarket(cellA(), params);
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
         OUTSIDER = makeAddr("OUTSIDER");
@@ -79,16 +80,16 @@ contract Test_EntryPointComplianceGating is EntryPointTestBase {
         _cancelRedemption(USER_A, nonce, USER_A);
     }
 
-    function test_whitelist_ltRedemptionStSharesLegToNonWhitelistedReceiverReverts() public {
-        // Stage an idle premium so LT redemptions pay a senior-share leg
+    function test_whitelist_lptRedemptionStSharesLegToNonWhitelistedReceiverReverts() public {
+        // Stage an idle premium so LPT redemptions pay a senior-share leg
         setVenueSlippageMode(true);
         applySTPnL(1000);
         _sync();
 
-        uint256 shares = _acquireTrancheShares(USER_A, address(liquidityTranche), 10e18);
-        // Revoke the receiver's senior whitelist eligibility AFTER acquiring shares: USER_B keeps JT/LT roles
+        uint256 shares = _acquireTrancheShares(USER_A, address(liquidityProviderTranche), 10e18);
+        // Revoke the receiver's senior whitelist eligibility AFTER acquiring shares: USER_B keeps JT/LPT roles
         accessManager.revokeRole(ST_LP_ROLE, USER_B);
-        (uint256 nonce,) = _requestRedemption(USER_A, address(liquidityTranche), shares, USER_B, 0);
+        (uint256 nonce,) = _requestRedemption(USER_A, address(liquidityProviderTranche), shares, USER_B, 0);
         _warpPastRedemptionDelay();
 
         // The BPT leg would pass, but the in-kind senior-share leg is an ST share transfer to a non-whitelisted receiver
@@ -109,7 +110,7 @@ contract Test_EntryPointComplianceGating is EntryPointTestBase {
         vm.startPrank(USER_A);
         seniorTranche.approve(address(entryPoint), stShares);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayKernel.ACCOUNT_NOT_WHITELISTED_TRANCHE_LP.selector, address(entryPoint)));
-        entryPoint.requestRedemption(address(seniorTranche), stShares, USER_A, 0);
+        entryPoint.requestRedemption(address(seniorTranche), stShares, USER_A, 0, IRoycoDayEntryPoint.RedemptionMode.INKIND);
         vm.stopPrank();
     }
 
@@ -141,7 +142,7 @@ contract Test_EntryPointComplianceGating is EntryPointTestBase {
         vm.startPrank(USER_A);
         juniorTranche.approve(address(entryPoint), shares);
         vm.expectRevert(abi.encodeWithSelector(IRoycoBlacklist.ACCOUNT_BLACKLISTED.selector, USER_A));
-        entryPoint.requestRedemption(address(juniorTranche), shares, USER_A, 0);
+        entryPoint.requestRedemption(address(juniorTranche), shares, USER_A, 0, IRoycoDayEntryPoint.RedemptionMode.INKIND);
         vm.stopPrank();
     }
 

@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
-import { ADMIN_ROLE, BURNER_ROLE, JT_LP_ROLE, LT_LP_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_ROLE, BURNER_ROLE, JT_LP_ROLE, LPT_LP_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import { IRoycoLiquidityTranche } from "../../../src/interfaces/IRoycoLiquidityTranche.sol";
+import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
@@ -13,7 +13,7 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 /**
  * @title Test_MockMarketRoleMatrix
  * @notice Always-running regression pin on the deployed-market access-control matrix. The production
- *         BalancerV3_GyroECLP_LT_DeploymentTemplate's role wiring is only asserted in the RPC-gated fork factory suite, so a
+ *         RoycoDayBalancerV3MarketDeploymentTemplate's role wiring is only asserted in the RPC-gated fork factory suite, so a
  *         standard CI run leaves it unverified; DayMarketTestBase hand-mirrors that wiring
  *         (`_wireTargetFunctionRoles`/`_wireRoleGrants`), and this pins the mirror against drift — including the
  *         grant set that lets a whitelist-enforcing market mint fee and premium shares.
@@ -46,15 +46,16 @@ contract Test_MockMarketRoleMatrix is DayMarketTestBase {
         assertEq(_role(address(juniorTranche), IRoycoVaultTranche.redeem.selector), JT_LP_ROLE, "JT redeem -> JT_LP_ROLE");
     }
 
-    function test_LTDepositAndRedeem_areLPGated() public view {
-        assertEq(_role(address(liquidityTranche), IRoycoVaultTranche.deposit.selector), LT_LP_ROLE, "LT deposit -> LT_LP_ROLE");
-        assertEq(_role(address(liquidityTranche), IRoycoLiquidityTranche.depositMultiAsset.selector), LT_LP_ROLE, "LT depositMultiAsset -> LT_LP_ROLE");
-        assertEq(_role(address(liquidityTranche), IRoycoVaultTranche.redeem.selector), LT_LP_ROLE, "LT redeem -> LT_LP_ROLE");
-        assertEq(_role(address(liquidityTranche), IRoycoLiquidityTranche.redeemMultiAsset.selector), LT_LP_ROLE, "LT redeemMultiAsset -> LT_LP_ROLE");
+    function test_LPTDepositAndRedeem_areLPGated() public view {
+        assertEq(_role(address(liquidityProviderTranche), IRoycoVaultTranche.deposit.selector), LPT_LP_ROLE, "LPT deposit -> LPT_LP_ROLE");
+        assertEq(_role(address(liquidityProviderTranche), IRoycoLiquidityProviderTranche.depositMultiAsset.selector), LPT_LP_ROLE, "LPT depositMultiAsset -> LPT_LP_ROLE");
+        assertEq(_role(address(liquidityProviderTranche), IRoycoVaultTranche.redeem.selector), LPT_LP_ROLE, "LPT redeem -> LPT_LP_ROLE");
+        assertEq(_role(address(liquidityProviderTranche), IRoycoLiquidityProviderTranche.redeemMultiAsset.selector), LPT_LP_ROLE, "LPT redeemMultiAsset -> LPT_LP_ROLE");
     }
 
     function test_KernelSync_boundToSyncRole_and_TrancheBurn_boundToBurnerRole() public view {
         assertEq(_role(address(kernel), IRoycoDayKernel.syncTrancheAccounting.selector), SYNC_ROLE, "kernel sync -> SYNC_ROLE");
+        assertEq(_role(address(kernel), IRoycoDayKernel.syncTrancheAccountingFor.selector), SYNC_ROLE, "kernel tranche-scoped sync -> SYNC_ROLE");
         assertEq(_role(address(seniorTranche), ERC20BurnableUpgradeable.burn.selector), BURNER_ROLE, "ST burn -> BURNER_ROLE");
         assertEq(_role(address(juniorTranche), ERC20BurnableUpgradeable.burnFrom.selector), BURNER_ROLE, "JT burnFrom -> BURNER_ROLE");
     }
@@ -78,10 +79,10 @@ contract Test_MockMarketRoleMatrix is DayMarketTestBase {
     function test_KernelAndFeeRecipient_DoNotHoldTrancheLPRoles() public view {
         assertFalse(_holds(ST_LP_ROLE, address(kernel)), "kernel must not hold ST_LP_ROLE");
         assertFalse(_holds(JT_LP_ROLE, address(kernel)), "kernel must not hold JT_LP_ROLE");
-        assertFalse(_holds(LT_LP_ROLE, address(kernel)), "kernel must not hold LT_LP_ROLE");
+        assertFalse(_holds(LPT_LP_ROLE, address(kernel)), "kernel must not hold LPT_LP_ROLE");
         assertFalse(_holds(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must not hold ST_LP_ROLE");
         assertFalse(_holds(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must not hold JT_LP_ROLE");
-        assertFalse(_holds(LT_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must not hold LT_LP_ROLE");
+        assertFalse(_holds(LPT_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must not hold LPT_LP_ROLE");
     }
 
     // ---------------------------------------------------------------------

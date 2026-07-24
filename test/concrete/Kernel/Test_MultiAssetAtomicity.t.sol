@@ -4,16 +4,16 @@ pragma solidity ^0.8.28;
 import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
-import { IRoycoLiquidityTranche } from "../../../src/interfaces/IRoycoLiquidityTranche.sol";
+import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
-import { defaultParams } from "../../utils/MarketParams.sol";
-import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
-import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { MockBalancerVault } from "../../mocks/MockBalancerVault.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
+import { defaultParams } from "../../utils/MarketParams.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
+import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
  * @title Test_MultiAssetAtomicity
@@ -41,7 +41,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         _deployMarket(cellA(), defaultParams());
         QUOTE_UNIT = 10 ** uint256(cell.quoteAsset.decimals);
         _seedMarket(100_000e18, 30_000e18);
-        _seedLT(10_000e18, 2000e18, 8000 * QUOTE_UNIT);
+        _seedLPT(10_000e18, 2000e18, 8000 * QUOTE_UNIT);
         _sync();
     }
 
@@ -51,7 +51,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
 
     /**
      * @dev Byte-exact digest of every ledger a multi-asset flow can touch: the committed accounting
-     *      checkpoint, the kernel's ownership ledgers (including ltOwnedSeniorTrancheShares), all three
+     *      checkpoint, the kernel's ownership ledgers (including lptOwnedSeniorTrancheShares), all three
      *      share supplies, the kernel's and the actor's token balances, and the pool's own reserves and supply
      */
     function _marketDigest(address _actor) internal view returns (bytes32) {
@@ -62,7 +62,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
                 kernel.getState(),
                 seniorTranche.totalSupply(),
                 juniorTranche.totalSupply(),
-                liquidityTranche.totalSupply(),
+                liquidityProviderTranche.totalSupply(),
                 stJtVault.balanceOf(address(kernel)),
                 bpt.balanceOf(address(kernel)),
                 seniorTranche.balanceOf(address(kernel)),
@@ -75,7 +75,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
                 quoteToken.balanceOf(_actor),
                 bpt.balanceOf(_actor),
                 seniorTranche.balanceOf(_actor),
-                liquidityTranche.balanceOf(_actor)
+                liquidityProviderTranche.balanceOf(_actor)
             )
         );
     }
@@ -85,8 +85,8 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         stJtVault.mintShares(_actor, _stAssets);
         quoteToken.mint(_actor, _quoteAssets);
         vm.startPrank(_actor);
-        stJtVault.approve(address(liquidityTranche), _stAssets);
-        quoteToken.approve(address(liquidityTranche), _quoteAssets);
+        stJtVault.approve(address(liquidityProviderTranche), _stAssets);
+        quoteToken.approve(address(liquidityProviderTranche), _quoteAssets);
         vm.stopPrank();
     }
 
@@ -94,14 +94,14 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
      * @dev Accumulates idle liquidity premium senior shares in the kernel: arms the venue's punitive
      *      slippage so the sync's reinvest gate fails, then realizes a 2% senior gain over a day so the
      *      fee and liquidity premium share mint produces senior shares that cannot deploy and must sit
-     *      in ltOwnedSeniorTrancheShares
+     *      in lptOwnedSeniorTrancheShares
      */
     function _accumulateIdleLiquidityPremiumSeniorShares() internal returns (uint256 idleShares) {
         setVenueSlippageMode(true);
         _warpAndRefreshFeed(1 days);
         applySTPnL(200);
         _sync();
-        idleShares = kernel.getState().ltOwnedSeniorTrancheShares;
+        idleShares = kernel.getState().lptOwnedSeniorTrancheShares;
         require(idleShares != 0, "setup: expected the liquidity premium to sit as idle senior shares");
     }
 
@@ -110,8 +110,8 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
     // =============================
 
     /// @notice A pool mint shorted below the caller's floor rejects the whole deposit, leaving no partial senior mint behind
-    function test_LTDepositMultiAsset_VenueShortsMintedPoolTokens_RollsBackWholly() public {
-        address actor = LT_PROVIDER;
+    function test_LPTDepositMultiAsset_VenueShortsMintedPoolTokens_RollsBackWholly() public {
+        address actor = LPT_PROVIDER;
         // 100 senior vault shares (100e18 NAV at the current rate) against 100 quote tokens (100e18 NAV)
         uint256 stAssets = 100e18;
         uint256 quoteAssets = 100 * QUOTE_UNIT;
@@ -120,11 +120,11 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         // Arm the venue to mint a single BPT wei while the caller demands at least half the roughly
         // 200e18 fair value of the two legs, so the venue's own floor check must throw
         balancerVault.setNextBptOutOverride(1);
-        uint256 minLtAssetsOut = 100e18;
+        uint256 minLptAssetsOut = 100e18;
 
         bytes32 digestBefore = _marketDigest(actor);
         vm.prank(actor);
-        try liquidityTranche.depositMultiAsset(stAssets, quoteAssets, minLtAssetsOut, actor) returns (uint256) {
+        try liquidityProviderTranche.depositMultiAsset(stAssets, quoteAssets, minLptAssetsOut, actor) returns (uint256, uint256) {
             fail("the deposit must revert when the venue mints fewer pool tokens than the caller's floor");
         } catch (bytes memory err) {
             assertEq(bytes4(err), IVaultErrors.BptAmountOutBelowMin.selector, "expected the venue's shorted-mint floor error");
@@ -136,8 +136,8 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
     }
 
     /// @notice A venue add that reverts outright rejects the whole deposit, leaving no partial senior mint behind
-    function test_LTDepositMultiAsset_VenueAddReverts_RollsBackWholly() public {
-        address actor = LT_PROVIDER;
+    function test_LPTDepositMultiAsset_VenueAddReverts_RollsBackWholly() public {
+        address actor = LPT_PROVIDER;
         // 100 senior vault shares against 100 quote tokens, both fully funded, only the venue fails
         uint256 stAssets = 100e18;
         uint256 quoteAssets = 100 * QUOTE_UNIT;
@@ -146,7 +146,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
 
         bytes32 digestBefore = _marketDigest(actor);
         vm.prank(actor);
-        try liquidityTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor) returns (uint256) {
+        try liquidityProviderTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor) returns (uint256, uint256) {
             fail("the deposit must revert when the venue add reverts");
         } catch (bytes memory err) {
             assertEq(bytes4(err), MockBalancerVault.FORCED_ADD_REVERT.selector, "the venue's revert must bubble out of the whole flow");
@@ -157,8 +157,8 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
     }
 
     /// @notice A senior leg past the coverage capacity rejects the whole deposit through the post-op gate, quote leg included
-    function test_LTDepositMultiAsset_SeniorLegBreachesCoverage_RollsBackWholly() public {
-        address actor = LT_PROVIDER;
+    function test_LPTDepositMultiAsset_SeniorLegBreachesCoverage_RollsBackWholly() public {
+        address actor = LPT_PROVIDER;
         // The advertised senior capacity plus 10,000 whole vault shares of clear overshoot, so the post-op
         // coverage check must reject regardless of dust slack
         uint256 stAssets = toUint256(kernel.stMaxDeposit(actor)) + 10_000e18;
@@ -167,7 +167,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
 
         bytes32 digestBefore = _marketDigest(actor);
         vm.prank(actor);
-        try liquidityTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor) returns (uint256) {
+        try liquidityProviderTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor) returns (uint256, uint256) {
             fail("the deposit must revert when its senior leg exceeds the market's coverage capacity");
         } catch (bytes memory err) {
             assertEq(bytes4(err), IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector, "expected the coverage gate to reject the whole flow");
@@ -182,7 +182,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
      *      senior shares, so only the zero-share mint guard stands between a dust leg and a donation: the wei
      *      would raise senior raw NAV while minting nothing, a pure gift to whoever already holds senior shares
      */
-    function test_LTDepositMultiAsset_STLegDustFloorsToZeroShares_RevertsWithoutDonatingToSeniorHolders() public {
+    function test_LPTDepositMultiAsset_STLegDustFloorsToZeroShares_RevertsWithoutDonatingToSeniorHolders() public {
         // Appreciate the shared senior/junior vault 2% and commit the gain, so the senior share price strictly
         // exceeds one NAV unit per share: the residual senior gain accrues to the pre-existing supply while the
         // premium and fee share mints are priced at the post-gain NAV, so price-per-share ends above 1.0
@@ -196,17 +196,17 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         // A 1-wei senior leg values to at most 1 NAV wei (the rate is below 2.0, so the floored conversion of
         // 1 tranche wei cannot exceed 1), and with supply < stEffectiveNAV the share mint floors to zero:
         // floor(1 * supply / stEffectiveNAV) = 0. The quote leg is real, so the flow has value to lose
-        address actor = LT_PROVIDER;
+        address actor = LPT_PROVIDER;
         uint256 quoteAssets = 100 * QUOTE_UNIT;
         _fundDepositLegs(actor, 1, quoteAssets);
 
         // Pin the two ledgers a silent donation would inflate, alongside the full digest
-        uint256 stOwnedBefore = toUint256(kernel.getState().stOwnedYieldBearingAssets);
-        uint256 stRawNAVBefore = toUint256(accountant.getState().lastSTRawNAV);
+        uint256 collateralOwnedBefore = toUint256(kernel.getState().totalCollateralAssets);
+        uint256 collateralNAVBefore = toUint256(accountant.getState().lastCollateralNAV);
         bytes32 digestBefore = _marketDigest(actor);
 
         vm.prank(actor);
-        try liquidityTranche.depositMultiAsset(1, quoteAssets, 0, actor) returns (uint256) {
+        try liquidityProviderTranche.depositMultiAsset(1, quoteAssets, 0, actor) returns (uint256, uint256) {
             fail("the deposit must revert when its senior leg floors to zero senior shares");
         } catch (bytes memory err) {
             assertEq(bytes4(err), IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector, "expected the zero-share senior mint guard to reject the whole flow");
@@ -214,8 +214,12 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
 
         // The revert must roll back the pre-mint 1-wei owned-asset credit along with everything else,
         // so nothing was donated to senior holders and the quote leg went back to the depositor
-        assertEq(toUint256(kernel.getState().stOwnedYieldBearingAssets), stOwnedBefore, "the 1-wei senior credit survived the revert, donating it to senior holders");
-        assertEq(toUint256(accountant.getState().lastSTRawNAV), stRawNAVBefore, "the committed senior raw NAV moved despite the reverted deposit");
+        assertEq(
+            toUint256(kernel.getState().totalCollateralAssets),
+            collateralOwnedBefore,
+            "the 1-wei senior credit survived the revert, donating it to senior holders"
+        );
+        assertEq(toUint256(accountant.getState().lastCollateralNAV), collateralNAVBefore, "the committed collateral NAV moved despite the reverted deposit");
         assertEq(_marketDigest(actor), digestBefore, "a reverted dust-leg deposit left a partial trace on the market");
     }
 
@@ -223,18 +227,18 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
     // Multi-asset redemption: one injected failure per leg, whole-flow rollback each time
     // =============================
 
-    /// @notice A venue removal that reverts outright rejects the whole redemption, leaving ltOwnedSeniorTrancheShares untouched
-    function test_LTRedeemMultiAsset_VenueRemovalReverts_RollsBackWholly() public {
+    /// @notice A venue removal that reverts outright rejects the whole redemption, leaving lptOwnedSeniorTrancheShares untouched
+    function test_LPTRedeemMultiAsset_VenueRemovalReverts_RollsBackWholly() public {
         // Accumulate idle liquidity premium senior shares first so a partial debit would be visible in the digest
         _accumulateIdleLiquidityPremiumSeniorShares();
-        address actor = LT_PROVIDER;
+        address actor = LPT_PROVIDER;
         // A quarter exit, comfortably above the senior liquidity floor, so only the venue fails
-        uint256 shares = liquidityTranche.balanceOf(actor) / 4;
+        uint256 shares = liquidityProviderTranche.balanceOf(actor) / 4;
         balancerVault.setRevertMode(MockBalancerVault.RevertMode.REMOVE);
 
         bytes32 digestBefore = _marketDigest(actor);
         vm.prank(actor);
-        try liquidityTranche.redeemMultiAsset(shares, 0, 0, actor, actor) {
+        try liquidityProviderTranche.redeemMultiAsset(shares, 0, 0, actor, actor) {
             fail("the redemption must revert when the venue removal reverts");
         } catch (bytes memory err) {
             assertEq(bytes4(err), MockBalancerVault.FORCED_REMOVE_REVERT.selector, "the venue's revert must bubble out of the whole flow");
@@ -245,16 +249,16 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
     }
 
     /// @notice A quote constituent under the caller's floor rejects the whole redemption, senior leg included
-    function test_LTRedeemMultiAsset_QuoteOutBelowCallerFloor_RollsBackWholly() public {
+    function test_LPTRedeemMultiAsset_QuoteOutBelowCallerFloor_RollsBackWholly() public {
         _accumulateIdleLiquidityPremiumSeniorShares();
-        address actor = LT_PROVIDER;
-        uint256 shares = liquidityTranche.balanceOf(actor) / 4;
+        address actor = LPT_PROVIDER;
+        uint256 shares = liquidityProviderTranche.balanceOf(actor) / 4;
         // The whole pool holds on the order of 13,000 quote tokens, so demanding 1,000,000 out must trip the floor
         uint256 minQuoteAssetsOut = 1_000_000 * QUOTE_UNIT;
 
         bytes32 digestBefore = _marketDigest(actor);
         vm.prank(actor);
-        try liquidityTranche.redeemMultiAsset(shares, 0, minQuoteAssetsOut, actor, actor) {
+        try liquidityProviderTranche.redeemMultiAsset(shares, 0, minQuoteAssetsOut, actor, actor) {
             fail("the redemption must revert when a constituent falls under the caller's floor");
         } catch (bytes memory err) {
             assertEq(bytes4(err), IVaultErrors.AmountOutBelowMin.selector, "expected the venue's constituent floor error");
@@ -263,15 +267,15 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
     }
 
     /// @notice A redemption that would pull pool depth below the senior liquidity floor is rejected whole by the post-op gate
-    function test_LTRedeemMultiAsset_WouldBreachLiquidityFloor_RollsBackWholly() public {
-        address actor = LT_PROVIDER;
+    function test_LPTRedeemMultiAsset_WouldBreachLiquidityFloor_RollsBackWholly() public {
+        address actor = LPT_PROVIDER;
         // The provider owns every liquidity share, so a full exit would empty the pool the senior floor requires
-        uint256 shares = liquidityTranche.balanceOf(actor);
-        assertEq(shares, liquidityTranche.totalSupply(), "setup: the provider is expected to own the whole liquidity supply");
+        uint256 shares = liquidityProviderTranche.balanceOf(actor);
+        assertEq(shares, liquidityProviderTranche.totalSupply(), "setup: the provider is expected to own the whole liquidity supply");
 
         bytes32 digestBefore = _marketDigest(actor);
         vm.prank(actor);
-        try liquidityTranche.redeemMultiAsset(shares, 0, 0, actor, actor) {
+        try liquidityProviderTranche.redeemMultiAsset(shares, 0, 0, actor, actor) {
             fail("the redemption must revert when it would pull depth below the senior liquidity floor");
         } catch (bytes memory err) {
             assertEq(bytes4(err), IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "expected the liquidity gate to reject the whole flow");
@@ -284,24 +288,24 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
     // =============================
 
     /// @notice Redeeming the production-advertised maximum lands liquidity utilization at or below one hundred percent
-    function test_LTRedeemMultiAsset_MaxRedeem_LeavesLiquidityUtilizationAtOrBelowWAD() public {
-        address actor = LT_PROVIDER;
+    function test_LPTRedeemMultiAsset_MaxRedeem_LeavesLiquidityUtilizationAtOrBelowWAD() public {
+        address actor = LPT_PROVIDER;
         // The advertised maximum presses the gate to its boundary, the strongest success-side probe
-        uint256 shares = liquidityTranche.maxRedeem(actor);
+        uint256 shares = liquidityProviderTranche.maxRedeem(actor);
         require(shares != 0, "setup: expected redeemable liquidity shares");
 
         // The money path must announce itself: MultiAssetRedeem with this caller, receiver, and owner
         // (the claim legs are venue-priced and pinned wei-exact by the preview-parity suite)
         AssetClaims memory uncheckedClaims;
-        vm.expectEmit(true, true, true, false, address(liquidityTranche));
-        emit IRoycoLiquidityTranche.MultiAssetRedeem(actor, actor, actor, shares, uncheckedClaims, 0);
+        vm.expectEmit(true, true, true, false, address(liquidityProviderTranche));
+        emit IRoycoLiquidityProviderTranche.MultiAssetRedeem(actor, actor, actor, shares, uncheckedClaims, 0);
         vm.prank(actor);
-        liquidityTranche.redeemMultiAsset(shares, 0, 0, actor, actor);
+        liquidityProviderTranche.redeemMultiAsset(shares, 0, 0, actor, actor);
 
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
         uint256 liquidityUtilizationWAD =
-            RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLTRawNAV));
+            RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLPTRawNAV));
         assertLe(liquidityUtilizationWAD, WAD, "an enforced redemption left the market short of its senior liquidity floor");
     }
 
@@ -311,23 +315,23 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
      *         round to a no-op) or still leave liquidity utilization at or below one hundred percent. The
      *         floor can never be broken by splitting an exit around the advertised maximum
      */
-    function test_LTRedeemMultiAsset_OneShareProbePastMaxRedeem_CannotBreachLiquidityFloor() public {
-        address actor = LT_PROVIDER;
-        uint256 maxShares = liquidityTranche.maxRedeem(actor);
+    function test_LPTRedeemMultiAsset_OneShareProbePastMaxRedeem_CannotBreachLiquidityFloor() public {
+        address actor = LPT_PROVIDER;
+        uint256 maxShares = liquidityProviderTranche.maxRedeem(actor);
         require(maxShares != 0, "setup: expected redeemable liquidity shares");
-        require(liquidityTranche.balanceOf(actor) > maxShares, "setup: expected the gate (not the balance) to bind the maximum");
+        require(liquidityProviderTranche.balanceOf(actor) > maxShares, "setup: expected the gate (not the balance) to bind the maximum");
 
         vm.prank(actor);
-        liquidityTranche.redeemMultiAsset(maxShares, 0, 0, actor, actor);
+        liquidityProviderTranche.redeemMultiAsset(maxShares, 0, 0, actor, actor);
 
         // The probe past the boundary: one more share through the same gated flow
         vm.prank(actor);
-        try liquidityTranche.redeemMultiAsset(1, 0, 0, actor, actor) {
+        try liquidityProviderTranche.redeemMultiAsset(1, 0, 0, actor, actor) {
             // The gate let it through, so it must have been utilization-neutral at the committed marks
             _sync();
             IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
             uint256 liquidityUtilizationWAD =
-                RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLTRawNAV));
+                RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLPTRawNAV));
             assertLe(liquidityUtilizationWAD, WAD, "a one-share redemption past the advertised maximum broke the senior liquidity floor");
         } catch (bytes memory err) {
             // Otherwise only the liquidity gate (or the one-share rounding to a valueless op) may reject it
@@ -340,8 +344,8 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
     }
 
     /// @notice Depositing the production-advertised senior maximum lands both gates at or below one hundred percent
-    function test_LTDepositMultiAsset_MaxSeniorLeg_LeavesBothUtilizationsAtOrBelowWAD() public {
-        address actor = LT_PROVIDER;
+    function test_LPTDepositMultiAsset_MaxSeniorLeg_LeavesBothUtilizationsAtOrBelowWAD() public {
+        address actor = LPT_PROVIDER;
         // The advertised senior capacity presses the coverage gate to its boundary
         uint256 stAssets = toUint256(kernel.stMaxDeposit(actor));
         require(stAssets != 0, "setup: expected senior deposit capacity");
@@ -350,18 +354,17 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
 
         // The money path must announce itself: MultiAssetDeposit with this caller and receiver
         // (the minted-amount legs are venue-priced and pinned wei-exact by the preview-parity suite)
-        vm.expectEmit(true, true, true, false, address(liquidityTranche));
-        emit IRoycoLiquidityTranche.MultiAssetDeposit(actor, actor, stAssets, quoteAssets, 0, 0);
+        vm.expectEmit(true, true, true, false, address(liquidityProviderTranche));
+        emit IRoycoLiquidityProviderTranche.MultiAssetDeposit(actor, actor, stAssets, quoteAssets, 0, 0);
         vm.prank(actor);
-        liquidityTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor);
+        liquidityProviderTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor);
 
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
-        uint256 coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV)
-        );
+        uint256 coverageUtilizationWAD =
+            RoycoTestMath.computeCoverageUtilization(toUint256(a.lastCollateralNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV));
         uint256 liquidityUtilizationWAD =
-            RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLTRawNAV));
+            RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLPTRawNAV));
         assertLe(coverageUtilizationWAD, WAD, "an enforced deposit left coverage utilization above one hundred percent");
         assertLe(liquidityUtilizationWAD, WAD, "an enforced deposit left liquidity utilization above one hundred percent");
     }
@@ -371,35 +374,35 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
     // =============================
 
     /// @notice Liquidity deposits stay open while the market is short of its senior liquidity floor, and they restore it
-    function test_LTDepositMultiAsset_LiquidityFloorBreached_DepositStillSucceedsAndRestores() public {
+    function test_LPTDepositMultiAsset_LiquidityFloorBreached_DepositStillSucceedsAndRestores() public {
         // Crash the pool's quote leg 90% in both price stores: the pool mark collapses while senior NAV is
         // untouched, so liquidity utilization breaches one hundred percent with no operation involved
-        applyLTPnL(-9000);
+        applyLPTPnL(-9000);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
         uint256 liquidityUtilizationBefore =
-            RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLTRawNAV));
+            RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLPTRawNAV));
         assertGt(liquidityUtilizationBefore, WAD, "setup: expected the senior liquidity floor to read breached");
 
         // A quote-only multi-asset deposit (no senior leg, so no senior gates) must land in the breach state
-        address actor = LT_PROVIDER;
+        address actor = LPT_PROVIDER;
         uint256 quoteAssets = 500 * QUOTE_UNIT;
         _fundDepositLegs(actor, 0, quoteAssets);
         vm.prank(actor);
-        liquidityTranche.depositMultiAsset(0, quoteAssets, 0, actor);
+        liquidityProviderTranche.depositMultiAsset(0, quoteAssets, 0, actor);
 
         // The deposit is the restoring force: it must have pulled utilization back down
         _sync();
         a = accountant.getState();
         uint256 liquidityUtilizationAfter =
-            RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLTRawNAV));
+            RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLPTRawNAV));
         assertLt(liquidityUtilizationAfter, liquidityUtilizationBefore, "a liquidity deposit in a breach state must reduce liquidity utilization");
     }
 
     /// @notice Once liquidation coverage is breached the liquidity gate still stands: a full exit that would
     ///         strand the pool below the senior floor reverts, while redeeming the bounded maximum succeeds and
     ///         unwinds the redeemer's pro-rata slice of the idle liquidity premium senior shares
-    function test_LTRedeemMultiAsset_LiquidationCoverageBreached_LiquidityGateStands() public {
+    function test_LPTRedeemMultiAsset_LiquidationCoverageBreached_LiquidityGateStands() public {
         // Idle liquidity premium senior shares ride along so the bounded redemption also proves their unwind
         uint256 idleBefore = _accumulateIdleLiquidityPremiumSeniorShares();
 
@@ -408,37 +411,37 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         applySTPnL(-6000);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
-        uint256 coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV)
-        );
+        uint256 coverageUtilizationWAD =
+            RoycoTestMath.computeCoverageUtilization(toUint256(a.lastCollateralNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV));
         assertGe(coverageUtilizationWAD, a.coverageLiquidationUtilizationWAD, "setup: expected liquidation coverage to read breached");
 
         // The provider's full exit would strand the pool below the senior liquidity floor, and the breach no
         // longer exempts it: the enforced liquidity gate reverts
-        address actor = LT_PROVIDER;
-        uint256 shares = liquidityTranche.balanceOf(actor);
+        address actor = LPT_PROVIDER;
+        uint256 shares = liquidityProviderTranche.balanceOf(actor);
         vm.prank(actor);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        liquidityTranche.redeemMultiAsset(shares, 0, 0, actor, actor);
+        liquidityProviderTranche.redeemMultiAsset(shares, 0, 0, actor, actor);
 
         // The bounded maximum still executes: a multi-asset exit relaxes the floor by unwinding senior depth in
         // flow, so it stays below the full balance but remains positive
-        uint256 maxMulti = liquidityTranche.maxRedeemMultiAsset(actor);
+        uint256 maxMulti = liquidityProviderTranche.maxRedeemMultiAsset(actor);
         assertGt(maxMulti, 0, "a bounded multi-asset exit that relaxes the floor must remain possible");
         assertLt(maxMulti, shares, "the breach must not waive the requirement: the maximum stays below the full balance");
-        uint256 supply = liquidityTranche.totalSupply();
-        uint256 expectedIdleAfter = idleBefore - Math.mulDiv(idleBefore, maxMulti, supply);
+        uint256 supply = liquidityProviderTranche.totalSupply();
+        // The redeemer's slice scales against the EFFECTIVE supply (supply + 1e6 virtual shares)
+        uint256 expectedIdleAfter = idleBefore - Math.mulDiv(idleBefore, maxMulti, supply + 1e6);
         vm.prank(actor);
-        liquidityTranche.redeemMultiAsset(maxMulti, 0, 0, actor, actor);
+        liquidityProviderTranche.redeemMultiAsset(maxMulti, 0, 0, actor, actor);
 
-        // The exit must debit exactly its pro-rata idle slice: idleBefore - floor(idleBefore * maxMulti / supply)
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, expectedIdleAfter, "the exit's idle senior share debit diverges from its pro-rata slice");
+        // The exit must debit exactly its pro-rata idle slice: idleBefore - floor(idleBefore * maxMulti / (supply + 1e6))
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, expectedIdleAfter, "the exit's idle senior share debit diverges from its pro-rata slice");
 
         // The enforced gate leaves the pool at or above its senior liquidity floor after the bounded exit
         _sync();
         a = accountant.getState();
         uint256 liquidityUtilizationWAD =
-            RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLTRawNAV));
+            RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLPTRawNAV));
         assertLe(liquidityUtilizationWAD, WAD, "the enforced gate must leave the pool at or above its liquidity floor after the bounded exit");
     }
 }

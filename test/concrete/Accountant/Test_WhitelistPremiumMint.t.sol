@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
-import { ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
@@ -24,12 +24,12 @@ contract Test_WhitelistPremiumMint is DayMarketTestBase {
     uint256 internal constant ST_SEED_WHOLE = 100;
     uint256 internal constant JT_SEED_WHOLE = 30;
 
-    uint256 internal stUnit;
+    uint256 internal collateralUnit;
 
     function setUp() public {
         // The default (non-whitelist) market backs the griefed-reinvestment pin; the whitelist pin redeploys
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        collateralUnit = 10 ** uint256(cell.collateralAsset.decimals);
     }
 
     // =============================
@@ -50,10 +50,10 @@ contract Test_WhitelistPremiumMint is DayMarketTestBase {
         MarketParamsConfig memory p = defaultParams();
         p.enforceWhitelistOnTransfer = true;
         _deployMarket(cellA(), p);
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        collateralUnit = 10 ** uint256(cell.collateralAsset.decimals);
 
         // Seeding is premium-free (rates are flat), so the whitelist market seeds cleanly
-        _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
+        _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
 
         // Book a +10% senior gain so the next sync accrues a nonzero liquidity premium (and protocol fees) to mint
         applySTPnL(1000);
@@ -63,7 +63,7 @@ contract Test_WhitelistPremiumMint is DayMarketTestBase {
 
         // The market keeps functioning: a subsequent whitelisted senior deposit (which pre-op syncs, minting the
         // premium/fees again) also lands.
-        uint256 more = 10 * stUnit;
+        uint256 more = 10 * collateralUnit;
         stJtVault.mintShares(ST_PROVIDER, more);
         vm.startPrank(ST_PROVIDER);
         stJtVault.approve(address(seniorTranche), more);
@@ -86,7 +86,7 @@ contract Test_WhitelistPremiumMint is DayMarketTestBase {
         MarketParamsConfig memory p = defaultParams();
         p.enforceWhitelistOnTransfer = true;
         _deployMarket(cellA(), p);
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        collateralUnit = 10 ** uint256(cell.collateralAsset.decimals);
 
         // The fee recipient is deliberately NOT a whitelisted senior LP (matching the production template, which
         // no longer grants it the tranche LP roles): its redeem authorization is left to the operator
@@ -94,7 +94,7 @@ contract Test_WhitelistPremiumMint is DayMarketTestBase {
         assertFalse(hasLpRole, "the fee recipient must start without the senior LP role");
 
         // Seed premium-free (flat rates), then book a +10% senior gain so the next sync carves a nonzero ST fee
-        _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
+        _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
         applySTPnL(1000);
         _sync();
 
@@ -126,32 +126,32 @@ contract Test_WhitelistPremiumMint is DayMarketTestBase {
 
     /**
      * @notice When the single-sided reinvestment fails the slippage gate, the premium mint still succeeds and the
-     *         freshly minted senior shares stay idle in the kernel (ltOwnedSeniorTrancheShares), not deployed into
-     *         ltRawNAV and not forfeited. The un-deployed premium is held by the kernel as idle liquidity premium
+     *         freshly minted senior shares stay idle in the kernel (lptOwnedSeniorTrancheShares), not deployed into
+     *         lptRawNAV and not forfeited. The un-deployed premium is held by the kernel as idle liquidity premium
      *         senior shares, claimable and never forfeited, and a tranche operation tolerates a failing
      *         reinvestment without reverting
      * @dev An attacker forcing venue slippage only defers deployment: the metric keeps reading under-provisioned
-     *      (ltRawNAV excludes the idle shares) so the LDM keeps paying
+     *      (lptRawNAV excludes the idle shares) so the LDM keeps paying
      */
     function test_griefedReinvestment_stagesPremiumAsIdleSeniorShares() public {
-        _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
+        _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
 
         // Arm persistent venue slippage so the single-sided reinvestment deterministically fails its min-BPT-out
         setVenueSlippageMode(true);
 
         // Record the pre-gain staged premium (zero, seeding was flat) and pool depth
-        uint256 stagedBefore = kernel.getState().ltOwnedSeniorTrancheShares;
+        uint256 stagedBefore = kernel.getState().lptOwnedSeniorTrancheShares;
         assertEq(stagedBefore, 0, "no premium is staged after a flat seed");
-        uint256 ltRawBefore = toUint256(accountant.getState().lastLTRawNAV);
+        uint256 lptRawBefore = toUint256(accountant.getState().lastLPTRawNAV);
 
         // Book a +10% senior gain, then sync: the premium mints but the reinvestment is rejected by the gate
         applySTPnL(1000);
         SyncedAccountingState memory s = _sync();
 
         // The sync does not revert, the premium is staged (not deployed, not forfeited)
-        uint256 stagedAfter = kernel.getState().ltOwnedSeniorTrancheShares;
+        uint256 stagedAfter = kernel.getState().lptOwnedSeniorTrancheShares;
         assertGt(stagedAfter, stagedBefore, "the griefed premium is staged as idle senior shares, not forfeited");
-        // ltRawNAV (the BPT depth) does not grow from the premium: the staged pile stays out of the liquidity metric
-        assertEq(toUint256(s.ltRawNAV), ltRawBefore, "the failed reinvestment leaves pool depth unchanged, so the metric stays under-provisioned");
+        // lptRawNAV (the BPT depth) does not grow from the premium: the staged pile stays out of the liquidity metric
+        assertEq(toUint256(s.lptRawNAV), lptRawBefore, "the failed reinvestment leaves pool depth unchanged, so the metric stays under-provisioned");
     }
 }

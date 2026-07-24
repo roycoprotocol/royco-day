@@ -28,7 +28,7 @@ contract Test_StaticCurveYDM is Test {
     // Distinct non-test accountant address for per-sender keying tests.
     address constant ACCT_B = address(0xB0B);
 
-    event StaticCurveYdmInitialized(address indexed accountant, uint256 yieldShareAtZeroUtilWAD, uint256 slopeLtTargetUtilWAD, uint256 slopeGteTargetUtilWAD);
+    event StaticCurveYdmInitialized(address indexed accountant, uint256 yieldShareAtZeroUtilWAD, uint256 slopeLptTargetUtilWAD, uint256 slopeGteTargetUtilWAD);
     event YdmOutput(address indexed accountant, uint256 yieldShareWAD);
 
     // ---------------------------------------------------------------------

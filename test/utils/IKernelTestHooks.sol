@@ -10,8 +10,8 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../../src/libraries/Units.sol";
 /// @dev Design notes vs the original interface:
 ///      - `stAsset`/`jtAsset`/`quoteAsset` are independent, so a concrete kernel can exercise st-asset != jt-asset
 ///        (different decimals and/or price). Suites must NOT assume `stAsset == jtAsset`.
-///      - `quoteAsset` + `hasLiquidityTranche` describe the LT leg; kernels without an LT set them to
-///        `address(0)` / `false` and the LT suite skips.
+///      - `quoteAsset` + `hasLiquidityProviderTranche` describe the LPT leg; kernels without an LPT set them to
+///        `address(0)` / `false` and the LPT suite skips.
 ///      - `simulate*Yield`/`simulate*Loss` must actually move the tranche's RAW nav in the stated direction and
 ///        magnitude; the suites assert on the realized post-sync numbers, so an approximate move is not enough.
 interface IKernelTestHooks {
@@ -20,8 +20,8 @@ interface IKernelTestHooks {
     /// @custom:field forkRpcUrlEnvVar     Env var holding the RPC URL (empty for a non-fork market).
     /// @custom:field stAsset              Senior tranche underlying asset.
     /// @custom:field jtAsset              Junior tranche underlying asset (MAY differ from `stAsset`).
-    /// @custom:field quoteAsset           LT pool quote asset (address(0) when `hasLiquidityTranche` is false).
-    /// @custom:field hasLiquidityTranche  Whether this market wires an LT (gates the LT abstract suite).
+    /// @custom:field quoteAsset           LPT pool quote asset (address(0) when `hasLiquidityProviderTranche` is false).
+    /// @custom:field hasLiquidityProviderTranche  Whether this market wires an LPT (gates the LPT abstract suite).
     /// @custom:field initialFunding       Initial per-user funding amount, in each asset's own decimals.
     struct TestConfig {
         uint256 forkBlock;
@@ -29,7 +29,7 @@ interface IKernelTestHooks {
         address stAsset;
         address jtAsset;
         address quoteAsset;
-        bool hasLiquidityTranche;
+        bool hasLiquidityProviderTranche;
         uint256 initialFunding;
     }
 
@@ -54,7 +54,7 @@ interface IKernelTestHooks {
     /// @notice Deals `_amount` of the junior asset (in its own decimals) to `_to`.
     function dealJTAsset(address _to, uint256 _amount) external;
 
-    /// @notice Deals `_amount` of the LT pool quote asset to `_to`. Reverts / no-op for markets without an LT.
+    /// @notice Deals `_amount` of the LPT pool quote asset to `_to`. Reverts / no-op for markets without an LPT.
     function dealQuoteAsset(address _to, uint256 _amount) external;
 
     /// @notice Maximum absolute delta tolerated on `TRANCHE_UNIT` comparisons for this kernel's rounding.

@@ -72,7 +72,7 @@ abstract contract UpgradeConfig {
     ///      stay "fresh" through the 2-day simulation warp. Before the warp the orchestrator
     ///      captures `latestRoundData` for each entry and after the warp it `vm.mockCall`s the
     ///      oracle so the response keeps its `answer` but reports `updatedAt = block.timestamp`,
-    ///      avoiding staleness reverts in downstream sync/quoter math.
+    ///      avoiding staleness reverts in downstream sync/pricing math.
     mapping(uint256 chainId => address[] oracles) internal _chainlinkOracles;
 
     // ═══════════════════════════════════════════════════════════════════════════

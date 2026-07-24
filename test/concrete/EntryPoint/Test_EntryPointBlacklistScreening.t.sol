@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
+import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { MAX_TRANCHE_UNITS } from "../../../src/libraries/Constants.sol";
 import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase, IERC20Like } from "../../utils/EntryPointTestBase.sol";
@@ -32,7 +33,7 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
         roycoBlacklist = RoycoBlacklist(
@@ -143,17 +144,24 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
     // requestRedemption
     // ---------------------------------------------------------------------
 
-    /// @notice A flagged receiver cannot be designated on a redemption request
-    function test_requestRedemption_revertsOnFlaggedReceiver() public {
+    /// @notice A flagged receiver may still be designated at request time, the screen sits where the value settles
+    /// so the redemption's kernel receiver screen stops the execution instead
+    function test_requestRedemption_flaggedReceiverQueuesButSettlementScreens() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
         _wireBlacklist();
         _flag(RECEIVER);
 
+        // The queue accepts the request, no value reaches the flagged receiver at request time
         vm.startPrank(USER_A);
         IERC20Like(address(seniorTranche)).approve(address(entryPoint), shares);
-        vm.expectRevert(_blacklistedError(RECEIVER));
-        entryPoint.requestRedemption(address(seniorTranche), shares, RECEIVER, 0);
+        (uint256 nonce,,) = entryPoint.requestRedemption(address(seniorTranche), shares, RECEIVER, 0, IRoycoDayEntryPoint.RedemptionMode.INKIND);
         vm.stopPrank();
+
+        // The settlement to the flagged receiver is stopped by the tranche redemption's kernel screen
+        _warpPastRedemptionDelay();
+        vm.expectRevert(_blacklistedError(RECEIVER));
+        vm.prank(USER_A);
+        entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
     }
 
     /// @notice A flagged requester is stopped by the share escrow transfer's kernel screen, no entry point screen needed
@@ -165,7 +173,7 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
         vm.startPrank(USER_A);
         IERC20Like(address(seniorTranche)).approve(address(entryPoint), shares);
         vm.expectRevert(_blacklistedError(USER_A));
-        entryPoint.requestRedemption(address(seniorTranche), shares, RECEIVER, 0);
+        entryPoint.requestRedemption(address(seniorTranche), shares, RECEIVER, 0, IRoycoDayEntryPoint.RedemptionMode.INKIND);
         vm.stopPrank();
     }
 
@@ -240,9 +248,9 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
         _flag(EXECUTOR);
         roycoBlacklist.unblacklistAccounts(_one(EXECUTOR));
 
-        uint256 executorAssetsBefore = IERC20Like(seniorTranche.asset()).balanceOf(EXECUTOR);
+        uint256 executorSharesBefore = IERC20Like(address(seniorTranche)).balanceOf(EXECUTOR);
         assertGt(_executeDepositMax(EXECUTOR, USER_A, nonce), 0, "the unblacklisted executor must execute the deposit");
-        assertGt(IERC20Like(seniorTranche.asset()).balanceOf(EXECUTOR), executorAssetsBefore, "the executor bonus must land");
+        assertGt(IERC20Like(address(seniorTranche)).balanceOf(EXECUTOR), executorSharesBefore, "the executor bonus must land in tranche shares");
     }
 
     // ---------------------------------------------------------------------
@@ -354,19 +362,32 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
     // cancelRedemptionRequest
     // ---------------------------------------------------------------------
 
-    /// @notice A flagged canceller cannot pull its escrowed shares, the canceller is not a party to the return transfer's kernel screen
-    function test_cancelRedemptionRequest_revertsOnFlaggedCanceller() public {
+    /// @notice A flagged canceller is stopped by the entry point screen regardless of the receiver, so the
+    /// escrow can never route a flagged party's shares to a clean address
+    function test_cancelRedemptionRequest_revertsOnFlaggedCancellerForAnyReceiver() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(seniorTranche), shares, USER_A, 0);
         _wireBlacklist();
         _flag(USER_A);
 
+        // The self-cancel routes the escrow back to the flagged canceller, the screen stops it
+        vm.expectRevert(_blacklistedError(USER_A));
+        vm.prank(USER_A);
+        entryPoint.cancelRedemptionRequest(nonce, USER_A);
+
+        // A clean receiver cannot launder the flagged canceller's escrow out, the canceller screen stops it before the return leg
         vm.expectRevert(_blacklistedError(USER_A));
         vm.prank(USER_A);
         entryPoint.cancelRedemptionRequest(nonce, RECEIVER);
+
+        // Unblacklisting the canceller releases the escrow to the clean receiver
+        roycoBlacklist.unblacklistAccounts(_one(USER_A));
+        uint256 receiverSharesBefore = seniorTranche.balanceOf(RECEIVER);
+        _cancelRedemption(USER_A, nonce, RECEIVER);
+        assertEq(seniorTranche.balanceOf(RECEIVER), receiverSharesBefore + shares, "the released share escrow must land on the receiver");
     }
 
-    /// @notice A flagged receiver is stopped by the share escrow return's kernel screen, no entry point screen needed
+    /// @notice A flagged receiver is stopped by the entry point screen, redundantly backstopped by the share escrow return's kernel screen
     function test_cancelRedemptionRequest_flaggedReceiverStoppedByReturnTransferScreen() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(seniorTranche), shares, USER_A, 0);

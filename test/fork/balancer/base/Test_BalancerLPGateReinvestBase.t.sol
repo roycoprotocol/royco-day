@@ -42,26 +42,26 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
      * @dev The committed liquidity utilization re-derived from the committed checkpoint with plain checked
      *      integer arithmetic (the ceiling division written out), sharing no math library with production:
      *      utilization is the depth the senior tranche requires (`stEffectiveNAV * minLiquidity`) over the
-     *      pooled depth backing it (`ltRawNAV`), rounded up in favor of reading a breach. Products stay far
+     *      pooled depth backing it (`lptRawNAV`), rounded up in favor of reading a breach. Products stay far
      *      below 2^256 on this suite's NAV domain, so the checked multiply cannot overflow.
      */
     function _committedLiquidityUtilization() internal view returns (uint256) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         uint256 stEff = toUint256(a.lastSTEffectiveNAV);
-        uint256 ltRaw = toUint256(a.lastLTRawNAV);
+        uint256 lptRaw = toUint256(a.lastLPTRawNAV);
         if (stEff == 0 || a.minLiquidityWAD == 0) return 0; // no senior claim or no requirement: nothing to back
-        if (ltRaw == 0) return type(uint256).max; // a live requirement against zero depth is unboundedly breached
-        return (stEff * uint256(a.minLiquidityWAD) + ltRaw - 1) / ltRaw;
+        if (lptRaw == 0) return type(uint256).max; // a live requirement against zero depth is unboundedly breached
+        return (stEff * uint256(a.minLiquidityWAD) + lptRaw - 1) / lptRaw;
     }
 
     /**
-     * @dev Drives the committed liquidity utilization above WAD through real senior yield: the LT premium is
-     *      disabled (`maxLTYieldShareWAD = 0`) so nothing restores the pool, and each yield step raises the
+     * @dev Drives the committed liquidity utilization above WAD through real senior yield: the LPT premium is
+     *      disabled (`maxLPTYieldShareWAD = 0`) so nothing restores the pool, and each yield step raises the
      *      senior mark faster than the rate-scaled pool depth. Fails loudly if the breach is not reached.
      */
     function _arrangeYieldDrivenLiquidityBreach() internal {
         _sync();
-        _enableLTOverlay(0.1e18, 0, _minLiquidityForTargetUtilization(0.99e18));
+        _enableLPTOverlay(0.1e18, 0, _minLiquidityForTargetUtilization(0.99e18));
         for (uint256 i = 0; i < 20; ++i) {
             _warpForward(1 days);
             _applySTYield(0.02e18);
@@ -71,13 +71,13 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         fail("arrange: senior yield did not push the liquidity utilization past WAD within the budget");
     }
 
-    /// @dev Measures the total NAV value a multi-asset LT redemption pays `_lp` (ST-asset + quote balance diffs).
+    /// @dev Measures the total NAV value a multi-asset LPT redemption pays `_lp` (ST-asset + quote balance diffs).
     function _measureRedeemValueMulti(address _lp, uint256 _shares) internal returns (uint256 valueNAV) {
         uint256 stAssetBal0 = IERC20(testConfig.stAsset).balanceOf(_lp);
         uint256 quoteBal0 = IERC20(testConfig.quoteAsset).balanceOf(_lp);
         uint256 stShareBal0 = ST.balanceOf(_lp);
-        _doRedeemLTMulti(_lp, _shares, 0, 0);
-        valueNAV = toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(IERC20(testConfig.stAsset).balanceOf(_lp) - stAssetBal0)))
+        _doRedeemLPTMulti(_lp, _shares, 0, 0);
+        valueNAV = toUint256(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(IERC20(testConfig.stAsset).balanceOf(_lp) - stAssetBal0)))
             + _quoteToNAV(IERC20(testConfig.quoteAsset).balanceOf(_lp) - quoteBal0) + _stSharesToNAVAtRate(ST.balanceOf(_lp) - stShareBal0, _kernelRate());
     }
 
@@ -90,7 +90,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     function test_ExternalAddUnbalanced_syncs_kernelLedgerUntouched() public {
         _seedForSwaps();
         _sync();
-        uint256 ltOwned0 = toUint256(KERNEL.getState().ltOwnedYieldBearingAssets);
+        uint256 lptOwned0 = toUint256(KERNEL.getState().totalLPTAssets);
         uint256 supply0 = _bptSupply();
 
         address actor = _makeExternalLP("EXTERNAL_UNBALANCED_ADDER");
@@ -103,7 +103,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.TrancheAccountingSynced.selector);
 
         assertEq(syncCount, 1, "the before-add hook must sync the kernel exactly once");
-        assertEq(toUint256(KERNEL.getState().ltOwnedYieldBearingAssets), ltOwned0, "an external add must not move the kernel's owned-BPT ledger");
+        assertEq(toUint256(KERNEL.getState().totalLPTAssets), lptOwned0, "an external add must not move the kernel's owned-BPT ledger");
         assertEq(IERC20(POOL).balanceOf(actor), bptOut, "the minted BPT must land with the external actor");
         assertEq(_bptSupply(), supply0 + bptOut, "the BPT supply must grow by exactly the external mint");
     }
@@ -111,17 +111,17 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     /**
      * @notice an external SINGLE-SIDED add's realized cost matches the derived leak law
      *         `(1 - w) * V * (f + (1 - q))`: the imbalanced portion pays the swap fee AND is absorbed at the
-     *         pool's internal marginal price q instead of the feed mark. The kernel's LT raw NAV weakly gains.
+     *         pool's internal marginal price q instead of the feed mark. The kernel's LPT raw NAV weakly gains.
      * @dev Economics on the FEED-price basis (both legs of the comparison marked the same way): the minted
      *      BPT's pro-rata claim on the pool's mark-to-market vs the contributed value at the same marks.
      *      Expectation source: `_expectedSingleSidedAddLeak` (derivation in the helper).
      */
-    function test_ExternalAddSingleSidedST_paysTheLT_leakWithinBound() public {
+    function test_ExternalAddSingleSidedST_paysTheLPT_leakWithinBound() public {
         _seedForSwaps();
         _sync();
         uint256 w0 = _stValueShareWAD();
         uint256 spot0 = _spotSTinQuoteWAD();
-        uint256 ltRaw0 = toUint256(LT.getRawNAV());
+        uint256 lptRaw0 = toUint256(_liveLPTRawNAV());
 
         address actor = _makeExternalLP("EXTERNAL_SINGLE_SIDED_ADDER");
         uint256 stShares = _rawBalances()[_stPoolIndex()] / 20;
@@ -135,22 +135,22 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         (int256 expectedLeak, uint256 slack) = _expectedSingleSidedAddLeak(valueIn, w0, spot0, _spotSTinQuoteWAD());
         assertApproxEqAbs(leak, expectedLeak, slack, "the adder's realized leak must match (1-w)*V*(f + (1-q))");
 
-        // Oracle-basis sanity: the kernel's LT mark can only gain from an external add.
-        assertGe(toUint256(LT.getRawNAV()) + _tol2(), ltRaw0, "an external add can never dilute the kernel's LT mark");
+        // Oracle-basis sanity: the kernel's LPT mark can only gain from an external add.
+        assertGe(toUint256(_liveLPTRawNAV()) + _tol2(), lptRaw0, "an external add can never dilute the kernel's LPT mark");
     }
 
     /// @notice an external PROPORTIONAL add is value-neutral to everyone else: NAV-per-BPT and the
-    ///         kernel's LT raw NAV are unchanged (up to pool-favoring rounding).
+    ///         kernel's LPT raw NAV are unchanged (up to pool-favoring rounding).
     function test_ExternalAddProportional_navPerBPTConstant() public {
         _seedForSwaps();
         _sync();
         uint256 navPerBPT0 = _navPerBPTWAD();
-        uint256 ltRaw0 = toUint256(LT.getRawNAV());
+        uint256 lptRaw0 = toUint256(_liveLPTRawNAV());
 
         _externalProportionalPosition("EXTERNAL_PROPORTIONAL_ADDER", _bptSupply() / 10);
 
         assertGe(_navPerBPTWAD() + 2, navPerBPT0, "a proportional add must not dilute NAV per BPT (rounding favors the pool)");
-        assertApproxEqAbs(toUint256(LT.getRawNAV()), ltRaw0, _tol2(), "a proportional add must leave the kernel's LT mark unchanged");
+        assertApproxEqAbs(toUint256(_liveLPTRawNAV()), lptRaw0, _tol2(), "a proportional add must leave the kernel's LPT mark unchanged");
     }
 
     /**
@@ -168,7 +168,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         _driveLiquidityUtilizationTo(0.95e18);
 
         uint256 utilBefore = _committedLiquidityUtilization();
-        uint256 ltRawBefore = toUint256(ACCOUNTANT.getState().lastLTRawNAV);
+        uint256 lptRawBefore = toUint256(ACCOUNTANT.getState().lastLPTRawNAV);
         uint256 depthBefore = _markToMarketAtFeeds();
 
         // The external LP exits its ENTIRE position: no Royco gate is consulted, the exit cannot revert.
@@ -179,7 +179,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
         _sync();
         assertLe(_committedLiquidityUtilization(), utilBefore + 1, "the liquidity utilization did not move (the gate values kernel inventory, not venue depth)");
-        assertApproxEqAbs(toUint256(ACCOUNTANT.getState().lastLTRawNAV), ltRawBefore, _tol2(), "the committed LT mark is invariant under the external burn");
+        assertApproxEqAbs(toUint256(ACCOUNTANT.getState().lastLPTRawNAV), lptRawBefore, _tol2(), "the committed LPT mark is invariant under the external burn");
     }
 
     /**
@@ -192,7 +192,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         address actor = _externalProportionalPosition("EXTERNAL_SINGLE_EXITER", _bptSupply() / 5);
 
         uint256 navPerBPT0 = _navPerBPTWAD();
-        uint256 ltRaw0 = toUint256(LT.getRawNAV());
+        uint256 lptRaw0 = toUint256(_liveLPTRawNAV());
         uint256 spot0 = _spotSTinQuoteWAD();
         uint256 quoteShare0 = WAD - _stValueShareWAD();
         uint256 phi0 = _kernelPoolShareWAD();
@@ -202,8 +202,8 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         _externalRemoveSingleTokenExactIn(actor, bptIn, testConfig.quoteAsset);
 
         assertGe(_navPerBPTWAD() + 2, navPerBPT0, "a single-token exit must pay the remainers, never dilute them");
-        uint256 ltRaw1 = toUint256(LT.getRawNAV());
-        assertGe(ltRaw1 + _tol2(), ltRaw0, "the kernel's LT mark must weakly gain from the exit fee");
+        uint256 lptRaw1 = toUint256(_liveLPTRawNAV());
+        assertGe(lptRaw1 + _tol2(), lptRaw0, "the kernel's LPT mark must weakly gain from the exit fee");
         // Upper bound: the kernel's share of the exit's fee + internal-price leak (the exit-side analogue of
         // the add leak law: the withdrawn single token is priced internally, in [alpha, beta]), padded by the
         // oracle re-mark drift the exit's composition skew can move (within (1 - alpha) of the exit value).
@@ -212,27 +212,27 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 leakHi = uint256(expectedLeak > int256(0) ? expectedLeak : -expectedLeak) + slack;
         uint256 remarkSlack = Math.mulDiv(exitValue, WAD - alpha, WAD);
         assertLe(
-            ltRaw1 - Math.min(ltRaw1, ltRaw0),
+            lptRaw1 - Math.min(lptRaw1, lptRaw0),
             Math.mulDiv(phi0, leakHi, WAD) + remarkSlack + _tol2(),
             "the kernel's gain is bounded by its exit-leak share plus the oracle re-mark drift"
         );
     }
 
     /**
-     * @notice external depth is economically inert to a kernel redeemer: a multi-asset LT redemption pays
+     * @notice external depth is economically inert to a kernel redeemer: a multi-asset LPT redemption pays
      *         the identical value whether or not a large external LP position sits in the pool (A/B snapshot).
      */
     function test_ExternalDepth_isInertToKernelRedeemer() public {
         _seedForSwaps();
         _sync();
-        uint256 shares = LT.balanceOf(LT_ALICE_ADDRESS) / 4;
+        uint256 shares = LPT.balanceOf(LPT_ALICE_ADDRESS) / 4;
 
         uint256 snapshotId = vm.snapshotState();
-        uint256 valueWithout = _measureRedeemValueMulti(LT_ALICE_ADDRESS, shares);
+        uint256 valueWithout = _measureRedeemValueMulti(LPT_ALICE_ADDRESS, shares);
         vm.revertToState(snapshotId);
 
         _externalProportionalPosition("EXTERNAL_BYSTANDER_LP", _bptSupply()); // doubles the pool around the redeemer
-        uint256 valueWith = _measureRedeemValueMulti(LT_ALICE_ADDRESS, shares);
+        uint256 valueWith = _measureRedeemValueMulti(LPT_ALICE_ADDRESS, shares);
 
         assertApproxEqAbs(valueWith, valueWithout, 2 * _tol2(), "a kernel redemption's value must be independent of external depth");
     }
@@ -285,7 +285,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
     /**
      * @notice the committed liquidity utilization equals the independent ceil-mirror
-     *         `ceil(stEffectiveNAV * minLiq / ltRawNAV)` on REAL oracle inputs, across seeded, skewed, externally-deepened,
+     *         `ceil(stEffectiveNAV * minLiq / lptRawNAV)` on REAL oracle inputs, across seeded, skewed, externally-deepened,
      *         and yield-moved states. Exact equality on every state.
      */
     function test_LiquidityGate_utilMatchesMirror_acrossRealStates() public {
@@ -310,28 +310,28 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         SyncedAccountingState memory s = _syncWithState();
         assertEq(
             s.liquidityUtilizationWAD,
-            _expectedLiquidityUtilization(s.stEffectiveNAV, uint64(s.minLiquidityWAD), s.ltRawNAV),
+            _expectedLiquidityUtilization(s.stEffectiveNAV, uint64(s.minLiquidityWAD), s.lptRawNAV),
             string.concat("packet liquidity utilization vs the independent ceil-mirror: ", _ctx)
         );
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        assertEq(s.ltRawNAV, a.lastLTRawNAV, string.concat("packet LT mark vs committed checkpoint: ", _ctx));
+        assertEq(s.lptRawNAV, a.lastLPTRawNAV, string.concat("packet LPT mark vs committed checkpoint: ", _ctx));
         assertEq(s.stEffectiveNAV, a.lastSTEffectiveNAV, string.concat("packet senior mark vs committed checkpoint: ", _ctx));
-        assertGt(toUint256(a.lastLTRawNAV), 0, string.concat("arrange: the committed LT mark must be live: ", _ctx));
+        assertGt(toUint256(a.lastLPTRawNAV), 0, string.concat("arrange: the committed LPT mark must be live: ", _ctx));
     }
 
     /**
      * @notice the liquidity gate binds senior entry at exactly WAD on real numbers and is RELEASED by real
-     *         LT depth: a senior deposit sized past the committed headroom reverts
-     *         `LIQUIDITY_REQUIREMENT_VIOLATED`, and succeeds after an LT deposit deepens the real pool.
+     *         LPT depth: a senior deposit sized past the committed headroom reverts
+     *         `LIQUIDITY_REQUIREMENT_VIOLATED`, and succeeds after an LPT deposit deepens the real pool.
      */
-    function test_LiquidityGate_stDeposit_bindsAtWAD_releasedByLTDeposit() public {
+    function test_LiquidityGate_stDeposit_bindsAtWAD_releasedByLPTDeposit() public {
         _seedForSwaps();
         _driveLiquidityUtilizationTo(0.99e18);
 
-        // Headroom from the committed checkpoint: util <= WAD  <=>  stEffectiveNAV <= ltRawNAV * WAD / minLiq.
+        // Headroom from the committed checkpoint: util <= WAD  <=>  stEffectiveNAV <= lptRawNAV * WAD / minLiq.
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        uint256 headroomNAV = Math.mulDiv(toUint256(a.lastLTRawNAV), WAD, a.minLiquidityWAD) - toUint256(a.lastSTEffectiveNAV);
-        uint256 breachAssets = toUint256(KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(headroomNAV))) * 101 / 100 + 10;
+        uint256 headroomNAV = Math.mulDiv(toUint256(a.lastLPTRawNAV), WAD, a.minLiquidityWAD) - toUint256(a.lastSTEffectiveNAV);
+        uint256 breachAssets = toUint256(KERNEL.convertValueToCollateralAssets(toNAVUnits(headroomNAV))) * 101 / 100 + 10;
 
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(testConfig.stAsset).approve(address(ST), breachAssets);
@@ -339,27 +339,27 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
 
-        // Real LT depth releases the gate: deepen the pool ~25%, then the identical deposit clears.
-        _seedLTBalanced(LT_BOB_ADDRESS, _rawBalances()[_stPoolIndex()] / 4);
+        // Real LPT depth releases the gate: deepen the pool ~25%, then the identical deposit clears.
+        _seedLPTBalanced(LPT_BOB_ADDRESS, _rawBalances()[_stPoolIndex()] / 4);
         uint256 shares = _doDepositST(ST_BOB_ADDRESS, breachAssets).shares;
         assertGt(shares, 0, "the identical senior deposit must clear once real depth backs it");
         assertLe(_committedLiquidityUtilization(), WAD, "the post-deposit committed utilization must respect the gate");
     }
 
     /**
-     * @notice a purely yield-driven breach (no one acted) blocks depth-reducing LT redemptions and senior
-     *         entry, leaves junior entry ungated, and releases on a real LT deposit. The gate binds on the
+     * @notice a purely yield-driven breach (no one acted) blocks depth-reducing LPT redemptions and senior
+     *         entry, leaves junior entry ungated, and releases on a real LPT deposit. The gate binds on the
      *         committed post-op state, whichever force moved it.
      */
-    function test_LiquidityGate_yieldDrivenBreach_blocksLTRedeemAndSTDeposit() public {
+    function test_LiquidityGate_yieldDrivenBreach_blocksLPTRedeemAndSTDeposit() public {
         _seedForSwaps();
         _arrangeYieldDrivenLiquidityBreach();
 
-        // Depth-reducing LT redemption: blocked.
-        uint256 shares = LT.balanceOf(LT_ALICE_ADDRESS) / 10;
-        vm.prank(LT_ALICE_ADDRESS);
+        // Depth-reducing LPT redemption: blocked.
+        uint256 shares = LPT.balanceOf(LPT_ALICE_ADDRESS) / 10;
+        vm.prank(LPT_ALICE_ADDRESS);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        LT.redeem(shares, LT_ALICE_ADDRESS, LT_ALICE_ADDRESS);
+        LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
 
         // Senior entry: blocked while under-provisioned.
         uint256 stAssets = testConfig.initialFunding / 1000;
@@ -372,11 +372,11 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         // Junior entry: never liquidity-gated.
         assertGt(_doDepositJT(JT_BOB_ADDRESS, testConfig.initialFunding / 1000).shares, 0, "junior entry must stay ungated by liquidity");
 
-        // A real LT deposit heals the metric and releases the redemption.
-        _seedLTBalanced(LT_BOB_ADDRESS, _rawBalances()[_stPoolIndex()] / 4);
+        // A real LPT deposit heals the metric and releases the redemption.
+        _seedLPTBalanced(LPT_BOB_ADDRESS, _rawBalances()[_stPoolIndex()] / 4);
         assertLe(_committedLiquidityUtilization(), WAD, "arrange: the deepening must heal the utilization");
-        vm.prank(LT_ALICE_ADDRESS);
-        LT.redeem(shares, LT_ALICE_ADDRESS, LT_ALICE_ADDRESS);
+        vm.prank(LPT_ALICE_ADDRESS);
+        LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -385,18 +385,18 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
     /// @dev The staged idle liquidity premium's NAV value at the committed senior mark (the venue's own reinvest basis).
     function _idleLiquidityPremiumValueNAV() internal view returns (uint256 idleShares, uint256 idleValueNAV) {
-        idleShares = KERNEL.getState().ltOwnedSeniorTrancheShares;
+        idleShares = KERNEL.getState().lptOwnedSeniorTrancheShares;
         idleValueNAV = toUint256(_expectedValue(idleShares, ST.totalSupply(), ACCOUNTANT.getState().lastSTEffectiveNAV));
     }
 
     /// @dev Executes the permissioned manual reinvest of the full idle balance and returns the decoded event args.
-    function _manualReinvestAll() internal returns (uint256 stSharesReinvested, uint256 ltAssetsMinted, uint256 eventCount) {
+    function _manualReinvestAll() internal returns (uint256 stSharesReinvested, uint256 lptAssetsMinted, uint256 eventCount) {
         vm.recordLogs();
         vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS);
         KERNEL.reinvestLiquidityPremium(type(uint256).max);
         bytes memory data;
         (eventCount, data) = _lastLogData(vm.getRecordedLogs(), address(KERNEL), IRoycoDayKernel.LiquidityPremiumReinvested.selector);
-        if (eventCount > 0) (stSharesReinvested, ltAssetsMinted) = abi.decode(data, (uint256, uint256));
+        if (eventCount > 0) (stSharesReinvested, lptAssetsMinted) = abi.decode(data, (uint256, uint256));
     }
 
     /**
@@ -408,10 +408,10 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 snapshotId = vm.snapshotState();
         assertTrue(_trySetReinvestmentSlippage(uint64(WAD - 1)), "probe: the slippage seam must open");
         (, uint256 idleValueNAV) = _idleLiquidityPremiumValueNAV();
-        fairBPT = toUint256(KERNEL.ltConvertNAVUnitsToTrancheUnits(toNAVUnits(idleValueNAV)));
-        (, uint256 ltAssetsMinted, uint256 eventCount) = _manualReinvestAll();
+        fairBPT = toUint256(KERNEL.convertValueToLPTAssets(toNAVUnits(idleValueNAV)));
+        (, uint256 lptAssetsMinted, uint256 eventCount) = _manualReinvestAll();
         assertEq(eventCount, 1, "probe: the wide-open gate must deploy the premium");
-        haircutWAD = ltAssetsMinted >= fairBPT ? 0 : WAD - Math.mulDiv(ltAssetsMinted, WAD, fairBPT);
+        haircutWAD = lptAssetsMinted >= fairBPT ? 0 : WAD - Math.mulDiv(lptAssetsMinted, WAD, fairBPT);
         vm.revertToState(snapshotId);
     }
 
@@ -448,7 +448,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     }
 
     /**
-     * @notice the reinvest obeys the single-sided leak law through the PRODUCTION path: the value the LT
+     * @notice the reinvest obeys the single-sided leak law through the PRODUCTION path: the value the LPT
      *         gives up deploying the premium is `(1 - w) * V * (f + (1 - q))` — the imbalance fee plus the
      *         internal-price discount — measured at feed marks.
      */
@@ -460,10 +460,10 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 w0 = _stValueShareWAD();
         uint256 spot0 = _spotSTinQuoteWAD();
 
-        (, uint256 ltAssetsMinted, uint256 eventCount) = _manualReinvestAll();
+        (, uint256 lptAssetsMinted, uint256 eventCount) = _manualReinvestAll();
         assertEq(eventCount, 1, "the open-gate reinvest must deploy");
 
-        uint256 mintedValue = Math.mulDiv(ltAssetsMinted, _mtmPerBPTWAD(), WAD);
+        uint256 mintedValue = Math.mulDiv(lptAssetsMinted, _mtmPerBPTWAD(), WAD);
         int256 leak = int256(idleValueNAV) - int256(mintedValue);
         (int256 expectedLeak, uint256 slack) = _expectedSingleSidedAddLeak(idleValueNAV, w0, spot0, _spotSTinQuoteWAD());
         assertApproxEqAbs(leak, expectedLeak, slack, "the reinvest leak must match (1-w)*V*(f + (1-q))");
@@ -488,14 +488,14 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         assertTrue(_trySetReinvestmentSlippage(uint64(Math.mulDiv(haircut, 9, 10))), "arrange: set the gate below h*");
         (,, uint256 eventCount) = _manualReinvestAll();
         assertEq(eventCount, 0, "a gate tighter than the realized haircut must tolerate-fail");
-        assertEq(KERNEL.getState().ltOwnedSeniorTrancheShares, idleShares0, "the premium must stay staged");
+        assertEq(KERNEL.getState().lptOwnedSeniorTrancheShares, idleShares0, "the premium must stay staged");
 
         // Above it: deploys in full.
         assertTrue(_trySetReinvestmentSlippage(uint64(Math.min(Math.mulDiv(haircut, 11, 10), WAD - 1))), "arrange: set the gate above h*");
         (uint256 stSharesReinvested,, uint256 eventCount2) = _manualReinvestAll();
         assertEq(eventCount2, 1, "a gate looser than the realized haircut must deploy");
         assertEq(stSharesReinvested, idleShares0, "the entire staged premium must deploy");
-        assertEq(KERNEL.getState().ltOwnedSeniorTrancheShares, 0, "the idle ledger must zero");
+        assertEq(KERNEL.getState().lptOwnedSeniorTrancheShares, 0, "the idle ledger must zero");
     }
 
     /**
@@ -512,7 +512,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         assertTrue(_trySetReinvestmentSlippage(shippedSlippageWAD), "arrange: restore the shipped gate");
         (,, uint256 eventCount) = _manualReinvestAll();
         assertEq(eventCount, 1, "the shipped configuration must deploy the premium on a healthy pool");
-        assertEq(KERNEL.getState().ltOwnedSeniorTrancheShares, 0, "the idle ledger must zero under the shipped gate");
+        assertEq(KERNEL.getState().lptOwnedSeniorTrancheShares, 0, "the idle ledger must zero under the shipped gate");
     }
 
     /**
@@ -542,10 +542,10 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 w0 = _stValueShareWAD();
         uint256 spot0 = _spotSTinQuoteWAD();
 
-        (, uint256 ltAssetsMinted, uint256 eventCount) = _manualReinvestAll();
+        (, uint256 lptAssetsMinted, uint256 eventCount) = _manualReinvestAll();
         assertEq(eventCount, 1, string.concat("the open-gate reinvest must deploy: ", _ctx));
 
-        int256 leak = int256(idleValueNAV) - int256(Math.mulDiv(ltAssetsMinted, _mtmPerBPTWAD(), WAD));
+        int256 leak = int256(idleValueNAV) - int256(Math.mulDiv(lptAssetsMinted, _mtmPerBPTWAD(), WAD));
         (int256 expectedLeak, uint256 slack) = _expectedSingleSidedAddLeak(idleValueNAV, w0, spot0, _spotSTinQuoteWAD());
         assertApproxEqAbs(leak, expectedLeak, slack, string.concat("the reinvest leak must match the law: ", _ctx));
     }
@@ -581,7 +581,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
         (,, uint256 eventCount) = _manualReinvestAll();
         assertEq(eventCount, 0, "the cap-breaching deploy must be swallowed, not bubbled");
-        assertEq(KERNEL.getState().ltOwnedSeniorTrancheShares, idleShares0, "the premium must stay staged for the next attempt");
+        assertEq(KERNEL.getState().lptOwnedSeniorTrancheShares, idleShares0, "the premium must stay staged for the next attempt");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -593,19 +593,19 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
      *         the LIVE pool ratio: each leg's raw removal equals `floor(bptBurned * rawBalance_i / bptSupply)`
      *         (within a wei), and the quote leg lands with the redeemer untouched.
      */
-    function test_LTRedeemMulti_afterSkew_removesLegsInLiveRatio() public {
+    function test_LPTRedeemMulti_afterSkew_removesLegsInLiveRatio() public {
         _seedForSwaps();
         _skewPool(true, 0.6e18);
         _sync();
 
         uint256[] memory raw0 = _rawBalances();
         uint256 supply0 = _bptSupply();
-        uint256 ltOwned0 = toUint256(KERNEL.getState().ltOwnedYieldBearingAssets);
-        uint256 redeemerQuote0 = IERC20(testConfig.quoteAsset).balanceOf(LT_ALICE_ADDRESS);
+        uint256 lptOwned0 = toUint256(KERNEL.getState().totalLPTAssets);
+        uint256 redeemerQuote0 = IERC20(testConfig.quoteAsset).balanceOf(LPT_ALICE_ADDRESS);
 
-        _doRedeemLTMulti(LT_ALICE_ADDRESS, LT.balanceOf(LT_ALICE_ADDRESS) / 4, 0, 0);
+        _doRedeemLPTMulti(LPT_ALICE_ADDRESS, LPT.balanceOf(LPT_ALICE_ADDRESS) / 4, 0, 0);
 
-        uint256 bptBurned = ltOwned0 - toUint256(KERNEL.getState().ltOwnedYieldBearingAssets);
+        uint256 bptBurned = lptOwned0 - toUint256(KERNEL.getState().totalLPTAssets);
         assertGt(bptBurned, 0, "arrange: the redemption must burn a venue slice");
         uint256[] memory raw1 = _rawBalances();
         assertApproxEqAbs(
@@ -621,7 +621,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
             "the quote leg must exit in the live pool ratio (floored)"
         );
         assertEq(
-            IERC20(testConfig.quoteAsset).balanceOf(LT_ALICE_ADDRESS) - redeemerQuote0,
+            IERC20(testConfig.quoteAsset).balanceOf(LPT_ALICE_ADDRESS) - redeemerQuote0,
             raw0[_quotePoolIndex()] - raw1[_quotePoolIndex()],
             "the venue's quote leg must land with the redeemer in full"
         );
@@ -629,24 +629,24 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
     /**
      * @notice after a skew, a multi-asset redeemer is never OVERCHARGED and inherits at most its slice of
-     *         the skew premium: received (feed marks) minus charged (the oracle-basis LT share value) sits in
+     *         the skew premium: received (feed marks) minus charged (the oracle-basis LPT share value) sits in
      *         `[-tol, slice * (MtM - TVL) + tol]` — the oracle's min-composition mark can only under-charge.
      */
-    function test_LTRedeemMulti_afterSkew_redeemerValueWithinSkewBound() public {
+    function test_LPTRedeemMulti_afterSkew_redeemerValueWithinSkewBound() public {
         _seedForSwaps();
         _skewPool(true, 0.6e18);
         _sync();
 
-        uint256 shares = LT.balanceOf(LT_ALICE_ADDRESS) / 4;
-        uint256 charged = Math.mulDiv(toUint256(LT.totalAssets().nav), shares, LT.totalSupply());
-        uint256 ltOwned0 = toUint256(KERNEL.getState().ltOwnedYieldBearingAssets);
+        uint256 shares = LPT.balanceOf(LPT_ALICE_ADDRESS) / 4;
+        uint256 charged = Math.mulDiv(toUint256(LPT.totalAssets().nav), shares, LPT.totalSupply());
+        uint256 lptOwned0 = toUint256(KERNEL.getState().totalLPTAssets);
         uint256 sliceGapCeiling = Math.mulDiv(
-            Math.mulDiv(ltOwned0, shares, LT.totalSupply()), // the BPT slice the redemption burns
+            Math.mulDiv(lptOwned0, shares, LPT.totalSupply()), // the BPT slice the redemption burns
             _markToMarketAtFeeds() - _poolTVL(),
             _bptSupply()
         );
 
-        uint256 received = _measureRedeemValueMulti(LT_ALICE_ADDRESS, shares);
+        uint256 received = _measureRedeemValueMulti(LPT_ALICE_ADDRESS, shares);
 
         assertGe(received + 2 * _tol2(), charged, "the redeemer must never be overcharged against the oracle mark");
         assertLe(received, charged + sliceGapCeiling + 2 * _tol2(), "the redeemer's bonus is capped by its slice of the MtM-TVL skew gap");
@@ -672,27 +672,27 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
     /**
      * @notice a value-balanced multi-asset deposit into a SKEWED pool pays a bounded entry cost: the
-     *         minted LT share value undercuts the contributed value by at most the worst in-range
-     *         re-mark plus fee on the whole contribution, and existing LT holders never lose.
+     *         minted LPT share value undercuts the contributed value by at most the worst in-range
+     *         re-mark plus fee on the whole contribution, and existing LPT holders never lose.
      * @dev Coarse bound by design: the deposit's non-proportional portion against a skewed pool is absorbed at
      *      in-range internal prices, so the total cost is capped by `(f + (1 - alpha)) * V`.
      */
-    function test_LTDepositMulti_intoSkewedPool_entryCostBounded() public {
+    function test_LPTDepositMulti_intoSkewedPool_entryCostBounded() public {
         _seedForSwaps();
         _skewPool(true, 0.6e18);
         _sync();
-        // Value LT shares by what they actually REDEEM for (previewRedeem's effective-NAV claim), not the
+        // Value LPT shares by what they actually REDEEM for (previewRedeem's effective-NAV claim), not the
         // composability-facing convertToAssets/totalAssets surface, which is now a deliberately conservative
         // BPT-only raw-NAV floor and understates a redeemer's true claim.
-        uint256 sharePrice0 = toUint256(LT.previewRedeem(1e18).nav);
+        uint256 sharePrice0 = toUint256(LPT.previewRedeem(1e18).nav);
 
         uint256 stLeg = _rawBalances()[_stPoolIndex()] / 10;
-        uint256 quoteLeg = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stLeg)));
-        uint256 contributed = toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stLeg))) + _quoteToNAV(quoteLeg);
+        uint256 quoteLeg = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(stLeg)));
+        uint256 contributed = toUint256(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(stLeg))) + _quoteToNAV(quoteLeg);
 
-        uint256 shares = _doDepositLTMulti(LT_ALICE_ADDRESS, stLeg, quoteLeg, 0).shares;
+        uint256 shares = _doDepositLPTMulti(LPT_ALICE_ADDRESS, stLeg, quoteLeg, 0).shares;
 
-        uint256 minted = toUint256(LT.previewRedeem(shares).nav);
+        uint256 minted = toUint256(LPT.previewRedeem(shares).nav);
         (uint256 alpha,) = _stPriceBandWAD();
         uint256 costCeiling = Math.mulDiv(contributed, _staticSwapFeePctWAD() + (WAD - alpha), WAD);
         // Entry into a skewed pool re-marks the contribution in EITHER direction, bounded by the swap fee plus the
@@ -700,7 +700,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         // leg down. Neither can exceed the fee + in-range band, so the bound is symmetric around `contributed`.
         assertLe(minted, contributed + costCeiling + 2 * _tol2(), "an entrant cannot extract beyond fee + worst in-range re-mark");
         assertGe(minted + costCeiling + 2 * _tol2(), contributed, "the entry cost into a skewed pool must stay within fee + worst in-range re-mark");
-        assertGe(toUint256(LT.previewRedeem(1e18).nav) + 2, sharePrice0, "existing LT holders can never lose to an entrant");
+        assertGe(toUint256(LPT.previewRedeem(1e18).nav) + 2, sharePrice0, "existing LPT holders can never lose to an entrant");
     }
 
     /**
@@ -708,21 +708,21 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
      *         identical BPT amount with and without a preceding skew (A/B snapshot) — only the multi-asset
      *         unwind sees composition.
      */
-    function test_LTRedeem_inKind_bptSliceUnaffectedByComposition() public {
+    function test_LPTRedeem_inKind_bptSliceUnaffectedByComposition() public {
         _seedForSwaps();
         _sync();
-        uint256 shares = LT.balanceOf(LT_ALICE_ADDRESS) / 4;
+        uint256 shares = LPT.balanceOf(LPT_ALICE_ADDRESS) / 4;
 
         uint256 snapshotId = vm.snapshotState();
-        uint256 bpt0 = IERC20(POOL).balanceOf(LT_ALICE_ADDRESS);
-        _doRedeemLT(LT_ALICE_ADDRESS, shares);
-        uint256 bptUnskewed = IERC20(POOL).balanceOf(LT_ALICE_ADDRESS) - bpt0;
+        uint256 bpt0 = IERC20(POOL).balanceOf(LPT_ALICE_ADDRESS);
+        _doRedeemLPT(LPT_ALICE_ADDRESS, shares);
+        uint256 bptUnskewed = IERC20(POOL).balanceOf(LPT_ALICE_ADDRESS) - bpt0;
         vm.revertToState(snapshotId);
 
         _skewPool(true, 0.6e18);
-        uint256 bpt1 = IERC20(POOL).balanceOf(LT_ALICE_ADDRESS);
-        _doRedeemLT(LT_ALICE_ADDRESS, shares);
-        uint256 bptSkewed = IERC20(POOL).balanceOf(LT_ALICE_ADDRESS) - bpt1;
+        uint256 bpt1 = IERC20(POOL).balanceOf(LPT_ALICE_ADDRESS);
+        _doRedeemLPT(LPT_ALICE_ADDRESS, shares);
+        uint256 bptSkewed = IERC20(POOL).balanceOf(LPT_ALICE_ADDRESS) - bpt1;
 
         assertEq(bptSkewed, bptUnskewed, "the in-kind BPT slice must not depend on the pool's composition");
     }
@@ -778,14 +778,14 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 quoteLeg = _rawBalances()[_quotePoolIndex()] / 10;
         uint256 contributed = _quoteToNAV(quoteLeg);
 
-        uint256 shares = _doDepositLTMulti(LT_ALICE_ADDRESS, 0, quoteLeg, 0).shares;
+        uint256 shares = _doDepositLPTMulti(LPT_ALICE_ADDRESS, 0, quoteLeg, 0).shares;
         assertGt(shares, 0, "the quote-only deposit must mint in-term");
 
-        // The depositor's minted claim: its share fraction of the post-add LT NAV (oracle-consistent mark).
-        uint256 minted = Math.mulDiv(toUint256(LT.totalAssets().nav), shares, LT.totalSupply());
+        // The depositor's minted claim: its share fraction of the post-add LPT NAV (oracle-consistent mark).
+        uint256 minted = Math.mulDiv(toUint256(LPT.totalAssets().nav), shares, LPT.totalSupply());
         int256 leak = int256(contributed) - int256(minted);
         (int256 expectedLeak, uint256 slack) = _expectedSingleSidedAddLeak(contributed, quoteShare0, quoteSpot0, Math.mulDiv(WAD, WAD, _spotSTinQuoteWAD()));
-        // The oracle basis (LT share value) undercuts the feed basis by up to the band re-mark; widen one-sided.
+        // The oracle basis (LPT share value) undercuts the feed basis by up to the band re-mark; widen one-sided.
         (uint256 alpha,) = _stPriceBandWAD();
         slack += Math.mulDiv(contributed, WAD - alpha, WAD);
         assertApproxEqAbs(leak, expectedLeak, slack, "the in-term quote-only deposit must obey the single-sided leak law");
@@ -808,21 +808,21 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         SyncedAccountingState memory state = _syncWithState();
         (uint256 reinvestCount,) = _lastLogData(vm.getRecordedLogs(), address(KERNEL), IRoycoDayKernel.LiquidityPremiumReinvested.selector);
         assertEq(reinvestCount, 0, "an in-term sync must not deploy");
-        assertEq(toUint256(state.ltLiquidityPremium), 0, "an in-term sync must pay no premium");
-        assertEq(KERNEL.getState().ltOwnedSeniorTrancheShares, idleShares, "the staged premium must sit untouched in-term");
+        assertEq(toUint256(state.lptLiquidityPremium), 0, "an in-term sync must pay no premium");
+        assertEq(KERNEL.getState().lptOwnedSeniorTrancheShares, idleShares, "the staged premium must sit untouched in-term");
 
         // The manual reinvest carries no term gate: the staged premium deploys in-term (behavior pin).
         assertTrue(_trySetReinvestmentSlippage(uint64(WAD - 1)), "arrange: the slippage gate must open");
         (uint256 stSharesReinvested,, uint256 eventCount) = _manualReinvestAll();
         assertEq(eventCount, 1, "the manual reinvest must deploy in-term (no term gate on the permissioned path)");
         assertEq(stSharesReinvested, idleShares, "the full staged premium must deploy");
-        assertEq(KERNEL.getState().ltOwnedSeniorTrancheShares, 0, "the idle ledger must zero");
+        assertEq(KERNEL.getState().lptOwnedSeniorTrancheShares, 0, "the idle ledger must zero");
     }
 
     /**
      * @notice the inverse direction — external depth cannot release a bound gate: with the utilization
      *         breached, an external LP doubling the pool's real tradable depth changes nothing. The committed
-     *         LT mark counts kernel-owned BPT only, so the LT redemption stays blocked. The venue is deep; the
+     *         LPT mark counts kernel-owned BPT only, so the LPT redemption stays blocked. The venue is deep; the
      *         market says it is not.
      */
     function test_liquidityGate_externalDepthCannotReleaseBoundGate() public {
@@ -834,9 +834,9 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         _sync();
 
         assertGt(_committedLiquidityUtilization(), WAD, "doubling the real depth does not move the committed utilization");
-        uint256 shares = LT.balanceOf(LT_ALICE_ADDRESS) / 10;
-        vm.prank(LT_ALICE_ADDRESS);
+        uint256 shares = LPT.balanceOf(LPT_ALICE_ADDRESS) / 10;
+        vm.prank(LPT_ALICE_ADDRESS);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        LT.redeem(shares, LT_ALICE_ADDRESS, LT_ALICE_ADDRESS);
+        LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
     }
 }

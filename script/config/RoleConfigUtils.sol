@@ -9,7 +9,7 @@ import {
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
-    ADMIN_ORACLE_QUOTER_ROLE,
+    ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_ROLE,
@@ -20,16 +20,16 @@ import {
     DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
+    LPT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
-    LT_LP_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
-} from "../../src/factory/RolesConfiguration.sol";
+} from "../../src/factory/Roles.sol";
 
 /**
  * @title RoleConfigUtils
  * @notice Provides the legacy `RoleConfig` struct and `getRoleConfig` lookup that used to live on the
- *         `RolesConfiguration` contract. Now that `RolesConfiguration.sol` is a file of free role-id
+ *         `Roles` contract. Now that `Roles.sol` is a file of free role-id
  *         constants, scripts that need the per-role admin/guardian/delay configuration inherit this
  *         helper instead.
  */
@@ -58,7 +58,7 @@ abstract contract RoleConfigUtils {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == ADMIN_UPGRADER_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
-        } else if (role == ST_LP_ROLE || role == JT_LP_ROLE || role == LT_LP_ROLE) {
+        } else if (role == ST_LP_ROLE || role == JT_LP_ROLE || role == LPT_LP_ROLE) {
             return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == LP_ROLE_ADMIN_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
@@ -70,7 +70,7 @@ abstract contract RoleConfigUtils {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         } else if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
-        } else if (role == ADMIN_ORACLE_QUOTER_ROLE) {
+        } else if (role == ADMIN_ORACLE_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == GUARDIAN_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });

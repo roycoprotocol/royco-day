@@ -43,7 +43,7 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
     /// @notice Creation code for the new kernel impl, given the construction params read off the proxy.
     function _kernelCreationCodeWith(IRoycoDayKernel.RoycoDayKernelConstructionParams memory cp) internal pure virtual returns (bytes memory);
 
-    /// @notice Module-specific snapshot bytes (e.g. quoter config, kernel-type immutables).
+    /// @notice Module-specific snapshot bytes (e.g. oracle config, kernel-type immutables).
     function _snapshotKernelSpecific(address proxy) internal view virtual returns (bytes memory);
 
     /// @notice Module-specific verification given the snapshot returned by `_snapshotKernelSpecific`.
@@ -95,12 +95,11 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
     function _readConstructionParams(address _proxy) internal view returns (IRoycoDayKernel.RoycoDayKernelConstructionParams memory cp) {
         IRoycoDayKernel k = IRoycoDayKernel(_proxy);
         cp.seniorTranche = k.SENIOR_TRANCHE();
-        cp.stAsset = k.ST_ASSET();
         cp.juniorTranche = k.JUNIOR_TRANCHE();
-        cp.jtAsset = k.JT_ASSET();
+        cp.collateralAsset = k.COLLATERAL_ASSET();
         cp.accountant = k.ACCOUNTANT();
-        cp.liquidityTranche = k.LIQUIDITY_TRANCHE();
-        cp.ltAsset = k.LT_ASSET();
+        cp.liquidityProviderTranche = k.LIQUIDITY_PROVIDER_TRANCHE();
+        cp.lptAsset = k.LPT_ASSET();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -125,46 +124,36 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
     function _snapshotCommon(address _proxy) internal view returns (bytes memory) {
         IRoycoDayKernel k = IRoycoDayKernel(_proxy);
         IRoycoDayKernel.RoycoDayKernelState memory state = k.getState();
-        uint256 stConv = NAV_UNIT.unwrap(k.stConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
-        uint256 jtConv = NAV_UNIT.unwrap(k.jtConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
-        return abi.encode(k.SENIOR_TRANCHE(), k.ST_ASSET(), k.JUNIOR_TRANCHE(), k.JT_ASSET(), k.ACCOUNTANT(), state, stConv, jtConv);
+        uint256 collateralConv = NAV_UNIT.unwrap(k.convertCollateralAssetsToValue(_oneTrancheUnit()));
+        return abi.encode(k.SENIOR_TRANCHE(), k.JUNIOR_TRANCHE(), k.COLLATERAL_ASSET(), k.ACCOUNTANT(), state, collateralConv);
     }
 
     function _verifyCommon(address _proxy, bytes memory _snap) internal view {
         (
             address senior,
-            address stAsset,
             address junior,
-            address jtAsset,
+            address collateralAsset,
             address accountant,
             IRoycoDayKernel.RoycoDayKernelState memory state,
-            uint256 stConvRate,
-            uint256 jtConvRate
-        ) = abi.decode(_snap, (address, address, address, address, address, IRoycoDayKernel.RoycoDayKernelState, uint256, uint256));
+            uint256 collateralConvRate
+        ) = abi.decode(_snap, (address, address, address, address, IRoycoDayKernel.RoycoDayKernelState, uint256));
 
         IRoycoDayKernel k = IRoycoDayKernel(_proxy);
         require(k.SENIOR_TRANCHE() == senior, UpgradeKernelBaseModule__ImmutableChanged("SENIOR_TRANCHE"));
-        require(k.ST_ASSET() == stAsset, UpgradeKernelBaseModule__ImmutableChanged("ST_ASSET"));
         require(k.JUNIOR_TRANCHE() == junior, UpgradeKernelBaseModule__ImmutableChanged("JUNIOR_TRANCHE"));
-        require(k.JT_ASSET() == jtAsset, UpgradeKernelBaseModule__ImmutableChanged("JT_ASSET"));
+        require(k.COLLATERAL_ASSET() == collateralAsset, UpgradeKernelBaseModule__ImmutableChanged("COLLATERAL_ASSET"));
         require(k.ACCOUNTANT() == accountant, UpgradeKernelBaseModule__ImmutableChanged("ACCOUNTANT"));
 
         IRoycoDayKernel.RoycoDayKernelState memory post = k.getState();
         require(post.protocolFeeRecipient == state.protocolFeeRecipient, UpgradeKernelBaseModule__StateChanged("protocolFeeRecipient"));
         require(post.stSelfLiquidationBonusWAD == state.stSelfLiquidationBonusWAD, UpgradeKernelBaseModule__StateChanged("stSelfLiquidationBonusWAD"));
         require(
-            TRANCHE_UNIT.unwrap(post.stOwnedYieldBearingAssets) == TRANCHE_UNIT.unwrap(state.stOwnedYieldBearingAssets),
-            UpgradeKernelBaseModule__StateChanged("stOwnedYieldBearingAssets")
-        );
-        require(
-            TRANCHE_UNIT.unwrap(post.jtOwnedYieldBearingAssets) == TRANCHE_UNIT.unwrap(state.jtOwnedYieldBearingAssets),
-            UpgradeKernelBaseModule__StateChanged("jtOwnedYieldBearingAssets")
+            TRANCHE_UNIT.unwrap(post.totalCollateralAssets) == TRANCHE_UNIT.unwrap(state.totalCollateralAssets),
+            UpgradeKernelBaseModule__StateChanged("totalCollateralAssets")
         );
 
-        uint256 postStConv = NAV_UNIT.unwrap(k.stConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
-        uint256 postJtConv = NAV_UNIT.unwrap(k.jtConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
-        require(postStConv == stConvRate, UpgradeKernelBaseModule__ConversionRateChanged("ST", stConvRate, postStConv));
-        require(postJtConv == jtConvRate, UpgradeKernelBaseModule__ConversionRateChanged("JT", jtConvRate, postJtConv));
+        uint256 postCollateralConv = NAV_UNIT.unwrap(k.convertCollateralAssetsToValue(_oneTrancheUnit()));
+        require(postCollateralConv == collateralConvRate, UpgradeKernelBaseModule__ConversionRateChanged("COLLATERAL", collateralConvRate, postCollateralConv));
     }
 
     function _oneTrancheUnit() private pure returns (TRANCHE_UNIT) {

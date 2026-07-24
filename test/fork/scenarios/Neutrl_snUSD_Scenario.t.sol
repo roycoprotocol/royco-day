@@ -2,14 +2,16 @@
 pragma solidity ^0.8.28;
 
 import { DeployScript } from "../../../script/Deploy.s.sol";
+import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
+import { MarketState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { Test_BalancerLPGateReinvestBase } from "../balancer/base/Test_BalancerLPGateReinvestBase.t.sol";
 
 /**
  * @title Neutrl_snUSD_Scenario
  * @notice Scenario-based fork tests for the Neutrl snUSD market: multiple actors run permutations of every
- *         deposit/redeem flow (ST/JT/LT, in-kind and multi-asset) interleaved with yield, loss, warps, syncs,
+ *         deposit/redeem flow (ST/JT/LPT, in-kind and multi-asset) interleaved with yield, loss, warps, syncs,
  *         and external Balancer swaps/LP adds, and the FULL protocol state is exhaustively verified after every
  *         step via one shared `_assertProtocolState` verifier. Delivered as both scripted permutations and a
  *         fuzzed op-sequence sharing that verifier.
@@ -34,17 +36,17 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
             stAsset: SNUSD_VAULT,
             jtAsset: SNUSD_VAULT,
             quoteAsset: USDC,
-            hasLiquidityTranche: true,
+            hasLiquidityProviderTranche: true,
             initialFunding: 1_000_000e18
         });
     }
 
-    function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
+    function _deployKernelAndMarket() internal override returns (DeploymentResult memory) {
         return DEPLOY_SCRIPT.deploy(
             DEPLOY_SCRIPT.getMarketConfig("snUSD"),
             OWNER_ADDRESS,
             PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds,
+            DEPLOY_SCRIPT.getChainConfig(block.chainid, false).scheduledOperationsExpirySeconds,
             _generateRoleAssignments(),
             DEPLOYER.privateKey
         );
@@ -76,30 +78,36 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
 
         MarketSnapshot memory s = _snap();
 
-        // 2. Raw NAVs: the live tranche getters agree with the snapshot.
-        assertEq(toUint256(ST.getRawNAV()), toUint256(s.stRawNAV), string.concat(_ctx, ": ST getRawNAV vs snapshot"));
-        assertEq(toUint256(JT.getRawNAV()), toUint256(s.jtRawNAV), string.concat(_ctx, ": JT getRawNAV vs snapshot"));
-        if (testConfig.hasLiquidityTranche) {
-            assertEq(toUint256(LT.getRawNAV()), toUint256(s.ltRawNAV), string.concat(_ctx, ": LT getRawNAV vs snapshot"));
+        // 2. Standing state-machine biconditional: PERPETUAL iff zero IL. Every perpetual commit erases the
+        //    IL ledger and FIXED_TERM always carries il > 0, so the mixed states are unrepresentable.
+        if (s.marketState == MarketState.PERPETUAL) {
+            assertEq(toUint256(s.lastJTImpermanentLoss), 0, string.concat(_ctx, ": PERPETUAL must carry zero JT impermanent loss"));
+        } else {
+            assertGt(toUint256(s.lastJTImpermanentLoss), 0, string.concat(_ctx, ": FIXED_TERM must carry nonzero JT impermanent loss"));
         }
 
-        // 3. Effective NAVs and the full view surface are live (must not revert) after every step.
+        // 3. Raw NAVs: the per-tranche raw NAV surface is retired, the snapshot's single collateral mark and
+        //    LPT mark are read straight off the kernel ledger through the production pricing path in _snap
+
+        // 4. Effective NAVs and the full view surface are live (must not revert) after every step.
         _sweepViewSurface(address(ST), string.concat(_ctx, ": ST"));
         _sweepViewSurface(address(JT), string.concat(_ctx, ": JT"));
-        if (testConfig.hasLiquidityTranche) _sweepViewSurface(address(LT), string.concat(_ctx, ": LT"));
+        if (testConfig.hasLiquidityProviderTranche) _sweepViewSurface(address(LPT), string.concat(_ctx, ": LPT"));
     }
 
-    /// @dev Reads every ERC4626-style view on a tranche so a revert (e.g. an empty-tranche panic) surfaces
-    ///      immediately, and cross-checks the effective NAV (totalAssets().nav) against a maxRedeem/previewRedeem
-    ///      round trip where the tranche is non-empty.
-    function _sweepViewSurface(address _tranche, string memory _ctx) internal view {
+    /// @dev Reads every ERC4626-style view on a tranche and runs the redeem-preview simulation so a revert
+    ///      (e.g. an empty-tranche panic) surfaces immediately. `previewRedeem` simulates the real redemption
+    ///      and is not view, and it reverts exactly like `redeem` outside PERPETUAL, so the sweep only quotes
+    ///      when `maxRedeem` reports capacity (it reads 0 in FIXED_TERM, where the quote would revert
+    ///      DISABLED_IN_FIXED_TERM_STATE).
+    function _sweepViewSurface(address _tranche, string memory _ctx) internal {
         IRoycoVaultTranche t = IRoycoVaultTranche(_tranche);
         // Effective NAV read.
         toUint256(t.totalAssets().nav);
         // Deposit-side views.
         toUint256(t.maxDeposit(ST_ALICE_ADDRESS));
         if (t.totalSupply() != 0) {
-            // Redeem-side views only meaningful with supply; a full-supply preview must not revert.
+            // Redeem-side reads only carry meaning with supply, and a full-capacity preview must not revert.
             uint256 maxR = t.maxRedeem(ST_ALICE_ADDRESS);
             if (maxR != 0) t.previewRedeem(maxR);
         }
@@ -112,7 +120,7 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
 
     /// @notice A healthy multi-party lifecycle: several actors deposit into all three tranches, yield accrues over
     ///         a window, an external arb swap hits the pool, then each actor partially exits — verified after every step.
-    function test_Scenario_multiPartyHealthyLifecycle() public whenLT {
+    function test_Scenario_multiPartyHealthyLifecycle() public whenLPT {
         uint256 fund = testConfig.initialFunding / 10;
 
         _doDepositJT(JT_ALICE_ADDRESS, fund);
@@ -120,9 +128,9 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
         _doDepositST(ST_ALICE_ADDRESS, fund);
         _assertProtocolState("after ST_ALICE deposit");
 
-        _seedDefaultLT();
-        _enableLTOverlay(0.5e18, 0.3e18, 0.05e18);
-        _assertProtocolState("after LT overlay enable + seed");
+        _seedDefaultLPT();
+        _enableLPTOverlay(0.5e18, 0.3e18, 0.05e18);
+        _assertProtocolState("after LPT overlay enable + seed");
 
         _doDepositST(ST_BOB_ADDRESS, fund / 2);
         _assertProtocolState("after ST_BOB deposit");
@@ -138,19 +146,20 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
         _assertProtocolState("after ST_ALICE partial redeem");
         _doRedeemJT(JT_ALICE_ADDRESS, JT.balanceOf(JT_ALICE_ADDRESS) / 4);
         _assertProtocolState("after JT_ALICE partial redeem");
-        _doRedeemLT(LT_ALICE_ADDRESS, LT.balanceOf(LT_ALICE_ADDRESS) / 4);
-        _assertProtocolState("after LT_ALICE partial in-kind redeem");
+        _doRedeemLPT(LPT_ALICE_ADDRESS, LPT.balanceOf(LPT_ALICE_ADDRESS) / 4);
+        _assertProtocolState("after LPT_ALICE partial in-kind redeem");
     }
 
     /// @notice LPs entering and exiting around a premium window while liquidity is provisioned, exercising the
-    ///         multi-asset LT flows and a covered senior drawdown that transits FIXED_TERM and back.
-    function test_Scenario_premiumWindowAndCoveredDrawdown() public whenLT {
+    ///         multi-asset LPT flows and a covered senior drawdown plus recovery. snUSD runs permanently
+    ///         perpetual (term duration 0), so every commit resolves PERPETUAL and erases the drawdown's IL.
+    function test_Scenario_premiumWindowAndCoveredDrawdown() public whenLPT {
         uint256 fund = testConfig.initialFunding / 10;
 
         _doDepositJT(JT_ALICE_ADDRESS, fund);
         _doDepositST(ST_ALICE_ADDRESS, fund);
-        _seedDefaultLT();
-        _enableLTOverlay(0.5e18, 0.3e18, 0.05e18);
+        _seedDefaultLPT();
+        _enableLPTOverlay(0.5e18, 0.3e18, 0.05e18);
         _assertProtocolState("arranged");
 
         // Premium window: yield accrues, sync deploys the liquidity premium.
@@ -164,7 +173,7 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
         _sync();
         _assertProtocolState("after covered drawdown sync");
 
-        // Recovery: yield restores the drawdown, the market returns to PERPETUAL.
+        // Recovery: yield restores the drawdown (a plain fee-gated gain, the IL was already erased at commit).
         _applySTYield(0.06e18);
         _warpForward(3 days);
         _sync();
@@ -178,12 +187,12 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
     /// @notice Fuzzes a randomized sequence of deposit/redeem/yield/sync steps across actors, verifying the full
     ///         protocol state after every successful step. Amounts are bounded by the live max reads so no step
     ///         trips a gate, keeping every iteration on the verification path.
-    function testFuzz_RandomOpSequence(uint256 _seed) public whenLT {
+    function testFuzz_RandomOpSequence(uint256 _seed) public whenLPT {
         uint256 fund = testConfig.initialFunding / 20;
         _doDepositJT(JT_ALICE_ADDRESS, fund);
         _doDepositST(ST_ALICE_ADDRESS, fund);
-        _seedDefaultLT();
-        _enableLTOverlay(0.5e18, 0.3e18, 0.05e18);
+        _seedDefaultLPT();
+        _enableLPTOverlay(0.5e18, 0.3e18, 0.05e18);
         _assertProtocolState("fuzz: arranged");
 
         uint256 seed = _seed;
@@ -205,10 +214,10 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
                 if (maxR < 1e12) continue;
                 _doRedeemJT(JT_ALICE_ADDRESS, maxR / 4 + 1);
             } else if (op == 3) {
-                // LT in-kind redeem — bounded by the liquidity-respecting max.
-                uint256 maxR = LT.maxRedeem(LT_ALICE_ADDRESS);
+                // LPT in-kind redeem — bounded by the liquidity-respecting max.
+                uint256 maxR = LPT.maxRedeem(LPT_ALICE_ADDRESS);
                 if (maxR < 1e12) continue;
-                _doRedeemLT(LT_ALICE_ADDRESS, maxR / 4 + 1);
+                _doRedeemLPT(LPT_ALICE_ADDRESS, maxR / 4 + 1);
             } else if (op == 4) {
                 // Up-only senior yield over a window, then a sync.
                 _applySTYield(0.01e18);

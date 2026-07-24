@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { JT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { JT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { MAX_MINT_DILUTION_WAD, WAD } from "../../../src/libraries/Constants.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -20,13 +20,18 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *         (ii) a deposit into a wiped-to-zero junior tranche (the junior-wipeout dilution state) mints exactly the cap
  *              floor(supply x MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)) — near-total capture with
  *              bounded supply growth — with preview parity holding on the clamped branch
- * @dev The wipe uses a -40% shared-rate move: jtRawNAV 30_000e18 -> 18_000e18 absorbs its own 12_000e18 loss, and
- *      coverage for the senior's 40_000e18 loss consumes exactly the remaining 18_000e18, so jtEffectiveNAV
- *      lands at exactly zero with the junior supply still outstanding; the (jtEffectiveNAV == 0 && stEffectiveNAV > 0) arm then
- *      forces PERPETUAL, so deposits stay enabled in the wiped state
+ * @dev The wipe uses a -40% collateral-rate move: the -52_000e18 collateral delta attributes
+ *      floor(52_000e18 * 100_000e18 / 130_000e18) = 40_000e18 to ST with JT taking the 12_000e18 residual, and
+ *      coverage for the senior's 40_000e18 leg consumes exactly the remaining 18_000e18 junior buffer, so
+ *      jtEffectiveNAV lands at exactly zero with the junior supply still outstanding; the
+ *      (jtEffectiveNAV == 0 && stEffectiveNAV > 0) arm then forces PERPETUAL, so deposits stay enabled in the wiped state
  */
 contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
     address internal jtActor;
+
+    /// @dev Virtual shares / virtual value, restated inline (see Constants.sol VIRTUAL_SHARES / VIRTUAL_VALUE)
+    uint256 internal constant VS = 1e6;
+    uint256 internal constant VA = 1;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
@@ -53,12 +58,12 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
         uint256 supplyBefore = juniorTranche.totalSupply();
         uint256 jtEffBefore = toUint256(state.jtEffectiveNAV);
         uint256 assets = 1000e18;
-        uint256 value = toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets)));
+        uint256 value = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(assets)));
 
         uint256 predicted = juniorTranche.previewDeposit(toTrancheUnits(assets));
         uint256 minted = _depositJT(assets);
 
-        assertEq(minted, Math.mulDiv(supplyBefore, value, jtEffBefore), "live-market mint is the fair floor formula");
+        assertEq(minted, Math.mulDiv(supplyBefore + VS, value, jtEffBefore + VA), "live-market mint is the fair floor formula");
         assertEq(minted, predicted, "preview parity at the fair-priced mint");
         assertEq(minted, RoycoTestMath.convertToShares(value, jtEffBefore, supplyBefore), "mirror agreement at the fair-priced mint");
     }
@@ -66,7 +71,7 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
     /**
      * @notice (ii) The dilution edge the clamp exists for: the junior tranche is wiped to exactly zero effective NAV with its
      *         supply outstanding, then a depositor enters. The mint is exactly the cap
-     *         floor(supply x MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)) = supply x (1e12 - 1): the depositor captures all but one
+     *         floor((supply + 1e6) x MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)) = (supply + 1e6) x (1e12 - 1): the depositor captures all but one
      *         part in 1e12 of the tranche, and the supply grows by a bounded factor instead of x value
      *         (pre-clamp, this deposit would have minted supply x value ~ 1e21 times more). Preview parity
      *         must hold on the clamped branch too
@@ -80,10 +85,10 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
         assertGt(supplyBefore, 0, "the wiped supply must remain outstanding");
 
         uint256 assets = 1e18;
-        uint256 value = toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets)));
+        uint256 value = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(assets)));
         // The bind holds: value ~ 0.6e18 NAV wei over the 1-wei pinned denominator, far past the ~1e12 bind threshold
         assertGt(value * (WAD - MAX_MINT_DILUTION_WAD), MAX_MINT_DILUTION_WAD, "the dilution deposit must bind the clamp");
-        uint256 cap = Math.mulDiv(supplyBefore, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
+        uint256 cap = Math.mulDiv(supplyBefore + VS, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
 
         uint256 predicted = juniorTranche.previewDeposit(toTrancheUnits(assets));
         uint256 minted = _depositJT(assets);
@@ -94,6 +99,6 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
 
         // The capture guarantee in both directions: the depositor owns at most (1 - residual) of the post-mint
         // supply, and at least that minus the cap's floor dust — near-total capture, bounded growth
-        assertLe(minted * (WAD - MAX_MINT_DILUTION_WAD), supplyBefore * MAX_MINT_DILUTION_WAD, "the mint never exceeds the ownership bound");
+        assertLe(minted * (WAD - MAX_MINT_DILUTION_WAD), (supplyBefore + VS) * MAX_MINT_DILUTION_WAD, "the mint never exceeds the ownership bound");
     }
 }

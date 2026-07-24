@@ -3,10 +3,10 @@ pragma solidity ^0.8.28;
 
 import { ERC20PermitUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import { JT_LP_ROLE, LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { JT_LP_ROLE, LPT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_TranchePermit_Tranches
@@ -17,7 +17,7 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
  *      name, version "1", chain id, tranche proxy address) rather than read from the tranche's DOMAIN_SEPARATOR,
  *      so a mis-wired domain in the tranche would fail these signatures instead of being mirrored by them.
  *      Seeded once in setUp so every payout literal is against the same wei-exact state: ST 100e18 and JT 30e18
- *      vault shares (coverage (100 + 30) x 0.2 / 30 = 0.8667 <= 1) plus the base's auto-seeded quote-only LT depth
+ *      vault shares (coverage (100 + 30) x 0.2 / 30 = 0.8667 <= 1) plus the base's auto-seeded quote-only LPT depth
  *      of 6e18 BPT at a NAV-per-BPT of exactly 1.0, with all rates at 1.0 and no PnL so no fee or premium shares
  *      ever perturb the supplies
  */
@@ -37,7 +37,7 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
     /// @dev Per-tranche delegates holding the LP role each tranche's redeem gate requires
     address internal ST_DELEGATE;
     address internal JT_DELEGATE;
-    address internal LT_DELEGATE;
+    address internal LPT_DELEGATE;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
@@ -45,7 +45,7 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
         (PERMIT_OWNER, PERMIT_OWNER_KEY) = makeAddrAndKey("PERMIT_OWNER");
         ST_DELEGATE = _generateActor("ST_DELEGATE", ST_LP_ROLE);
         JT_DELEGATE = _generateActor("JT_DELEGATE", JT_LP_ROLE);
-        LT_DELEGATE = _generateActor("LT_DELEGATE", LT_LP_ROLE);
+        LPT_DELEGATE = _generateActor("LPT_DELEGATE", LPT_LP_ROLE);
     }
 
     /**
@@ -75,12 +75,13 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
      * @notice A permit signature sets the delegate's allowance and advances the owner's nonce on every tranche, and
      *         the delegate then redeems the owner's shares with the assets landing at the receiver
      * @dev The permit-then-redeem pair is the gasless-onboarding path for every tranche share (the owner never
-     *      sends a transaction), so it is proven on ST, JT, and LT in one run. Payouts at the seeded 1.0 rates:
-     *      ST: 10e18 of 100e18 senior shares claim 100e18 vault shares -> 10e18 x 100e18 / 100e18 = 10e18 vault shares.
-     *      JT: 3e18 of 30e18 junior shares claim 30e18 vault shares -> 3e18 x 30e18 / 30e18 = 3e18 vault shares
+     *      sends a transaction), so it is proven on ST, JT, and LPT in one run. Payouts at the seeded 1.0 rates,
+     *      scaled by the virtual-shares offset the claim scaler now carries (leg x shares / (supply + 1e6)):
+     *      ST: 10e18 of 100e18 senior shares claim 100e18 vault shares -> floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 vault shares.
+     *      JT: 3e18 of 30e18 junior shares claim 30e18 vault shares -> floor(30e18 x 3e18 / (30e18 + 1e6)) = 2999999999999900000 vault shares
      *      (post-redemption coverage (90 + 27) x 0.2 / 27 = 0.8667 <= 1, so the coverage gate clears).
-     *      LT: 0.5e18 of 6e18 liquidity shares claim 6e18 BPT -> 0.5e18 x 6e18 / 6e18 = 0.5e18 BPT
-     *      (post-redemption ltRawNAV 5.5e18 >= required 90e18 x 0.05 = 4.5e18, so the liquidity gate clears)
+     *      LPT: 0.5e18 of 6e18 liquidity shares claim 6e18 BPT -> floor(6e18 x 0.5e18 / (6e18 + 1e6)) = 499999999999916666 BPT
+     *      (post-redemption lptRawNAV 5.5e18 >= required 90e18 x 0.05 = 4.5e18, so the liquidity gate clears)
      */
     function test_Permit_SignatureSetsAllowanceAndDelegateRedeems() public {
         uint256 deadline = block.timestamp + 1 hours;
@@ -89,7 +90,8 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
         vm.prank(ST_PROVIDER);
         seniorTranche.transfer(PERMIT_OWNER, 10e18);
         assertEq(seniorTranche.nonces(PERMIT_OWNER), 0, "a fresh owner must start at nonce zero on the senior tranche");
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 10e18, 0, deadline));
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 10e18, 0, deadline));
         // Anyone may submit the signed permit, the signature alone authorizes the approval
         seniorTranche.permit(PERMIT_OWNER, ST_DELEGATE, 10e18, deadline, v, r, s);
         assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 10e18, "the permit must set the allowance to exactly the signed value");
@@ -97,7 +99,11 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         vm.prank(ST_DELEGATE);
         seniorTranche.redeem(10e18, ST_DELEGATE, PERMIT_OWNER);
-        assertEq(stJtVault.balanceOf(ST_DELEGATE), 10e18, "the delegate must receive exactly the 10e18 redeemed vault shares");
+        assertEq(
+            stJtVault.balanceOf(ST_DELEGATE),
+            9_999_999_999_999_900_000,
+            "the delegate must receive exactly floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 vault shares"
+        );
         assertEq(seniorTranche.balanceOf(PERMIT_OWNER), 0, "the owner's senior shares must be fully redeemed through the permit allowance");
         assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 0, "the delegated redemption must consume the permit allowance in full");
 
@@ -112,23 +118,31 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         vm.prank(JT_DELEGATE);
         juniorTranche.redeem(3e18, JT_DELEGATE, PERMIT_OWNER);
-        assertEq(stJtVault.balanceOf(JT_DELEGATE), 3e18, "the delegate must receive exactly the 3e18 redeemed vault shares");
+        assertEq(
+            stJtVault.balanceOf(JT_DELEGATE),
+            2_999_999_999_999_900_000,
+            "the delegate must receive exactly floor(30e18 x 3e18 / (30e18 + 1e6)) = 2999999999999900000 vault shares"
+        );
         assertEq(juniorTranche.balanceOf(PERMIT_OWNER), 0, "the owner's junior shares must be fully redeemed through the permit allowance");
         assertEq(juniorTranche.allowance(PERMIT_OWNER, JT_DELEGATE), 0, "the delegated junior redemption must consume the permit allowance in full");
 
-        // ===== Liquidity tranche =====
-        vm.prank(LT_PROVIDER);
-        liquidityTranche.transfer(PERMIT_OWNER, 0.5e18);
-        (v, r, s) = vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(liquidityTranche), "Royco Liquidity Tranche", LT_DELEGATE, 0.5e18, 0, deadline));
-        liquidityTranche.permit(PERMIT_OWNER, LT_DELEGATE, 0.5e18, deadline, v, r, s);
-        assertEq(liquidityTranche.allowance(PERMIT_OWNER, LT_DELEGATE), 0.5e18, "the permit must set the liquidity allowance to exactly the signed value");
-        assertEq(liquidityTranche.nonces(PERMIT_OWNER), 1, "the consumed liquidity permit must advance that tranche's own nonce to 1");
+        // ===== Liquidity provider tranche =====
+        vm.prank(LPT_PROVIDER);
+        liquidityProviderTranche.transfer(PERMIT_OWNER, 0.5e18);
+        (v, r, s) = vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(liquidityProviderTranche), "Royco Liquidity Provider Tranche", LPT_DELEGATE, 0.5e18, 0, deadline));
+        liquidityProviderTranche.permit(PERMIT_OWNER, LPT_DELEGATE, 0.5e18, deadline, v, r, s);
+        assertEq(liquidityProviderTranche.allowance(PERMIT_OWNER, LPT_DELEGATE), 0.5e18, "the permit must set the liquidity allowance to exactly the signed value");
+        assertEq(liquidityProviderTranche.nonces(PERMIT_OWNER), 1, "the consumed liquidity permit must advance that tranche's own nonce to 1");
 
-        vm.prank(LT_DELEGATE);
-        liquidityTranche.redeem(0.5e18, LT_DELEGATE, PERMIT_OWNER);
-        assertEq(bpt.balanceOf(LT_DELEGATE), 0.5e18, "the delegate must receive exactly the 0.5e18 redeemed BPT in kind");
-        assertEq(liquidityTranche.balanceOf(PERMIT_OWNER), 0, "the owner's liquidity shares must be fully redeemed through the permit allowance");
-        assertEq(liquidityTranche.allowance(PERMIT_OWNER, LT_DELEGATE), 0, "the delegated liquidity redemption must consume the permit allowance in full");
+        vm.prank(LPT_DELEGATE);
+        liquidityProviderTranche.redeem(0.5e18, LPT_DELEGATE, PERMIT_OWNER);
+        assertEq(
+            bpt.balanceOf(LPT_DELEGATE),
+            499_999_999_999_916_666,
+            "the delegate must receive exactly floor(6e18 x 0.5e18 / (6e18 + 1e6)) = 499999999999916666 BPT in kind"
+        );
+        assertEq(liquidityProviderTranche.balanceOf(PERMIT_OWNER), 0, "the owner's liquidity shares must be fully redeemed through the permit allowance");
+        assertEq(liquidityProviderTranche.allowance(PERMIT_OWNER, LPT_DELEGATE), 0, "the delegated liquidity redemption must consume the permit allowance in full");
     }
 
     /**
@@ -145,7 +159,8 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         // --- Expired: the deadline check fires before any signature work, one second past is already dead ---
         uint256 expiredDeadline = block.timestamp - 1;
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 10e18, 0, expiredDeadline));
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 10e18, 0, expiredDeadline));
         vm.expectRevert(abi.encodeWithSelector(ERC20PermitUpgradeable.ERC2612ExpiredSignature.selector, expiredDeadline));
         seniorTranche.permit(PERMIT_OWNER, ST_DELEGATE, 10e18, expiredDeadline, v, r, s);
         assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 0, "an expired permit must not set any allowance");
@@ -191,7 +206,8 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         // The signature-based approval lands even under pause
         uint256 deadline = block.timestamp + 1 hours;
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 2e18, 0, deadline));
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 2e18, 0, deadline));
         seniorTranche.permit(PERMIT_OWNER, ST_DELEGATE, 2e18, deadline, v, r, s);
         assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 2e18, "a paused market must still accept the pure-approval permit");
         assertEq(seniorTranche.nonces(PERMIT_OWNER), 1, "the permit must consume the nonce even while paused");

@@ -3,14 +3,14 @@ pragma solidity ^0.8.28;
 
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
+import { SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/EntryPointConfigurer.sol";
 import { MarketSyncerConfigurer } from "../../../src/factory/templates/periphery/MarketSyncerConfigurer.sol";
-import { SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
+import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 
 /**
  * @title PeripheryConfiguratorHarness
@@ -21,14 +21,7 @@ import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 contract PeripheryConfiguratorHarness is EntryPointConfigurer, MarketSyncerConfigurer {
     IRoycoFactory internal immutable FACTORY;
 
-    constructor(
-        address _entryPoint,
-        address _syncer,
-        IRoycoFactory _factory
-    )
-        EntryPointConfigurer(_entryPoint, _factory)
-        MarketSyncerConfigurer(_syncer)
-    {
+    constructor(address _entryPoint, address _syncer, IRoycoFactory _factory) EntryPointConfigurer(_entryPoint, _factory) MarketSyncerConfigurer(_syncer) {
         FACTORY = _factory;
     }
 
@@ -52,15 +45,15 @@ contract PeripheryConfiguratorHarness is EntryPointConfigurer, MarketSyncerConfi
  *      RoycoMarketSyncer wired to the same access manager
  */
 contract Test_PeripheryConfiguration is EntryPointTestBase {
-    uint256 internal stUnit;
+    uint256 internal collateralUnit;
 
     RoycoMarketSyncer internal syncer;
     PeripheryConfiguratorHarness internal harness;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
-        _seedMarket(100 * stUnit, 50 * stUnit);
+        collateralUnit = 10 ** uint256(cell.collateralAsset.decimals);
+        _seedMarket(100 * collateralUnit, 50 * collateralUnit);
         _deployEntryPoint();
 
         // Deploy a real market syncer wired to the fixture's access manager, then bind its registration selector to
@@ -79,7 +72,14 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
 
     /// @dev Builds a TrancheConfig with a marker deposit delay so a test can prove which tranche received which config
     function _markerConfig(uint24 _depositDelay) internal pure returns (IRoycoDayEntryPoint.TrancheConfig memory) {
-        return IRoycoDayEntryPoint.TrancheConfig({ enabled: true, depositDelaySeconds: _depositDelay, redemptionDelaySeconds: 1 hours, oracleClock: address(0) });
+        return IRoycoDayEntryPoint.TrancheConfig({
+            enabled: true,
+            depositDelaySeconds: _depositDelay,
+            depositExpirySeconds: 0,
+            redemptionDelaySeconds: 1 hours,
+            redemptionExpirySeconds: 0,
+            gateByOracleUpdate: false
+        });
     }
 
     // ---------------------------------------------------------------------
@@ -88,7 +88,7 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
 
     function test_ConfigureAllThreeTranches_appliesConfigsAndRegistersKernel() public {
         address[] memory tranches = new address[](3);
-        (tranches[0], tranches[1], tranches[2]) = (address(seniorTranche), address(juniorTranche), address(liquidityTranche));
+        (tranches[0], tranches[1], tranches[2]) = (address(seniorTranche), address(juniorTranche), address(liquidityProviderTranche));
         IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](3);
         (configs[0], configs[1], configs[2]) = (_markerConfig(111), _markerConfig(222), _markerConfig(333));
 
@@ -97,7 +97,7 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
         // Each present tranche received its own index-aligned config and resolved to the market's kernel
         assertEq(entryPoint.getTrancheConfig(address(seniorTranche)).baseConfig.depositDelaySeconds, 111, "ST config applied");
         assertEq(entryPoint.getTrancheConfig(address(juniorTranche)).baseConfig.depositDelaySeconds, 222, "JT config applied");
-        assertEq(entryPoint.getTrancheConfig(address(liquidityTranche)).baseConfig.depositDelaySeconds, 333, "LT config applied");
+        assertEq(entryPoint.getTrancheConfig(address(liquidityProviderTranche)).baseConfig.depositDelaySeconds, 333, "LPT config applied");
         assertEq(entryPoint.getTrancheConfig(address(seniorTranche)).kernel, address(kernel), "ST resolved to the market kernel");
 
         // The kernel registers on the syncer through the factory-forwarded, SYNC_ROLE-gated call
@@ -115,19 +115,21 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
         uint24 defaultDelay = entryPoint.getTrancheConfig(address(juniorTranche)).baseConfig.depositDelaySeconds;
         assertEq(defaultDelay, DEFAULT_DEPOSIT_DELAY, "the junior tranche starts at the fixture's default delay");
 
-        // Present ST and LT, absent JT (zero address) with a distinct config in its slot
+        // Present ST and LPT, absent JT (zero address) with a distinct config in its slot
         address[] memory tranches = new address[](3);
-        (tranches[0], tranches[1], tranches[2]) = (address(seniorTranche), address(0), address(liquidityTranche));
+        (tranches[0], tranches[1], tranches[2]) = (address(seniorTranche), address(0), address(liquidityProviderTranche));
         IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](3);
         (configs[0], configs[1], configs[2]) = (_markerConfig(111), _markerConfig(999), _markerConfig(333));
 
         // The absent tranche is dropped so the entry point never sees a zero address (it would revert NULL_ADDRESS)
         harness.configureTranches(tranches, configs);
 
-        // ST and LT took their own index-aligned configs, proving the paired config survives the skip
+        // ST and LPT took their own index-aligned configs, proving the paired config survives the skip
         assertEq(entryPoint.getTrancheConfig(address(seniorTranche)).baseConfig.depositDelaySeconds, 111, "ST took its paired config");
-        assertEq(entryPoint.getTrancheConfig(address(liquidityTranche)).baseConfig.depositDelaySeconds, 333, "LT took its paired config");
+        assertEq(entryPoint.getTrancheConfig(address(liquidityProviderTranche)).baseConfig.depositDelaySeconds, 333, "LPT took its paired config");
         // The skipped slot's config (999) was never applied to the junior tranche, its delay is untouched
-        assertEq(entryPoint.getTrancheConfig(address(juniorTranche)).baseConfig.depositDelaySeconds, defaultDelay, "the absent tranche's config was never applied");
+        assertEq(
+            entryPoint.getTrancheConfig(address(juniorTranche)).baseConfig.depositDelaySeconds, defaultDelay, "the absent tranche's config was never applied"
+        );
     }
 }

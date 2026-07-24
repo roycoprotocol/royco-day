@@ -14,38 +14,29 @@ import {
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
     ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
-    ADMIN_ORACLE_QUOTER_ROLE,
+    ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
     JT_LP_ROLE,
-    LT_LP_ROLE,
+    LPT_LP_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
-} from "../../src/factory/RolesConfiguration.sol";
+} from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
-import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as DayKernel
-} from "../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
-import {
-    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import {
-    IdenticalAssets_ST_JT_ChainlinkOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
-import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { RoycoDayBalancerV3Kernel } from "../../src/kernels/RoycoDayBalancerV3Kernel.sol";
+import { BalancerV3LiquidityVenue } from "../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
-import { RoycoLiquidityTranche } from "../../src/tranches/RoycoLiquidityTranche.sol";
+import { RoycoLiquidityProviderTranche } from "../../src/tranches/RoycoLiquidityProviderTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
 import { AdaptiveCurveYDM_V2 } from "../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
@@ -55,6 +46,7 @@ import { MockBPTOracle } from "../mocks/MockBPTOracle.sol";
 import { MockBalancerVault } from "../mocks/MockBalancerVault.sol";
 import { MockERC20C } from "../mocks/MockERC20C.sol";
 import { MockERC4626C } from "../mocks/MockERC4626C.sol";
+import { MockPriceOracle } from "../mocks/MockPriceOracle.sol";
 import { MockYDM } from "../mocks/MockYDM.sol";
 import { Assertions } from "./Assertions.sol";
 import { FixtureCell, MarketParamsConfig, TokenConfig } from "./FixtureTypes.sol";
@@ -63,13 +55,12 @@ import { FixtureCell, MarketParamsConfig, TokenConfig } from "./FixtureTypes.sol
  * @title DayMarketTestBase
  * @notice The single parameterized market fixture every mock-market test layer inherits
  * @dev Deploys a full Day market — tokens per FixtureCell, mocks for every external surface, the five contracts
- *      (ST, JT, LT, kernel, accountant) behind ERC1967 proxies, and production-shaped role bindings mirroring
- *      BalancerV3_GyroECLP_LT_DeploymentTemplate._buildRoleBindings minus the Balancer-governance targets
- * @dev PnL injection mutates mock rates and oracle answers, never `deal`, so PnL flows through the same quoter
- *      paths production uses. applySTPnL and applyJTPnL are documented aliases over the SHARED ERC4626 rate:
- *      this kernel family prices ST and JT off one vault share rate, so single-tranche PnL isolation is
- *      impossible at the kernel layer and independent (stRawNAV, jtRawNAV) tuples are driven at the mock-kernel
- *      accountant layer (AccountantTestBase)
+ *      (ST, JT, LPT, kernel, accountant) behind ERC1967 proxies, and production-shaped role bindings mirroring
+ *      RoycoDayBalancerV3MarketDeploymentTemplate._buildRoleBindings minus the Balancer-governance targets
+ * @dev PnL injection mutates mock oracle prices, never `deal`, so PnL flows through the same pricing paths
+ *      production uses. applySTPnL and applyJTPnL are documented aliases over the SHARED collateral asset
+ *      oracle: the market prices its one coinvested collateral off one oracle price, so single-tranche PnL
+ *      isolation is unrepresentable and both aliases move the same collateral NAV
  */
 abstract contract DayMarketTestBase is Assertions {
     using Math for uint256;
@@ -78,16 +69,16 @@ abstract contract DayMarketTestBase is Assertions {
     // Constants
     // =============================
 
-    /// @dev Chainlink price staleness threshold wired into the kernel's ST/JT quoter at initialization
+    /// @dev Collateral asset oracle staleness threshold wired into the kernel at initialization
     uint48 internal constant ORACLE_STALENESS_THRESHOLD_SECONDS = 1 days;
 
-    /// @dev Sequencer grace period wired into the kernel's ST/JT quoter at initialization
+    /// @dev Sequencer grace period wired into the kernel at initialization (inert until a test wires a sequencer feed)
     uint48 internal constant ORACLE_GRACE_PERIOD_SECONDS = 1 hours;
 
-    /// @dev The price feed's oracle decimals
+    /// @dev The quote-side price feed's oracle decimals
     uint8 internal constant PRICE_FEED_DECIMALS = 8;
 
-    /// @dev The price feed's initial answer (1.0 at 8 decimals, base asset pegged to the NAV asset)
+    /// @dev The quote-side price feed's initial answer (1.0 at 8 decimals, quote asset pegged to the NAV asset)
     int256 internal constant PRICE_FEED_INITIAL_ANSWER = 1e8;
 
     /// @dev Oracle failure modes accepted by setOracleMode
@@ -114,16 +105,26 @@ abstract contract DayMarketTestBase is Assertions {
     // Token Handles
     // =============================
 
-    /// @notice The quote stable paired against the senior tranche share in the LT pool
+    /// @notice The quote stable paired against the senior tranche share in the LPT pool
     MockERC20C internal quoteToken;
 
     /// @notice The underlying of the shared ST/JT ERC4626 vault
     MockERC20C internal stJtUnderlying;
 
+    /// @notice The live collateral NAV through the production venue path (the kernel's collateral ledger valued by its venue)
+    function _liveCollateralNAV() internal view returns (uint256) {
+        return toUint256(kernel.convertCollateralAssetsToValue(kernel.getState().totalCollateralAssets));
+    }
+
+    /// @notice The live LPT raw NAV through the production venue path (the kernel's LPT ledger valued by its venue)
+    function _liveLPTRawNAV() internal view returns (uint256) {
+        return toUint256(kernel.convertLPTAssetsToValue(kernel.getState().totalLPTAssets));
+    }
+
     /**
-     * @notice The single ERC4626 vault share serving as BOTH the ST and JT asset
-     * @dev The shipped quoter family requires ST_ASSET == JT_ASSET (IdenticalAssets_ST_JT_Oracle_Quoter.sol,
-     *      TRANCHE_ASSETS_MUST_BE_IDENTICAL), so one instance backs both tranches and its rate is the shared PnL feed
+     * @notice The single ERC4626 vault share serving as the coinvested collateral asset
+     * @dev Coinvestment is structural (the kernel holds one COLLATERAL_ASSET both tranches deposit), so one
+     *      instance backs both tranches and its rate is the market's PnL feed
      */
     MockERC4626C internal stJtVault;
 
@@ -131,17 +132,20 @@ abstract contract DayMarketTestBase is Assertions {
     // Oracle and Venue Handles
     // =============================
 
-    /// @notice The base-asset-to-NAV-asset Chainlink-shaped price feed consumed by the ST/JT quoter
+    /// @notice The collateral asset oracle pricing 1 whole vault share in NAV units, the kernel's only collateral price source
+    MockPriceOracle internal collateralAssetOracle;
+
+    /// @notice The quote-side Chainlink-shaped price feed, the venue's quote-leg source of truth (never read by the kernel)
     MockAggregatorV3 internal priceFeed;
 
-    /// @notice A spare sequencer-uptime feed handle, NOT wired at init (the quoter skips sequencer checks for address(0))
-    /// @dev Wire it later through the kernel's setSequencerUptimeFeed via ORACLE_QUOTER_ADMIN
+    /// @notice A spare sequencer-uptime feed handle, NOT wired at init (the kernel skips sequencer checks for address(0))
+    /// @dev Wire it later through the kernel's setSequencerUptimeFeed via ORACLE_ADMIN
     MockAggregatorV3 internal sequencerFeed;
 
-    /// @notice The mock Balancer V3 vault backing the LT venue
+    /// @notice The mock Balancer V3 vault backing the LPT venue
     MockBalancerVault internal balancerVault;
 
-    /// @notice The mock BPT (the LT asset), its ledger lives in the mock vault
+    /// @notice The mock BPT (the LPT asset), its ledger lives in the mock vault
     MockBPT internal bpt;
 
     /// @notice The BPT oracle satisfying LPOracleBase.computeTVL, AUTO mode by default
@@ -161,8 +165,8 @@ abstract contract DayMarketTestBase is Assertions {
     /// @notice The junior tranche's YDM (cast to MockYDM / StaticCurveYDM / AdaptiveCurveYDM_V2 per params.jtYdmKind)
     IYDM internal jtYdm;
 
-    /// @notice The liquidity tranche's YDM, always a distinct instance from jtYdm
-    IYDM internal ltYdm;
+    /// @notice The liquidity provider tranche's YDM, always a distinct instance from jtYdm
+    IYDM internal lptYdm;
 
     // =============================
     // Market Handles
@@ -177,14 +181,14 @@ abstract contract DayMarketTestBase is Assertions {
     /// @notice The junior tranche proxy
     RoycoJuniorTranche internal juniorTranche;
 
-    /// @notice The liquidity tranche proxy
-    RoycoLiquidityTranche internal liquidityTranche;
+    /// @notice The liquidity provider tranche proxy
+    RoycoLiquidityProviderTranche internal liquidityProviderTranche;
 
     /// @notice The accountant proxy
     RoycoDayAccountant internal accountant;
 
     /// @notice The kernel proxy
-    DayKernel internal kernel;
+    RoycoDayBalancerV3Kernel internal kernel;
 
     /// @notice The EOA that deploys the kernel proxy so its address is CREATE-predictable for the impl constructors
     address internal kernelProxyDeployer;
@@ -201,21 +205,22 @@ abstract contract DayMarketTestBase is Assertions {
     address internal MARKET_OPS_ADMIN;
     address internal ACCOUNTANT_ADMIN;
     address internal PROTOCOL_FEE_SETTER;
-    address internal ORACLE_QUOTER_ADMIN;
+    address internal ORACLE_ADMIN;
     address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
     address internal PROTOCOL_FEE_RECIPIENT;
 
     /// @notice Default LP actors, one per tranche
     address internal ST_PROVIDER;
     address internal JT_PROVIDER;
-    address internal LT_PROVIDER;
+    address internal LPT_PROVIDER;
 
     // =============================
     // Internal Fixture State
     // =============================
 
-    /// @dev The last positive price-feed answer, restored when setOracleMode returns to NONE
-    int256 internal lastHealthyOracleAnswer = PRICE_FEED_INITIAL_ANSWER;
+    /// @dev The fixture's healthy collateral oracle price, the PnL scaling base and the value setOracleMode NONE restores
+    /// @dev Poison modes bypass it by design, so a NONE restore always lands back on the tracked healthy price
+    uint256 internal collateralPriceWAD;
 
     // =============================
     // Deployment
@@ -223,7 +228,7 @@ abstract contract DayMarketTestBase is Assertions {
 
     /**
      * @notice Deploys the full Day market for the specified token shape and parameterization
-     * @dev Mirrors BalancerV3_GyroECLP_LT_DeploymentTemplate.deployMarket's order, adapted to mocks: tokens, oracles, venue, YDMs,
+     * @dev Mirrors RoycoDayBalancerV3MarketDeploymentTemplate.deployMarket's order, adapted to mocks: tokens, oracles, venue, YDMs,
      *      predicted kernel address, impls, tranche and accountant proxies, pool registration, kernel impl (its
      *      constructor validates the registered pool), kernel proxy at the
      *      predicted address, then role bindings and grants
@@ -231,7 +236,7 @@ abstract contract DayMarketTestBase is Assertions {
      * @param _params The market parameterization to deploy
      */
     function _deployMarket(FixtureCell memory _cell, MarketParamsConfig memory _params) internal virtual {
-        // The kernel family requires identical ST/JT assets, which the kernel constructor enforces
+        // The tranches coinvest one collateral asset, which the kernel initializer enforces
         _validateFixtureCell(_cell);
 
         cell = _cell;
@@ -243,15 +248,19 @@ abstract contract DayMarketTestBase is Assertions {
 
         // 2. Tokens: quote stable + ONE ERC4626 vault share over a mock underlying for both ST and JT
         quoteToken = _deployERC20("Quote Stable", "QUOTE", _cell.quoteAsset);
-        stJtUnderlying = _deployERC20("ST/JT Underlying", "UNDR", _toUnderlyingConfig(_cell.stAsset));
-        stJtVault = new MockERC4626C(address(stJtUnderlying), "ST/JT Vault Share", "vSHARE", _cell.stAsset.decimals);
-        stJtVault.setRate(_cell.stAsset.initialRateWAD);
+        stJtUnderlying = _deployERC20("ST/JT Underlying", "UNDR", _toUnderlyingConfig(_cell.collateralAsset));
+        stJtVault = new MockERC4626C(address(stJtUnderlying), "ST/JT Vault Share", "vSHARE", _cell.collateralAsset.decimals);
+        stJtVault.setRate(_cell.collateralAsset.initialRateWAD);
         vm.label(address(stJtVault), "MockERC4626C_STJT");
 
-        // 3. Oracles: price feed at 1.0, plus a spare sequencer feed handle (sequencer checks are skipped at init)
+        // 3. Oracles: the collateral asset oracle at the cell's initial rate (the kernel's only collateral price
+        //    source), the quote-side feed at 1.0, plus a spare sequencer feed handle (sequencer checks are
+        //    disabled at init)
+        collateralAssetOracle = new MockPriceOracle(address(stJtVault), _cell.collateralAsset.initialRateWAD);
+        collateralPriceWAD = _cell.collateralAsset.initialRateWAD;
         priceFeed = new MockAggregatorV3(PRICE_FEED_DECIMALS, PRICE_FEED_INITIAL_ANSWER);
         sequencerFeed = new MockAggregatorV3(0, 0);
-        lastHealthyOracleAnswer = PRICE_FEED_INITIAL_ANSWER;
+        vm.label(address(collateralAssetOracle), "MockCollateralAssetOracle");
         vm.label(address(priceFeed), "MockPriceFeed");
         vm.label(address(sequencerFeed), "MockSequencerFeed");
 
@@ -265,9 +274,9 @@ abstract contract DayMarketTestBase is Assertions {
 
         // 5. YDMs: always two distinct instances (the accountant reverts YDMS_CANNOT_BE_IDENTICAL)
         bytes memory jtYdmInitData;
-        bytes memory ltYdmInitData;
+        bytes memory lptYdmInitData;
         (jtYdm, jtYdmInitData) = _deployYDM("JT_YDM", _params.jtYdmKind, _params.jtCurve, _params.targetUtilizationWAD);
-        (ltYdm, ltYdmInitData) = _deployYDM("LT_YDM", _params.ltYdmKind, _params.ltCurve, _params.targetUtilizationWAD);
+        (lptYdm, lptYdmInitData) = _deployYDM("LPT_YDM", _params.lptYdmKind, _params.lptCurve, _params.targetUtilizationWAD);
 
         // 6. Predict the kernel proxy address so the tranche and accountant impls can bake it into their immutables
         kernelProxyDeployer = makeAddr("KERNEL_PROXY_DEPLOYER");
@@ -276,31 +285,31 @@ abstract contract DayMarketTestBase is Assertions {
         // 7. Impls with the predicted kernel address
         RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(stJtVault), predictedKernel);
         RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(stJtVault), predictedKernel);
-        RoycoLiquidityTranche ltImpl = new RoycoLiquidityTranche(address(bpt), predictedKernel);
+        RoycoLiquidityProviderTranche lptImpl = new RoycoLiquidityProviderTranche(address(bpt), predictedKernel);
         RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel);
 
         // 8. Tranche and accountant proxies MUST exist before the kernel impl (its initialize calls tranche.asset())
         seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));
         juniorTranche = RoycoJuniorTranche(_deployTrancheProxy(address(jtImpl), "Royco Junior Tranche", "RJT"));
-        liquidityTranche = RoycoLiquidityTranche(_deployTrancheProxy(address(ltImpl), "Royco Liquidity Tranche", "RLT"));
+        liquidityProviderTranche = RoycoLiquidityProviderTranche(_deployTrancheProxy(address(lptImpl), "Royco Liquidity Provider Tranche", "RLT"));
         vm.label(address(seniorTranche), "ST");
         vm.label(address(juniorTranche), "JT");
-        vm.label(address(liquidityTranche), "LT");
+        vm.label(address(liquidityProviderTranche), "LPT");
 
         accountant = RoycoDayAccountant(
             address(
                 new ERC1967Proxy(
                     address(accImpl),
-                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(_params, jtYdmInitData, ltYdmInitData), address(accessManager)))
+                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(_params, jtYdmInitData, lptYdmInitData), address(accessManager)))
                 )
             )
         );
         vm.label(address(accountant), "Accountant");
 
-        // 9. Register the pool BEFORE kernel impl construction (the LT quoter constructor validates the registration
-        //    and that the pool pairs the senior tranche, BalancerV3_LT_BPTOracle_Quoter.sol:89-107).
+        // 9. Register the pool BEFORE kernel impl construction (the LPT venue constructor validates the registration
+        //    and that the pool pairs the senior tranche, BalancerV3LiquidityVenue.sol:89-107).
         //    Production Balancer registers pool tokens sorted ascending by address (InputHelpers.ensureSortedTokens),
-        //    so the senior tranche can land at index 1 and the quoter's tokens[1] == SENIOR_TRANCHE branch is real
+        //    so the senior tranche can land at index 1 and the venue's tokens[1] == SENIOR_TRANCHE branch is real
         bool stSortsFirst = address(seniorTranche) < address(quoteToken);
         stPoolTokenIndex = stSortsFirst ? 0 : 1;
         IERC20[2] memory poolTokens =
@@ -308,24 +317,23 @@ abstract contract DayMarketTestBase is Assertions {
         balancerVault.registerPool(address(bpt), poolTokens);
         // Documenting assertion: the recorded index must resolve the senior share in the registered order. Under
         // the deterministic forge test deployer every standard token shape (A-D) sorts the quote token below the
-        // tranche proxies, so ST lands at index 1 and the quoter constructor's tokens[1] == SENIOR_TRANCHE branch
-        // (BalancerV3_LT_BPTOracle_Quoter.sol:103) is exercised by every market lifecycle suite, not forced artificially
+        // tranche proxies, so ST lands at index 1 and the venue constructor's tokens[1] == SENIOR_TRANCHE branch
+        // (BalancerV3LiquidityVenue.sol:103) is exercised by every market lifecycle suite, not forced artificially
         require(
             address(balancerVault.getPoolTokens(address(bpt))[stPoolTokenIndex]) == address(seniorTranche),
             "DayMarketTestBase: recorded senior pool index does not match the registered token order"
         );
         _initializePoolMinimumSupply();
 
-        // 10. Kernel impl (constructor resolves the vault via BalancerPoolToken(ltAsset).getVault())
-        DayKernel kernelImpl = new DayKernel(
+        // 10. Kernel impl (constructor resolves the vault via BalancerPoolToken(lptAsset).getVault())
+        RoycoDayBalancerV3Kernel kernelImpl = new RoycoDayBalancerV3Kernel(
             IRoycoDayKernel.RoycoDayKernelConstructionParams({
                 seniorTranche: address(seniorTranche),
-                stAsset: address(stJtVault),
                 juniorTranche: address(juniorTranche),
-                jtAsset: address(stJtVault),
+                collateralAsset: address(stJtVault),
                 accountant: address(accountant),
-                liquidityTranche: address(liquidityTranche),
-                ltAsset: address(bpt),
+                liquidityProviderTranche: address(liquidityProviderTranche),
+                lptAsset: address(bpt),
                 enforceVaultSharesTransferWhitelist: _params.enforceWhitelistOnTransfer
             })
         );
@@ -341,26 +349,21 @@ abstract contract DayMarketTestBase is Assertions {
                     initialAuthority: address(accessManager),
                     protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT,
                     stSelfLiquidationBonusWAD: _params.stSelfLiquidationBonusWAD,
-                    roycoBlacklist: address(0)
+                    roycoBlacklist: address(0),
+                    collateralAssetOracle: address(collateralAssetOracle),
+                    stalenessThresholdSeconds: ORACLE_STALENESS_THRESHOLD_SECONDS,
+                    sequencerUptimeFeed: address(0),
+                    gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS
                 }),
-                DayKernel.KernelSpecificInitParams({
-                    stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
-                        initialConversionRateWAD: 0,
-                        baseAssetToNavAssetOracle: address(priceFeed),
-                        stalenessThresholdSeconds: ORACLE_STALENESS_THRESHOLD_SECONDS,
-                        sequencerUptimeFeed: address(0),
-                        gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS
-                    }),
-                    ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
-                        bptOracle: address(bptOracle), maxReinvestmentSlippageWAD: _params.maxReinvestmentSlippageWAD
-                    })
+                BalancerV3LiquidityVenue.LiquidityVenueInitParams({
+                    bptOracle: address(bptOracle), maxReinvestmentSlippageWAD: _params.maxReinvestmentSlippageWAD
                 })
             )
         );
         vm.prank(kernelProxyDeployer);
         address kernelProxy = address(new ERC1967Proxy(address(kernelImpl), kernelInitData));
         require(kernelProxy == predictedKernel, "DayMarketTestBase: kernel proxy address prediction failed");
-        kernel = DayKernel(kernelProxy);
+        kernel = RoycoDayBalancerV3Kernel(kernelProxy);
         vm.label(kernelProxy, "Kernel");
 
         // 13. Wire the kernel as the senior leg's live rate provider in BOTH price stores, mirroring production:
@@ -377,36 +380,44 @@ abstract contract DayMarketTestBase is Assertions {
     }
 
     // =============================
-    // PnL Injection (mock rates and oracles, never deal)
+    // PnL Injection (mock oracle prices, never deal)
     // =============================
 
     /**
-     * @notice Applies senior PnL by accruing the shared ST/JT vault rate
-     * @dev SHARED-FEED ALIAS: raw NAVs in this kernel family are ownedAssets x the shared 4626/Chainlink rate, so
-     *      this moves ST and JT raw NAV proportionally. Single-tranche isolation is impossible at the kernel layer,
-     *      independent (stRawNAV, jtRawNAV) tuples are driven at the mock-kernel accountant layer (AccountantTestBase)
-     * @param _bps The signed basis-point move applied to the vault rate
+     * @notice Applies senior PnL by scaling the shared collateral asset oracle price
+     * @dev SHARED-FEED ALIAS: the collateral NAV is totalCollateralAssets x the one oracle price, so this moves
+     *      the one coinvested pool and the sync attributes the delta pro-rata across the tranches
+     * @dev The price moves WITHOUT refreshing the oracle's updatedAt, freshness stays an independent knob
+     * @param _bps The signed basis-point move applied to the oracle price
      */
     function applySTPnL(int256 _bps) internal virtual {
-        stJtVault.accrue(_bps);
+        _scaleCollateralOraclePrice(_bps);
     }
 
-    /// @notice Applies junior PnL, a documented alias of applySTPnL over the shared vault rate (see applySTPnL)
+    /// @notice Applies junior PnL, a documented alias of applySTPnL over the shared oracle price (see applySTPnL)
     function applyJTPnL(int256 _bps) internal virtual {
-        stJtVault.accrue(_bps);
+        _scaleCollateralOraclePrice(_bps);
+    }
+
+    /// @notice Scales the tracked healthy collateral price by a signed basis-point move and writes it to the oracle
+    function _scaleCollateralOraclePrice(int256 _bps) internal virtual {
+        int256 factorWAD = int256(WAD) + _bps * 1e14;
+        require(factorWAD > 0, "DayMarketTestBase: collateral PnL factor must stay positive");
+        collateralPriceWAD = collateralPriceWAD.mulDiv(uint256(factorWAD), WAD, Math.Rounding.Floor);
+        collateralAssetOracle.setPrice(collateralPriceWAD);
     }
 
     /**
-     * @notice Applies liquidity tranche PnL by scaling the BPT oracle's value and the vault's fair-value pricing together
-     * @dev The two price stores must stay coherent: the oracle backs the kernel's ltRawNAV mark and min-BPT-out floor
+     * @notice Applies liquidity provider tranche PnL by scaling the BPT oracle's value and the vault's fair-value pricing together
+     * @dev The two price stores must stay coherent: the oracle backs the kernel's lptRawNAV mark and min-BPT-out floor
      *      while the vault's fair-value pricing decides the BPT an add actually mints, so bumping only one would
      *      manufacture phantom slippage (or phantom surplus) production cannot exhibit. The oracle is bumped first and
      *      its effective quote price is copied into the vault, one store of truth. The senior leg is untouched by
-     *      construction, both stores peg it to the kernel's live rate provider, so LT PnL lands on the quote leg only,
+     *      construction, both stores peg it to the kernel's live rate provider, so LPT PnL lands on the quote leg only,
      *      exactly as a production rate-scaled leg cannot drift from its rate. In the oracle's MANUAL mode the bump
      *      scales the pinned TVL only and the vault pricing is deliberately left to the test's own control
      */
-    function applyLTPnL(int256 _bps) internal virtual {
+    function applyLPTPnL(int256 _bps) internal virtual {
         bptOracle.bump(_bps);
         balancerVault.setTokenPriceWAD(address(quoteToken), bptOracle.getPriceWAD(address(quoteToken)));
     }
@@ -418,7 +429,6 @@ abstract contract DayMarketTestBase is Assertions {
         require(factorWAD > 0, "DayMarketTestBase: quote PnL factor must stay positive");
         int256 newAnswer = (answer * factorWAD) / int256(WAD);
         priceFeed.setAnswer(newAnswer);
-        if (newAnswer > 0) lastHealthyOracleAnswer = newAnswer;
     }
 
     // =============================
@@ -449,33 +459,34 @@ abstract contract DayMarketTestBase is Assertions {
     }
 
     /**
-     * @notice Drives the price feed into an oracle failure mode
-     * @dev Modes: 0 NONE restores a healthy fresh feed, 1 STALE warps past the staleness threshold WITHOUT
-     *      refreshing updatedAt, 2 NEGATIVE and 3 ZERO poison the answer, 4 REVERT arms revert mode
+     * @notice Drives the collateral asset oracle into an oracle failure mode
+     * @dev Modes: 0 NONE restores the tracked healthy price on a fresh report, 1 STALE warps past the staleness
+     *      threshold WITHOUT refreshing updatedAt, 2 NEGATIVE and 3 ZERO poison the price, 4 REVERT arms revert mode
      * @param _mode The ORACLE_MODE_* constant to apply
      */
     function setOracleMode(uint8 _mode) internal virtual {
         if (_mode == ORACLE_MODE_NONE) {
-            priceFeed.setRevertMode(false);
-            (, int256 answer,,,) = priceFeed.latestRoundData();
-            if (answer <= 0) priceFeed.setAnswer(lastHealthyOracleAnswer);
-            priceFeed.setUpdatedAt(block.timestamp);
+            collateralAssetOracle.setRevertMode(false);
+            collateralAssetOracle.setPrice(collateralPriceWAD);
+            collateralAssetOracle.setUpdatedAt(block.timestamp);
         } else if (_mode == ORACLE_MODE_STALE) {
             vm.warp(block.timestamp + ORACLE_STALENESS_THRESHOLD_SECONDS + 1);
         } else if (_mode == ORACLE_MODE_NEGATIVE) {
-            priceFeed.setAnswer(-1);
+            // NAV prices are unsigned, a negative-answer source surfaces as a zero price tripping the same INVALID_PRICE gate
+            collateralAssetOracle.setPrice(0);
         } else if (_mode == ORACLE_MODE_ZERO) {
-            priceFeed.setAnswer(0);
+            collateralAssetOracle.setPrice(0);
         } else if (_mode == ORACLE_MODE_REVERT) {
-            priceFeed.setRevertMode(true);
+            collateralAssetOracle.setRevertMode(true);
         } else {
             revert("DayMarketTestBase: unknown oracle mode");
         }
     }
 
-    /// @notice Warps forward and refreshes the price feed's updatedAt so time passes without tripping the staleness gate
+    /// @notice Warps forward and refreshes the collateral oracle and quote feed so time passes without tripping the staleness gate
     function _warpAndRefreshFeed(uint256 _secs) internal virtual {
         vm.warp(block.timestamp + _secs);
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         priceFeed.setUpdatedAt(block.timestamp);
     }
 
@@ -488,10 +499,10 @@ abstract contract DayMarketTestBase is Assertions {
      * @dev Deposits JT first: senior deposits are coverage-gated on existing junior NAV, so a JT-less market
      *      rejects ST deposits. Amounts are denominated in shared vault-share tranche units
      * @dev PRODUCTION CONSTRAINT: ST deposits are ALSO liquidity-gated (RoycoDayAccountant.sol:332-334), and a
-     *      market with positive minLiquidity and zero LT depth reads liquidityUtilization as type(uint256).max
+     *      market with positive minLiquidity and zero LPT depth reads liquidityUtilization as type(uint256).max
      *      (UtilizationLogic.sol:72), so no ST deposit can ever land first. When needed, this helper auto-seeds
-     *      the minimal quote-only LT depth that satisfies the requirement before the ST deposit. Tests that need
-     *      an exact LT composition must call _seedLT explicitly before this
+     *      the minimal quote-only LPT depth that satisfies the requirement before the ST deposit. Tests that need
+     *      an exact LPT composition must call _seedLPT explicitly before this
      * @param _stAssets The vault shares ST_PROVIDER deposits into the senior tranche
      * @param _jtAssets The vault shares JT_PROVIDER deposits into the junior tranche
      */
@@ -514,10 +525,10 @@ abstract contract DayMarketTestBase is Assertions {
     }
 
     /**
-     * @notice Auto-seeds the minimal quote-only LT depth an ST deposit needs to clear the liquidity requirement
-     * @dev Computes the post-deposit senior effective NAV, derives the required ltRawNAV from minLiquidity, and
+     * @notice Auto-seeds the minimal quote-only LPT depth an ST deposit needs to clear the liquidity requirement
+     * @dev Computes the post-deposit senior effective NAV, derives the required lptRawNAV from minLiquidity, and
      *      seeds the deficit as a quote-only pool leg (no senior leg needed, which also breaks the circularity of
-     *      ST deposits needing LT depth while the LT senior leg needs ST shares). One whole quote unit of cushion
+     *      ST deposits needing LPT depth while the LPT senior leg needs ST shares). One whole quote unit of cushion
      *      absorbs the utilization computation's ceil rounding
      * @param _stAssets The vault shares about to be deposited into the senior tranche
      */
@@ -525,16 +536,16 @@ abstract contract DayMarketTestBase is Assertions {
         uint256 minLiquidityWAD = params.minLiquidityWAD;
         if (minLiquidityWAD == 0) return;
 
-        uint256 stEffAfter = toUint256(seniorTranche.totalAssets().nav) + toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(_stAssets)));
-        uint256 requiredLtRawNAV = stEffAfter.mulDiv(minLiquidityWAD, WAD, Math.Rounding.Ceil);
-        uint256 currentLtRawNAV = toUint256(liquidityTranche.getRawNAV());
-        if (currentLtRawNAV >= requiredLtRawNAV) return;
+        uint256 stEffAfter = toUint256(seniorTranche.totalAssets().nav) + toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(_stAssets)));
+        uint256 requiredLptRawNAV = stEffAfter.mulDiv(minLiquidityWAD, WAD, Math.Rounding.Ceil);
+        uint256 currentLptRawNAV = _liveLPTRawNAV();
+        if (currentLptRawNAV >= requiredLptRawNAV) return;
 
         uint256 quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
-        uint256 deficitNAV = requiredLtRawNAV - currentLtRawNAV;
+        uint256 deficitNAV = requiredLptRawNAV - currentLptRawNAV;
         uint256 quoteLeg = deficitNAV.mulDiv(quoteUnit, WAD, Math.Rounding.Ceil) + quoteUnit;
         // BPT is minted 1:1 with the 18-decimal NAV added so the pool's NAV-per-BPT stays at 1.0
-        _seedLT(quoteLeg.mulDiv(WAD, quoteUnit, Math.Rounding.Floor), 0, quoteLeg);
+        _seedLPT(quoteLeg.mulDiv(WAD, quoteUnit, Math.Rounding.Floor), 0, quoteLeg);
     }
 
     /**
@@ -543,7 +554,7 @@ abstract contract DayMarketTestBase is Assertions {
      *      vault's initialization. Production initializers pay for those dead shares out of their own mint, so this
      *      fixture plays the initializer: it seeds the smallest whole-quote-wei value covering the dead shares and
      *      keeps only the surplus BPT, leaving total supply == pool value (NAV-per-BPT exactly 1.0). Later seeds
-     *      that mint BPT 1:1 with the NAV they add therefore keep every hand-derived LT mark wei-exact
+     *      that mint BPT 1:1 with the NAV they add therefore keep every hand-derived LPT mark wei-exact
      */
     function _initializePoolMinimumSupply() internal virtual {
         uint256 quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
@@ -562,15 +573,15 @@ abstract contract DayMarketTestBase is Assertions {
     }
 
     /**
-     * @notice Seeds LT depth: mints BPT against real pool legs and deposits it through the production LT deposit path
+     * @notice Seeds LPT depth: mints BPT against real pool legs and deposits it through the production LPT deposit path
      * @dev The senior leg is acquired through the senior tranche's own deposit path (the only mint path for tranche
      *      shares), so the market must already carry JT coverage headroom (_seedMarket first). The fixture funds both
-     *      legs, mints the BPT to LT_PROVIDER via the vault's external-LP helper, and LT_PROVIDER deposits it
-     * @param _bptAmount The BPT amount minted and deposited into the liquidity tranche
+     *      legs, mints the BPT to LPT_PROVIDER via the vault's external-LP helper, and LPT_PROVIDER deposits it
+     * @param _bptAmount The BPT amount minted and deposited into the liquidity provider tranche
      * @param _stLeg The senior tranche shares placed in the pool
      * @param _quoteLeg The quote assets placed in the pool
      */
-    function _seedLT(uint256 _bptAmount, uint256 _stLeg, uint256 _quoteLeg) internal virtual {
+    function _seedLPT(uint256 _bptAmount, uint256 _stLeg, uint256 _quoteLeg) internal virtual {
         if (_stLeg != 0) {
             _acquireSTShares(_stLeg);
             seniorTranche.approve(address(balancerVault), _stLeg);
@@ -583,18 +594,18 @@ abstract contract DayMarketTestBase is Assertions {
         uint256[2] memory legs;
         legs[stPoolTokenIndex] = _stLeg;
         legs[1 - stPoolTokenIndex] = _quoteLeg;
-        balancerVault.mintPoolTokensTo(address(bpt), LT_PROVIDER, _bptAmount, legs);
+        balancerVault.mintPoolTokensTo(address(bpt), LPT_PROVIDER, _bptAmount, legs);
 
-        vm.startPrank(LT_PROVIDER);
-        bpt.approve(address(liquidityTranche), _bptAmount);
-        liquidityTranche.deposit(toTrancheUnits(_bptAmount), LT_PROVIDER);
+        vm.startPrank(LPT_PROVIDER);
+        bpt.approve(address(liquidityProviderTranche), _bptAmount);
+        liquidityProviderTranche.deposit(toTrancheUnits(_bptAmount), LPT_PROVIDER);
         vm.stopPrank();
     }
 
     /**
      * @notice Acquires at least _shares senior tranche shares for the fixture through the production deposit path
      * @dev Sizes the vault-share deposit from the current effective NAV per share with a one-unit cushion for the
-     *      quoter's floor rounding, then verifies the mint covered the request
+     *      venue's floor rounding, then verifies the mint covered the request
      * @param _shares The senior tranche shares the fixture must end up holding
      */
     function _acquireSTShares(uint256 _shares) internal virtual {
@@ -604,7 +615,7 @@ abstract contract DayMarketTestBase is Assertions {
         if (supply == 0) navNeeded = _shares;
         else navNeeded = _shares.mulDiv(toUint256(seniorTranche.totalAssets().nav), supply, Math.Rounding.Ceil);
 
-        uint256 vaultShares = toUint256(kernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(navNeeded))) + 1;
+        uint256 vaultShares = toUint256(kernel.convertValueToCollateralAssets(toNAVUnits(navNeeded))) + 1;
         // This deposit is itself liquidity-gated, top up quote-only depth first (never recurses, the auto-seed leg has no senior side)
         _ensureLiquidityCapacityForSTDeposit(vaultShares);
         uint256 balanceBefore = seniorTranche.balanceOf(address(this));
@@ -637,14 +648,8 @@ abstract contract DayMarketTestBase is Assertions {
 
     /// @notice Validates the token shape satisfies the kernel family's structural constraints
     function _validateFixtureCell(FixtureCell memory _cell) internal pure {
-        require(_cell.stAsset.erc4626 && _cell.jtAsset.erc4626, "DayMarketTestBase: ST/JT assets must be ERC4626 vault shares for this kernel family");
+        require(_cell.collateralAsset.erc4626, "DayMarketTestBase: the collateral asset must be an ERC4626 vault share for this kernel family");
         require(!_cell.quoteAsset.erc4626, "DayMarketTestBase: the quote asset must be a plain ERC20");
-        require(
-            _cell.stAsset.decimals == _cell.jtAsset.decimals && _cell.stAsset.underlyingDecimals == _cell.jtAsset.underlyingDecimals
-                && _cell.stAsset.initialRateWAD == _cell.jtAsset.initialRateWAD && _cell.stAsset.behaviors == _cell.jtAsset.behaviors
-                && _cell.stAsset.feeBps == _cell.jtAsset.feeBps,
-            "DayMarketTestBase: ST and JT token configs must be identical (one shared vault instance)"
-        );
     }
 
     /// @notice Deploys a configurable ERC20 and applies the token config's behavior bitmap and fee
@@ -711,7 +716,7 @@ abstract contract DayMarketTestBase is Assertions {
     function _buildAccountantInitParams(
         MarketParamsConfig memory _params,
         bytes memory _jtYdmInitData,
-        bytes memory _ltYdmInitData
+        bytes memory _lptYdmInitData
     )
         internal
         view
@@ -723,22 +728,21 @@ abstract contract DayMarketTestBase is Assertions {
             minLiquidityWAD: _params.minLiquidityWAD,
             jtYDM: address(jtYdm),
             jtYDMInitializationData: _jtYdmInitData,
-            ltYDM: address(ltYdm),
-            ltYDMInitializationData: _ltYdmInitData,
+            lptYDM: address(lptYdm),
+            lptYDMInitializationData: _lptYdmInitData,
             maxJTYieldShareWAD: _params.maxJTYieldShareWAD,
-            maxLTYieldShareWAD: _params.maxLTYieldShareWAD,
+            maxLPTYieldShareWAD: _params.maxLPTYieldShareWAD,
             fixedTermDurationSeconds: _params.fixedTermDurationSeconds,
-            stNAVDustTolerance: toNAVUnits(_params.stNAVDustTolerance),
-            jtNAVDustTolerance: toNAVUnits(_params.jtNAVDustTolerance),
+            dustTolerance: toNAVUnits(_params.dustTolerance),
             stProtocolFeeWAD: _params.stProtocolFeeWAD,
             jtProtocolFeeWAD: _params.jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: _params.jtYieldShareProtocolFeeWAD,
-            ltYieldShareProtocolFeeWAD: _params.ltYieldShareProtocolFeeWAD
+            lptYieldShareProtocolFeeWAD: _params.lptYieldShareProtocolFeeWAD
         });
     }
 
     // =============================
-    // Role Wiring (mirrors BalancerV3_GyroECLP_LT_DeploymentTemplate._buildRoleBindings minus Balancer-governance targets)
+    // Role Wiring (mirrors RoycoDayBalancerV3MarketDeploymentTemplate._buildRoleBindings minus Balancer-governance targets)
     // =============================
 
     /// @notice Binds every production selector to its production role on the five market contracts
@@ -746,41 +750,42 @@ abstract contract DayMarketTestBase is Assertions {
         // ST/JT tranches: LP-gated deposit and redeem, admin surface, kernel-only burns via BURNER_ROLE
         _bindTranche(address(seniorTranche), ST_LP_ROLE, ST_LP_ROLE, false);
         _bindTranche(address(juniorTranche), JT_LP_ROLE, JT_LP_ROLE, false);
-        // LT: LP-gated deposits and redemptions, mirroring the ST/JT surface
-        _bindTranche(address(liquidityTranche), LT_LP_ROLE, LT_LP_ROLE, true);
+        // LPT: LP-gated deposits and redemptions, mirroring the ST/JT surface
+        _bindTranche(address(liquidityProviderTranche), LPT_LP_ROLE, LPT_LP_ROLE, true);
 
         // Kernel
         address k = address(kernel);
         accessManager.setTargetFunctionRole(
             k, _sels(IRoycoDayKernel.setProtocolFeeRecipient.selector, IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector), ADMIN_KERNEL_ROLE
         );
-        accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.syncTrancheAccounting.selector), SYNC_ROLE);
+        accessManager.setTargetFunctionRole(
+            k, _sels(IRoycoDayKernel.syncTrancheAccounting.selector, IRoycoDayKernel.syncTrancheAccountingFor.selector), SYNC_ROLE
+        );
         accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.reinvestLiquidityPremium.selector), ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.setRoycoBlacklist.selector), ADMIN_MARKET_OPS_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
 
-        // Kernel quoter admin surface (the LT-quoter setters the template binds plus this family's ST/JT quoter setters)
+        // Kernel pricing admin surface (the liquidity venue setters and the collateral asset oracle setters the template binds)
         accessManager.setTargetFunctionRole(
             k,
             _sels(
-                BalancerV3_LT_BPTOracle_Quoter.setBPTOracle.selector,
-                BalancerV3_LT_BPTOracle_Quoter.setMaxReinvestmentSlippage.selector,
-                IdenticalAssets_ST_JT_Oracle_Quoter.setConversionRate.selector,
-                IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.setChainlinkOracle.selector,
-                IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.setSequencerUptimeFeed.selector
+                BalancerV3LiquidityVenue.setBPTOracle.selector,
+                BalancerV3LiquidityVenue.setMaxReinvestmentSlippage.selector,
+                IRoycoDayKernel.setCollateralAssetOracle.selector,
+                IRoycoDayKernel.setSequencerUptimeFeed.selector
             ),
-            ADMIN_ORACLE_QUOTER_ROLE
+            ADMIN_ORACLE_ROLE
         );
 
-        // Accountant (the template's 16-selector list, BalancerV3_GyroECLP_LT_DeploymentTemplate.sol:525-561)
+        // Accountant (the template's 16-selector list, RoycoDayBalancerV3MarketDeploymentTemplate.sol:525-561)
         address a = address(accountant);
         accessManager.setTargetFunctionRole(
             a,
             _sels7(
                 IRoycoDayAccountant.setJuniorTrancheYDM.selector,
-                IRoycoDayAccountant.setLiquidityTrancheYDM.selector,
+                IRoycoDayAccountant.setLiquidityProviderTrancheYDM.selector,
                 IRoycoDayAccountant.setMinCoverage.selector,
                 IRoycoDayAccountant.setLiquidationCoverageUtilization.selector,
                 IRoycoDayAccountant.setMinLiquidity.selector,
@@ -795,34 +800,30 @@ abstract contract DayMarketTestBase is Assertions {
                 IRoycoDayAccountant.setSeniorTrancheProtocolFee.selector,
                 IRoycoDayAccountant.setJuniorTrancheProtocolFee.selector,
                 IRoycoDayAccountant.setJTYieldShareProtocolFee.selector,
-                IRoycoDayAccountant.setLTYieldShareProtocolFee.selector
+                IRoycoDayAccountant.setLPTYieldShareProtocolFee.selector
             ),
             ADMIN_PROTOCOL_FEE_SETTER_ROLE
         );
-        accessManager.setTargetFunctionRole(
-            a,
-            _sels(IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector, IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector),
-            ADMIN_MARKET_OPS_ROLE
-        );
+        accessManager.setTargetFunctionRole(a, _sels(IRoycoDayAccountant.setDustTolerance.selector), ADMIN_MARKET_OPS_ROLE);
         accessManager.setTargetFunctionRole(a, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(a, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
         accessManager.setTargetFunctionRole(a, _sels(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
     }
 
-    /// @notice Binds one tranche's selector surface (deposit/redeem/admin/burn, plus the LT multi-asset pair)
+    /// @notice Binds one tranche's selector surface (deposit/redeem/admin/burn, plus the LPT multi-asset pair)
     function _bindTranche(address _tranche, uint64 _depositRole, uint64 _redeemRole, bool _isLiquidity) internal {
         if (_isLiquidity) {
             accessManager.setTargetFunctionRole(
-                _tranche, _sels(IRoycoVaultTranche.deposit.selector, RoycoLiquidityTranche.depositMultiAsset.selector), _depositRole
+                _tranche, _sels(IRoycoVaultTranche.deposit.selector, RoycoLiquidityProviderTranche.depositMultiAsset.selector), _depositRole
             );
             accessManager.setTargetFunctionRole(
-                _tranche, _sels(IRoycoVaultTranche.redeem.selector, RoycoLiquidityTranche.redeemMultiAsset.selector), _redeemRole
+                _tranche, _sels(IRoycoVaultTranche.redeem.selector, RoycoLiquidityProviderTranche.redeemMultiAsset.selector), _redeemRole
             );
         } else {
             accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.deposit.selector), _depositRole);
             accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.redeem.selector), _redeemRole);
         }
-        // Pause/unpause are bound for parity with the other components, but the tranche enforces no pause of its own:
+        // Pause/unpause are bound for parity with the other Constants, but the tranche enforces no pause of its own:
         // the kernel is the market's single pause authority, so a tranche-level pause is inert
         accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
@@ -834,7 +835,7 @@ abstract contract DayMarketTestBase is Assertions {
      * @notice Grants the post-init contract roles and the per-role admin and LP wallets, all at zero execution delay
      * @dev Contract grants mirror the template's postInitGrants (SYNC_ROLE to the accountant for withSyncedAccounting,
      *      BURNER_ROLE to the kernel) minus the Balancer hook grant, which does not exist in mock-land. The fixture
-     *      itself receives ST_LP_ROLE so the LT seed helper can source senior shares through the production path
+     *      itself receives ST_LP_ROLE so the LPT seed helper can source senior shares through the production path
      */
     function _wireRoleGrants() internal {
         // Post-init contract grants
@@ -855,15 +856,15 @@ abstract contract DayMarketTestBase is Assertions {
         MARKET_OPS_ADMIN = _generateActor("MARKET_OPS_ADMIN", ADMIN_MARKET_OPS_ROLE);
         ACCOUNTANT_ADMIN = _generateActor("ACCOUNTANT_ADMIN", ADMIN_ACCOUNTANT_ROLE);
         PROTOCOL_FEE_SETTER = _generateActor("PROTOCOL_FEE_SETTER", ADMIN_PROTOCOL_FEE_SETTER_ROLE);
-        ORACLE_QUOTER_ADMIN = _generateActor("ORACLE_QUOTER_ADMIN", ADMIN_ORACLE_QUOTER_ROLE);
+        ORACLE_ADMIN = _generateActor("ORACLE_ADMIN", ADMIN_ORACLE_ROLE);
         MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = _generateActor("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN", ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
 
         // LP actors
         ST_PROVIDER = _generateActor("ST_PROVIDER", ST_LP_ROLE);
         JT_PROVIDER = _generateActor("JT_PROVIDER", JT_LP_ROLE);
-        LT_PROVIDER = _generateActor("LT_PROVIDER", LT_LP_ROLE);
+        LPT_PROVIDER = _generateActor("LPT_PROVIDER", LPT_LP_ROLE);
 
-        // The fixture sources senior shares for LT pool seeding through the production deposit path
+        // The fixture sources senior shares for LPT pool seeding through the production deposit path
         accessManager.grantRole(ST_LP_ROLE, address(this), 0);
     }
 

@@ -24,7 +24,7 @@ import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
  *
  *      `snapshotState()` (post-warp) and `verify()` together assert continuity of:
  *        name, symbol, totalSupply, asset, KERNEL, TRANCHE_TYPE, and `totalAssets()` (all three
- *        claim fields: stAssets, jtAssets, nav).
+ *        claim fields: collateralAssets, nav).
  */
 contract UpgradeTrancheModule is UpgradeModuleBase {
     error UpgradeTrancheModule__TrancheTypeMismatch(TrancheType requested, TrancheType actual);
@@ -36,8 +36,7 @@ contract UpgradeTrancheModule is UpgradeModuleBase {
     error UpgradeTrancheModule__AssetImmutableChanged(address expected, address actual);
     error UpgradeTrancheModule__KernelImmutableChanged(address expected, address actual);
     error UpgradeTrancheModule__TrancheTypeChanged(TrancheType expected, TrancheType actual);
-    error UpgradeTrancheModule__TotalAssetsStChanged(TRANCHE_UNIT expected, TRANCHE_UNIT actual);
-    error UpgradeTrancheModule__TotalAssetsJtChanged(TRANCHE_UNIT expected, TRANCHE_UNIT actual);
+    error UpgradeTrancheModule__TotalAssetsCollateralChanged(TRANCHE_UNIT expected, TRANCHE_UNIT actual);
     error UpgradeTrancheModule__TotalAssetsNavChanged(NAV_UNIT expected, NAV_UNIT actual);
 
     /// @inheritdoc UpgradeModuleBase
@@ -94,7 +93,7 @@ contract UpgradeTrancheModule is UpgradeModuleBase {
     function snapshotState(address _proxy) external view override returns (bytes memory) {
         IRoycoVaultTranche t = IRoycoVaultTranche(_proxy);
         AssetClaims memory claims = t.totalAssets();
-        return abi.encode(t.name(), t.symbol(), t.totalSupply(), t.asset(), t.KERNEL(), t.TRANCHE_TYPE(), claims.stAssets, claims.jtAssets, claims.nav);
+        return abi.encode(t.name(), t.symbol(), t.totalSupply(), t.asset(), t.KERNEL(), t.TRANCHE_TYPE(), claims.collateralAssets, claims.nav);
     }
 
     /// @inheritdoc UpgradeModuleBase
@@ -106,10 +105,9 @@ contract UpgradeTrancheModule is UpgradeModuleBase {
             address asset,
             address kernel,
             TrancheType trancheType,
-            TRANCHE_UNIT stAssets,
-            TRANCHE_UNIT jtAssets,
+            TRANCHE_UNIT collateralAssets,
             NAV_UNIT nav
-        ) = abi.decode(_preStateSnapshot, (string, string, uint256, address, address, TrancheType, TRANCHE_UNIT, TRANCHE_UNIT, NAV_UNIT));
+        ) = abi.decode(_preStateSnapshot, (string, string, uint256, address, address, TrancheType, TRANCHE_UNIT, NAV_UNIT));
 
         IRoycoVaultTranche t = IRoycoVaultTranche(_proxy);
         require(keccak256(bytes(t.name())) == keccak256(bytes(name)), UpgradeTrancheModule__NameChanged());
@@ -120,8 +118,10 @@ contract UpgradeTrancheModule is UpgradeModuleBase {
         require(t.TRANCHE_TYPE() == trancheType, UpgradeTrancheModule__TrancheTypeChanged(trancheType, t.TRANCHE_TYPE()));
 
         AssetClaims memory claims = t.totalAssets();
-        require(TRANCHE_UNIT.unwrap(claims.stAssets) == TRANCHE_UNIT.unwrap(stAssets), UpgradeTrancheModule__TotalAssetsStChanged(stAssets, claims.stAssets));
-        require(TRANCHE_UNIT.unwrap(claims.jtAssets) == TRANCHE_UNIT.unwrap(jtAssets), UpgradeTrancheModule__TotalAssetsJtChanged(jtAssets, claims.jtAssets));
+        require(
+            TRANCHE_UNIT.unwrap(claims.collateralAssets) == TRANCHE_UNIT.unwrap(collateralAssets),
+            UpgradeTrancheModule__TotalAssetsCollateralChanged(collateralAssets, claims.collateralAssets)
+        );
         require(NAV_UNIT.unwrap(claims.nav) == NAV_UNIT.unwrap(nav), UpgradeTrancheModule__TotalAssetsNavChanged(nav, claims.nav));
     }
 }

@@ -24,20 +24,20 @@ abstract contract MarketFuzzTestBase is DayMarketTestBase {
 
     /**
      * @notice Seeds a flat market (vault rate 1.0, every price 1.0): _jt into JT, _st into ST, plus _extraQuote
-     *         quote wei of additional quote-only pool depth, returning the derived total LT raw NAV
+     *         quote wei of additional quote-only pool depth, returning the derived total LPT raw NAV
      * @dev The fixture auto-seeds the minimal quote-only depth the liquidity-gated ST seed deposit needs:
      *      autoQuote = ceil(ceil(_st / 20) / 1e12) + 1e6 quote wei, which is the required depth
      *      ceil(_st x 5% liquidity requirement) rounded up to quote precision plus one whole quote unit of
      *      cushion, minted as BPT 1:1 with its NAV so the pool's NAV-per-BPT stays exactly 1.0. The explicit
-     *      extra leg is minted the same way, so ltRawNAV = (autoQuote + _extraQuote) x 1e12 exactly, and the
+     *      extra leg is minted the same way, so lptRawNAV = (autoQuote + _extraQuote) x 1e12 exactly, and the
      *      helper pins the live read against that derivation
      */
-    function _seedFlatMarket(uint256 _st, uint256 _jt, uint256 _extraQuote) internal returns (uint256 ltRawNAV) {
+    function _seedFlatMarket(uint256 _st, uint256 _jt, uint256 _extraQuote) internal returns (uint256 lptRawNAV) {
         _seedMarket(_st, _jt);
-        if (_extraQuote != 0) _seedLT(_extraQuote * QUOTE_TO_NAV_SCALE, 0, _extraQuote);
+        if (_extraQuote != 0) _seedLPT(_extraQuote * QUOTE_TO_NAV_SCALE, 0, _extraQuote);
         // Independent plain-integer re-derivation of the auto-seeded depth (deliberately no shared ceil helper
         // with the fixture, so a rounding bug in its math-library calls fails this pin): the liquidity gate
-        // requires ltRawNAV >= ceil(5% of the post-deposit senior effective NAV), and at a 1.0 vault rate and 1.0
+        // requires lptRawNAV >= ceil(5% of the post-deposit senior effective NAV), and at a 1.0 vault rate and 1.0
         // prices that NAV is exactly _st, so the required depth is ceil(_st / 20) = (_st + 19) / 20 NAV wei. The
         // fixture funds it quote-only, rounded up to whole quote wei (1 quote wei == 1e12 NAV wei) plus one whole
         // quote unit (1e6 quote wei) of cushion, minting BPT 1:1 with the NAV added.
@@ -45,8 +45,8 @@ abstract contract MarketFuzzTestBase is DayMarketTestBase {
         // = (5e16 + 1 + (1e12 - 1)) / 1e12 + 1e6 = 50_001 + 1_000_000 = 1_050_001 quote wei, so with
         // _extraQuote = 0 the seeded depth is exactly 1_050_001e12 NAV wei
         uint256 autoQuote = ((_st + 19) / 20 + (QUOTE_TO_NAV_SCALE - 1)) / QUOTE_TO_NAV_SCALE + 1e6;
-        ltRawNAV = (autoQuote + _extraQuote) * QUOTE_TO_NAV_SCALE;
-        assertEq(toUint256(liquidityTranche.getRawNAV()), ltRawNAV, "seeded LT depth must match the derived quote-backed BPT value");
+        lptRawNAV = (autoQuote + _extraQuote) * QUOTE_TO_NAV_SCALE;
+        assertEq(_liveLPTRawNAV(), lptRawNAV, "seeded LPT depth must match the derived quote-backed BPT value");
     }
 
     /// @notice Mints vault shares to ST_PROVIDER and deposits them into the senior tranche
@@ -70,7 +70,7 @@ abstract contract MarketFuzzTestBase is DayMarketTestBase {
     /**
      * @notice Mints quote-backed BPT to the receiver through the mock vault's external-LP helper
      * @dev The quote leg is funded by this fixture and mapped through the pool's sorted registration order,
-     *      mirroring DayMarketTestBase._seedLT's quote-only leg placement
+     *      mirroring DayMarketTestBase._seedLPT's quote-only leg placement
      */
     function _mintQuoteBackedBPT(address _to, uint256 _bptAmount, uint256 _quoteLeg) internal {
         quoteToken.mint(address(this), _quoteLeg);

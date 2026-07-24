@@ -12,8 +12,8 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
  */
 interface IRoycoVaultTranche is IERC20Metadata {
     /**
-     * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST", "Royco-JT", or "Royco-LT")
-     * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST", "JT", or "LT")
+     * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST", "Royco-JT", or "Royco-LPT")
+     * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST", "JT", or "LPT")
      * @custom:field initialAuthority - The initial authority for the tranche
      */
     struct RoycoTrancheInitParams {
@@ -35,7 +35,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @notice Emitted when a redemption is made from the tranche
      * @param sender The address that initiated the redemption
      * @param receiver The address that received the redeemed assets
-     * @param claims The asset claims received by the receiver, including claims on ST assets, JT assets, and their total NAV value
+     * @param claims The asset claims received by the receiver, including claims on the collateral assets, LPT assets, ST shares, and their total NAV value
      * @param shares The amount of shares redeemed
      */
     event Redeem(address indexed sender, address indexed receiver, AssetClaims claims, uint256 shares);
@@ -57,34 +57,94 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @notice Thrown when the caller of a permissioned function is not the tranche's configured kernel
     error ONLY_KERNEL();
 
-    /// @notice Thrown when the value allocated from a deposit does not match the expected value
-    error INVALID_VALUE_ALLOCATED();
+    /// @notice Thrown when a deposit renders a zero deposit NAV
+    error INVALID_DEPOSIT_NAV();
 
     /// @notice Returns the address of the kernel that this tranche is associated with
     /// @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
     function KERNEL() external view returns (address kernel);
 
     /**
-     * @notice Returns the raw NAV of the tranche's invested assets
-     * @dev The raw NAV represents the pure value of the tranche's assets before any coverage adjustments or yield sharing
-     * @return nav The raw NAV of the tranche's invested assets, denominated in the kernel's NAV units
+     * @notice Deposits assets into the tranche and mints shares to the receiver
+     * @dev Transfers assets from the caller and mints shares to the receiver
+     * @param _assets The amount of assets to deposit, denominated in the tranche's base asset units
+     * @param _receiver The address that will receive the minted shares
+     * @return shares The number of shares minted to the receiver
      */
-    function getRawNAV() external view returns (NAV_UNIT nav);
+    function deposit(TRANCHE_UNIT _assets, address _receiver) external returns (uint256 shares);
 
     /**
-     * @notice Returns the total effective assets held by this tranche
-     * @dev The effective assets include claims on both ST and JT assets after accounting for coverage and yield sharing
-     * @return claims The total asset claims held by this tranche, including claims on ST assets, JT assets, and their total NAV value
+     * @notice Redeems shares from the tranche and transfers assets to the receiver
+     * @dev Burns shares from the owner and transfers the corresponding asset claims to the receiver
+     * @param _shares The number of shares to redeem
+     * @param _receiver The address that will receive the redeemed assets
+     * @param _owner The address that owns the shares being redeemed
+     * @return claims The asset claims transferred to the receiver, including claims on the collateral assets, LPT assets, ST shares, and their total NAV value
      */
-    function totalAssets() external view returns (AssetClaims memory claims);
+    function redeem(uint256 _shares, address _receiver, address _owner) external returns (AssetClaims memory claims);
 
-    /// @notice Returns the address of the underlying base asset for this tranche
-    /// @return asset The address of the ERC20 token used as the base asset for deposits into this tranche
-    function asset() external view returns (address asset);
+    /**
+     * @notice Mints a kernel-computed number of protocol fee shares to the specified fee recipient
+     * @dev Only callable by the kernel during accounting synchronization
+     * @dev Takes a precomputed share count rather than a NAV: the kernel prices every tranche's protocol fee shares (and the
+     *      senior liquidity premium) against the post-carve-out NAV so neither dilutes the other and the tranche only mints the count
+     * @param _protocolFeeRecipient The address that will receive the minted protocol fee shares
+     * @param _protocolFeeShares The precomputed number of protocol fee shares to mint
+     * @return totalTrancheShares The total shares in the tranche after minting the protocol fee shares
+     */
+    function mintProtocolFeeShares(address _protocolFeeRecipient, uint256 _protocolFeeShares) external returns (uint256 totalTrancheShares);
 
-    /// @notice Returns the tranche type indicating whether this is a senior, junior, or liquidity tranche
-    /// @return trancheType An enumerator indicating SENIOR, JUNIOR, or LIQUIDITY tranche type
-    function TRANCHE_TYPE() external view returns (TrancheType trancheType);
+    /**
+     * @notice Mints tranche shares to the specified account
+     * @dev Authorized via the AccessManager `restricted` modifier, the deploy template grants the market's kernel the role
+     *      for this selector so the kernel can mint senior shares to itself when seeding the LPT's liquidity venue
+     * @dev Takes a raw share count: the caller (kernel) is responsible for computing a fair, non-diluting amount
+     * @param _to The account to mint the shares to
+     * @param _shares The number of shares to mint
+     */
+    function mint(address _to, uint256 _shares) external;
+
+    /**
+     * @notice Previews the number of shares that would be minted for a given deposit amount
+     * @dev NON-VIEW: routes the deposit through its execute-and-revert simulation, which mutates no state net
+     * @dev The quote is produced by the actual kernel deposit path, so any revert the deposit would raise bubbles unchanged
+     * @param _assets The amount of assets to deposit, denominated in the tranche's base asset units
+     * @return shares The number of shares that would be minted for the specified deposit amount
+     */
+    function previewDeposit(TRANCHE_UNIT _assets) external returns (uint256 shares);
+
+    /**
+     * @notice Previews the asset claims that would be received for a given redemption amount
+     * @dev NON-VIEW: routes the redemption through its execute-and-revert simulation, which mutates no state net
+     * @dev The quote is produced by the actual kernel redemption path, so any revert the redemption would raise bubbles unchanged
+     * @param _shares The number of shares to redeem
+     * @return claims The asset claims that would be received, including claims on the collateral assets, LPT assets, ST shares, and their total NAV value
+     */
+    function previewRedeem(uint256 _shares) external returns (AssetClaims memory claims);
+
+    /**
+     * @notice Converts a specified number of shares to asset claims using the current exchange rate
+     * @dev Does not mutate any state
+     * @dev For the liquidity provider tranche this is the composability-facing exchange rate and is LPT-asset-only (the raw NAV,
+     *      `stShares` always zero): the claimable idle liquidity-premium senior shares are excluded, so the quoted
+     *      price is a conservative floor that cannot dip when a staged premium deploys into the pool
+     *      Use `previewRedeem` for the accurate redemption quote, which includes the idle slice paid in-kind, the two
+     *      coincide exactly when no premium is staged
+     * @param _shares The number of shares to convert
+     * @return claims The equivalent asset claims for the specified share amount, including claims on the collateral assets, LPT assets, ST shares, and their total NAV value
+     */
+    function convertToAssets(uint256 _shares) external view returns (AssetClaims memory claims);
+
+    /**
+     * @notice Converts a specified amount of assets to shares using the current exchange rate
+     * @dev Does not mutate any state
+     * @dev For the liquidity provider tranche the exchange rate is LPT-asset-only (the raw NAV): the claimable idle
+     *      liquidity-premium senior shares are excluded, so the quoted rate cannot dip when a staged premium deploys
+     *      Use `previewDeposit` for the accurate deposit quote, which prices at the idle-inclusive effective NAV
+     * @param _assets The amount of assets to convert, denominated in the tranche's base asset units
+     * @return shares The equivalent number of shares for the specified asset amount
+     */
+    function convertToShares(TRANCHE_UNIT _assets) external view returns (uint256 shares);
 
     /**
      * @notice Returns the maximum amount of assets that can be deposited by the specified receiver
@@ -103,82 +163,17 @@ interface IRoycoVaultTranche is IERC20Metadata {
     function maxRedeem(address _owner) external view returns (uint256 shares);
 
     /**
-     * @notice Previews the number of shares that would be minted for a given deposit amount
-     * @dev Does not mutate any state
-     * @param _assets The amount of assets to deposit, denominated in the tranche's base asset units
-     * @return shares The number of shares that would be minted for the specified deposit amount
+     * @notice Returns the total effective assets held by this tranche
+     * @dev The effective assets include the claims on the collateral assets after accounting for coverage and yield sharing
+     * @return claims The total asset claims held by this tranche, including claims on the collateral assets, LPT assets, ST shares, and their total NAV value
      */
-    function previewDeposit(TRANCHE_UNIT _assets) external view returns (uint256 shares);
+    function totalAssets() external view returns (AssetClaims memory claims);
 
-    /**
-     * @notice Previews the asset claims that would be received for a given redemption amount
-     * @dev Does not mutate any state
-     * @param _shares The number of shares to redeem
-     * @return claims The asset claims that would be received, including claims on ST assets, JT assets, and their total NAV value
-     */
-    function previewRedeem(uint256 _shares) external view returns (AssetClaims memory claims);
+    /// @notice Returns the address of the underlying base asset for this tranche
+    /// @return asset The address of the ERC20 token used as the base asset for deposits into this tranche
+    function asset() external view returns (address asset);
 
-    /**
-     * @notice Converts a specified amount of assets to shares using the current exchange rate
-     * @dev Does not mutate any state
-     * @dev For the liquidity tranche the exchange rate is LT-asset-only (the raw NAV): the claimable idle
-     *      liquidity-premium senior shares are excluded, so the quoted rate cannot dip when a staged premium deploys
-     *      Use `previewDeposit` for the accurate deposit quote, which prices at the idle-inclusive effective NAV
-     * @param _assets The amount of assets to convert, denominated in the tranche's base asset units
-     * @return shares The equivalent number of shares for the specified asset amount
-     */
-    function convertToShares(TRANCHE_UNIT _assets) external view returns (uint256 shares);
-
-    /**
-     * @notice Converts a specified number of shares to asset claims using the current exchange rate
-     * @dev Does not mutate any state
-     * @dev For the liquidity tranche this is the composability-facing exchange rate and is LT-asset-only (the raw NAV,
-     *      `stShares` always zero): the claimable idle liquidity-premium senior shares are excluded, so the quoted
-     *      price is a conservative floor that cannot dip when a staged premium deploys into the pool
-     *      Use `previewRedeem` for the accurate redemption quote, which includes the idle slice paid in-kind, the two
-     *      coincide exactly when no premium is staged
-     * @param _shares The number of shares to convert
-     * @return claims The equivalent asset claims for the specified share amount, including claims on ST assets, JT assets, and their total NAV value
-     */
-    function convertToAssets(uint256 _shares) external view returns (AssetClaims memory claims);
-
-    /**
-     * @notice Deposits assets into the tranche and mints shares to the receiver
-     * @dev Transfers assets from the caller and mints shares to the receiver
-     * @param _assets The amount of assets to deposit, denominated in the tranche's base asset units
-     * @param _receiver The address that will receive the minted shares
-     * @return shares The number of shares minted to the receiver
-     */
-    function deposit(TRANCHE_UNIT _assets, address _receiver) external returns (uint256 shares);
-
-    /**
-     * @notice Redeems shares from the tranche and transfers assets to the receiver
-     * @dev Burns shares from the owner and transfers the corresponding asset claims to the receiver
-     * @param _shares The number of shares to redeem
-     * @param _receiver The address that will receive the redeemed assets
-     * @param _owner The address that owns the shares being redeemed
-     * @return claims The asset claims transferred to the receiver, including claims on ST assets, JT assets, and their total NAV value
-     */
-    function redeem(uint256 _shares, address _receiver, address _owner) external returns (AssetClaims memory claims);
-
-    /**
-     * @notice Mints tranche shares to the specified account
-     * @dev Authorized via the AccessManager `restricted` modifier, the deploy template grants the market's kernel the role
-     *      for this selector so the kernel can mint senior shares to itself when seeding the LT's liquidity venue
-     * @dev Takes a raw share count: the caller (kernel) is responsible for computing a fair, non-diluting amount
-     * @param _to The account to mint the shares to
-     * @param _shares The number of shares to mint
-     */
-    function mint(address _to, uint256 _shares) external;
-
-    /**
-     * @notice Mints a kernel-computed number of protocol fee shares to the specified fee recipient
-     * @dev Only callable by the kernel during accounting synchronization
-     * @dev Takes a precomputed share count rather than a NAV: the kernel prices every tranche's protocol fee shares (and the
-     *      senior liquidity premium) against the post-carve-out NAV so neither dilutes the other and the tranche only mints the count
-     * @param _protocolFeeRecipient The address that will receive the minted protocol fee shares
-     * @param _protocolFeeShares The precomputed number of protocol fee shares to mint
-     * @return totalTrancheShares The total shares in the tranche after minting the protocol fee shares
-     */
-    function mintProtocolFeeShares(address _protocolFeeRecipient, uint256 _protocolFeeShares) external returns (uint256 totalTrancheShares);
+    /// @notice Returns the tranche type indicating whether this is a senior, junior, or liquidity provider tranche
+    /// @return trancheType An enumerator indicating SENIOR, JUNIOR, or LIQUIDITY tranche type
+    function TRANCHE_TYPE() external view returns (TrancheType trancheType);
 }

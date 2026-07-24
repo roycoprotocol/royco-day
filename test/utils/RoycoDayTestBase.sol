@@ -5,7 +5,8 @@ import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/RolesConfiguration.sol";
+import { DeploymentResult, RoleAssignment, RoleAssignmentAddresses } from "../../script/config/DeploymentTypes.sol";
+import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
@@ -53,8 +54,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     Vm.Wallet internal PROTOCOL_FEE_SETTER;
     address internal PROTOCOL_FEE_SETTER_ADDRESS;
 
-    Vm.Wallet internal ORACLE_QUOTER_ADMIN;
-    address internal ORACLE_QUOTER_ADMIN_ADDRESS;
+    Vm.Wallet internal ORACLE_ADMIN;
+    address internal ORACLE_ADMIN_ADDRESS;
 
     Vm.Wallet internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
     address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS;
@@ -126,8 +127,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
     /**
      * @dev Liquidation coverage utilization threshold. Derivation at this fixture's 20% minimum coverage:
-     *      coverage utilization is exposure x minCoverage / jtEffectiveNAV, where exposure is the combined
-     *      stRawNAV + jtRawNAV. At 6.4667e18 liquidation arms only once the junior buffer covers less than
+     *      coverage utilization is collateralNAV x minCoverage / jtEffectiveNAV. At 6.4667e18
+     *      liquidation arms only once the junior buffer covers less than
      *      ~3.09% (0.2e18 / 6.4667e18) of total exposure, a near-total JT wipeout, far above any utilization
      *      a healthy seeded state in this suite reads
      */
@@ -184,8 +185,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         PROTOCOL_FEE_SETTER = _initWallet("PROTOCOL_FEE_SETTER", 1000 ether);
         PROTOCOL_FEE_SETTER_ADDRESS = PROTOCOL_FEE_SETTER.addr;
 
-        ORACLE_QUOTER_ADMIN = _initWallet("ORACLE_QUOTER_ADMIN", 1000 ether);
-        ORACLE_QUOTER_ADMIN_ADDRESS = ORACLE_QUOTER_ADMIN.addr;
+        ORACLE_ADMIN = _initWallet("ORACLE_ADMIN", 1000 ether);
+        ORACLE_ADMIN_ADDRESS = ORACLE_ADMIN.addr;
 
         MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = _initWallet("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN", 1000 ether);
         MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS = MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN.addr;
@@ -241,7 +242,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         providers.push(JT_DAN_ADDRESS);
     }
 
-    function _setDeployedMarket(DeployScript.DeploymentResult memory _deploymentResult) internal {
+    function _setDeployedMarket(DeploymentResult memory _deploymentResult) internal {
         YDM = _deploymentResult.ydm;
         vm.label(address(YDM), "YDM");
 
@@ -270,7 +271,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     }
 
     /// @dev Wires roles that live in `ExtraRoles` and are intentionally NOT passed through
-    ///      `factory.initialize` (canonical `RolesConfiguration.getRoleConfig` doesn't know
+    ///      `factory.initialize` (canonical `Roles.getRoleConfig` doesn't know
     ///      them, so including them in the init array would revert). Pranks FNDN (the
     ///      admin-role holder): `OWNER_ADDRESS` for a fresh in-memory deploy, `ROOT_MULTISIG`
     ///      when the test forks a chain where the factory is already on-chain.
@@ -336,7 +337,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     /// @param _assets The assets denominated in ST's tranche units to convert to the kernel's NAV units
     /// @return value The specified assets denominated in ST's tranche units converted to the kernel's NAV units
     function _toSTValue(TRANCHE_UNIT _assets) internal view returns (NAV_UNIT) {
-        return KERNEL.stConvertTrancheUnitsToNAVUnits(_assets);
+        return KERNEL.convertCollateralAssetsToValue(_assets);
     }
 
     /// @notice Returns the fork configuration
@@ -348,9 +349,9 @@ abstract contract RoycoDayTestBase is Test, Assertions {
 
     /// @notice Generates role assignments using the role-specific addresses
     /// @return roleAssignments Array of role assignment configurations
-    function _generateRoleAssignments() internal view returns (DeployScript.RoleAssignment[] memory roleAssignments) {
+    function _generateRoleAssignments() internal view returns (RoleAssignment[] memory roleAssignments) {
         return DEPLOY_SCRIPT.generateRolesAssignments(
-            DeployScript.RoleAssignmentAddresses({
+            RoleAssignmentAddresses({
                 pauserAddress: PAUSER_ADDRESS,
                 unpauserAddress: UNPAUSER_ADDRESS,
                 upgraderAddress: UPGRADER_ADDRESS,
@@ -358,7 +359,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 adminKernelAddress: KERNEL_ADMIN_ADDRESS,
                 adminAccountantAddress: ACCOUNTANT_ADMIN_ADDRESS,
                 adminProtocolFeeSetterAddress: PROTOCOL_FEE_SETTER_ADDRESS,
-                adminOracleQuoterAddress: ORACLE_QUOTER_ADMIN_ADDRESS,
+                adminOracleAddress: ORACLE_ADMIN_ADDRESS,
                 lpRoleAdminAddress: LP_ROLE_ADMIN_ADDRESS,
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
                 deployerAddress: DEPLOYER_ADDRESS,

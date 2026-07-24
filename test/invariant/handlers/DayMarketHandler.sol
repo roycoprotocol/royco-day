@@ -5,7 +5,7 @@ import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/c
 import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { JT_LP_ROLE, LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { JT_LP_ROLE, LPT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
@@ -52,12 +52,12 @@ contract DayMarketHandler is DayMarketTestBase {
     uint256 internal JT_PINNED_SHARE_WAD;
 
     /// @dev The pinned instantaneous liquidity yield share the mock model returns on every query
-    uint256 internal LT_PINNED_SHARE_WAD;
+    uint256 internal LPT_PINNED_SHARE_WAD;
 
     /**
      * @dev Worst-case NAV-wei lost to flooring across one operation's unit conversions and claim scalings.
      *      A single mulDiv floor loses under 1 wei of its result and one op performs at most ten of them
-     *      (two quoter conversions per leg, the five claim fields, the post-op delta), each worth at most
+     *      (two pricing conversions per leg, the five claim fields, the post-op delta), each worth at most
      *      the share-rate in NAV wei. The share rate stays below 10 under the bounded PnL regime, so 100
      *      NAV wei bounds the total. Used only to tolerate flooring in the share-price monotonicity check
      */
@@ -69,8 +69,8 @@ contract DayMarketHandler is DayMarketTestBase {
      *      most (WAD − ε)/ε (~1e12 at the default ε = 1e6) instead of by the deposit's NAV value, but a
      *      residual overflow cliff remains: the clamp's own cap computation overflows once
      *      supply ≥ ~2^256·ε/(WAD − ε) ≈ 1.158e65, so ~4 unchecked cycles from 1e21 still reach a
-     *      Panic(0x11) — including inside the sync's fee mint, which would brick the market. Every deposit
-     *      op therefore clamps against this bound (the one venue-priced mint, the multi-asset LT share,
+     *      Panic(0x11), including inside the sync's fee mint, which would brick the market. Every deposit
+     *      op therefore clamps against this bound (the one venue-priced mint, the multi-asset LPT share,
      *      keeps the panic prediction only: the drained-pool dilution state it would need cannot recur
      *      across successful adds), so campaign states stay provably overflow-free: unclamped supplies stop
      *      at 1e45, a clamped one-unit deposit at most doubles the supply and run depths give far fewer
@@ -90,7 +90,7 @@ contract DayMarketHandler is DayMarketTestBase {
 
     address[3] internal stActors;
     address[2] internal jtActors;
-    address[2] internal ltActors;
+    address[2] internal lptActors;
     address internal externalLp;
 
     // =============================
@@ -122,25 +122,26 @@ contract DayMarketHandler is DayMarketTestBase {
     /// @notice Cumulative idle liquidity premium senior shares handed directly to redeemers
     uint256 public ghost_idlePremiumSeniorSharesPaidToRedeemers;
 
-    /// @dev The cause of one recorded jtCoverageImpermanentLoss ledger movement
-    enum JTCoverageImpermanentLossCause {
+    /// @dev The cause of one recorded jtImpermanentLoss ledger movement. The old JT_REDEEM_SCALE cause is
+    ///      gone with the deleted postOp scaling: a junior exit only settles in PERPETUAL where the ledger
+    ///      is already zero, so a redeem can never move it
+    enum JTImpermanentLossCause {
         COVERAGE_APPLIED,
         RECOVERY,
-        JT_REDEEM_SCALE,
         ERASED
     }
 
-    /// @dev One recorded jtCoverageImpermanentLoss ledger movement
-    struct JTCoverageImpermanentLossEvent {
-        JTCoverageImpermanentLossCause cause;
+    /// @dev One recorded jtImpermanentLoss ledger movement
+    struct JTImpermanentLossEvent {
+        JTImpermanentLossCause cause;
         uint256 magnitude;
     }
 
-    /// @notice The append-only log of every jtCoverageImpermanentLoss ledger movement with its cause
-    JTCoverageImpermanentLossEvent[] public ghost_jtCoverageImpermanentLossEvents;
+    /// @notice The append-only log of every jtImpermanentLoss ledger movement with its cause
+    JTImpermanentLossEvent[] public ghost_jtImpermanentLossEvents;
 
-    /// @dev The jtCoverageImpermanentLoss value implied by replaying the event log, checked against the committed value
-    uint256 internal ghost_jtCoverageImpermanentLossReplay;
+    /// @dev The jtImpermanentLoss value implied by replaying the event log, checked against the committed value
+    uint256 internal ghost_jtImpermanentLossReplay;
 
     // =============================
     // Share-price monotonicity trackers
@@ -148,7 +149,17 @@ contract DayMarketHandler is DayMarketTestBase {
 
     uint256 internal ghost_stPriceHighWater;
     uint256 internal ghost_jtPriceHighWater;
-    uint256 internal ghost_ltPriceHighWater;
+    uint256 internal ghost_lptPriceHighWater;
+
+    // The OZ virtual-shares share price floor((effNAV + VIRTUAL_VALUE) * WAD / (supply + VIRTUAL_SHARES)) captured
+    // at each high-water. The naive price floor(effNAV * WAD / supply) the check tracks sits ABOVE this virtual
+    // price by an offset gap that SHRINKS as supply grows on deposits. The virtual price is the monotone-non-decreasing
+    // OZ share price (it never falls on a no-loss deposit), so absent a loss event the naive price can fall by at most
+    // the gap captured at the high-water. Tolerating exactly that stored gap keeps the monotonicity check tight while
+    // absorbing the offset's deposit-dilution dust (a real loss still drops the virtual price and trips the check).
+    uint256 internal ghost_stVirtualHighWater;
+    uint256 internal ghost_jtVirtualHighWater;
+    uint256 internal ghost_lptVirtualHighWater;
 
     /// @dev Set by ops that can legitimately push the senior share price down (an uncovered drawdown)
     bool internal ghost_uncoveredLossSinceLastCheck;
@@ -157,13 +168,13 @@ contract DayMarketHandler is DayMarketTestBase {
     bool internal ghost_jtLossSinceLastCheck;
 
     /// @dev Set by ops that can legitimately push the liquidity share price down (a venue drawdown)
-    bool internal ghost_ltVenueLossSinceLastCheck;
+    bool internal ghost_lptVenueLossSinceLastCheck;
 
     /**
      * @dev Idle premium senior shares deployed into the venue since the last price-monotonicity check,
      *      whether by a sync's own reinvestment attempt or by op_reinvest. A deploy re-marks the deployed
-     *      shares from their exact claimable-leg valuation floor(n * stEffectiveNAV / stSupply) down to
-     *      the venue's WAD-quantized senior rate, floor(stEffectiveNAV * WAD / stSupply) / WAD per share,
+     *      shares from their exact claimable-leg valuation floor(n * (stEffectiveNAV + 1) / (stSupply + 1e6)) down to
+     *      the venue's WAD-quantized senior rate, floor((stEffectiveNAV + 1) * WAD / (stSupply + 1e6)) / WAD per share,
      *      so the liquidity effective NAV may fall by the quantization residual
      *      n * ((stEffectiveNAV * WAD) mod stSupply) / (stSupply * WAD) < n / WAD NAV wei with no value
      *      leaving the market (the mark is quantized, not the value). The liquidity price check consumes
@@ -179,7 +190,7 @@ contract DayMarketHandler is DayMarketTestBase {
     uint256 internal ghost_windowMaxJTShareWAD;
 
     /// @dev The largest configured liquidity yield-share cap seen inside the current premium window
-    uint256 internal ghost_windowMaxLTShareWAD;
+    uint256 internal ghost_windowMaxLPTShareWAD;
 
     // =============================
     // Regime counters (reported by the invariant contract)
@@ -220,7 +231,7 @@ contract DayMarketHandler is DayMarketTestBase {
     bytes4 internal constant SEL_LIQUIDITY = IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
     bytes4 internal constant SEL_INVALID_POST_OP = IRoycoDayAccountant.INVALID_POST_OP_STATE.selector;
     bytes4 internal constant SEL_ZERO_SHARES = IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector;
-    bytes4 internal constant SEL_ZERO_VALUE = IRoycoVaultTranche.INVALID_VALUE_ALLOCATED.selector;
+    bytes4 internal constant SEL_ZERO_VALUE = IRoycoVaultTranche.INVALID_DEPOSIT_NAV.selector;
     bytes4 internal constant SEL_ERC20_BALANCE = IERC20Errors.ERC20InsufficientBalance.selector;
     bytes4 internal constant SEL_AMOUNT_OUT_BELOW_MIN = IVaultErrors.AmountOutBelowMin.selector;
     bytes4 internal constant SEL_PANIC = bytes4(0x4e487b71);
@@ -233,24 +244,22 @@ contract DayMarketHandler is DayMarketTestBase {
     struct Snap {
         bool ok;
         bool fixedTerm;
-        uint256 stRawNAV;
-        uint256 jtRawNAV;
-        uint256 ltRawNAV;
+        uint256 collateralNAV;
+        uint256 lptRawNAV;
         uint256 stEffectiveNAV;
         uint256 jtEffectiveNAV;
-        uint256 jtCoverageImpermanentLoss;
+        uint256 jtImpermanentLoss;
         uint256 coverageUtilizationWAD;
         uint256 minCoverageWAD;
         uint256 minLiquidityWAD;
         uint256 coverageLiquidationUtilizationWAD;
-        uint256 effectiveNAVDustTolerance;
+        uint256 dustTolerance;
         uint256 stSupply;
         uint256 jtSupply;
-        uint256 ltSupply;
-        uint256 stOwned;
-        uint256 jtOwned;
-        uint256 ltOwned;
-        uint256 ltOwnedSeniorTrancheShares;
+        uint256 lptSupply;
+        uint256 collateralOwned;
+        uint256 lptOwned;
+        uint256 lptOwnedSeniorTrancheShares;
         uint256 bonusWAD;
     }
 
@@ -277,9 +286,9 @@ contract DayMarketHandler is DayMarketTestBase {
 
         QUOTE_UNIT = 10 ** uint256(cell.quoteAsset.decimals);
         JT_PINNED_SHARE_WAD = uint256(params.jtCurve[1]);
-        LT_PINNED_SHARE_WAD = uint256(params.ltCurve[1]);
+        LPT_PINNED_SHARE_WAD = uint256(params.lptCurve[1]);
         ghost_windowMaxJTShareWAD = params.maxJTYieldShareWAD;
-        ghost_windowMaxLTShareWAD = params.maxLTYieldShareWAD;
+        ghost_windowMaxLPTShareWAD = params.maxLPTYieldShareWAD;
 
         // Actor set: three senior LPs, two junior LPs, two liquidity LPs, one external pool participant
         stActors[0] = _generateActor("H_ST_ACTOR_0", ST_LP_ROLE);
@@ -287,8 +296,8 @@ contract DayMarketHandler is DayMarketTestBase {
         stActors[2] = _generateActor("H_ST_ACTOR_2", ST_LP_ROLE);
         jtActors[0] = _generateActor("H_JT_ACTOR_0", JT_LP_ROLE);
         jtActors[1] = _generateActor("H_JT_ACTOR_1", JT_LP_ROLE);
-        ltActors[0] = _generateActor("H_LT_ACTOR_0", LT_LP_ROLE);
-        ltActors[1] = _generateActor("H_LT_ACTOR_1", LT_LP_ROLE);
+        lptActors[0] = _generateActor("H_LPT_ACTOR_0", LPT_LP_ROLE);
+        lptActors[1] = _generateActor("H_LPT_ACTOR_1", LPT_LP_ROLE);
         externalLp = makeAddr("H_EXTERNAL_LP");
 
         // Seed a healthy market: 30k junior first (coverage), auto-seeded quote depth, then 100k senior
@@ -297,7 +306,7 @@ contract DayMarketHandler is DayMarketTestBase {
         // Baseline the ghost ledgers and the price high-water marks off one verified sync
         _syncAndVerify("constructor");
         ghost_transferredIn[address(stJtVault)] = stJtVault.balanceOf(address(kernel));
-        ghost_jtCoverageImpermanentLossReplay = toUint256(accountant.getState().lastJTCoverageImpermanentLoss);
+        ghost_jtImpermanentLossReplay = toUint256(accountant.getState().lastJTImpermanentLoss);
     }
 
     // =============================
@@ -313,7 +322,7 @@ contract DayMarketHandler is DayMarketTestBase {
         Snap memory s = _syncAndVerify("pre:stDeposit");
         if (s.ok) {
             // The in-handler supply bound: keep the mint from carrying the senior supply past the campaign bound
-            assets = _clampSupplySafeDeposit(assets, _quoteSTUnits(assets), s.stEffectiveNAV, s.stSupply);
+            assets = _clampSupplySafeDeposit(assets, _quoteCollateralUnits(assets), s.stEffectiveNAV, s.stSupply);
             _execStDeposit(actor, assets, s);
             _syncAndVerify("post:stDeposit");
         }
@@ -343,15 +352,15 @@ contract DayMarketHandler is DayMarketTestBase {
         Snap memory s = _syncAndVerify("pre:jtDeposit");
         if (s.ok) {
             // The in-handler supply bound: keep the mint from carrying the junior supply past the campaign bound
-            assets = _clampSupplySafeDeposit(assets, _quoteSTUnits(assets), s.jtEffectiveNAV, s.jtSupply);
+            assets = _clampSupplySafeDeposit(assets, _quoteCollateralUnits(assets), s.jtEffectiveNAV, s.jtSupply);
             Pred memory p;
-            uint256 value = _quoteSTUnits(assets);
+            uint256 value = _quoteCollateralUnits(assets);
             uint256 predShares;
             if (s.fixedTerm) {
                 _expect(p, SEL_DISABLED_FT);
             } else {
-                uint256 jtRawAfter = _quoteJTUnits(s.jtOwned + assets);
-                if (jtRawAfter == s.jtRawNAV || value == 0) {
+                uint256 collateralAfter = _quoteCollateralUnits(s.collateralOwned + assets);
+                if (collateralAfter == s.collateralNAV || value == 0) {
                     _expect(p, SEL_INVALID_POST_OP);
                     _expect(p, SEL_ZERO_VALUE);
                 }
@@ -392,92 +401,92 @@ contract DayMarketHandler is DayMarketTestBase {
     }
 
     /// @notice A liquidity LP deposits pool tokens minted at fair value against a real quote leg
-    function op_ltDeposit(uint256 _actorSeed, uint256 _quoteLeg) external {
-        _recordCall("ltDeposit");
-        address actor = ltActors[bound(_actorSeed, 0, ltActors.length - 1)];
+    function op_lptDeposit(uint256 _actorSeed, uint256 _quoteLeg) external {
+        _recordCall("lptDeposit");
+        address actor = lptActors[bound(_actorSeed, 0, lptActors.length - 1)];
         // Uniform over 1 to 1e6 whole quote tokens backing the minted pool tokens
         uint256 quoteLeg = bound(_quoteLeg, QUOTE_UNIT, QUOTE_UNIT * 1e6);
         // Mint the pool tokens before the sync so the committed marks already reflect the deeper pool
         uint256 bptAmt = _mintFairValueBpt(actor, quoteLeg);
-        Snap memory s = _syncAndVerify("pre:ltDeposit");
+        Snap memory s = _syncAndVerify("pre:lptDeposit");
         if (s.ok) {
             // The in-handler supply bound: any pool tokens the clamp strands with the actor are just an external holding
             bptAmt = _clampSupplySafeDeposit(
                 bptAmt,
-                _quoteLTUnits(bptAmt),
-                RoycoTestMath.getLiquidityTrancheEffectiveNAV(s.ltRawNAV, s.ltOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply),
-                s.ltSupply
+                _quoteLPTUnits(bptAmt),
+                RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(s.lptRawNAV, s.lptOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply),
+                s.lptSupply
             );
             Pred memory p;
-            uint256 value = _quoteLTUnits(bptAmt);
-            uint256 navAt = RoycoTestMath.getLiquidityTrancheEffectiveNAV(s.ltRawNAV, s.ltOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
-            if (_quoteLTUnits(s.ltOwned + bptAmt) == s.ltRawNAV || value == 0) {
+            uint256 value = _quoteLPTUnits(bptAmt);
+            uint256 navAt = RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(s.lptRawNAV, s.lptOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
+            if (_quoteLPTUnits(s.lptOwned + bptAmt) == s.lptRawNAV || value == 0) {
                 _expect(p, SEL_INVALID_POST_OP);
                 _expect(p, SEL_ZERO_VALUE);
             }
-            (uint256 predShares, bool mintPanics) = _mirrorMintShares(value, navAt, s.ltSupply);
+            (uint256 predShares, bool mintPanics) = _mirrorMintShares(value, navAt, s.lptSupply);
             // The mint-dilution clamp's residual overflow cliff: past the supply-inflation point the mint itself must panic
             if (mintPanics) _expect(p, SEL_PANIC);
             else if (predShares == 0) _expect(p, SEL_ZERO_SHARES);
             vm.startPrank(actor);
-            bpt.approve(address(liquidityTranche), bptAmt);
-            try liquidityTranche.deposit(toTrancheUnits(bptAmt), actor) returns (uint256 gotShares) {
-                _recordSuccess("ltDeposit");
+            bpt.approve(address(liquidityProviderTranche), bptAmt);
+            try liquidityProviderTranche.deposit(toTrancheUnits(bptAmt), actor) returns (uint256 gotShares) {
+                _recordSuccess("lptDeposit");
                 ghost_transferredIn[address(bpt)] += bptAmt;
-                _flag(gotShares == predShares, "ltDeposit minted shares diverge from the floor mirror");
+                _flag(gotShares == predShares, "lptDeposit minted shares diverge from the floor mirror");
             } catch (bytes memory err) {
-                _classify("ltDeposit", err, p);
+                _classify("lptDeposit", err, p);
             }
             vm.stopPrank();
-            _syncAndVerify("post:ltDeposit");
+            _syncAndVerify("post:lptDeposit");
         }
     }
 
-    /// @notice A liquidity LP enters atomically with senior underlying plus quote through the venue add
-    function op_ltDepositMultiAsset(uint256 _actorSeed, uint256 _stAssets, uint256 _quote) external {
-        _recordCall("ltDepositMultiAsset");
-        address actor = ltActors[bound(_actorSeed, 0, ltActors.length - 1)];
-        // Uniform over 1e-6 to 1e6 whole vault shares on the senior leg and 1 to 1e6 quote tokens
-        uint256 stAssets = bound(_stAssets, 1e12, 1e24);
+    /// @notice A liquidity LP enters atomically with collateral underlying plus quote through the venue add
+    function op_lptDepositMultiAsset(uint256 _actorSeed, uint256 _collateralAssets, uint256 _quote) external {
+        _recordCall("lptDepositMultiAsset");
+        address actor = lptActors[bound(_actorSeed, 0, lptActors.length - 1)];
+        // Uniform over 1e-6 to 1e6 whole vault shares on the collateral leg and 1 to 1e6 quote tokens
+        uint256 collateralAssets = bound(_collateralAssets, 1e12, 1e24);
         uint256 quoteAssets = bound(_quote, QUOTE_UNIT, QUOTE_UNIT * 1e6);
-        Snap memory s = _syncAndVerify("pre:ltDepositMultiAsset");
+        Snap memory s = _syncAndVerify("pre:lptDepositMultiAsset");
         if (s.ok) {
             // The in-handler supply bound on the senior leg the venue add mints through the same share pricing
-            stAssets = _clampSupplySafeDeposit(stAssets, _quoteSTUnits(stAssets), s.stEffectiveNAV, s.stSupply);
-            _execLtDepositMultiAsset(actor, stAssets, quoteAssets, s);
-            _syncAndVerify("post:ltDepositMultiAsset");
+            collateralAssets = _clampSupplySafeDeposit(collateralAssets, _quoteCollateralUnits(collateralAssets), s.stEffectiveNAV, s.stSupply);
+            _execLptDepositMultiAsset(actor, collateralAssets, quoteAssets, s);
+            _syncAndVerify("post:lptDepositMultiAsset");
         }
     }
 
     /// @notice A liquidity LP redeems in kind, taking pool tokens plus its slice of any idle liquidity premium senior shares
-    function op_ltRedeem(uint256 _actorSeed, uint256 _shares) external {
-        _recordCall("ltRedeem");
-        address actor = ltActors[bound(_actorSeed, 0, ltActors.length - 1)];
-        Snap memory s = _syncAndVerify("pre:ltRedeem");
+    function op_lptRedeem(uint256 _actorSeed, uint256 _shares) external {
+        _recordCall("lptRedeem");
+        address actor = lptActors[bound(_actorSeed, 0, lptActors.length - 1)];
+        Snap memory s = _syncAndVerify("pre:lptRedeem");
         if (s.ok) {
-            uint256 bal = liquidityTranche.balanceOf(actor);
+            uint256 bal = liquidityProviderTranche.balanceOf(actor);
             // Uniform over the actor's holding, degraded to a single share on an empty balance
             uint256 shares = bound(_shares, 1, bal == 0 ? 1 : bal);
-            _execLtRedeem(actor, shares, s);
-            _syncAndVerify("post:ltRedeem");
+            _execLptRedeem(actor, shares, s);
+            _syncAndVerify("post:lptRedeem");
         }
     }
 
     /// @notice A liquidity LP exits atomically, unwinding the senior leg back to vault shares plus quote
-    function op_ltRedeemMultiAsset(uint256 _actorSeed, uint256 _shares) external {
-        _recordCall("ltRedeemMultiAsset");
-        address actor = ltActors[bound(_actorSeed, 0, ltActors.length - 1)];
-        Snap memory s = _syncAndVerify("pre:ltRedeemMultiAsset");
+    function op_lptRedeemMultiAsset(uint256 _actorSeed, uint256 _shares) external {
+        _recordCall("lptRedeemMultiAsset");
+        address actor = lptActors[bound(_actorSeed, 0, lptActors.length - 1)];
+        Snap memory s = _syncAndVerify("pre:lptRedeemMultiAsset");
         if (s.ok) {
-            uint256 bal = liquidityTranche.balanceOf(actor);
+            uint256 bal = liquidityProviderTranche.balanceOf(actor);
             // Uniform over the actor's holding, degraded to a single share on an empty balance
             uint256 shares = bound(_shares, 1, bal == 0 ? 1 : bal);
             // One call in four probes the caller's quote slippage floor instead of exiting unbounded, so
             // both floor regimes stay exercised: a nonzero venue slice must reject an unmeetable floor,
             // and a zero venue slice silently skips the floor check (that bypass is pinned, not skipped)
             bool probeQuoteMin = _actorSeed % 4 == 3;
-            _execLtRedeemMultiAsset(actor, shares, probeQuoteMin, s);
-            _syncAndVerify("post:ltRedeemMultiAsset");
+            _execLptRedeemMultiAsset(actor, shares, probeQuoteMin, s);
+            _syncAndVerify("post:lptRedeemMultiAsset");
         }
     }
 
@@ -493,9 +502,10 @@ contract DayMarketHandler is DayMarketTestBase {
         Snap memory s = _syncAndVerify("pre:reinvest");
         if (s.ok) {
             // Half the calls deploy everything, half deploy an arbitrary partial amount
-            uint256 amount = _stShares % 2 == 0 ? type(uint256).max : bound(_stShares, 1, s.ltOwnedSeniorTrancheShares == 0 ? 1 : s.ltOwnedSeniorTrancheShares);
+            uint256 amount =
+                _stShares % 2 == 0 ? type(uint256).max : bound(_stShares, 1, s.lptOwnedSeniorTrancheShares == 0 ? 1 : s.lptOwnedSeniorTrancheShares);
             uint256 poolSeniorBefore = seniorTranche.balanceOf(address(balancerVault));
-            uint256 idleBefore = kernel.getState().ltOwnedSeniorTrancheShares;
+            uint256 idleBefore = kernel.getState().lptOwnedSeniorTrancheShares;
             vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
             try kernel.reinvestLiquidityPremium(amount) {
                 _recordSuccess("reinvest");
@@ -503,8 +513,8 @@ contract DayMarketHandler is DayMarketTestBase {
                 ghost_liquidityPremiumSharesReinvested += deployed;
                 ghost_stSharesDeployedSinceLastPriceCheck += deployed;
                 _flag(
-                    kernel.getState().ltOwnedSeniorTrancheShares == idleBefore - deployed,
-                    "reinvest changed ltOwnedSeniorTrancheShares by more than the shares that reached the pool"
+                    kernel.getState().lptOwnedSeniorTrancheShares == idleBefore - deployed,
+                    "reinvest changed lptOwnedSeniorTrancheShares by more than the shares that reached the pool"
                 );
             } catch (bytes memory err) {
                 // The reinvestment path tolerates venue failures internally, so any revert is unpredicted
@@ -532,7 +542,7 @@ contract DayMarketHandler is DayMarketTestBase {
         if (bps < 0) {
             ghost_uncoveredLossSinceLastCheck = true;
             ghost_jtLossSinceLastCheck = true;
-            ghost_ltVenueLossSinceLastCheck = true;
+            ghost_lptVenueLossSinceLastCheck = true;
         }
         applySTPnL(bps);
         _syncAndVerify("post:stPnL");
@@ -546,20 +556,20 @@ contract DayMarketHandler is DayMarketTestBase {
         if (bps < 0) {
             ghost_uncoveredLossSinceLastCheck = true;
             ghost_jtLossSinceLastCheck = true;
-            ghost_ltVenueLossSinceLastCheck = true;
+            ghost_lptVenueLossSinceLastCheck = true;
         }
         applyJTPnL(bps);
         _syncAndVerify("post:jtPnL");
     }
 
     /// @notice The pool's quote leg moves by a bounded basis-point amount in both price stores
-    function op_ltPnL(int256 _bps) external {
-        _recordCall("ltPnL");
+    function op_lptPnL(int256 _bps) external {
+        _recordCall("lptPnL");
         // Uniform over minus three to plus three percent per event
         int256 bps = bound(_bps, -300, 300);
-        if (bps < 0) ghost_ltVenueLossSinceLastCheck = true;
-        applyLTPnL(bps);
-        _syncAndVerify("post:ltPnL");
+        if (bps < 0) ghost_lptVenueLossSinceLastCheck = true;
+        applyLPTPnL(bps);
+        _syncAndVerify("post:lptPnL");
     }
 
     /// @notice The accountant admin nudges one market parameter within a safe, bounded range
@@ -586,7 +596,7 @@ contract DayMarketHandler is DayMarketTestBase {
                     pick == 0 ? (uint64(0.5e18), uint64(0.3e18)) : pick == 1 ? (uint64(0.6e18), uint64(0.4e18)) : (uint64(0.4e18), uint64(0.2e18));
                 accountant.setMaxYieldShares(j, l);
                 if (j > ghost_windowMaxJTShareWAD) ghost_windowMaxJTShareWAD = j;
-                if (l > ghost_windowMaxLTShareWAD) ghost_windowMaxLTShareWAD = l;
+                if (l > ghost_windowMaxLPTShareWAD) ghost_windowMaxLPTShareWAD = l;
             } else if (kind == 4) {
                 // One of three fixed term durations, never zero so the fixed-term regime stays reachable
                 uint256 pick = bound(_valueSeed, 0, 2);
@@ -636,7 +646,7 @@ contract DayMarketHandler is DayMarketTestBase {
                 // Overflow guard only, the boundary case stays exact whenever capacity is below the cap
                 uint256 assets = maxAssets > 1e27 ? 1e27 : maxAssets;
                 // The in-handler supply bound: only binds in the dust-NAV states where the boundary is meaningless anyway
-                assets = _clampSupplySafeDeposit(assets, _quoteSTUnits(assets), s.stEffectiveNAV, s.stSupply);
+                assets = _clampSupplySafeDeposit(assets, _quoteCollateralUnits(assets), s.stEffectiveNAV, s.stSupply);
                 _execStDeposit(actor, assets, s);
             }
             _syncAndVerify("post:aimedMaxST");
@@ -648,12 +658,13 @@ contract DayMarketHandler is DayMarketTestBase {
         _recordCall("aimedLoseUntilLiquidation");
         Snap memory s = _syncAndVerify("pre:aimedLiquidation");
         if (s.ok && s.stEffectiveNAV + s.jtEffectiveNAV > 0) {
-            // Solve for the loss fraction f on both raw NAVs that lands coverage utilization on the
-            // liquidation threshold L. With a shared feed both legs lose f, junior absorbs its own loss
-            // plus coverage, so jtEffectiveNAV' = jtEffectiveNAV(1-f) - f*stEffectiveNAV and the exposure shrinks to (1-f)(stRawNAV+jtRawNAV).
-            // Requiring exposure*minCoverageWAD/jtEffectiveNAV' >= L and isolating f gives
-            // f = (jtEffectiveNAV - E*C/L) / (stEffectiveNAV + jtEffectiveNAV - E*C/L) with E = stRawNAV + jtRawNAV and C = minCoverageWAD
-            uint256 ecl = (s.stRawNAV + s.jtRawNAV).mulDiv(s.minCoverageWAD, s.coverageLiquidationUtilizationWAD);
+            // Solve for the loss fraction f on the collateral NAV that lands coverage utilization on the
+            // liquidation threshold L. With one shared rate the whole pool loses f, junior absorbs its own
+            // loss plus coverage, so jtEffectiveNAV' = jtEffectiveNAV(1-f) - f*stEffectiveNAV and the
+            // collateral NAV shrinks to (1-f)*E. Requiring E'*minCoverageWAD/jtEffectiveNAV' >= L and
+            // isolating f gives f = (jtEffectiveNAV - E*C/L) / (stEffectiveNAV + jtEffectiveNAV - E*C/L)
+            // with E = collateralNAV and C = minCoverageWAD
+            uint256 ecl = s.collateralNAV.mulDiv(s.minCoverageWAD, s.coverageLiquidationUtilizationWAD);
             // Already at or past the threshold: the trailing verified sync realizes and counts the regime
             if (s.jtEffectiveNAV > ecl && s.coverageUtilizationWAD < s.coverageLiquidationUtilizationWAD) {
                 uint256 fWAD = (s.jtEffectiveNAV - ecl).mulDiv(WAD, s.stEffectiveNAV + s.jtEffectiveNAV - ecl, Math.Rounding.Ceil) + 0.01e18;
@@ -661,7 +672,7 @@ contract DayMarketHandler is DayMarketTestBase {
                 int256 bpsDrop = int256(fWAD / 1e14) + 1;
                 ghost_uncoveredLossSinceLastCheck = true;
                 ghost_jtLossSinceLastCheck = true;
-                ghost_ltVenueLossSinceLastCheck = true;
+                ghost_lptVenueLossSinceLastCheck = true;
                 applySTPnL(-bpsDrop);
             }
             _syncAndVerify("post:aimedLiquidation");
@@ -720,15 +731,15 @@ contract DayMarketHandler is DayMarketTestBase {
                     }
                 }
             } else {
-                for (uint256 i; i < ltActors.length; ++i) {
-                    uint256 shares = liquidityTranche.maxRedeem(ltActors[i]);
+                for (uint256 i; i < lptActors.length; ++i) {
+                    uint256 shares = liquidityProviderTranche.maxRedeem(lptActors[i]);
                     if (shares != 0) {
                         s = _refreshSnap();
-                        _execLtRedeem(ltActors[i], shares, s);
+                        _execLptRedeem(lptActors[i], shares, s);
                     }
                 }
             }
-            if (seniorTranche.totalSupply() == 0 || juniorTranche.totalSupply() == 0 || liquidityTranche.totalSupply() == 0) {
+            if (seniorTranche.totalSupply() == 0 || juniorTranche.totalSupply() == 0 || liquidityProviderTranche.totalSupply() == 0) {
                 ghost_zeroSupplyStatesReached++;
             }
             _syncAndVerify("post:aimedFullExit");
@@ -742,41 +753,41 @@ contract DayMarketHandler is DayMarketTestBase {
      *         through must leave liquidityUtilizationWAD at or below WAD - the senior tranche's exit
      *         liquidity floor may never be broken by an exit sized off the market's own advertised maximum
      */
-    function aimed_ltRedeemToLiquidityGateBoundary(uint256 _actorSeed) external {
-        _recordCall("aimedLtRedeemToLiquidityGateBoundary");
-        address actor = ltActors[bound(_actorSeed, 0, ltActors.length - 1)];
-        Snap memory s = _syncAndVerify("pre:ltGateBoundary");
+    function aimed_lptRedeemToLiquidityGateBoundary(uint256 _actorSeed) external {
+        _recordCall("aimedLptRedeemToLiquidityGateBoundary");
+        address actor = lptActors[bound(_actorSeed, 0, lptActors.length - 1)];
+        Snap memory s = _syncAndVerify("pre:lptGateBoundary");
         if (!s.ok) return;
 
         // Park at the boundary: the advertised maximum is exactly the largest exit the gate may pass
-        uint256 maxShares = liquidityTranche.maxRedeem(actor);
+        uint256 maxShares = liquidityProviderTranche.maxRedeem(actor);
         if (maxShares != 0) {
             bool enforced = !s.fixedTerm;
-            uint256 balBefore = liquidityTranche.balanceOf(actor);
-            _execLtRedeem(actor, maxShares, s);
-            bool redeemed = liquidityTranche.balanceOf(actor) < balBefore;
-            s = _syncAndVerify("boundary:ltGateBoundary");
+            uint256 balBefore = liquidityProviderTranche.balanceOf(actor);
+            _execLptRedeem(actor, maxShares, s);
+            bool redeemed = liquidityProviderTranche.balanceOf(actor) < balBefore;
+            s = _syncAndVerify("boundary:lptGateBoundary");
             if (!s.ok) return;
             if (redeemed && enforced) {
                 _flag(
-                    RoycoTestMath.computeLiquidityUtilization(s.stEffectiveNAV, s.minLiquidityWAD, s.ltRawNAV) <= WAD,
-                    "ltGateBoundary: the advertised maximum redemption left liquidityUtilizationWAD above WAD"
+                    RoycoTestMath.computeLiquidityUtilization(s.stEffectiveNAV, s.minLiquidityWAD, s.lptRawNAV) <= WAD,
+                    "lptGateBoundary: the advertised maximum redemption left liquidityUtilizationWAD above WAD"
                 );
             }
         }
 
         // The one-share probe past the boundary: the gate must reject it or the floor must still hold
-        if (liquidityTranche.balanceOf(actor) != 0) {
+        if (liquidityProviderTranche.balanceOf(actor) != 0) {
             bool enforced = !s.fixedTerm;
-            uint256 balBefore = liquidityTranche.balanceOf(actor);
-            _execLtRedeem(actor, 1, s);
-            bool redeemed = liquidityTranche.balanceOf(actor) < balBefore;
-            s = _syncAndVerify("probe:ltGateBoundary");
+            uint256 balBefore = liquidityProviderTranche.balanceOf(actor);
+            _execLptRedeem(actor, 1, s);
+            bool redeemed = liquidityProviderTranche.balanceOf(actor) < balBefore;
+            s = _syncAndVerify("probe:lptGateBoundary");
             if (!s.ok) return;
             if (redeemed && enforced) {
                 _flag(
-                    RoycoTestMath.computeLiquidityUtilization(s.stEffectiveNAV, s.minLiquidityWAD, s.ltRawNAV) <= WAD,
-                    "ltGateBoundary: a one-share redemption past the boundary broke the senior liquidity floor"
+                    RoycoTestMath.computeLiquidityUtilization(s.stEffectiveNAV, s.minLiquidityWAD, s.lptRawNAV) <= WAD,
+                    "lptGateBoundary: a one-share redemption past the boundary broke the senior liquidity floor"
                 );
             }
         }
@@ -789,19 +800,19 @@ contract DayMarketHandler is DayMarketTestBase {
     /// @dev Runs one senior deposit under an independently derived revert prediction
     function _execStDeposit(address _actor, uint256 _assets, Snap memory s) internal {
         Pred memory p;
-        uint256 value = _quoteSTUnits(_assets);
+        uint256 value = _quoteCollateralUnits(_assets);
         uint256 predShares;
         if (s.fixedTerm) {
             _expect(p, SEL_DISABLED_FT);
         } else {
-            uint256 stRawAfter = _quoteSTUnits(s.stOwned + _assets);
-            if (stRawAfter == s.stRawNAV || value == 0) {
+            uint256 collateralAfter = _quoteCollateralUnits(s.collateralOwned + _assets);
+            if (collateralAfter == s.collateralNAV || value == 0) {
                 _expect(p, SEL_INVALID_POST_OP);
                 _expect(p, SEL_ZERO_VALUE);
             }
-            uint256 stEffAfter = s.stEffectiveNAV + (stRawAfter - s.stRawNAV);
-            if (RoycoTestMath.computeCoverageUtilization(stRawAfter, s.jtRawNAV, s.minCoverageWAD, s.jtEffectiveNAV) > WAD) _expect(p, SEL_COVERAGE);
-            if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, s.ltRawNAV) > WAD) _expect(p, SEL_LIQUIDITY);
+            uint256 stEffAfter = s.stEffectiveNAV + (collateralAfter - s.collateralNAV);
+            if (RoycoTestMath.computeCoverageUtilization(collateralAfter, s.minCoverageWAD, s.jtEffectiveNAV) > WAD) _expect(p, SEL_COVERAGE);
+            if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, s.lptRawNAV) > WAD) _expect(p, SEL_LIQUIDITY);
             bool mintPanics;
             (predShares, mintPanics) = _mirrorMintShares(value, s.stEffectiveNAV, s.stSupply);
             // The mint-dilution clamp's residual overflow cliff: past the supply-inflation point the mint itself must panic
@@ -830,11 +841,10 @@ contract DayMarketHandler is DayMarketTestBase {
             // Scaling a claim over a zero share supply divides by zero
             _expect(p, SEL_PANIC);
         } else {
-            (uint256 stA, uint256 jtA, uint256 bonusNAV) = _mirrorSeniorRedeemClaims(s, _shares, s.stSupply);
+            (uint256 collateralA, uint256 bonusNAV) = _mirrorSeniorRedeemClaims(s, _shares, s.stSupply);
             if (bonusNAV > 0) ghost_jtLossSinceLastCheck = true;
-            uint256 rawAfterST = _quoteSTUnits(s.stOwned - stA);
-            uint256 rawAfterJT = _quoteJTUnits(s.jtOwned - jtA);
-            if (rawAfterST == s.stRawNAV && rawAfterJT == s.jtRawNAV) _expect(p, SEL_INVALID_POST_OP);
+            uint256 collateralAfter = _quoteCollateralUnits(s.collateralOwned - collateralA);
+            if (collateralAfter == s.collateralNAV) _expect(p, SEL_INVALID_POST_OP);
             if (_shares > seniorTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
         }
         uint256 outBefore = stJtVault.balanceOf(_actor);
@@ -850,26 +860,22 @@ contract DayMarketHandler is DayMarketTestBase {
     /// @dev Runs one junior redemption under an independently derived revert prediction
     function _execJtRedeem(address _actor, uint256 _shares, Snap memory s) internal {
         Pred memory p;
-        uint256 jtCoverageImpermanentLossExpected = ghost_jtCoverageImpermanentLossReplay;
         if (s.fixedTerm) {
             _expect(p, SEL_DISABLED_FT);
         } else if (s.jtSupply == 0) {
             _expect(p, SEL_PANIC);
         } else {
-            // Junior claims decompose into a cross-claim on senior assets plus the self-backed remainder
-            uint256 jtClaimOnST = _sat(s.jtEffectiveNAV, s.jtRawNAV);
-            uint256 jtClaimOnJT = s.jtRawNAV - _sat(s.stEffectiveNAV, s.stRawNAV);
-            uint256 stA = jtClaimOnST == 0 ? 0 : _quoteNAVToSTUnits(jtClaimOnST).mulDiv(_shares, s.jtSupply);
-            uint256 jtA = jtClaimOnJT == 0 ? 0 : _quoteNAVToJTUnits(jtClaimOnJT).mulDiv(_shares, s.jtSupply);
-            uint256 rawAfterST = _quoteSTUnits(s.stOwned - stA);
-            uint256 rawAfterJT = _quoteJTUnits(s.jtOwned - jtA);
-            uint256 totalRedeemed = (s.stRawNAV - rawAfterST) + (s.jtRawNAV - rawAfterJT);
+            // A junior claim is its effective NAV converted once to collateral assets (the old cross-claim
+            // decomposition mirrors a deleted src path and describes an unrepresentable two-legged state)
+            // _scaleAssetClaims divides by the effective supply (jtSupply + VIRTUAL_SHARES); a dust redemption's
+            // slice floors smaller, so the requote sees no collateral NAV move and the predictor foresees INVALID_POST_OP
+            uint256 effJtSupply = s.jtSupply + RoycoTestMath.VIRTUAL_SHARES;
+            uint256 collateralA = s.jtEffectiveNAV == 0 ? 0 : _quoteNAVToCollateralUnits(s.jtEffectiveNAV).mulDiv(_shares, effJtSupply);
+            uint256 collateralAfter = _quoteCollateralUnits(s.collateralOwned - collateralA);
+            uint256 totalRedeemed = s.collateralNAV - collateralAfter;
             if (totalRedeemed == 0) _expect(p, SEL_INVALID_POST_OP);
             uint256 jtEffAfter = s.jtEffectiveNAV - totalRedeemed;
-            if (RoycoTestMath.computeCoverageUtilization(rawAfterST, rawAfterJT, s.minCoverageWAD, jtEffAfter) > WAD) _expect(p, SEL_COVERAGE);
-            if (totalRedeemed != 0 && s.jtCoverageImpermanentLoss != 0) {
-                jtCoverageImpermanentLossExpected = s.jtCoverageImpermanentLoss.mulDiv(jtEffAfter, s.jtEffectiveNAV);
-            }
+            if (RoycoTestMath.computeCoverageUtilization(collateralAfter, s.minCoverageWAD, jtEffAfter) > WAD) _expect(p, SEL_COVERAGE);
             if (_shares > juniorTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
         }
         uint256 outBefore = stJtVault.balanceOf(_actor);
@@ -877,98 +883,89 @@ contract DayMarketHandler is DayMarketTestBase {
         try juniorTranche.redeem(_shares, _actor, _actor) {
             _recordSuccess("jtRedeem");
             ghost_transferredOut[address(stJtVault)] += stJtVault.balanceOf(_actor) - outBefore;
-            // A junior exit realizes its slice of the coverage loss ledger pro rata
-            if (jtCoverageImpermanentLossExpected != ghost_jtCoverageImpermanentLossReplay) {
-                ghost_jtCoverageImpermanentLossEvents.push(
-                    JTCoverageImpermanentLossEvent(
-                        JTCoverageImpermanentLossCause.JT_REDEEM_SCALE, ghost_jtCoverageImpermanentLossReplay - jtCoverageImpermanentLossExpected
-                    )
-                );
-                ghost_jtCoverageImpermanentLossReplay = jtCoverageImpermanentLossExpected;
-            }
-            _flag(
-                toUint256(accountant.getState().lastJTCoverageImpermanentLoss) == jtCoverageImpermanentLossExpected,
-                "jtRedeem coverage-loss scaling diverges from the floor mirror"
-            );
+            // The JT_REDEEM postOp IL scaling is deleted: a junior exit only settles in PERPETUAL where the
+            // ledger is already zero, so a successful redeem must leave the committed value untouched
+            _flag(toUint256(accountant.getState().lastJTImpermanentLoss) == ghost_jtImpermanentLossReplay, "jtRedeem moved the impermanent-loss ledger");
         } catch (bytes memory err) {
             _classify("jtRedeem", err, p);
         }
     }
 
     /// @dev Runs one in-kind liquidity redemption under an independently derived revert prediction
-    function _execLtRedeem(address _actor, uint256 _shares, Snap memory s) internal {
+    function _execLptRedeem(address _actor, uint256 _shares, Snap memory s) internal {
         Pred memory p;
         if (s.fixedTerm) {
             _expect(p, SEL_DISABLED_FT);
-        } else if (s.ltSupply == 0) {
-            // A no-LT-supply market, every LT balance is zero, so a redeem of any size either panics on the
+        } else if (s.lptSupply == 0) {
+            // A no-LPT-supply market, every LPT balance is zero, so a redeem of any size either panics on the
             // zero-supply valuation or computes an all-zero claim that clears the post-op no-op guard and
-            // reaches the share burn, which reverts on the redeemer's empty LT balance
+            // reaches the share burn, which reverts on the redeemer's empty LPT balance
             _expect(p, SEL_PANIC);
             _expect(p, SEL_INVALID_POST_OP);
             _expect(p, SEL_ERC20_BALANCE);
         } else {
-            uint256 ltClaimUnits = s.ltRawNAV == 0 ? 0 : _quoteNAVToLTUnits(s.ltRawNAV);
-            uint256 userLt = ltClaimUnits.mulDiv(_shares, s.ltSupply);
-            uint256 ltRawAfter = _quoteLTUnits(s.ltOwned - userLt);
+            uint256 lptClaimUnits = s.lptRawNAV == 0 ? 0 : _quoteNAVToLPTUnits(s.lptRawNAV);
+            // _scaleAssetClaims divides the BPT slice by the effective supply (lptSupply + VIRTUAL_SHARES)
+            uint256 userLt = lptClaimUnits.mulDiv(_shares, s.lptSupply + RoycoTestMath.VIRTUAL_SHARES);
+            uint256 lptRawAfter = _quoteLPTUnits(s.lptOwned - userLt);
             // A dust in-kind redeem whose BPT and idle-premium slices floor to zero at the src's SHARE
-            // granularity trips the no-op guard. This NAV-granular mirror's ltRawAfter cannot resolve that
-            // boundary reliably, so accept the revert as a valid outcome; a value-moving redeem simply succeeds.
+            // granularity trips the no-op guard. This NAV-granular mirror's lptRawAfter cannot resolve that
+            // boundary reliably, so accept the revert as a valid outcome. A value-moving redeem simply succeeds.
             _expect(p, SEL_INVALID_POST_OP);
-            // The liquidity gate is enforced on every LT redemption, including once the liquidation coverage threshold is breached
-            if (RoycoTestMath.computeLiquidityUtilization(s.stEffectiveNAV, s.minLiquidityWAD, ltRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
-            if (_shares > liquidityTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
+            // The liquidity gate is enforced on every LPT redemption, including once the liquidation coverage threshold is breached
+            if (RoycoTestMath.computeLiquidityUtilization(s.stEffectiveNAV, s.minLiquidityWAD, lptRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
+            if (_shares > liquidityProviderTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
         }
         uint256 bptBefore = bpt.balanceOf(_actor);
         uint256 idleBefore = seniorTranche.balanceOf(_actor);
         vm.prank(_actor);
-        try liquidityTranche.redeem(_shares, _actor, _actor) {
-            _recordSuccess("ltRedeem");
+        try liquidityProviderTranche.redeem(_shares, _actor, _actor) {
+            _recordSuccess("lptRedeem");
             ghost_transferredOut[address(bpt)] += bpt.balanceOf(_actor) - bptBefore;
             ghost_idlePremiumSeniorSharesPaidToRedeemers += seniorTranche.balanceOf(_actor) - idleBefore;
         } catch (bytes memory err) {
-            _classify("ltRedeem", err, p);
+            _classify("lptRedeem", err, p);
         }
     }
 
     /// @dev Runs one multi-asset liquidity deposit under a full mirror of the mock venue's pricing
-    function _execLtDepositMultiAsset(address _actor, uint256 _stAssets, uint256 _quoteAssets, Snap memory s) internal {
+    function _execLptDepositMultiAsset(address _actor, uint256 _collateralAssets, uint256 _quoteAssets, Snap memory s) internal {
         Pred memory p;
-        if (s.fixedTerm && _stAssets > 0) {
+        if (s.fixedTerm && _collateralAssets > 0) {
             _expect(p, SEL_DISABLED_FT);
         } else {
-            VenueAdd memory v = _mirrorVenueAdd(s, _stAssets, _quoteAssets);
+            VenueAdd memory v = _mirrorVenueAdd(s, _collateralAssets, _quoteAssets);
             // The residual overflow cliff on the senior leg: past the supply-inflation point the ST mint panics
             if (v.stMintPanics) _expect(p, SEL_PANIC);
-            if (_stAssets > 0 && !v.stMintPanics && v.stSharesMinted == 0) _expect(p, SEL_ZERO_SHARES);
+            if (_collateralAssets > 0 && !v.stMintPanics && v.stSharesMinted == 0) _expect(p, SEL_ZERO_SHARES);
             if (v.valueAllocated == 0) {
                 _expect(p, SEL_ZERO_VALUE);
                 _expect(p, SEL_INVALID_POST_OP);
             }
-            if (v.ltRawAfter <= s.ltRawNAV) _expect(p, SEL_INVALID_POST_OP);
-            uint256 navAt = RoycoTestMath.getLiquidityTrancheEffectiveNAV(s.ltRawNAV, s.ltOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
-            (uint256 predLtShares, bool ltMintPanics) = _mirrorMintShares(v.valueAllocated, navAt, s.ltSupply);
-            if (ltMintPanics) _expect(p, SEL_PANIC);
-            else if (predLtShares == 0) _expect(p, SEL_ZERO_SHARES);
-            if (_stAssets > 0) {
-                uint256 stRawAfter = _quoteSTUnits(s.stOwned + _stAssets);
-                uint256 stEffAfter = s.stEffectiveNAV + (stRawAfter - s.stRawNAV);
-                if (RoycoTestMath.computeCoverageUtilization(stRawAfter, s.jtRawNAV, s.minCoverageWAD, s.jtEffectiveNAV) > WAD) {
+            if (v.lptRawAfter <= s.lptRawNAV) _expect(p, SEL_INVALID_POST_OP);
+            uint256 navAt = RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(s.lptRawNAV, s.lptOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
+            (uint256 predLptShares, bool lptMintPanics) = _mirrorMintShares(v.valueAllocated, navAt, s.lptSupply);
+            if (lptMintPanics) _expect(p, SEL_PANIC);
+            else if (predLptShares == 0) _expect(p, SEL_ZERO_SHARES);
+            if (_collateralAssets > 0) {
+                uint256 collateralAfter = _quoteCollateralUnits(s.collateralOwned + _collateralAssets);
+                uint256 stEffAfter = s.stEffectiveNAV + (collateralAfter - s.collateralNAV);
+                if (RoycoTestMath.computeCoverageUtilization(collateralAfter, s.minCoverageWAD, s.jtEffectiveNAV) > WAD) {
                     _expect(p, SEL_COVERAGE);
                 }
-                if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, v.ltRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
+                if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, v.lptRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
             }
         }
-        stJtVault.mintShares(_actor, _stAssets);
+        stJtVault.mintShares(_actor, _collateralAssets);
         quoteToken.mint(_actor, _quoteAssets);
         TokenFlows memory f = _snapTokenFlows();
-        uint256 idleLedgerBefore = kernel.getState().ltOwnedSeniorTrancheShares;
+        uint256 idleLedgerBefore = kernel.getState().lptOwnedSeniorTrancheShares;
         vm.startPrank(_actor);
-        stJtVault.approve(address(liquidityTranche), _stAssets);
-        quoteToken.approve(address(liquidityTranche), _quoteAssets);
-        try liquidityTranche.depositMultiAsset(_stAssets, _quoteAssets, 0, _actor) {
-            _recordSuccess("ltDepositMultiAsset");
-            ghost_transferredIn[address(stJtVault)] += _stAssets;
+        stJtVault.approve(address(liquidityProviderTranche), _collateralAssets);
+        quoteToken.approve(address(liquidityProviderTranche), _quoteAssets);
+        try liquidityProviderTranche.depositMultiAsset(_collateralAssets, _quoteAssets, 0, _actor) {
+            _recordSuccess("lptDepositMultiAsset");
+            ghost_transferredIn[address(stJtVault)] += _collateralAssets;
             // Reconcile the venue's ACTUAL token movements, independently of the pricing mirror above,
             // so a pricing bug shared by the mock venue and its mirror still surfaces as a token flow
             // that does not balance. A multi-asset deposit moves value one way only: the quote leg must
@@ -977,19 +974,19 @@ contract DayMarketHandler is DayMarketTestBase {
             // liquidity premium ledger, and every pool token the add minted must sit in kernel custody
             _flag(
                 quoteToken.balanceOf(address(balancerVault)) == f.venueQuote0 + _quoteAssets,
-                "ltDepositMultiAsset: the deposited quote leg did not land in the pool in full"
+                "lptDepositMultiAsset: the deposited quote leg did not land in the pool in full"
             );
             _flag(
                 seniorTranche.totalSupply() + f.venueSenior0 == f.stSupply0 + seniorTranche.balanceOf(address(balancerVault)),
-                "ltDepositMultiAsset: minted senior shares do not reconcile with the pool's senior inflow"
+                "lptDepositMultiAsset: minted senior shares do not reconcile with the pool's senior inflow"
             );
-            _flag(kernel.getState().ltOwnedSeniorTrancheShares == idleLedgerBefore, "ltDepositMultiAsset: a deposit moved the idle liquidity premium ledger");
+            _flag(kernel.getState().lptOwnedSeniorTrancheShares == idleLedgerBefore, "lptDepositMultiAsset: a deposit moved the idle liquidity premium ledger");
             _flag(
                 bpt.balanceOf(address(kernel)) + f.bptSupply0 == f.kernelBpt0 + bpt.totalSupply(),
-                "ltDepositMultiAsset: pool tokens minted by the add do not reconcile with the kernel's custody"
+                "lptDepositMultiAsset: pool tokens minted by the add do not reconcile with the kernel's custody"
             );
         } catch (bytes memory err) {
-            _classify("ltDepositMultiAsset", err, p);
+            _classify("lptDepositMultiAsset", err, p);
         }
         vm.stopPrank();
     }
@@ -1003,16 +1000,16 @@ contract DayMarketHandler is DayMarketTestBase {
      *      burn, the senior unwind, and every post-op gate on every exit: the venue's floor rejection
      *      is the only admissible outcome for an armed probe regardless of the venue slice
      */
-    function _execLtRedeemMultiAsset(address _actor, uint256 _shares, bool _probeQuoteMin, Snap memory s) internal {
+    function _execLptRedeemMultiAsset(address _actor, uint256 _shares, bool _probeQuoteMin, Snap memory s) internal {
         Pred memory p;
         uint256 minQuoteOut;
         bool probeMustRevert;
         if (s.fixedTerm) {
             _expect(p, SEL_DISABLED_FT);
-        } else if (s.ltSupply == 0 || s.stSupply == 0) {
-            // A degenerate market with no senior or LT supply, a multi-asset exit either divides by zero in the
+        } else if (s.lptSupply == 0 || s.stSupply == 0) {
+            // A degenerate market with no senior or LPT supply, a multi-asset exit either divides by zero in the
             // senior valuation (Panic) or computes an all-zero claim that clears the post-op no-op guard and
-            // reaches the share burn, which reverts on the redeemer's empty LT balance. None of these settle the exit
+            // reaches the share burn, which reverts on the redeemer's empty LPT balance. None of these settle the exit
             _expect(p, SEL_PANIC);
             _expect(p, SEL_INVALID_POST_OP);
             _expect(p, SEL_ERC20_BALANCE);
@@ -1022,14 +1019,14 @@ contract DayMarketHandler is DayMarketTestBase {
             // A redemption legitimately hits the no-op-exit guard (INVALID_POST_OP_STATE, RoycoDayAccountant.sol:263)
             // whenever its BPT and idle-premium slices floor to zero at the src's SHARE granularity. This
             // NAV-granular removal mirror cannot resolve that dust boundary reliably (its computeTVL-based
-            // ltRawAfter rounds differently than the committed mark), so accept the revert as a valid outcome for
-            // every multi-asset redeem — a redemption that moves real value simply succeeds instead.
+            // lptRawAfter rounds differently than the committed mark), so accept the revert as a valid outcome for
+            // every multi-asset redeem. A redemption that moves real value simply succeeds instead.
             _expect(p, SEL_INVALID_POST_OP);
-            // The liquidity gate is enforced on every LT redemption, including during a liquidation breach: the multi-asset
+            // The liquidity gate is enforced on every LPT redemption, including during a liquidation breach: the multi-asset
             // exit relaxes the floor by unwinding senior depth (reflected in stEffAfter) but never waives it
             uint256 stEffAfter = s.stEffectiveNAV - (r.totalRedeemed - r.bonusNAV);
-            if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, r.ltRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
-            if (_shares > liquidityTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
+            if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, r.lptRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
+            if (_shares > liquidityProviderTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
             if (_probeQuoteMin) {
                 // The unmeetable floor: one wei above the proportional removal's guaranteed quote output
                 // The probe must revert and the exit must not settle: the removal always runs, so either its
@@ -1048,16 +1045,16 @@ contract DayMarketHandler is DayMarketTestBase {
         TokenFlows memory f = _snapTokenFlows();
         uint256 vaultSharesBefore = stJtVault.balanceOf(_actor);
         uint256 quoteBefore = quoteToken.balanceOf(_actor);
-        uint256 idleLedgerBefore = kernel.getState().ltOwnedSeniorTrancheShares;
+        uint256 idleLedgerBefore = kernel.getState().lptOwnedSeniorTrancheShares;
         vm.prank(_actor);
-        try liquidityTranche.redeemMultiAsset(_shares, 0, minQuoteOut, _actor, _actor) {
+        try liquidityProviderTranche.redeemMultiAsset(_shares, 0, minQuoteOut, _actor, _actor) {
             // A caller's slippage floor is a postcondition: an exit that cannot pay it must not settle
-            _flag(!probeMustRevert, "ltRedeemMultiAsset: the venue removal accepted a quote floor above its guaranteed output");
-            _recordSuccess("ltRedeemMultiAsset");
+            _flag(!probeMustRevert, "lptRedeemMultiAsset: the venue removal accepted a quote floor above its guaranteed output");
+            _recordSuccess("lptRedeemMultiAsset");
             ghost_transferredOut[address(stJtVault)] += stJtVault.balanceOf(_actor) - vaultSharesBefore;
             ghost_transferredOut[address(quoteToken)] += quoteToken.balanceOf(_actor) - quoteBefore;
             // The redeemer's slice of the idle liquidity premium senior shares is unwound on its behalf rather than handed over as shares
-            uint256 idleUnwound = idleLedgerBefore - kernel.getState().ltOwnedSeniorTrancheShares;
+            uint256 idleUnwound = idleLedgerBefore - kernel.getState().lptOwnedSeniorTrancheShares;
             ghost_idlePremiumSeniorSharesPaidToRedeemers += idleUnwound;
             // Reconcile the venue's ACTUAL token movements, independently of the pricing mirror above,
             // so a pricing bug shared by the mock venue and its mirror still surfaces as a token flow
@@ -1067,18 +1064,18 @@ contract DayMarketHandler is DayMarketTestBase {
             // kernel), and the burned pool tokens must come exclusively from the kernel's custody
             _flag(
                 quoteToken.balanceOf(address(balancerVault)) + quoteToken.balanceOf(_actor) == f.venueQuote0 + quoteBefore,
-                "ltRedeemMultiAsset: the pool's quote outflow does not reconcile with the redeemer's quote gain"
+                "lptRedeemMultiAsset: the pool's quote outflow does not reconcile with the redeemer's quote gain"
             );
             _flag(
                 seniorTranche.totalSupply() + f.venueSenior0 + idleUnwound == f.stSupply0 + seniorTranche.balanceOf(address(balancerVault)),
-                "ltRedeemMultiAsset: burned senior shares do not reconcile with the pool withdrawal plus the idle slice"
+                "lptRedeemMultiAsset: burned senior shares do not reconcile with the pool withdrawal plus the idle slice"
             );
             _flag(
                 bpt.totalSupply() + f.kernelBpt0 == f.bptSupply0 + bpt.balanceOf(address(kernel)),
-                "ltRedeemMultiAsset: burned pool tokens do not reconcile with the kernel's custody outflow"
+                "lptRedeemMultiAsset: burned pool tokens do not reconcile with the kernel's custody outflow"
             );
         } catch (bytes memory err) {
-            _classify("ltRedeemMultiAsset", err, p);
+            _classify("lptRedeemMultiAsset", err, p);
         }
     }
 
@@ -1113,14 +1110,14 @@ contract DayMarketHandler is DayMarketTestBase {
         uint256 stSharesMinted;
         bool stMintPanics;
         uint256 bptOut;
-        uint256 ltRawAfter;
+        uint256 lptRawAfter;
         uint256 valueAllocated;
     }
 
     /// @dev Mirrors the unbalanced add: fair value at the vault's prices, the armed haircut, the oracle re-mark
     function _mirrorVenueAdd(Snap memory s, uint256 _stAssets, uint256 _quoteAssets) internal view returns (VenueAdd memory v) {
         uint256 rate = _mirrorSeniorRate(s.stEffectiveNAV, s.stSupply);
-        if (_stAssets != 0) (v.stSharesMinted, v.stMintPanics) = _mirrorMintShares(_quoteSTUnits(_stAssets), s.stEffectiveNAV, s.stSupply);
+        if (_stAssets != 0) (v.stSharesMinted, v.stMintPanics) = _mirrorMintShares(_quoteCollateralUnits(_stAssets), s.stEffectiveNAV, s.stSupply);
         uint256[2] memory balances = balancerVault.getPoolBalances(address(bpt));
         uint256 stBal = balances[stPoolTokenIndex];
         uint256 qBal = balances[1 - stPoolTokenIndex];
@@ -1134,27 +1131,29 @@ contract DayMarketHandler is DayMarketTestBase {
         uint256 oracleQuotePrice = bptOracle.getPriceWAD(address(quoteToken));
         uint256 tvlAfter = (stBal + v.stSharesMinted).mulDiv(rate, WAD) + (qBal + _quoteAssets).mulDiv(oracleQuotePrice, QUOTE_UNIT);
         uint256 supplyAfter = bptSupply + v.bptOut;
-        v.ltRawAfter = supplyAfter == 0 ? 0 : (s.ltOwned + v.bptOut).mulDiv(tvlAfter, supplyAfter);
+        v.lptRawAfter = supplyAfter == 0 ? 0 : (s.lptOwned + v.bptOut).mulDiv(tvlAfter, supplyAfter);
         v.valueAllocated = supplyAfter == 0 ? 0 : v.bptOut.mulDiv(tvlAfter, supplyAfter);
     }
 
     /// @dev Everything the multi-asset redemption prediction needs about the proportional removal's outcome
     struct RemovalMirror {
-        uint256 ltRawAfter;
+        uint256 lptRawAfter;
         uint256 totalRedeemed;
         uint256 bonusNAV;
         /// @dev The redeemer's pool-token slice, zero means the kernel skips the removal (and its floors) entirely
-        uint256 venueLtUnits;
+        uint256 venueLptUnits;
         /// @dev The quote leg the proportional removal pays the receiver, the reference for the quote-floor probe
         uint256 quoteOut;
     }
 
     /// @dev Mirrors the proportional removal, the senior unwind, and the exit bonus for gate prediction
     function _mirrorVenueRemoval(Snap memory s, uint256 _shares) internal view returns (RemovalMirror memory r) {
-        uint256 ltClaimUnits = s.ltRawNAV == 0 ? 0 : _quoteNAVToLTUnits(s.ltRawNAV);
-        uint256 userLt = ltClaimUnits.mulDiv(_shares, s.ltSupply);
-        r.venueLtUnits = userLt;
-        uint256 idleSlice = s.ltOwnedSeniorTrancheShares.mulDiv(_shares, s.ltSupply);
+        uint256 lptClaimUnits = s.lptRawNAV == 0 ? 0 : _quoteNAVToLPTUnits(s.lptRawNAV);
+        // _scaleAssetClaims divides both the BPT slice and the idle-premium-share slice by the effective supply
+        uint256 effLptSupply = s.lptSupply + RoycoTestMath.VIRTUAL_SHARES;
+        uint256 userLt = lptClaimUnits.mulDiv(_shares, effLptSupply);
+        r.venueLptUnits = userLt;
+        uint256 idleSlice = s.lptOwnedSeniorTrancheShares.mulDiv(_shares, effLptSupply);
         uint256[2] memory balances = balancerVault.getPoolBalances(address(bpt));
         uint256 bptSupply = bpt.totalSupply();
         uint256 stOut = balances[stPoolTokenIndex].mulDiv(userLt, bptSupply);
@@ -1166,34 +1165,31 @@ contract DayMarketHandler is DayMarketTestBase {
             uint256 tvlAfter =
                 (balances[stPoolTokenIndex] - stOut).mulDiv(rate, WAD) + (balances[1 - stPoolTokenIndex] - qOut).mulDiv(oracleQuotePrice, QUOTE_UNIT);
             uint256 supplyAfter = bptSupply - userLt;
-            r.ltRawAfter = supplyAfter == 0 ? 0 : (s.ltOwned - userLt).mulDiv(tvlAfter, supplyAfter);
+            r.lptRawAfter = supplyAfter == 0 ? 0 : (s.lptOwned - userLt).mulDiv(tvlAfter, supplyAfter);
         }
         // The redeemer's senior shares come from the pool withdrawal plus its idle liquidity premium slice
         uint256 sToRedeem = stOut + idleSlice;
-        (uint256 stA, uint256 jtA, uint256 bonusNAV) = _mirrorSeniorRedeemClaims(s, sToRedeem, s.stSupply);
+        (uint256 collateralA, uint256 bonusNAV) = _mirrorSeniorRedeemClaims(s, sToRedeem, s.stSupply);
         r.bonusNAV = bonusNAV;
-        uint256 rawAfterST = _quoteSTUnits(s.stOwned - stA);
-        uint256 rawAfterJT = _quoteJTUnits(s.jtOwned - jtA);
-        r.totalRedeemed = (s.stRawNAV - rawAfterST) + (s.jtRawNAV - rawAfterJT);
+        uint256 collateralAfter = _quoteCollateralUnits(s.collateralOwned - collateralA);
+        r.totalRedeemed = s.collateralNAV - collateralAfter;
     }
 
-    /// @dev Mirrors a senior redemption's asset claims (scaled slice plus any liquidation exit bonus)
-    function _mirrorSeniorRedeemClaims(Snap memory s, uint256 _shares, uint256 _totalShares)
-        internal
-        view
-        returns (uint256 stA, uint256 jtA, uint256 bonusNAV)
-    {
-        uint256 jtClaimOnST = _sat(s.jtEffectiveNAV, s.jtRawNAV);
-        uint256 stClaimOnST = s.stRawNAV - jtClaimOnST;
-        uint256 stClaimOnJT = _sat(s.stEffectiveNAV, s.stRawNAV);
-        stA = stClaimOnST == 0 ? 0 : _quoteNAVToSTUnits(stClaimOnST).mulDiv(_shares, _totalShares);
-        jtA = stClaimOnJT == 0 ? 0 : _quoteNAVToJTUnits(stClaimOnJT).mulDiv(_shares, _totalShares);
+    /// @dev Mirrors a senior redemption's asset claims (the effective NAV converted once, scaled, plus any liquidation exit bonus)
+    function _mirrorSeniorRedeemClaims(Snap memory s, uint256 _shares, uint256 _totalShares) internal view returns (uint256 collateralA, uint256 bonusNAV) {
+        // A senior claim is its effective NAV converted once to collateral assets. Production's
+        // _scaleAssetClaims divides every claim field by the effective supply (_totalShares +
+        // VIRTUAL_SHARES). Mirroring the offset is load-bearing for the redeem revert prediction: a
+        // wei-scale redemption's slice floors smaller here, so s.collateralOwned - collateralA re-quotes to
+        // an unchanged collateral NAV and the predictor correctly foresees the accountant's
+        // INVALID_POST_OP no-op-exit guard (totalRedemptionNAV == 0)
+        uint256 effTotalShares = _totalShares + RoycoTestMath.VIRTUAL_SHARES;
+        collateralA = s.stEffectiveNAV == 0 ? 0 : _quoteNAVToCollateralUnits(s.stEffectiveNAV).mulDiv(_shares, effTotalShares);
         if (s.coverageUtilizationWAD >= s.coverageLiquidationUtilizationWAD) {
-            uint256 navSlice = s.stEffectiveNAV.mulDiv(_shares, _totalShares);
+            uint256 navSlice = s.stEffectiveNAV.mulDiv(_shares, effTotalShares);
             bonusNAV = RoycoTestMath.seniorTrancheSelfLiquidationBonus(
                 RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs({
-                    stRawNAV: s.stRawNAV,
-                    jtRawNAV: s.jtRawNAV,
+                    stEffectiveNAV: s.stEffectiveNAV,
                     jtEffectiveNAV: s.jtEffectiveNAV,
                     coverageUtilizationWAD: s.coverageUtilizationWAD,
                     coverageLiquidationUtilizationWAD: s.coverageLiquidationUtilizationWAD,
@@ -1201,9 +1197,8 @@ contract DayMarketHandler is DayMarketTestBase {
                     userClaimNAV: navSlice
                 })
             );
-            uint256 bonusFromST = Math.min(bonusNAV, jtClaimOnST);
-            if (bonusFromST != 0) stA += _quoteNAVToSTUnits(bonusFromST);
-            if (bonusNAV - bonusFromST != 0) jtA += _quoteNAVToJTUnits(bonusNAV - bonusFromST);
+            // The bonus is one more collateral leg on the claim, sourced from JT effective NAV by the post-op sync
+            if (bonusNAV != 0) collateralA += _quoteNAVToCollateralUnits(bonusNAV);
         }
     }
 
@@ -1213,15 +1208,14 @@ contract DayMarketHandler is DayMarketTestBase {
 
     /// @dev Pre-sync reads packaged for the verification pass
     struct SyncCtx {
-        uint256 stRawNew;
-        uint256 jtRawNew;
+        uint256 collateralNew;
         uint256 stSupply0;
         uint256 jtSupply0;
-        uint256 ltSupply0;
-        uint256 ltOwnedSeniorTrancheShares0;
+        uint256 lptSupply0;
+        uint256 lptOwnedSeniorTrancheShares0;
         uint256 poolSenior0;
         uint256 twJT;
-        uint256 twLT;
+        uint256 twLPT;
         uint256 elapsedPrem;
         bool firstAccrual;
         bool wasBreached;
@@ -1233,7 +1227,7 @@ contract DayMarketHandler is DayMarketTestBase {
     /**
      * @dev Syncs the market as the keeper and verifies the entire outcome against independent mirrors:
      *      the committed NAVs against the tranche accounting sync recomputation, the share mints against
-     *      the fee and liquidity premium share mint floors, the ltOwnedSeniorTrancheShares ledger against
+     *      the fee and liquidity premium share mint floors, the lptOwnedSeniorTrancheShares ledger against
      *      the pool's own balance movement, the accrual window
      *      against the pinned model constants, the committed pool mark against a manual re-pricing, and
      *      the three share prices against their high-water marks outside sanctioned loss events
@@ -1244,13 +1238,12 @@ contract DayMarketHandler is DayMarketTestBase {
         SyncCtx memory c;
         c.stSupply0 = seniorTranche.totalSupply();
         c.jtSupply0 = juniorTranche.totalSupply();
-        c.ltSupply0 = liquidityTranche.totalSupply();
-        c.ltOwnedSeniorTrancheShares0 = k0.ltOwnedSeniorTrancheShares;
+        c.lptSupply0 = liquidityProviderTranche.totalSupply();
+        c.lptOwnedSeniorTrancheShares0 = k0.lptOwnedSeniorTrancheShares;
         c.poolSenior0 = seniorTranche.balanceOf(address(balancerVault));
         c.state0 = a0.lastMarketState;
-        c.wasBreached = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a0.lastSTRawNAV), toUint256(a0.lastJTRawNAV), a0.minCoverageWAD, toUint256(a0.lastJTEffectiveNAV)
-        ) >= a0.coverageLiquidationUtilizationWAD;
+        c.wasBreached = RoycoTestMath.computeCoverageUtilization(toUint256(a0.lastCollateralNAV), a0.minCoverageWAD, toUint256(a0.lastJTEffectiveNAV))
+            >= a0.coverageLiquidationUtilizationWAD;
 
         // Recompute the premium accrual window exactly as the accountant will, off the pinned model
         if (a0.lastYieldShareAccrualTimestamp == 0) {
@@ -1258,7 +1251,7 @@ contract DayMarketHandler is DayMarketTestBase {
         } else {
             uint256 elapsedAcc = block.timestamp - uint256(a0.lastYieldShareAccrualTimestamp);
             c.twJT = uint256(a0.twJTYieldShareAccruedWAD) + Math.min(JT_PINNED_SHARE_WAD, a0.maxJTYieldShareWAD) * elapsedAcc;
-            c.twLT = uint256(a0.twLTYieldShareAccruedWAD) + Math.min(LT_PINNED_SHARE_WAD, a0.maxLTYieldShareWAD) * elapsedAcc;
+            c.twLPT = uint256(a0.twLPTYieldShareAccruedWAD) + Math.min(LPT_PINNED_SHARE_WAD, a0.maxLPTYieldShareWAD) * elapsedAcc;
             c.elapsedPrem = block.timestamp - uint256(a0.lastPremiumPaymentTimestamp);
         }
 
@@ -1272,39 +1265,36 @@ contract DayMarketHandler is DayMarketTestBase {
             return s;
         }
 
-        // Quote the raw marks after the sync so the freshly initialized rate cache prices them exactly as
-        // the sync did (the owned amounts themselves cannot move during a sync)
-        c.stRawNew = _quoteSTUnits(toUint256(k0.stOwnedYieldBearingAssets));
-        c.jtRawNew = _quoteJTUnits(toUint256(k0.jtOwnedYieldBearingAssets));
+        // Quote the collateral mark after the sync so the freshly initialized rate cache prices it exactly as
+        // the sync did (the owned amount itself cannot move during a sync)
+        c.collateralNew = _quoteCollateralUnits(toUint256(k0.totalCollateralAssets));
 
-        // Recompute the full tranche accounting sync from the committed checkpoint and this block's fresh marks
+        // Recompute the full tranche accounting sync from the committed checkpoint and this block's fresh mark
         RoycoTestMath.SyncInputs memory win = RoycoTestMath.SyncInputs({
-            stRawNAVLast: toUint256(a0.lastSTRawNAV),
-            jtRawNAVLast: toUint256(a0.lastJTRawNAV),
+            collateralNAVLast: toUint256(a0.lastCollateralNAV),
             stEffectiveNAVLast: toUint256(a0.lastSTEffectiveNAV),
             jtEffectiveNAVLast: toUint256(a0.lastJTEffectiveNAV),
-            jtCoverageImpermanentLossLast: toUint256(a0.lastJTCoverageImpermanentLoss),
+            jtImpermanentLossLast: toUint256(a0.lastJTImpermanentLoss),
             marketStateLast: c.state0 == MarketState.PERPETUAL ? RoycoTestMath.MarketState.PERPETUAL : RoycoTestMath.MarketState.FIXED_TERM,
             fixedTermEndTimestampLast: uint256(a0.fixedTermEndTimestamp),
-            stRawNAVDelta: int256(c.stRawNew) - int256(toUint256(a0.lastSTRawNAV)),
-            jtRawNAVDelta: int256(c.jtRawNew) - int256(toUint256(a0.lastJTRawNAV)),
-            ltRawNAVNew: toUint256(a0.lastLTRawNAV),
+            collateralNAVDelta: int256(c.collateralNew) - int256(toUint256(a0.lastCollateralNAV)),
+            lptRawNAVNew: toUint256(a0.lastLPTRawNAV),
             jtTwYieldShareAccrual: c.twJT,
-            ltTwYieldShareAccrual: c.twLT,
+            lptTwYieldShareAccrual: c.twLPT,
             elapsedSincePremiumPayment: c.elapsedPrem,
             jtInstYieldShareWAD: JT_PINNED_SHARE_WAD,
-            ltInstYieldShareWAD: LT_PINNED_SHARE_WAD,
+            lptInstYieldShareWAD: LPT_PINNED_SHARE_WAD,
             maxJTYieldShareWAD: a0.maxJTYieldShareWAD,
-            maxLTYieldShareWAD: a0.maxLTYieldShareWAD,
+            maxLPTYieldShareWAD: a0.maxLPTYieldShareWAD,
             stProtocolFeeWAD: a0.stProtocolFeeWAD,
             jtProtocolFeeWAD: a0.jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: a0.jtYieldShareProtocolFeeWAD,
-            ltYieldShareProtocolFeeWAD: a0.ltYieldShareProtocolFeeWAD,
+            lptYieldShareProtocolFeeWAD: a0.lptYieldShareProtocolFeeWAD,
             nowTimestamp: block.timestamp,
             fixedTermDuration: a0.fixedTermDurationSeconds,
             minCoverageWAD: a0.minCoverageWAD,
             coverageLiquidationUtilizationWAD: a0.coverageLiquidationUtilizationWAD,
-            effectiveDust: toUint256(a0.effectiveNAVDustTolerance),
+            dustTolerance: toUint256(a0.dustTolerance),
             minLiquidityWAD: a0.minLiquidityWAD
         });
         try this.runSyncTrancheAccountingMirror(win) returns (RoycoTestMath.SyncOutputs memory w) {
@@ -1322,14 +1312,18 @@ contract DayMarketHandler is DayMarketTestBase {
         IRoycoDayAccountant.RoycoDayAccountantState memory a1 = accountant.getState();
         IRoycoDayKernel.RoycoDayKernelState memory k1 = kernel.getState();
 
-        // Committed raw marks must echo the fresh quotes, and raw must equal effective in total
+        // The committed collateral mark must echo the fresh quote, and it must equal effective in total
+        _flag(toUint256(a1.lastCollateralNAV) == c.collateralNew, string.concat(_label, ": committed collateral mark diverges from the fresh quote"));
         _flag(
-            toUint256(a1.lastSTRawNAV) == c.stRawNew && toUint256(a1.lastJTRawNAV) == c.jtRawNew,
-            string.concat(_label, ": committed raw marks diverge from the fresh quotes")
+            c.collateralNew == toUint256(a1.lastSTEffectiveNAV) + toUint256(a1.lastJTEffectiveNAV),
+            string.concat(_label, ": collateral NAV and effective NAV totals diverge after the sync")
         );
+
+        // The state-machine biconditional: every PERPETUAL commit erases the IL ledger and the FIXED_TERM
+        // branch never zeroes it, so PERPETUAL iff il == 0 after every sync
         _flag(
-            c.stRawNew + c.jtRawNew == toUint256(a1.lastSTEffectiveNAV) + toUint256(a1.lastJTEffectiveNAV),
-            string.concat(_label, ": raw and effective NAV totals diverge after the sync")
+            (a1.lastMarketState == MarketState.PERPETUAL) == (toUint256(a1.lastJTImpermanentLoss) == 0),
+            string.concat(_label, ": committed market state and impermanent-loss ledger disagree (PERPETUAL iff il == 0)")
         );
 
         uint256 premiumShares;
@@ -1343,8 +1337,8 @@ contract DayMarketHandler is DayMarketTestBase {
                 string.concat(_label, ": committed junior effective NAV diverges from the recomputation")
             );
             _flag(
-                toUint256(a1.lastJTCoverageImpermanentLoss) == c.w.jtCoverageImpermanentLoss,
-                string.concat(_label, ": committed coverage loss diverges from the recomputation")
+                toUint256(a1.lastJTImpermanentLoss) == c.w.jtImpermanentLoss,
+                string.concat(_label, ": committed impermanent loss diverges from the recomputation")
             );
             _flag(
                 (a1.lastMarketState == MarketState.PERPETUAL) == (c.w.marketState == RoycoTestMath.MarketState.PERPETUAL),
@@ -1355,21 +1349,31 @@ contract DayMarketHandler is DayMarketTestBase {
                 string.concat(_label, ": committed fixed-term end diverges from the recomputation")
             );
 
-            // Replay the coverage-loss ledger through its only four sanctioned movements
-            _recordCoverageImpermanentLossMovement(a0, c.w);
+            // The FIXED_TERM zero-fee theorem: under same-sign attribution any nonzero fee or premium
+            // requires a gain residual that fully recovered the IL, which resolves PERPETUAL instead, so
+            // a FIXED_TERM commit can never carry a fee or premium
+            if (c.w.marketState == RoycoTestMath.MarketState.FIXED_TERM) {
+                _flag(
+                    c.w.stProtocolFee == 0 && c.w.jtProtocolFee == 0 && c.w.lptProtocolFee == 0 && c.w.lptLiquidityPremium == 0,
+                    string.concat(_label, ": a FIXED_TERM commit carried a nonzero fee or premium")
+                );
+            }
+
+            // Replay the impermanent-loss ledger through its only four sanctioned movements
+            _recordImpermanentLossMovement(a0, c.w);
             _flag(
-                ghost_jtCoverageImpermanentLossReplay == toUint256(a1.lastJTCoverageImpermanentLoss),
-                string.concat(_label, ": coverage-loss ledger replay diverges from the committed value")
+                ghost_jtImpermanentLossReplay == toUint256(a1.lastJTImpermanentLoss),
+                string.concat(_label, ": impermanent-loss ledger replay diverges from the committed value")
             );
 
             // The senior supply may grow only by the fee and liquidity premium share mint, both legs floor-priced
-            // (and mint-dilution clamped) over the same retained NAV stEffectiveNAV - premium - stFee. The LT
-            // protocol fee is carved out of the premium: the LT receives the NET premium (premium - ltFee) as
-            // idle senior shares and the fee recipient receives (stFee + ltFee) as senior shares, so no
-            // liquidity-tranche shares mint on a sync. ltFee <= premium always, so the net never underflows
-            uint256 retainedSeniorNAV = c.w.stEffectiveNAV - c.w.ltLiquidityPremium - c.w.stProtocolFee;
-            premiumShares = RoycoTestMath.convertToShares(c.w.ltLiquidityPremium - c.w.ltProtocolFee, retainedSeniorNAV, c.stSupply0);
-            uint256 feeShares = RoycoTestMath.convertToShares(c.w.stProtocolFee + c.w.ltProtocolFee, retainedSeniorNAV, c.stSupply0);
+            // (and mint-dilution clamped) over the same retained NAV stEffectiveNAV - premium - stFee. The LPT
+            // protocol fee is carved out of the premium: the LPT receives the NET premium (premium - lptFee) as
+            // idle senior shares and the fee recipient receives (stFee + lptFee) as senior shares, so no
+            // liquidity-provider-tranche shares mint on a sync. lptFee <= premium always, so the net never underflows
+            uint256 retainedSeniorNAV = c.w.stEffectiveNAV - c.w.lptLiquidityPremium - c.w.stProtocolFee;
+            premiumShares = RoycoTestMath.convertToShares(c.w.lptLiquidityPremium - c.w.lptProtocolFee, retainedSeniorNAV, c.stSupply0);
+            uint256 feeShares = RoycoTestMath.convertToShares(c.w.stProtocolFee + c.w.lptProtocolFee, retainedSeniorNAV, c.stSupply0);
             _flag(
                 seniorTranche.totalSupply() == c.stSupply0 + premiumShares + feeShares,
                 string.concat(_label, ": senior supply moved by something other than the fee and liquidity premium share mint")
@@ -1382,14 +1386,14 @@ contract DayMarketHandler is DayMarketTestBase {
             // Premium accrual window: reset exactly when premiums pay, otherwise grow by the pinned model
             if (c.firstAccrual || c.w.premiumsPaid) {
                 _flag(
-                    a1.twJTYieldShareAccruedWAD == 0 && a1.twLTYieldShareAccruedWAD == 0 && uint256(a1.lastPremiumPaymentTimestamp) == block.timestamp,
+                    a1.twJTYieldShareAccruedWAD == 0 && a1.twLPTYieldShareAccruedWAD == 0 && uint256(a1.lastPremiumPaymentTimestamp) == block.timestamp,
                     string.concat(_label, ": premium accumulators failed to reset on a premium payment")
                 );
                 ghost_windowMaxJTShareWAD = a1.maxJTYieldShareWAD;
-                ghost_windowMaxLTShareWAD = a1.maxLTYieldShareWAD;
+                ghost_windowMaxLPTShareWAD = a1.maxLPTYieldShareWAD;
             } else {
                 _flag(
-                    uint256(a1.twJTYieldShareAccruedWAD) == c.twJT && uint256(a1.twLTYieldShareAccruedWAD) == c.twLT,
+                    uint256(a1.twJTYieldShareAccruedWAD) == c.twJT && uint256(a1.twLPTYieldShareAccruedWAD) == c.twLPT,
                     string.concat(_label, ": accrued premium weight diverges from the pinned model accrual")
                 );
                 _flag(
@@ -1399,12 +1403,12 @@ contract DayMarketHandler is DayMarketTestBase {
             }
             if (c.elapsedPrem > 0) {
                 _flag(
-                    c.twJT <= ghost_windowMaxJTShareWAD * c.elapsedPrem && c.twLT <= ghost_windowMaxLTShareWAD * c.elapsedPrem,
+                    c.twJT <= ghost_windowMaxJTShareWAD * c.elapsedPrem && c.twLPT <= ghost_windowMaxLPTShareWAD * c.elapsedPrem,
                     string.concat(_label, ": accrued premium weight exceeds the configured cap over the window")
                 );
             }
             if (IS_ZERO_LIQUIDITY_PROFILE) {
-                _flag(c.w.ltLiquidityPremium == 0 && premiumShares == 0, string.concat(_label, ": zero-liquidity market accrued a liquidity premium"));
+                _flag(c.w.lptLiquidityPremium == 0 && premiumShares == 0, string.concat(_label, ": zero-liquidity market accrued a liquidity premium"));
             }
         }
         _flag(uint256(a1.lastYieldShareAccrualTimestamp) == block.timestamp, string.concat(_label, ": accrual timestamp failed to advance to this block"));
@@ -1415,24 +1419,24 @@ contract DayMarketHandler is DayMarketTestBase {
         ghost_stSharesDeployedSinceLastPriceCheck += deployed;
         if (c.mirrorOk) {
             _flag(
-                k1.ltOwnedSeniorTrancheShares == c.ltOwnedSeniorTrancheShares0 + premiumShares - deployed,
-                string.concat(_label, ": ltOwnedSeniorTrancheShares diverges from mint minus measured deployment")
+                k1.lptOwnedSeniorTrancheShares == c.lptOwnedSeniorTrancheShares0 + premiumShares - deployed,
+                string.concat(_label, ": lptOwnedSeniorTrancheShares diverges from mint minus measured deployment")
             );
         }
-        if (k1.ltOwnedSeniorTrancheShares > 0) ghost_idleLiquidityPremiumObserved++;
+        if (k1.lptOwnedSeniorTrancheShares > 0) ghost_idleLiquidityPremiumObserved++;
 
         // Solvency: every internal ledger is fully backed by the kernel's actual token balances
         _flag(
-            stJtVault.balanceOf(address(kernel)) == toUint256(k1.stOwnedYieldBearingAssets) + toUint256(k1.jtOwnedYieldBearingAssets),
-            string.concat(_label, ": kernel vault-share balance no longer backs the senior plus junior ledgers")
+            stJtVault.balanceOf(address(kernel)) == toUint256(k1.totalCollateralAssets),
+            string.concat(_label, ": kernel vault-share balance no longer backs the collateral ledger")
         );
         _flag(
-            bpt.balanceOf(address(kernel)) == toUint256(k1.ltOwnedYieldBearingAssets),
+            bpt.balanceOf(address(kernel)) == toUint256(k1.totalLPTAssets),
             string.concat(_label, ": kernel pool-token balance no longer backs the liquidity ledger")
         );
         _flag(
-            seniorTranche.balanceOf(address(kernel)) == k1.ltOwnedSeniorTrancheShares,
-            string.concat(_label, ": kernel senior-share balance no longer backs ltOwnedSeniorTrancheShares")
+            seniorTranche.balanceOf(address(kernel)) == k1.lptOwnedSeniorTrancheShares,
+            string.concat(_label, ": kernel senior-share balance no longer backs lptOwnedSeniorTrancheShares")
         );
         _flag(quoteToken.balanceOf(address(kernel)) == 0, string.concat(_label, ": kernel retained quote tokens it should never hold"));
 
@@ -1440,46 +1444,38 @@ contract DayMarketHandler is DayMarketTestBase {
         // exclude the idle liquidity premium senior shares, which appear only in the effective value
         uint256 stEff1 = toUint256(a1.lastSTEffectiveNAV);
         uint256 stSupply1 = seniorTranche.totalSupply();
-        uint256 ltRawMirror = _mirrorLtRawNAV(toUint256(k1.ltOwnedYieldBearingAssets), stEff1, stSupply1);
-        _flag(toUint256(a1.lastLTRawNAV) == ltRawMirror, string.concat(_label, ": committed pool mark diverges from the manual re-pricing"));
-        uint256 ltEffNavMirror = RoycoTestMath.getLiquidityTrancheEffectiveNAV(ltRawMirror, k1.ltOwnedSeniorTrancheShares, stEff1, stSupply1);
+        uint256 lptRawMirror = _mirrorLptRawNAV(toUint256(k1.totalLPTAssets), stEff1, stSupply1);
+        _flag(toUint256(a1.lastLPTRawNAV) == lptRawMirror, string.concat(_label, ": committed pool mark diverges from the manual re-pricing"));
+        uint256 lptEffNavMirror = RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(lptRawMirror, k1.lptOwnedSeniorTrancheShares, stEff1, stSupply1);
         _flag(
-            toUint256(liquidityTranche.totalAssets().nav) == ltEffNavMirror,
+            toUint256(liquidityProviderTranche.totalAssets().nav) == lptEffNavMirror,
             string.concat(_label, ": liquidity effective value is not the pool mark plus the idle liquidity premium slice")
         );
 
-        _checkPriceMonotonicity(_label, a1, stSupply1, ltEffNavMirror);
+        _checkPriceMonotonicity(_label, a1, stSupply1, lptEffNavMirror);
         _trackRegimes(a1, c);
-        s = _buildSnap(a1, k1, ltEffNavMirror);
+        s = _buildSnap(a1, k1, lptEffNavMirror);
     }
 
-    /// @dev Appends this sync's coverage-loss movement to the event log and advances the replay value
-    function _recordCoverageImpermanentLossMovement(IRoycoDayAccountant.RoycoDayAccountantState memory a0, RoycoTestMath.SyncOutputs memory w) internal {
-        uint256 jtCoverageImpermanentLossBefore = toUint256(a0.lastJTCoverageImpermanentLoss);
+    /// @dev Appends this sync's impermanent-loss movement to the event log and advances the replay value
+    function _recordImpermanentLossMovement(IRoycoDayAccountant.RoycoDayAccountantState memory a0, RoycoTestMath.SyncOutputs memory w) internal {
+        uint256 jtImpermanentLossBefore = toUint256(a0.lastJTImpermanentLoss);
         if (w.ilErased > 0) {
             // Erasure runs after any same-sync growth or recovery, so log that movement first
-            uint256 preErase = w.jtCoverageImpermanentLoss + w.ilErased;
-            if (preErase > jtCoverageImpermanentLossBefore) {
-                ghost_jtCoverageImpermanentLossEvents.push(
-                    JTCoverageImpermanentLossEvent(JTCoverageImpermanentLossCause.COVERAGE_APPLIED, preErase - jtCoverageImpermanentLossBefore)
-                );
-            } else if (preErase < jtCoverageImpermanentLossBefore) {
-                ghost_jtCoverageImpermanentLossEvents.push(
-                    JTCoverageImpermanentLossEvent(JTCoverageImpermanentLossCause.RECOVERY, jtCoverageImpermanentLossBefore - preErase)
-                );
+            uint256 preErase = w.jtImpermanentLoss + w.ilErased;
+            if (preErase > jtImpermanentLossBefore) {
+                ghost_jtImpermanentLossEvents.push(JTImpermanentLossEvent(JTImpermanentLossCause.COVERAGE_APPLIED, preErase - jtImpermanentLossBefore));
+            } else if (preErase < jtImpermanentLossBefore) {
+                ghost_jtImpermanentLossEvents.push(JTImpermanentLossEvent(JTImpermanentLossCause.RECOVERY, jtImpermanentLossBefore - preErase));
             }
-            ghost_jtCoverageImpermanentLossEvents.push(JTCoverageImpermanentLossEvent(JTCoverageImpermanentLossCause.ERASED, w.ilErased));
-            ghost_jtCoverageImpermanentLossReplay = w.jtCoverageImpermanentLoss;
-        } else if (w.jtCoverageImpermanentLoss > jtCoverageImpermanentLossBefore) {
-            ghost_jtCoverageImpermanentLossEvents.push(
-                JTCoverageImpermanentLossEvent(JTCoverageImpermanentLossCause.COVERAGE_APPLIED, w.jtCoverageImpermanentLoss - jtCoverageImpermanentLossBefore)
-            );
-            ghost_jtCoverageImpermanentLossReplay = ghost_jtCoverageImpermanentLossReplay + (w.jtCoverageImpermanentLoss - jtCoverageImpermanentLossBefore);
-        } else if (w.jtCoverageImpermanentLoss < jtCoverageImpermanentLossBefore) {
-            ghost_jtCoverageImpermanentLossEvents.push(
-                JTCoverageImpermanentLossEvent(JTCoverageImpermanentLossCause.RECOVERY, jtCoverageImpermanentLossBefore - w.jtCoverageImpermanentLoss)
-            );
-            ghost_jtCoverageImpermanentLossReplay = ghost_jtCoverageImpermanentLossReplay - (jtCoverageImpermanentLossBefore - w.jtCoverageImpermanentLoss);
+            ghost_jtImpermanentLossEvents.push(JTImpermanentLossEvent(JTImpermanentLossCause.ERASED, w.ilErased));
+            ghost_jtImpermanentLossReplay = w.jtImpermanentLoss;
+        } else if (w.jtImpermanentLoss > jtImpermanentLossBefore) {
+            ghost_jtImpermanentLossEvents.push(JTImpermanentLossEvent(JTImpermanentLossCause.COVERAGE_APPLIED, w.jtImpermanentLoss - jtImpermanentLossBefore));
+            ghost_jtImpermanentLossReplay = ghost_jtImpermanentLossReplay + (w.jtImpermanentLoss - jtImpermanentLossBefore);
+        } else if (w.jtImpermanentLoss < jtImpermanentLossBefore) {
+            ghost_jtImpermanentLossEvents.push(JTImpermanentLossEvent(JTImpermanentLossCause.RECOVERY, jtImpermanentLossBefore - w.jtImpermanentLoss));
+            ghost_jtImpermanentLossReplay = ghost_jtImpermanentLossReplay - (jtImpermanentLossBefore - w.jtImpermanentLoss);
         }
     }
 
@@ -1489,55 +1485,60 @@ contract DayMarketHandler is DayMarketTestBase {
         string memory _label,
         IRoycoDayAccountant.RoycoDayAccountantState memory a1,
         uint256 _stSupply,
-        uint256 _ltEffNav
+        uint256 _lptEffNav
     )
         internal
     {
         uint256 jtEff1 = toUint256(a1.lastJTEffectiveNAV);
-        if (_stSupply == 0) ghost_stPriceHighWater = 0;
+        if (_stSupply == 0) (ghost_stPriceHighWater, ghost_stVirtualHighWater) = (0, 0);
         if (_stSupply > 0) {
-            uint256 pSt = toUint256(a1.lastSTEffectiveNAV).mulDiv(WAD, _stSupply);
-            uint256 dust = PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND.mulDiv(WAD, _stSupply) + 2;
+            uint256 stEff1 = toUint256(a1.lastSTEffectiveNAV);
+            uint256 pSt = stEff1.mulDiv(WAD, _stSupply);
+            // Base flooring budget plus the offset's deposit-dilution dust: absent a loss the naive price can fall by
+            // at most the naive-virtual gap captured at the prior high-water (see ghost_*VirtualHighWater).
+            uint256 dust = PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND.mulDiv(WAD, _stSupply) + 2 + (ghost_stPriceHighWater - ghost_stVirtualHighWater);
             if (pSt + dust < ghost_stPriceHighWater) {
                 _flag(ghost_uncoveredLossSinceLastCheck && jtEff1 == 0, string.concat(_label, ": senior share price fell without an uncovered loss"));
                 if (jtEff1 == 0) ghost_uncoveredLossRealized++;
             }
-            ghost_stPriceHighWater = pSt;
+            (ghost_stPriceHighWater, ghost_stVirtualHighWater) = (pSt, Math.min(pSt, _virtualSharePrice(stEff1, _stSupply)));
         }
         uint256 jtSupply1 = juniorTranche.totalSupply();
-        if (jtSupply1 == 0) ghost_jtPriceHighWater = 0;
+        if (jtSupply1 == 0) (ghost_jtPriceHighWater, ghost_jtVirtualHighWater) = (0, 0);
         if (jtSupply1 > 0) {
             uint256 pJt = jtEff1.mulDiv(WAD, jtSupply1);
-            uint256 dust = PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND.mulDiv(WAD, jtSupply1) + 2;
+            uint256 dust = PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND.mulDiv(WAD, jtSupply1) + 2 + (ghost_jtPriceHighWater - ghost_jtVirtualHighWater);
             if (pJt + dust < ghost_jtPriceHighWater) {
                 _flag(ghost_jtLossSinceLastCheck, string.concat(_label, ": junior share price fell without a junior loss event"));
             }
-            ghost_jtPriceHighWater = pJt;
+            (ghost_jtPriceHighWater, ghost_jtVirtualHighWater) = (pJt, Math.min(pJt, _virtualSharePrice(jtEff1, jtSupply1)));
         }
-        uint256 ltSupply1 = liquidityTranche.totalSupply();
-        if (ltSupply1 == 0) ghost_ltPriceHighWater = 0;
-        if (ltSupply1 > 0) {
-            uint256 pLt = _ltEffNav.mulDiv(WAD, ltSupply1);
+        uint256 lptSupply1 = liquidityProviderTranche.totalSupply();
+        if (lptSupply1 == 0) (ghost_lptPriceHighWater, ghost_lptVirtualHighWater) = (0, 0);
+        if (lptSupply1 > 0) {
+            uint256 pLt = _lptEffNav.mulDiv(WAD, lptSupply1);
             // Deploying n idle premium senior shares re-marks them from the exact claimable-leg valuation
-            // floor(n * stEffectiveNAV / stSupply) to the venue's WAD-quantized senior rate
-            // floor(stEffectiveNAV * WAD / stSupply) / WAD per share, an NAV drop of
+            // floor(n * (stEffectiveNAV + 1) / (stSupply + 1e6)) to the venue's WAD-quantized senior rate
+            // floor((stEffectiveNAV + 1) * WAD / (stSupply + 1e6)) / WAD per share, an NAV drop of
             // n * ((stEffectiveNAV * WAD) mod stSupply) / (stSupply * WAD) < n / WAD NAV wei that is mark
             // quantization, not value leakage. The per-mulDiv flooring residue on the deploy path stays
             // inside the constant PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND budget, so the dust bound widens
-            // by exactly n / WAD NAV wei and a drop even one price wei past it still fails
+            // by exactly n / WAD NAV wei and a drop even one price wei past it still fails. The trailing term
+            // is the offset's deposit-dilution dust: the naive-virtual gap captured at the prior high-water.
             uint256 deployQuantizationNAVWei = ghost_stSharesDeployedSinceLastPriceCheck / WAD;
-            uint256 dust = (PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND + deployQuantizationNAVWei).mulDiv(WAD, ltSupply1) + 2;
-            if (pLt + dust < ghost_ltPriceHighWater) {
+            uint256 dust = (PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND + deployQuantizationNAVWei).mulDiv(WAD, lptSupply1) + 2
+                + (ghost_lptPriceHighWater - ghost_lptVirtualHighWater);
+            if (pLt + dust < ghost_lptPriceHighWater) {
                 _flag(
-                    ghost_ltVenueLossSinceLastCheck || (ghost_uncoveredLossSinceLastCheck && jtEff1 == 0),
+                    ghost_lptVenueLossSinceLastCheck || (ghost_uncoveredLossSinceLastCheck && jtEff1 == 0),
                     string.concat(_label, ": liquidity share price fell without a venue or uncovered loss event")
                 );
             }
-            ghost_ltPriceHighWater = pLt;
+            (ghost_lptPriceHighWater, ghost_lptVirtualHighWater) = (pLt, Math.min(pLt, _virtualSharePrice(_lptEffNav, lptSupply1)));
         }
         ghost_uncoveredLossSinceLastCheck = false;
         ghost_jtLossSinceLastCheck = false;
-        ghost_ltVenueLossSinceLastCheck = false;
+        ghost_lptVenueLossSinceLastCheck = false;
         ghost_stSharesDeployedSinceLastPriceCheck = 0;
     }
 
@@ -1545,9 +1546,8 @@ contract DayMarketHandler is DayMarketTestBase {
     function _trackRegimes(IRoycoDayAccountant.RoycoDayAccountantState memory a1, SyncCtx memory c) internal {
         if (c.state0 == MarketState.PERPETUAL && a1.lastMarketState == MarketState.FIXED_TERM) ghost_enteredFixedTerm++;
         if (c.state0 == MarketState.FIXED_TERM && a1.lastMarketState == MarketState.PERPETUAL) ghost_exitedFixedTerm++;
-        bool breachedNow = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a1.lastSTRawNAV), toUint256(a1.lastJTRawNAV), a1.minCoverageWAD, toUint256(a1.lastJTEffectiveNAV)
-        ) >= a1.coverageLiquidationUtilizationWAD;
+        bool breachedNow = RoycoTestMath.computeCoverageUtilization(toUint256(a1.lastCollateralNAV), a1.minCoverageWAD, toUint256(a1.lastJTEffectiveNAV))
+            >= a1.coverageLiquidationUtilizationWAD;
         if (!c.wasBreached && breachedNow) ghost_crossedLiquidationThreshold++;
     }
 
@@ -1563,24 +1563,22 @@ contract DayMarketHandler is DayMarketTestBase {
     {
         s.ok = true;
         s.fixedTerm = a1.lastMarketState == MarketState.FIXED_TERM;
-        s.stRawNAV = toUint256(a1.lastSTRawNAV);
-        s.jtRawNAV = toUint256(a1.lastJTRawNAV);
-        s.ltRawNAV = toUint256(a1.lastLTRawNAV);
+        s.collateralNAV = toUint256(a1.lastCollateralNAV);
+        s.lptRawNAV = toUint256(a1.lastLPTRawNAV);
         s.stEffectiveNAV = toUint256(a1.lastSTEffectiveNAV);
         s.jtEffectiveNAV = toUint256(a1.lastJTEffectiveNAV);
-        s.jtCoverageImpermanentLoss = toUint256(a1.lastJTCoverageImpermanentLoss);
-        s.coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(s.stRawNAV, s.jtRawNAV, a1.minCoverageWAD, s.jtEffectiveNAV);
+        s.jtImpermanentLoss = toUint256(a1.lastJTImpermanentLoss);
+        s.coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(s.collateralNAV, a1.minCoverageWAD, s.jtEffectiveNAV);
         s.minCoverageWAD = a1.minCoverageWAD;
         s.minLiquidityWAD = a1.minLiquidityWAD;
         s.coverageLiquidationUtilizationWAD = a1.coverageLiquidationUtilizationWAD;
-        s.effectiveNAVDustTolerance = toUint256(a1.effectiveNAVDustTolerance);
+        s.dustTolerance = toUint256(a1.dustTolerance);
         s.stSupply = seniorTranche.totalSupply();
         s.jtSupply = juniorTranche.totalSupply();
-        s.ltSupply = liquidityTranche.totalSupply();
-        s.stOwned = toUint256(k1.stOwnedYieldBearingAssets);
-        s.jtOwned = toUint256(k1.jtOwnedYieldBearingAssets);
-        s.ltOwned = toUint256(k1.ltOwnedYieldBearingAssets);
-        s.ltOwnedSeniorTrancheShares = k1.ltOwnedSeniorTrancheShares;
+        s.lptSupply = liquidityProviderTranche.totalSupply();
+        s.collateralOwned = toUint256(k1.totalCollateralAssets);
+        s.lptOwned = toUint256(k1.totalLPTAssets);
+        s.lptOwnedSeniorTrancheShares = k1.lptOwnedSeniorTrancheShares;
         s.bonusWAD = k1.stSelfLiquidationBonusWAD;
     }
 
@@ -1614,21 +1612,24 @@ contract DayMarketHandler is DayMarketTestBase {
     function coreInvariantBreach() external view returns (string memory) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
         IRoycoDayKernel.RoycoDayKernelState memory k = kernel.getState();
-        if (toUint256(a.lastSTRawNAV) + toUint256(a.lastJTRawNAV) != toUint256(a.lastSTEffectiveNAV) + toUint256(a.lastJTEffectiveNAV)) {
-            return "raw and effective NAV totals diverge";
+        if (toUint256(a.lastCollateralNAV) != toUint256(a.lastSTEffectiveNAV) + toUint256(a.lastJTEffectiveNAV)) {
+            return "collateral NAV and effective NAV totals diverge";
         }
-        if (stJtVault.balanceOf(address(kernel)) != toUint256(k.stOwnedYieldBearingAssets) + toUint256(k.jtOwnedYieldBearingAssets)) {
-            return "kernel vault-share balance does not back the senior plus junior ledgers";
+        if ((a.lastMarketState == MarketState.PERPETUAL) != (toUint256(a.lastJTImpermanentLoss) == 0)) {
+            return "market state and impermanent-loss ledger disagree (PERPETUAL iff il == 0)";
+        }
+        if (stJtVault.balanceOf(address(kernel)) != toUint256(k.totalCollateralAssets)) {
+            return "kernel vault-share balance does not back the collateral ledger";
         }
         uint256 netIn = ghost_transferredIn[address(stJtVault)] - ghost_transferredOut[address(stJtVault)];
         if (stJtVault.balanceOf(address(kernel)) != netIn) return "kernel vault-share balance diverges from the transfer ledger";
-        if (bpt.balanceOf(address(kernel)) != toUint256(k.ltOwnedYieldBearingAssets)) return "kernel pool-token balance does not back the liquidity ledger";
-        if (seniorTranche.balanceOf(address(kernel)) != k.ltOwnedSeniorTrancheShares) {
-            return "kernel senior-share balance does not back ltOwnedSeniorTrancheShares";
+        if (bpt.balanceOf(address(kernel)) != toUint256(k.totalLPTAssets)) return "kernel pool-token balance does not back the liquidity ledger";
+        if (seniorTranche.balanceOf(address(kernel)) != k.lptOwnedSeniorTrancheShares) {
+            return "kernel senior-share balance does not back lptOwnedSeniorTrancheShares";
         }
         if (
             ghost_liquidityPremiumSharesMinted
-                != k.ltOwnedSeniorTrancheShares + ghost_liquidityPremiumSharesReinvested + ghost_idlePremiumSeniorSharesPaidToRedeemers
+                != k.lptOwnedSeniorTrancheShares + ghost_liquidityPremiumSharesReinvested + ghost_idlePremiumSeniorSharesPaidToRedeemers
         ) {
             return "idle liquidity premium ledger does not reconcile minted, deployed, and paid-out shares";
         }
@@ -1637,7 +1638,7 @@ contract DayMarketHandler is DayMarketTestBase {
 
     /**
      * @notice The wei-precision NAV conservation identity over the committed checkpoint:
-     *         stRawNAV + jtRawNAV == stEffectiveNAV + jtEffectiveNAV. The liquidity premium is covered
+     *         collateralNAV == stEffectiveNAV + jtEffectiveNAV. The liquidity premium is covered
      *         senior shares inside stEffectiveNAV, never a third NAV leg, so the identity must survive
      *         the fee and liquidity premium share mint on every sync. On a breach the full checkpoint is
      *         dumped so the failing state is reconstructible from the assertion message alone
@@ -1645,17 +1646,14 @@ contract DayMarketHandler is DayMarketTestBase {
     function conservationCheckpointReport() external view returns (bool holds, string memory report) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
         IRoycoDayKernel.RoycoDayKernelState memory k = kernel.getState();
-        uint256 stRawNAV = toUint256(a.lastSTRawNAV);
-        uint256 jtRawNAV = toUint256(a.lastJTRawNAV);
+        uint256 collateralNAV = toUint256(a.lastCollateralNAV);
         uint256 stEffectiveNAV = toUint256(a.lastSTEffectiveNAV);
         uint256 jtEffectiveNAV = toUint256(a.lastJTEffectiveNAV);
-        holds = stRawNAV + jtRawNAV == stEffectiveNAV + jtEffectiveNAV;
+        holds = collateralNAV == stEffectiveNAV + jtEffectiveNAV;
         if (!holds) {
             report = string.concat(
-                "stRawNAV + jtRawNAV != stEffectiveNAV + jtEffectiveNAV at wei precision | stRawNAV=",
-                vm.toString(stRawNAV),
-                " jtRawNAV=",
-                vm.toString(jtRawNAV),
+                "collateralNAV != stEffectiveNAV + jtEffectiveNAV at wei precision | collateralNAV=",
+                vm.toString(collateralNAV),
                 " stEffectiveNAV=",
                 vm.toString(stEffectiveNAV),
                 " jtEffectiveNAV=",
@@ -1663,10 +1661,10 @@ contract DayMarketHandler is DayMarketTestBase {
             );
             report = string.concat(
                 report,
-                " ltRawNAV=",
-                vm.toString(toUint256(a.lastLTRawNAV)),
-                " jtCoverageImpermanentLoss=",
-                vm.toString(toUint256(a.lastJTCoverageImpermanentLoss)),
+                " lptRawNAV=",
+                vm.toString(toUint256(a.lastLPTRawNAV)),
+                " jtImpermanentLoss=",
+                vm.toString(toUint256(a.lastJTImpermanentLoss)),
                 " marketState=",
                 vm.toString(uint256(a.lastMarketState)),
                 " fixedTermEndTimestamp=",
@@ -1674,21 +1672,42 @@ contract DayMarketHandler is DayMarketTestBase {
             );
             report = string.concat(
                 report,
-                " ltOwnedSeniorTrancheShares=",
-                vm.toString(k.ltOwnedSeniorTrancheShares),
+                " lptOwnedSeniorTrancheShares=",
+                vm.toString(k.lptOwnedSeniorTrancheShares),
                 " stSupply=",
                 vm.toString(seniorTranche.totalSupply()),
                 " jtSupply=",
                 vm.toString(juniorTranche.totalSupply()),
-                " ltSupply=",
-                vm.toString(liquidityTranche.totalSupply())
+                " lptSupply=",
+                vm.toString(liquidityProviderTranche.totalSupply())
             );
         }
     }
 
-    /// @notice The number of recorded coverage-loss ledger movements
-    function jtCoverageImpermanentLossEventCount() external view returns (uint256) {
-        return ghost_jtCoverageImpermanentLossEvents.length;
+    /**
+     * @notice The state-machine biconditional over the committed checkpoint: PERPETUAL iff the
+     *         impermanent-loss ledger is zero. Every PERPETUAL commit erases the ledger and the
+     *         FIXED_TERM branch never zeroes it, so a breach in either direction is a state the
+     *         two-branch machine cannot produce
+     */
+    function stateMachineCheckpointReport() external view returns (bool holds, string memory report) {
+        IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
+        bool perpetual = a.lastMarketState == MarketState.PERPETUAL;
+        uint256 il = toUint256(a.lastJTImpermanentLoss);
+        holds = perpetual == (il == 0);
+        if (!holds) {
+            report = string.concat(
+                perpetual
+                    ? "PERPETUAL committed with a nonzero impermanent-loss ledger | jtImpermanentLoss="
+                    : "FIXED_TERM committed with a zero impermanent-loss ledger | jtImpermanentLoss=",
+                vm.toString(il)
+            );
+        }
+    }
+
+    /// @notice The number of recorded impermanent-loss ledger movements
+    function jtImpermanentLossEventCount() external view returns (uint256) {
+        return ghost_jtImpermanentLossEvents.length;
     }
 
     /// @notice String-keyed read of the anti-vacuity op-invocation ledger
@@ -1726,58 +1745,56 @@ contract DayMarketHandler is DayMarketTestBase {
     }
 
     /// @dev Re-prices the kernel's pool tokens by hand: pool balances at the pinned senior rate and the oracle quote price
-    function _mirrorLtRawNAV(uint256 _ltOwned, uint256 _stEff, uint256 _stSupply) internal view returns (uint256) {
+    function _mirrorLptRawNAV(uint256 _lptOwned, uint256 _stEff, uint256 _stSupply) internal view returns (uint256) {
         uint256 supply = bpt.totalSupply();
         if (supply == 0) return 0;
         uint256 rate = _mirrorSeniorRate(_stEff, _stSupply);
         uint256[2] memory balances = balancerVault.getPoolBalances(address(bpt));
         uint256 tvl =
             balances[stPoolTokenIndex].mulDiv(rate, WAD) + balances[1 - stPoolTokenIndex].mulDiv(bptOracle.getPriceWAD(address(quoteToken)), QUOTE_UNIT);
-        return _ltOwned.mulDiv(tvl, supply);
+        return _lptOwned.mulDiv(tvl, supply);
     }
 
-    /// @dev The senior share rate the pool prices with: effective value per share, floored to one wei
+    /// @dev The OZ virtual-shares share price floor((effNAV + VIRTUAL_VALUE) * WAD / (supply + VIRTUAL_SHARES)),
+    ///      the monotone-non-decreasing price the offset guarantees on a no-loss deposit. The naive price the
+    ///      monotonicity check tracks sits weakly above this, and the gap is the tolerated per-op deposit-dilution dust.
+    function _virtualSharePrice(uint256 _effNAV, uint256 _supply) internal pure returns (uint256) {
+        return (_effNAV + RoycoTestMath.VIRTUAL_VALUE).mulDiv(WAD, _supply + RoycoTestMath.VIRTUAL_SHARES);
+    }
+
+    /// @dev The senior share rate the pool prices with: effective value per share, floored to one wei. Mirrors
+    ///      production ValuationLogic._computeTrancheShareRate == _convertToValue(WAD, supply, effNAV, Floor), which
+    ///      carries the virtual-shares/value offset: floor((stEff + VIRTUAL_VALUE) * WAD / (stSupply + VIRTUAL_SHARES)).
+    ///      The fresh-tranche exemption (supply == 0 && effNAV == 0 -> 0) then the pool's 1-wei floor still apply.
     function _mirrorSeniorRate(uint256 _stEff, uint256 _stSupply) internal pure returns (uint256) {
-        if (_stSupply == 0) return 1;
-        uint256 r = _stEff.mulDiv(WAD, _stSupply);
+        if (_stSupply == 0 && _stEff == 0) return 1;
+        uint256 r = (_stEff + RoycoTestMath.VIRTUAL_VALUE).mulDiv(WAD, _stSupply + RoycoTestMath.VIRTUAL_SHARES);
         return r == 0 ? 1 : r;
     }
 
-    /// @dev Values senior vault shares in NAV units at the kernel quoter's committed senior rate. Every
-    ///      prediction prices assets at the exact per-block rate production applies, the independence of
-    ///      a mirror lives in its surrounding arithmetic, never in a re-derived price
-    function _quoteSTUnits(uint256 _units) internal view returns (uint256) {
-        return toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(_units)));
+    /// @dev Values collateral vault shares in NAV units at the kernel's committed collateral rate.
+    ///      Every prediction prices assets at the exact per-block rate production applies, the independence
+    ///      of a mirror lives in its surrounding arithmetic, never in a re-derived price
+    function _quoteCollateralUnits(uint256 _units) internal view returns (uint256) {
+        return toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(_units)));
     }
 
-    /// @dev Values junior vault shares in NAV units at the kernel quoter's committed junior rate, the
-    ///      same per-block price source the junior deposit and redemption paths read
-    function _quoteJTUnits(uint256 _units) internal view returns (uint256) {
-        return toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(_units)));
-    }
-
-    /// @dev Values pool tokens in NAV units at the kernel quoter's committed pool mark, so liquidity-gate
+    /// @dev Values pool tokens in NAV units at the kernel's committed pool mark, so liquidity-gate
     ///      predictions and the removal mirror price depth exactly as the accountant marks it
-    function _quoteLTUnits(uint256 _units) internal view returns (uint256) {
-        return toUint256(kernel.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(_units)));
+    function _quoteLPTUnits(uint256 _units) internal view returns (uint256) {
+        return toUint256(kernel.convertLPTAssetsToValue(toTrancheUnits(_units)));
     }
 
-    /// @dev The backward conversion, NAV units to senior vault shares, sizing the senior leg of a claim
-    ///      the way production scales a redeemer's proportional slice
-    function _quoteNAVToSTUnits(uint256 _nav) internal view returns (uint256) {
-        return toUint256(kernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(_nav)));
-    }
-
-    /// @dev The backward conversion, NAV units to junior vault shares, sizing the junior leg of a
-    ///      redemption claim at the same committed rate production uses
-    function _quoteNAVToJTUnits(uint256 _nav) internal view returns (uint256) {
-        return toUint256(kernel.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(_nav)));
+    /// @dev The backward conversion, NAV units to collateral vault shares, sizing the collateral leg of a
+    ///      claim the way production scales a redeemer's proportional slice
+    function _quoteNAVToCollateralUnits(uint256 _nav) internal view returns (uint256) {
+        return toUint256(kernel.convertValueToCollateralAssets(toNAVUnits(_nav)));
     }
 
     /// @dev The backward conversion, NAV units to pool tokens, sizing the venue slice a liquidity
     ///      redemption burns at the committed pool mark
-    function _quoteNAVToLTUnits(uint256 _nav) internal view returns (uint256) {
-        return toUint256(kernel.ltConvertNAVUnitsToTrancheUnits(toNAVUnits(_nav)));
+    function _quoteNAVToLPTUnits(uint256 _nav) internal view returns (uint256) {
+        return toUint256(kernel.convertValueToLPTAssets(toNAVUnits(_nav)));
     }
 
     /**
@@ -1814,11 +1831,6 @@ contract DayMarketHandler is DayMarketTestBase {
         // No overflow risk in the sum: a non-panicking mint already guarantees supply + shares fits
         if (mintPanics || _supply + shares > TRANCHE_SUPPLY_CAMPAIGN_BOUND) return 1;
         return _assets;
-    }
-
-    /// @dev Saturating subtraction
-    function _sat(uint256 _a, uint256 _b) internal pure returns (uint256) {
-        return _a > _b ? _a - _b : 0;
     }
 
     /// @dev Adds one selector to the op's allowed revert set

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { DeployScript } from "../../../../../script/Deploy.s.sol";
+import { DeploymentResult } from "../../../../../script/config/DeploymentTypes.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../../../../src/libraries/Units.sol";
 import { Test_SeniorTrancheDepositWithdrawBase } from "../Test_SeniorTrancheDepositWithdrawBase.t.sol";
 
@@ -15,7 +16,7 @@ import { Test_SeniorTrancheDepositWithdrawBase } from "../Test_SeniorTrancheDepo
 contract Neutrl_snUSD_Senior is Test_SeniorTrancheDepositWithdrawBase {
     address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // ST/JT ERC4626 asset
     address internal constant NUSD_REDSTONE_ORACLE = 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95; // base(nUSD)->NAV feed
-    address internal constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // LT pool quote asset
+    address internal constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // LPT pool quote asset
 
     function _baseAssetToNavOracle() internal pure override returns (address) {
         return NUSD_REDSTONE_ORACLE;
@@ -28,17 +29,17 @@ contract Neutrl_snUSD_Senior is Test_SeniorTrancheDepositWithdrawBase {
             stAsset: SNUSD_VAULT,
             jtAsset: SNUSD_VAULT,
             quoteAsset: USDC,
-            hasLiquidityTranche: true,
+            hasLiquidityProviderTranche: true,
             initialFunding: 1_000_000e18
         });
     }
 
-    function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
+    function _deployKernelAndMarket() internal override returns (DeploymentResult memory) {
         return DEPLOY_SCRIPT.deploy(
             DEPLOY_SCRIPT.getMarketConfig("snUSD"),
             OWNER_ADDRESS,
             PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds,
+            DEPLOY_SCRIPT.getChainConfig(block.chainid, false).scheduledOperationsExpirySeconds,
             _generateRoleAssignments(),
             DEPLOYER.privateKey
         );

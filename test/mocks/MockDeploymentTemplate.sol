@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { BaseDeploymentTemplate } from "../../src/factory/templates/base/BaseDeploymentTemplate.sol";
-import { COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2 } from "../../src/factory/templates/base/Components.sol";
 import { IRoycoFactory } from "../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 
@@ -10,19 +9,10 @@ import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProto
  * @title MockDeploymentTemplate
  * @notice Minimal concrete deployment template bound to a real RoycoFactory: deployMarket returns a caller-settable
  *         DeploymentResult so tests can hand the factory arbitrary component sets (including zero tranche members)
- * @dev When deployMarket receives nonempty params it decodes (bytes32 salt, uint256 targetUtilizationWAD) and drives
- *      the base's internal _deployYDM helper inside the factory's active-template window, recording the outcome, so
- *      tests can exercise the YDM salt-reuse path through the production entrypoint
  */
 contract MockDeploymentTemplate is BaseDeploymentTemplate {
     /// @dev The canned result deployMarket returns, set by the test before executeMarketDeployment
     IRoycoProtocolTemplate.DeploymentResult private _result;
-
-    /// @notice The YDM address returned by the last params-driven _deployYDM call
-    address public lastDeployedYDM;
-
-    /// @notice Whether the last params-driven _deployYDM call reused an instance already deployed at the salt
-    bool public lastYDMAlreadyDeployed;
 
     /// @notice Binds the template to the factory that will drive it
     /// @param _factory The Royco factory this template will be registered with
@@ -35,22 +25,17 @@ contract MockDeploymentTemplate is BaseDeploymentTemplate {
     }
 
     /// @inheritdoc IRoycoProtocolTemplate
-    /// @dev Nonempty params decode as (bytes32 salt, uint256 targetUtilizationWAD) and drive _deployYDM before returning the canned result
-    function deployMarket(bytes calldata _params)
+    /// @dev Ignores its params and returns the canned result
+    function deployMarket(bytes calldata)
         external
         override(IRoycoProtocolTemplate)
         onlyRoycoFactory
         returns (IRoycoProtocolTemplate.DeploymentResult memory result)
     {
-        if (_params.length != 0) {
-            (bytes32 salt, uint256 targetUtilizationWAD) = abi.decode(_params, (bytes32, uint256));
-            bytes memory ydmConstructorArgs = abi.encode(targetUtilizationWAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
-            (lastDeployedYDM, lastYDMAlreadyDeployed) = _deployYDM(salt, ydmConstructorArgs, COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2);
-        }
         result = _result;
     }
 
     /// @inheritdoc BaseDeploymentTemplate
     /// @dev No periphery to configure for the canned-result mock
-    function _configureMarketPeriphery(IRoycoProtocolTemplate.DeploymentResult calldata, bytes calldata) internal override(BaseDeploymentTemplate) { }
+    function _postMarketRegistration(IRoycoProtocolTemplate.DeploymentResult calldata, bytes calldata) internal override(BaseDeploymentTemplate) { }
 }

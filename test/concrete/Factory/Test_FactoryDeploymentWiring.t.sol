@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_ROLE, ADMIN_FACTORY_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
@@ -14,7 +14,7 @@ import { UninitializedERC1967Proxy } from "../../mocks/UninitializedERC1967Proxy
  * @title Test_FactoryDeploymentWiring
  * @notice Always-running (no-RPC) coverage for the factory's active-template role-wiring primitives and its
  *         previously fork-only revert branches: the `onlyActiveTemplate` guard (ONLY_ACTIVE_TEMPLATE), the
- *         `executeAsFactory` failure path (FACTORY_CALL_FAILED), and the `executeMarketDeployment` reentrancy
+ *         `executeAsFactory` failure path (a verbatim-bubbled target revert), and the `executeMarketDeployment` reentrancy
  *         guard (NO_ACTIVE_TEMPLATE). The production template exercises these only on a mainnet fork.
  */
 contract Test_FactoryDeploymentWiring is Test {
@@ -40,8 +40,6 @@ contract Test_FactoryDeploymentWiring is Test {
         am.grantRole(DEPLOYER_ROLE, address(this), 0);
 
         template = new MockWiringTemplate(IRoycoFactory(address(factory)));
-        // Empty init arrays count as initialized, which satisfies registerTemplate's isInitialized gate.
-        template.initialize(new bytes32[](0), new bytes[](0));
         factory.registerTemplate(address(template));
 
         // A canned non-zero result so the registry write is clean (avoids the zero-tranche registry skip).
@@ -49,11 +47,11 @@ contract Test_FactoryDeploymentWiring is Test {
             IRoycoProtocolTemplate.DeploymentResult({
                 seniorTranche: makeAddr("ST"),
                 juniorTranche: makeAddr("JT"),
-                liquidityTranche: makeAddr("LT"),
+                liquidityProviderTranche: makeAddr("LPT"),
                 kernel: makeAddr("KERNEL"),
                 accountant: makeAddr("ACCOUNTANT"),
                 ydm: makeAddr("YDM"),
-                ltYdm: makeAddr("LTYDM"),
+                lptYdm: makeAddr("LPTYDM"),
                 extras: ""
             })
         );
@@ -77,13 +75,24 @@ contract Test_FactoryDeploymentWiring is Test {
     // ---------------------------------------------------------------------
 
     function test_ONLY_ACTIVE_TEMPLATE_guardsSetTargetFunctionRole() public {
+        address[] memory targets = new address[](1);
+        targets[0] = WIRE_TARGET;
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = WIRE_SELECTOR;
+        uint64[] memory roleIds = new uint64[](1);
+        roleIds[0] = SYNC_ROLE;
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
-        factory.setMarketTargetFunctionRole(WIRE_TARGET, WIRE_SELECTOR, SYNC_ROLE);
+        factory.setMarketTargetFunctionRole(targets, selectors, roleIds);
     }
 
     function test_ONLY_ACTIVE_TEMPLATE_guardsGrantMarketRole() public {
+        uint64[] memory roleIds = new uint64[](1);
+        roleIds[0] = SYNC_ROLE;
+        address[] memory accounts = new address[](1);
+        accounts[0] = WIRE_ACCOUNT;
+        uint32[] memory delays = new uint32[](1);
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
-        factory.grantMarketRole(SYNC_ROLE, WIRE_ACCOUNT, 0);
+        factory.grantMarketRole(roleIds, accounts, delays);
     }
 
     function test_ONLY_ACTIVE_TEMPLATE_guardsExecuteAsFactory() public {
@@ -107,14 +116,14 @@ contract Test_FactoryDeploymentWiring is Test {
 
         // The registry write landed for all three tranches.
         assertEq(factory.trancheToKernel(makeAddr("ST")), makeAddr("KERNEL"), "ST -> kernel registry write");
-        assertEq(factory.trancheToKernel(makeAddr("LT")), makeAddr("KERNEL"), "LT -> kernel registry write");
+        assertEq(factory.trancheToKernel(makeAddr("LPT")), makeAddr("KERNEL"), "LPT -> kernel registry write");
     }
 
     // ---------------------------------------------------------------------
-    // configureMarketPeriphery: the active-template window spans the post-registration hook
+    // postMarketRegistration: the active-template window spans the post-registration hook
     // ---------------------------------------------------------------------
 
-    function test_Hook_wiringPrimitivesWorkInConfigureMarketPeriphery_afterRegistryWrite() public {
+    function test_Hook_wiringPrimitivesWorkInpostMarketRegistration_afterRegistryWrite() public {
         template.setMode(template.MODE_WIRE_IN_HOOK());
         template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, SYNC_ROLE, WIRE_ACCOUNT);
 
@@ -135,12 +144,13 @@ contract Test_FactoryDeploymentWiring is Test {
     function test_Hook_directCallRejectedForNonFactoryCaller() public {
         IRoycoProtocolTemplate.DeploymentResult memory result;
         vm.expectRevert(abi.encodeWithSignature("ONLY_ROYCO_FACTORY()"));
-        template.configureMarketPeriphery(result, "");
+        template.postMarketRegistration(result, "");
     }
 
     function test_Hook_revertUnwindsRegistryWritesAtomically() public {
         template.setMode(template.MODE_EXEC_FAIL_IN_HOOK());
-        vm.expectPartialRevert(IRoycoFactory.FACTORY_CALL_FAILED.selector);
+        // The mock's deadbeef target has no fallback, so the dispatch bubbles its empty revert data verbatim
+        vm.expectRevert(bytes(""));
         factory.executeMarketDeployment(address(template), "");
 
         // The registry writes that preceded the failing hook were unwound with the whole deployment.
@@ -148,12 +158,13 @@ contract Test_FactoryDeploymentWiring is Test {
     }
 
     // ---------------------------------------------------------------------
-    // FACTORY_CALL_FAILED: a reverting executeAsFactory target bubbles the named error
+    // executeAsFactory failure: a reverting target bubbles its revert data verbatim
     // ---------------------------------------------------------------------
 
-    function test_FACTORY_CALL_FAILED_onRevertingExecuteAsFactoryTarget() public {
+    function test_ExecuteAsFactory_bubblesTargetRevertVerbatim() public {
         template.setMode(template.MODE_EXEC_FAIL());
-        vm.expectPartialRevert(IRoycoFactory.FACTORY_CALL_FAILED.selector);
+        // The mock's deadbeef target has no fallback, so the dispatch bubbles its empty revert data verbatim
+        vm.expectRevert(bytes(""));
         factory.executeMarketDeployment(address(template), "");
     }
 

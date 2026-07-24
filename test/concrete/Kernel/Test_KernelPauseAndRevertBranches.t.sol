@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { stdError } from "../../../lib/forge-std/src/Test.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import { LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { LPT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -24,14 +24,14 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
     uint256 internal constant ST_SEED_WHOLE = 100;
     uint256 internal constant JT_SEED_WHOLE = 30;
 
-    uint256 internal stUnit;
+    uint256 internal collateralUnit;
     uint256 internal quoteUnit;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        collateralUnit = 10 ** uint256(cell.collateralAsset.decimals);
         quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
-        _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
+        _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
     }
 
     function _pauseKernel() internal {
@@ -52,48 +52,48 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
     // ---------------------------------------------------------------------
 
     function test_PausedKernel_bricksSTDeposit() public {
-        stJtVault.mintShares(ST_PROVIDER, stUnit);
+        stJtVault.mintShares(ST_PROVIDER, collateralUnit);
         vm.prank(ST_PROVIDER);
-        stJtVault.approve(address(seniorTranche), stUnit);
+        stJtVault.approve(address(seniorTranche), collateralUnit);
         _pauseKernel();
         vm.prank(ST_PROVIDER);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        seniorTranche.deposit(toTrancheUnits(stUnit), ST_PROVIDER);
+        seniorTranche.deposit(toTrancheUnits(collateralUnit), ST_PROVIDER);
     }
 
     function test_PausedKernel_bricksJTDeposit() public {
-        stJtVault.mintShares(JT_PROVIDER, stUnit);
+        stJtVault.mintShares(JT_PROVIDER, collateralUnit);
         vm.prank(JT_PROVIDER);
-        stJtVault.approve(address(juniorTranche), stUnit);
+        stJtVault.approve(address(juniorTranche), collateralUnit);
         _pauseKernel();
         vm.prank(JT_PROVIDER);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        juniorTranche.deposit(toTrancheUnits(stUnit), JT_PROVIDER);
+        juniorTranche.deposit(toTrancheUnits(collateralUnit), JT_PROVIDER);
     }
 
-    function test_PausedKernel_bricksInKindLTDeposit() public {
-        address a = makeAddr("P_LT_INKIND");
-        accessManager.grantRole(LT_LP_ROLE, a, 0);
+    function test_PausedKernel_bricksInKindLPTDeposit() public {
+        address a = makeAddr("P_LPT_INKIND");
+        accessManager.grantRole(LPT_LP_ROLE, a, 0);
         uint256 bptAmount = 10e18;
         _mintBptTo(a, bptAmount, 10 * quoteUnit);
         vm.prank(a);
-        bpt.approve(address(liquidityTranche), bptAmount);
+        bpt.approve(address(liquidityProviderTranche), bptAmount);
         _pauseKernel();
         vm.prank(a);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        liquidityTranche.deposit(toTrancheUnits(bptAmount), a);
+        liquidityProviderTranche.deposit(toTrancheUnits(bptAmount), a);
     }
 
-    function test_PausedKernel_bricksMultiAssetLTDeposit() public {
-        address a = makeAddr("P_LT_MULTI");
-        accessManager.grantRole(LT_LP_ROLE, a, 0);
+    function test_PausedKernel_bricksMultiAssetLPTDeposit() public {
+        address a = makeAddr("P_LPT_MULTI");
+        accessManager.grantRole(LPT_LP_ROLE, a, 0);
         quoteToken.mint(a, 10 * quoteUnit);
         vm.prank(a);
-        quoteToken.approve(address(liquidityTranche), 10 * quoteUnit);
+        quoteToken.approve(address(liquidityProviderTranche), 10 * quoteUnit);
         _pauseKernel();
         vm.prank(a);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        liquidityTranche.depositMultiAsset(0, 10 * quoteUnit, 0, a);
+        liquidityProviderTranche.depositMultiAsset(0, 10 * quoteUnit, 0, a);
     }
 
     // ---------------------------------------------------------------------
@@ -116,20 +116,20 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
         juniorTranche.redeem(shares, JT_PROVIDER, JT_PROVIDER);
     }
 
-    function test_PausedKernel_bricksInKindLTRedeem() public {
-        uint256 shares = liquidityTranche.balanceOf(LT_PROVIDER) / 2;
+    function test_PausedKernel_bricksInKindLPTRedeem() public {
+        uint256 shares = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 2;
         _pauseKernel();
-        vm.prank(LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        liquidityTranche.redeem(shares, LT_PROVIDER, LT_PROVIDER);
+        liquidityProviderTranche.redeem(shares, LPT_PROVIDER, LPT_PROVIDER);
     }
 
-    function test_PausedKernel_bricksMultiAssetLTRedeem() public {
-        uint256 shares = liquidityTranche.balanceOf(LT_PROVIDER) / 2;
+    function test_PausedKernel_bricksMultiAssetLPTRedeem() public {
+        uint256 shares = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 2;
         _pauseKernel();
-        vm.prank(LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        liquidityTranche.redeemMultiAsset(shares, 0, 0, LT_PROVIDER, LT_PROVIDER);
+        liquidityProviderTranche.redeemMultiAsset(shares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
     }
 
     // ---------------------------------------------------------------------
@@ -173,11 +173,11 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
      *      sync, so an integrator sizing a deposit or redemption learns it is impossible without eating a revert
      */
     function test_PausedKernel_MaxViewsReturnZeroWithoutReverting() public {
-        // A live LT position so the multi-asset maximum is nonzero before the pause, isolating the pause as the cause
-        _seedLT(5e18, 0, 5 * quoteUnit);
+        // A live LPT position so the multi-asset maximum is nonzero before the pause, isolating the pause as the cause
+        _seedLPT(5e18, 0, 5 * quoteUnit);
         _sync();
         assertGt(seniorTranche.maxRedeem(ST_PROVIDER), 0, "senior redemption capacity must be live before the pause");
-        assertGt(liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER), 0, "the multi-asset maximum must be live before the pause");
+        assertGt(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), 0, "the multi-asset maximum must be live before the pause");
 
         _pauseKernel();
 
@@ -185,16 +185,18 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
         assertEq(seniorTranche.maxRedeem(ST_PROVIDER), 0, "a paused kernel must zero senior redemption capacity");
         assertEq(toUint256(juniorTranche.maxDeposit(JT_PROVIDER)), 0, "a paused kernel must zero junior deposit capacity");
         assertEq(juniorTranche.maxRedeem(JT_PROVIDER), 0, "a paused kernel must zero junior redemption capacity");
-        assertEq(toUint256(liquidityTranche.maxDeposit(LT_PROVIDER)), 0, "a paused kernel must zero liquidity deposit capacity");
-        assertEq(liquidityTranche.maxRedeem(LT_PROVIDER), 0, "a paused kernel must zero liquidity in-kind redemption capacity");
-        assertEq(liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER), 0, "a paused kernel must zero the multi-asset redemption maximum");
+        assertEq(toUint256(liquidityProviderTranche.maxDeposit(LPT_PROVIDER)), 0, "a paused kernel must zero liquidity deposit capacity");
+        assertEq(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), 0, "a paused kernel must zero liquidity in-kind redemption capacity");
+        assertEq(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), 0, "a paused kernel must zero the multi-asset redemption maximum");
     }
 
     /**
      * @notice A paused kernel reverts every price-bearing read so an integrator can never consume a stale or faulty
      *         mark while the market is halted for a mispricing or other incident
-     * @dev Previews and conversions route through the kernel's whenNotPaused previewSyncTrancheAccounting, and the
-     *      senior share rate the venue prices against is itself whenNotPaused, so the pool cannot trade on a paused mark
+     * @dev In-kind previews simulate the real whenNotPaused kernel deposit and redeem entrypoints, so the pause
+     *      bubbles out of them exactly as it would out of execution. Conversions and multi-asset previews route
+     *      through the kernel's whenNotPaused previewSyncTrancheAccountingFor, and the senior share rate the venue
+     *      prices against is itself whenNotPaused, so the pool cannot trade on a paused mark
      */
     function test_PausedKernel_PriceBearingReadsRevert() public {
         _pauseKernel();
@@ -208,9 +210,9 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         seniorTranche.convertToShares(toTrancheUnits(1e18));
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        liquidityTranche.previewDepositMultiAsset(1e18, quoteUnit);
+        liquidityProviderTranche.previewDepositMultiAsset(1e18, quoteUnit);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        liquidityTranche.previewRedeemMultiAsset(1e18);
+        liquidityProviderTranche.previewRedeemMultiAsset(1e18);
         // The senior share rate the Balancer pool prices its senior leg against also reverts under the pause
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         kernel.getRate();
@@ -222,7 +224,7 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
 
     /**
      * @notice A tranche-level pause is inert: it sets the tranche's own flag (bound for parity with the other
-     *         components, mirroring the accountant) but gates nothing, because every tranche operation and token
+     *         Constants, mirroring the accountant) but gates nothing, because every tranche operation and token
      *         movement is gated on the kernel's pause. Only pausing the kernel freezes the tranche
      * @dev An operator who reaches for a tranche pause changes nothing, so the market's single pause authority is the
      *      kernel: this pins that a tranche flag is inert while a kernel pause is enforced on the same flow
@@ -255,10 +257,10 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
         _pauseKernel();
         vm.prank(UNPAUSER);
         kernel.unpause();
-        stJtVault.mintShares(ST_PROVIDER, stUnit);
+        stJtVault.mintShares(ST_PROVIDER, collateralUnit);
         vm.startPrank(ST_PROVIDER);
-        stJtVault.approve(address(seniorTranche), stUnit);
-        seniorTranche.deposit(toTrancheUnits(stUnit), ST_PROVIDER); // no revert
+        stJtVault.approve(address(seniorTranche), collateralUnit);
+        seniorTranche.deposit(toTrancheUnits(collateralUnit), ST_PROVIDER); // no revert
         vm.stopPrank();
         _sync(); // no revert
     }
@@ -274,7 +276,7 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
         accountant.setMaxYieldShares(0.6e18, 0.4e18 + 1);
     }
 
-    /// @dev A sum that overflows uint64 panics (0x11) in the checked `_maxJT + _maxLT` addition before the named
+    /// @dev A sum that overflows uint64 panics (0x11) in the checked `_maxJT + _maxLPT` addition before the named
     ///      INVALID_MAX_YIELD_SHARE_CONFIG can be raised, so the arithmetic panic is the observed revert.
     function test_MaxYieldShareSum_OverflowingUint64_PanicsBeforeNamedError() public {
         vm.prank(ACCOUNTANT_ADMIN);

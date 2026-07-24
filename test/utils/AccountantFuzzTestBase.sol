@@ -11,7 +11,7 @@ import { RoycoTestMath } from "./RoycoTestMath.sol";
  * @title AccountantFuzzTestBase
  * @notice Shared mock-kernel fuzz base for the accountant property suite, extending AccountantTestBase's
  *         deploy and seeding surface with the mirror-input marshalling the fuzz properties need
- * @dev Checkpoints are always constructed through legal kernel calls (post-op deposits, pre-op syncs, LT
+ * @dev Checkpoints are always constructed through legal kernel calls (post-op deposits, pre-op syncs, LPT
  *      commits), never through storage writes, so every fuzzed state is a state production can actually reach
  */
 abstract contract AccountantFuzzTestBase is AccountantTestBase {
@@ -36,67 +36,63 @@ abstract contract AccountantFuzzTestBase is AccountantTestBase {
      *      sync has initialized the accrual timestamps (a fresh accountant holds zero timestamps and follows the
      *      first-sync initialization path instead)
      * @param _jtRate The pinned instantaneous JT yield share the mock JT YDM returns
-     * @param _ltRate The pinned instantaneous LT yield share the mock LT YDM returns
+     * @param _lptRate The pinned instantaneous LPT yield share the mock LPT YDM returns
      */
-    function _premiumWindow(uint256 _jtRate, uint256 _ltRate) internal view returns (uint256 twJT, uint256 twLT, uint256 elapsedSincePayment) {
+    function _premiumWindow(uint256 _jtRate, uint256 _lptRate) internal view returns (uint256 twJT, uint256 twLPT, uint256 elapsedSincePayment) {
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         uint256 elapsedSinceAccrual = block.timestamp - s.lastYieldShareAccrualTimestamp;
         twJT = s.twJTYieldShareAccruedWAD + Math.min(_jtRate, DEFAULT_MAX_JT_YIELD_SHARE_WAD) * elapsedSinceAccrual;
-        twLT = s.twLTYieldShareAccruedWAD + Math.min(_ltRate, DEFAULT_MAX_LT_YIELD_SHARE_WAD) * elapsedSinceAccrual;
+        twLPT = s.twLPTYieldShareAccruedWAD + Math.min(_lptRate, DEFAULT_MAX_LPT_YIELD_SHARE_WAD) * elapsedSinceAccrual;
         elapsedSincePayment = block.timestamp - s.lastPremiumPaymentTimestamp;
     }
 
     /**
      * @dev Marshals the committed checkpoint plus caller-supplied premium-window values into a complete
-     *      RoycoTestMath.SyncInputs mirror for the sync about to run against (_stRawNew, _jtRawNew, _ltRawNew) marks.
+     *      RoycoTestMath.SyncInputs mirror for the sync about to run against (_collateralNew, _lptRawNew) marks.
      *      The premium-window values are caller-supplied because their bookkeeping differs between the
      *      first-ever sync (both timestamps initialize to now, forcing the instantaneous branch) and every
      *      later one (see _premiumWindow)
      */
     function _mirrorInput(
-        uint256 _stRawNew,
-        uint256 _jtRawNew,
-        uint256 _ltRawNew,
+        uint256 _collateralNew,
+        uint256 _lptRawNew,
         uint256 _twJT,
-        uint256 _twLT,
+        uint256 _twLPT,
         uint256 _elapsedSincePayment,
         uint256 _jtRate,
-        uint256 _ltRate
+        uint256 _lptRate
     )
         internal
         view
         returns (RoycoTestMath.SyncInputs memory in_)
     {
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        in_.stRawNAVLast = toUint256(s.lastSTRawNAV);
-        in_.jtRawNAVLast = toUint256(s.lastJTRawNAV);
+        in_.collateralNAVLast = toUint256(s.lastCollateralNAV);
         in_.stEffectiveNAVLast = toUint256(s.lastSTEffectiveNAV);
         in_.jtEffectiveNAVLast = toUint256(s.lastJTEffectiveNAV);
-        in_.jtCoverageImpermanentLossLast = toUint256(s.lastJTCoverageImpermanentLoss);
+        in_.jtImpermanentLossLast = toUint256(s.lastJTImpermanentLoss);
         in_.marketStateLast = RoycoTestMath.MarketState(uint8(s.lastMarketState));
         in_.fixedTermEndTimestampLast = s.fixedTermEndTimestamp;
-        in_.stRawNAVDelta = int256(_stRawNew) - int256(in_.stRawNAVLast);
-        in_.jtRawNAVDelta = int256(_jtRawNew) - int256(in_.jtRawNAVLast);
-        in_.ltRawNAVNew = _ltRawNew;
+        in_.collateralNAVDelta = int256(_collateralNew) - int256(in_.collateralNAVLast);
+        in_.lptRawNAVNew = _lptRawNew;
         in_.jtTwYieldShareAccrual = _twJT;
-        in_.ltTwYieldShareAccrual = _twLT;
+        in_.lptTwYieldShareAccrual = _twLPT;
         in_.elapsedSincePremiumPayment = _elapsedSincePayment;
         in_.jtInstYieldShareWAD = _jtRate;
-        in_.ltInstYieldShareWAD = _ltRate;
+        in_.lptInstYieldShareWAD = _lptRate;
         in_.maxJTYieldShareWAD = DEFAULT_MAX_JT_YIELD_SHARE_WAD;
-        in_.maxLTYieldShareWAD = DEFAULT_MAX_LT_YIELD_SHARE_WAD;
+        in_.maxLPTYieldShareWAD = DEFAULT_MAX_LPT_YIELD_SHARE_WAD;
         in_.stProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
         in_.jtProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
         in_.jtYieldShareProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
-        in_.ltYieldShareProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
+        in_.lptYieldShareProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
         in_.nowTimestamp = block.timestamp;
         in_.fixedTermDuration = DEFAULT_FIXED_TERM_DURATION_SECONDS;
         in_.minCoverageWAD = DEFAULT_MIN_COVERAGE_WAD;
         in_.coverageLiquidationUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
-        // Read the effective dust the deployed accountant actually enforces (it maintains the field as the sum
-        // of the two configured raw-NAV dust tolerances) instead of hard-coding 0, so a suite that deploys with
-        // nonzero dust tolerances feeds its mirror the same fee/premium dust gate production applies
-        in_.effectiveDust = toUint256(s.effectiveNAVDustTolerance);
+        // Read the dust tolerance the deployed accountant actually enforces instead of hard-coding 0, so a suite
+        // that deploys with a nonzero dust tolerance feeds its mirror the same fee/premium dust gate production applies
+        in_.dustTolerance = toUint256(s.dustTolerance);
         in_.minLiquidityWAD = DEFAULT_MIN_LIQUIDITY_WAD;
     }
 }

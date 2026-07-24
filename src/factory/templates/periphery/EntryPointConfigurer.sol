@@ -35,7 +35,7 @@ abstract contract EntryPointConfigurer {
 
     /**
      * @notice Applies the specified tranche configurations on the entry point through the factory
-     * @dev A market always has a senior tranche but may lack a junior or liquidity tranche, so any zero-address
+     * @dev A market always has a senior tranche but may lack a junior or liquidity provider tranche, so any zero-address
      *      tranche and its paired config are dropped before the call, the entry point rejects a zero tranche and a
      *      caller passes zero for an absent one
      * @param _factory The Royco factory driving the deployment, used to execute the admin-gated call

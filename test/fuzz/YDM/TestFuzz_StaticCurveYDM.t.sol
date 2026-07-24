@@ -38,9 +38,9 @@ contract TestFuzz_YieldShare_StaticCurveYDM is Test {
         yT = bound(_yT, 1, WAD); // uniform over the positive share range (the contract treats yT == 0 as uninitialized)
 
         // Below-kink rise: at most yT (so y0 >= 0) and at most the uint64-slope fit for a run of targetU
-        uint256 riseLtMax = uint256(type(uint64).max) * targetU / WAD;
-        if (riseLtMax > yT) riseLtMax = yT;
-        y0 = yT - bound(_riseLt, 0, riseLtMax); // uniform over the feasible below-kink rises incl. the flat edge
+        uint256 riseLptMax = uint256(type(uint64).max) * targetU / WAD;
+        if (riseLptMax > yT) riseLptMax = yT;
+        y0 = yT - bound(_riseLt, 0, riseLptMax); // uniform over the feasible below-kink rises incl. the flat edge
 
         // Above-kink rise: at most WAD - yT (so yFull <= WAD) and at most the uint64-slope fit for a run of WAD - targetU
         uint256 riseGteMax = uint256(type(uint64).max) * (WAD - targetU) / WAD;

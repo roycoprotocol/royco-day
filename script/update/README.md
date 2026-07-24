@@ -75,7 +75,7 @@ script/update/
 ├── kernel/
 │   ├── SetProtocolFeeRecipient.s.sol
 │   ├── SetSeniorTrancheSelfLiquidationBonus.s.sol
-│   └── SetChainlinkOracle.s.sol
+│   └── SetCollateralAssetOracle.s.sol
 └── factory/
     └── SetScheduledOperationsExpiry.s.sol
 ```

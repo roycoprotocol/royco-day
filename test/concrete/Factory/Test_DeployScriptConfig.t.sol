@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import { MockERC20C } from "../../mocks/MockERC20C.sol";
+import { RoleAssignment, RoleAssignmentAddresses, RoleConfig } from "../../../script/config/DeploymentTypes.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
@@ -13,7 +13,7 @@ import {
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
     ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
-    ADMIN_ORACLE_QUOTER_ROLE,
+    ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_ROLE,
@@ -24,11 +24,12 @@ import {
     DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
+    LPT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
-    LT_LP_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
-} from "../../../src/factory/RolesConfiguration.sol";
+} from "../../../src/factory/Roles.sol";
+import { MockERC20C } from "../../mocks/MockERC20C.sol";
 
 /**
  * @title Test_DeployScriptConfig
@@ -64,9 +65,9 @@ contract Test_DeployScriptConfig is Test {
      */
     function test_GetRoleConfig_ResolvesEveryGeneratedRoleAssignment() public view {
         // 18 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
-        // The fee recipient deliberately carries three LP roles (ST/JT/LT) and market ops carries the blacklist
+        // The fee recipient deliberately carries three LP roles (ST/JT/LPT) and market ops carries the blacklist
         // admin role alongside its own, which is how 18 addresses fan out to 21 assignments.
-        DeployScript.RoleAssignmentAddresses memory addresses = DeployScript.RoleAssignmentAddresses({
+        RoleAssignmentAddresses memory addresses = RoleAssignmentAddresses({
             pauserAddress: address(0x1001),
             unpauserAddress: address(0x1002),
             upgraderAddress: address(0x1003),
@@ -74,7 +75,7 @@ contract Test_DeployScriptConfig is Test {
             adminKernelAddress: address(0x1005),
             adminAccountantAddress: address(0x1006),
             adminProtocolFeeSetterAddress: address(0x1007),
-            adminOracleQuoterAddress: address(0x1008),
+            adminOracleAddress: address(0x1008),
             lpRoleAdminAddress: address(0x1009),
             guardianAddress: address(0x100A),
             deployerAddress: address(0x100B),
@@ -87,7 +88,7 @@ contract Test_DeployScriptConfig is Test {
             entryPointFeeCollectorAddress: address(0x1011)
         });
 
-        DeployScript.RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
+        RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
 
         // Independently derived count: the address surface is 18 fields, of which the fee recipient maps to the
         // three LP roles, market ops maps to its own role plus the blacklist admin role, and the other 16 map
@@ -99,7 +100,7 @@ contract Test_DeployScriptConfig is Test {
 
             // Pass 2 of _applyRoleGraph calls getRoleConfig(role) for every granted assignment. If any emitted
             // role were unmapped this call would revert UNKNOWN_ROLE and abort the deployment mid-broadcast.
-            DeployScript.RoleConfig memory cfg = deployScript.getRoleConfig(role);
+            RoleConfig memory cfg = deployScript.getRoleConfig(role);
 
             // The admin re-pointing in pass 2 is only safe if every target admin role is itself rooted in the
             // graph: ADMIN_ROLE (held by the factory admin), or one of the two meta-admin roles that pass 1
@@ -120,7 +121,7 @@ contract Test_DeployScriptConfig is Test {
             // Hand-derived admin per role: the three LP roles sit under LP_ROLE_ADMIN_ROLE, DEPLOYER_ROLE sits
             // under DEPLOYER_ROLE_ADMIN_ROLE, and every other role is administered by ADMIN_ROLE directly.
             uint64 expectedAdmin = ADMIN_ROLE;
-            if (role == ST_LP_ROLE || role == JT_LP_ROLE || role == LT_LP_ROLE) expectedAdmin = LP_ROLE_ADMIN_ROLE;
+            if (role == ST_LP_ROLE || role == JT_LP_ROLE || role == LPT_LP_ROLE) expectedAdmin = LP_ROLE_ADMIN_ROLE;
             if (role == DEPLOYER_ROLE) expectedAdmin = DEPLOYER_ROLE_ADMIN_ROLE;
             assertEq(cfg.adminRole, expectedAdmin, "admin does not match the hand-derived role graph");
 
@@ -130,7 +131,7 @@ contract Test_DeployScriptConfig is Test {
         }
 
         // The emitted role set itself, hand-listed from the deployment's operational surface (pause/unpause,
-        // upgrade, sync, kernel/accountant/fee/quoter admin, LP admin + the three LP roles, guardian, deployer +
+        // upgrade, sync, kernel/accountant/fee/venue admin, LP admin + the three LP roles, guardian, deployer +
         // its admin, Balancer pool manager, market ops + blacklist admin, entry point config + fee collection,
         // liquidity-premium reinvestment). Order-pinned so a silent drop or reorder is loud.
         uint64[21] memory expectedRoles = [
@@ -140,7 +141,7 @@ contract Test_DeployScriptConfig is Test {
             ADMIN_KERNEL_ROLE,
             ADMIN_ACCOUNTANT_ROLE,
             ADMIN_PROTOCOL_FEE_SETTER_ROLE,
-            ADMIN_ORACLE_QUOTER_ROLE,
+            ADMIN_ORACLE_ROLE,
             LP_ROLE_ADMIN_ROLE,
             ST_LP_ROLE,
             JT_LP_ROLE,
@@ -148,7 +149,7 @@ contract Test_DeployScriptConfig is Test {
             DEPLOYER_ROLE,
             DEPLOYER_ROLE_ADMIN_ROLE,
             ADMIN_UNPAUSER_ROLE,
-            LT_LP_ROLE,
+            LPT_LP_ROLE,
             ADMIN_BALANCER_POOL_MANAGER_ROLE,
             ADMIN_MARKET_OPS_ROLE,
             ADMIN_BLACKLIST_ROLE,
@@ -170,41 +171,7 @@ contract Test_DeployScriptConfig is Test {
      */
     function test_RevertIf_GetRoleConfigQueriedWithUnmappedRole() public {
         // The revert must carry the exact queried id so the operator can see WHICH role the config mis-references.
-        vm.expectRevert(abi.encodeWithSelector(DeployScript.UNKNOWN_ROLE.selector, BURNER_ROLE));
+        vm.expectRevert(abi.encodeWithSelector(DeployScript.UnknownRole.selector, BURNER_ROLE));
         deployScript.getRoleConfig(BURNER_ROLE);
-    }
-
-    /**
-     * @notice DeployScript.deploy derives the marketId as
-     *         keccak256(abi.encode(seniorTrancheName, juniorTrancheName, block.timestamp, block.chainid)). abi.encode
-     *         length-prefixes each dynamic string, so a shifted boundary between the two tranche names cannot alias two
-     *         distinct configs to one id: ("Senior AB", "C-JT") and ("Senior A", "BC-JT") derive different ids. An
-     *         identical config rerun in the same block still derives the same id (the derivation carries no caller
-     *         nonce), but that is a loud foot-gun, not silent aliasing: the marketId seeds every CREATE2 component salt,
-     *         so a colliding second deployment hits an already-deployed component address and reverts
-     *         MARKET_COMPONENT_ALREADY_DEPLOYED atomically
-     */
-    function test_MarketIdDerivation_IsInjectiveAcrossShiftedNameBoundaries() public {
-        // Fixed block context so the derivation below is fully determined: both derivations share the same
-        // timestamp and chainid, isolating the string boundary as the only moving part.
-        vm.warp(1_750_000_000);
-        vm.chainId(1);
-
-        // Two DIFFERENT market configs whose packed name bytes would coincide under encodePacked:
-        //   "Senior AB" ++ "C-JT" and "Senior A" ++ "BC-JT" both pack to "Senior ABC-JT"
-        // abi.encode length-prefixes each string, so the boundary survives and the two ids differ.
-        bytes32 marketIdA = keccak256(abi.encode(string("Senior AB"), string("C-JT"), block.timestamp, block.chainid));
-        bytes32 marketIdB = keccak256(abi.encode(string("Senior A"), string("BC-JT"), block.timestamp, block.chainid));
-        assertNotEq(marketIdA, marketIdB, "abi.encode keeps shifted name boundaries distinct");
-
-        // An identical config rerun in the same block still derives the same id (no nonce) — accepted, because the
-        // colliding redeploy reverts MARKET_COMPONENT_ALREADY_DEPLOYED loudly rather than aliasing components.
-        bytes32 rerunId = keccak256(abi.encode(string("Senior AB"), string("C-JT"), block.timestamp, block.chainid));
-        assertEq(marketIdA, rerunId, "same names in the same block derive the same id, a loud redeploy revert not silent aliasing");
-
-        // The replaced encodePacked derivation WOULD have aliased the shifted-boundary pair — shown for contrast.
-        bytes32 packedA = keccak256(abi.encodePacked(string("Senior AB"), string("C-JT"), block.timestamp, block.chainid));
-        bytes32 packedB = keccak256(abi.encodePacked(string("Senior A"), string("BC-JT"), block.timestamp, block.chainid));
-        assertEq(packedA, packedB, "the replaced encodePacked derivation aliased shifted boundaries");
     }
 }

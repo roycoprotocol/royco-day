@@ -12,10 +12,11 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     JT_LP_ROLE,
-    LT_LP_ROLE,
+    LPT_LP_ROLE,
     PUBLIC_ROLE,
-    ST_LP_ROLE
-} from "../../src/factory/RolesConfiguration.sol";
+    ST_LP_ROLE,
+    SYNC_ROLE
+} from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
@@ -30,7 +31,7 @@ import { DayMarketTestBase } from "./DayMarketTestBase.sol";
  * @notice The shared fixture for RoycoDayEntryPoint suites: deploys the entry point behind an ERC1967 proxy over a
  *         full Day market, wires the production-shaped role bindings, and provides request/execute/cancel helpers
  * @dev Suites call _deployMarket(...) with their chosen cell/params, then _deployEntryPoint(). Time helpers route
- *      through _warpAndRefreshFeed so delay warps never trip the ST/JT quoter's Chainlink staleness gate
+ *      through _warpAndRefreshFeed so delay warps never trip the kernel's collateral oracle staleness gate
  */
 abstract contract EntryPointTestBase is DayMarketTestBase {
     using Math for uint256;
@@ -44,6 +45,13 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
 
     /// @dev Default redemption delay (kept well under the 1-day oracle staleness threshold)
     uint24 internal constant DEFAULT_REDEMPTION_DELAY = 1 hours;
+
+    /// @dev Default expiry windows are maximal: the resolved expiry saturates at type(uint32).max, so requests
+    ///      effectively never expire and the base suites keep their behavior
+    uint32 internal constant DEFAULT_DEPOSIT_EXPIRY = type(uint32).max;
+
+    /// @dev Default redemption expiry window is maximal (never expires); see DEFAULT_DEPOSIT_EXPIRY
+    uint32 internal constant DEFAULT_REDEMPTION_EXPIRY = type(uint32).max;
 
     /// @dev Default executor bonus (1%)
     uint64 internal constant DEFAULT_EXECUTOR_BONUS = 0.01e18;
@@ -77,7 +85,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
 
     /**
      * @notice Deploys the entry point proxy over the already-deployed market and wires its production role bindings
-     * @dev Must be called after _deployMarket. Registers all three tranches (ST, JT, LT) enabled with the default
+     * @dev Must be called after _deployMarket. Registers all three tranches (ST, JT, LPT) enabled with the default
      *      delays, grants the entry point the three LP roles, and creates the user/executor/admin actors
      */
     function _deployEntryPoint() internal virtual {
@@ -85,7 +93,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         entryPointFactory = new MockRoycoFactory(address(accessManager));
         entryPointFactory.setTrancheKernel(address(seniorTranche), address(kernel));
         entryPointFactory.setTrancheKernel(address(juniorTranche), address(kernel));
-        entryPointFactory.setTrancheKernel(address(liquidityTranche), address(kernel));
+        entryPointFactory.setTrancheKernel(address(liquidityProviderTranche), address(kernel));
         vm.label(address(entryPointFactory), "MockRoycoFactory");
 
         // Deploy the entry point behind an ERC1967 proxy, initialized with no tranche configs: the initial
@@ -94,8 +102,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         entryPoint = IRoycoDayEntryPoint(
             address(
                 new ERC1967Proxy(
-                    address(entryPointImpl),
-                    abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
+                    address(entryPointImpl), abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
                 )
             )
         );
@@ -125,7 +132,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
             ),
             PUBLIC_ROLE
         );
-        accessManager.setTargetFunctionRole(ep, _sels(IRoycoDayEntryPoint.pokeOracleClock.selector), PUBLIC_ROLE);
+        accessManager.setTargetFunctionRole(ep, _sels(IRoycoDayEntryPoint.pokeCollateralAssetOracle.selector), PUBLIC_ROLE);
         accessManager.setTargetFunctionRole(ep, _sels(IRoycoDayEntryPoint.modifyTrancheConfigs.selector), ADMIN_ENTRY_POINT_ROLE);
         accessManager.setTargetFunctionRole(ep, _sels(IRoycoDayEntryPoint.collectProtocolFees.selector), ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE);
         accessManager.setTargetFunctionRole(ep, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
@@ -135,7 +142,9 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         // The entry point deposits, redeems, and receives escrowed shares
         accessManager.grantRole(ST_LP_ROLE, ep, 0);
         accessManager.grantRole(JT_LP_ROLE, ep, 0);
-        accessManager.grantRole(LT_LP_ROLE, ep, 0);
+        accessManager.grantRole(LPT_LP_ROLE, ep, 0);
+        // The entry point syncs the kernel to price its request-time references, mirroring the template's entry point SYNC grant
+        accessManager.grantRole(SYNC_ROLE, ep, 0);
 
         // Apply the initial tranche configs through the factory, as production market deployments do: the factory
         // holds ADMIN_ENTRY_POINT_ROLE (mirroring RoycoFactory.initialize) and forwards the admin-gated call
@@ -153,18 +162,40 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         EXECUTOR = _generateEntryPointUser("EXECUTOR");
     }
 
-    /// @notice Builds the default 3-tranche (ST, JT, LT) config arrays: enabled, default delays, no oracle clock
+    /// @notice Builds the default 3-tranche (ST, JT, LPT) config arrays: enabled, default delays, oracle gate disabled
     function _defaultTrancheConfigs() internal view returns (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) {
         tranches = new address[](3);
         tranches[0] = address(seniorTranche);
         tranches[1] = address(juniorTranche);
-        tranches[2] = address(liquidityTranche);
+        tranches[2] = address(liquidityProviderTranche);
         configs = new IRoycoDayEntryPoint.TrancheConfig[](3);
         for (uint256 i = 0; i < 3; ++i) {
             configs[i] = IRoycoDayEntryPoint.TrancheConfig({
-                enabled: true, depositDelaySeconds: DEFAULT_DEPOSIT_DELAY, redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY, oracleClock: address(0)
+                enabled: true,
+                depositDelaySeconds: DEFAULT_DEPOSIT_DELAY,
+                depositExpirySeconds: DEFAULT_DEPOSIT_EXPIRY,
+                redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY,
+                redemptionExpirySeconds: DEFAULT_REDEMPTION_EXPIRY,
+                gateByOracleUpdate: false
             });
         }
+    }
+
+    /// @notice Re-configures a single tranche with finite deposit/redemption expiry windows, leaving delays at their defaults
+    /// @dev Applied through the factory (which holds ADMIN_ENTRY_POINT_ROLE), mirroring the deployment-time config path
+    function _setTrancheExpiry(address _tranche, uint32 _depositExpirySeconds, uint32 _redemptionExpirySeconds) internal {
+        address[] memory tranches = new address[](1);
+        tranches[0] = _tranche;
+        IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](1);
+        configs[0] = IRoycoDayEntryPoint.TrancheConfig({
+            enabled: true,
+            depositDelaySeconds: DEFAULT_DEPOSIT_DELAY,
+            depositExpirySeconds: _depositExpirySeconds,
+            redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY,
+            redemptionExpirySeconds: _redemptionExpirySeconds,
+            gateByOracleUpdate: false
+        });
+        entryPointFactory.executeAsFactory(address(entryPoint), abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
     }
 
     /// @notice Creates a labeled, funded actor holding all three tranche LP roles
@@ -173,7 +204,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         vm.deal(user, 100 ether);
         accessManager.grantRole(ST_LP_ROLE, user, 0);
         accessManager.grantRole(JT_LP_ROLE, user, 0);
-        accessManager.grantRole(LT_LP_ROLE, user, 0);
+        accessManager.grantRole(LPT_LP_ROLE, user, 0);
     }
 
     // =============================
@@ -181,8 +212,8 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice Applies senior PnL and re-syncs, so quoter-cache state models the real transaction boundary
-     * @dev The kernel's transient quoter cache clears at transaction end on-chain, but a forge test without isolation
+     * @notice Applies senior PnL and re-syncs, so venue-cache state models the real transaction boundary
+     * @dev The kernel's transient price cache clears at transaction end on-chain, but a forge test without isolation
      *      runs as ONE transaction: a cache warmed by an earlier kernel call in the same test would leak the pre-PnL
      *      rate into the entry point's execution-time forfeiture quotes (making forfeitures silently read as zero)
      *      Syncing after the PnL re-initializes the cache at the fresh rate, matching what any real cross-transaction
@@ -199,9 +230,9 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         _sync();
     }
 
-    /// @notice Applies liquidity tranche PnL and re-syncs (see applySTPnL for the transaction-boundary rationale)
-    function applyLTPnL(int256 _bps) internal virtual override {
-        super.applyLTPnL(_bps);
+    /// @notice Applies liquidity provider tranche PnL and re-syncs (see applySTPnL for the transaction-boundary rationale)
+    function applyLPTPnL(int256 _bps) internal virtual override {
+        super.applyLPTPnL(_bps);
         _sync();
     }
 
@@ -209,10 +240,10 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     // Funding Helpers
     // =============================
 
-    /// @notice Funds an account with a tranche's asset: shared vault shares for ST/JT, quote-backed BPT for LT
+    /// @notice Funds an account with a tranche's asset: shared vault shares for ST/JT, quote-backed BPT for LPT
     /// @dev The BPT leg is minted against a value-matched quote-only pool leg so the pool's NAV-per-BPT stays ~1.0
     function _fundTrancheAssets(address _to, address _tranche, uint256 _amount) internal virtual {
-        if (_tranche == address(liquidityTranche)) {
+        if (_tranche == address(liquidityProviderTranche)) {
             uint256 quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
             uint256 quoteLeg = _amount.mulDiv(quoteUnit, WAD, Math.Rounding.Ceil) + quoteUnit;
             quoteToken.mint(address(this), quoteLeg);
@@ -228,7 +259,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     /**
      * @notice Acquires tranche shares for an account through the production deposit path
      * @dev Funds the account with the tranche's asset and deposits it directly on the tranche (the account holds
-     *      the LP roles). ST deposits are liquidity-gated, so LT capacity is auto-topped-up first
+     *      the LP roles). ST deposits are liquidity-gated, so LPT capacity is auto-topped-up first
      * @return shares The tranche shares minted to the account
      */
     function _acquireTrancheShares(address _user, address _tranche, uint256 _assets) internal virtual returns (uint256 shares) {
@@ -261,7 +292,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         address asset = IRoycoVaultTranche(_tranche).asset();
         vm.startPrank(_user);
         IERC20Like(asset).approve(address(entryPoint), _assets);
-        (nonce, executableAt) = entryPoint.requestDeposit(_tranche, toTrancheUnits(_assets), _receiver, _executorBonusWAD);
+        (nonce, executableAt,) = entryPoint.requestDeposit(_tranche, toTrancheUnits(_assets), _receiver, _executorBonusWAD);
         vm.stopPrank();
     }
 
@@ -270,7 +301,9 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         return _requestDeposit(_user, _tranche, _assets, _user, DEFAULT_EXECUTOR_BONUS);
     }
 
-    /// @notice Requests a redemption as _user, acquiring and approving the tranche shares first
+    /// @notice Requests a redemption as _user, auto-selecting the redemption mode by tranche
+    /// @dev The liquidity provider tranche defaults to OPTIMIZED (matching the pre-mode max-routing behavior); the
+    ///      senior and junior tranches default to INKIND (the only mode they support). Use the mode overload to pin one
     function _requestRedemption(
         address _user,
         address _tranche,
@@ -282,9 +315,28 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         virtual
         returns (uint256 nonce, uint32 executableAt)
     {
+        IRoycoDayEntryPoint.RedemptionMode mode = (_tranche == address(liquidityProviderTranche))
+            ? IRoycoDayEntryPoint.RedemptionMode.OPTIMIZED
+            : IRoycoDayEntryPoint.RedemptionMode.INKIND;
+        return _requestRedemption(_user, _tranche, _shares, _receiver, _executorBonusWAD, mode);
+    }
+
+    /// @notice Requests a redemption as _user with an explicit redemption mode, acquiring and approving the tranche shares first
+    function _requestRedemption(
+        address _user,
+        address _tranche,
+        uint256 _shares,
+        address _receiver,
+        uint64 _executorBonusWAD,
+        IRoycoDayEntryPoint.RedemptionMode _mode
+    )
+        internal
+        virtual
+        returns (uint256 nonce, uint32 executableAt)
+    {
         vm.startPrank(_user);
         IERC20Like(_tranche).approve(address(entryPoint), _shares);
-        (nonce, executableAt) = entryPoint.requestRedemption(_tranche, _shares, _receiver, _executorBonusWAD);
+        (nonce, executableAt,) = entryPoint.requestRedemption(_tranche, _shares, _receiver, _executorBonusWAD, _mode);
         vm.stopPrank();
     }
 
@@ -376,7 +428,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
 
     /// @notice Asserts every leg of an AssetClaims is zero
     function assertAssetClaimsZero(AssetClaims memory _claims, string memory _err) internal pure {
-        assertEq(toUint256(_claims.stAssets) + toUint256(_claims.jtAssets) + toUint256(_claims.ltAssets) + _claims.stShares + toUint256(_claims.nav), 0, _err);
+        assertEq(toUint256(_claims.collateralAssets) + toUint256(_claims.lptAssets) + _claims.stShares + toUint256(_claims.nav), 0, _err);
     }
 }
 

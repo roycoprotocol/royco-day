@@ -12,13 +12,13 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/E
 import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { BalancerV3LiquidityVenue } from "../../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { toUint256 } from "../../../../src/libraries/Units.sol";
 import {
     IPermit2Like,
-    Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest
-} from "../../kernels/Identical_ERC4626_Chainlink_BalancerV3_LT/base/Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest.sol";
+    Identical_ERC4626_Chainlink_BalancerV3_LPT_KernelTest
+} from "../../kernels/Identical_ERC4626_Chainlink_BalancerV3_LPT/base/Identical_ERC4626_Chainlink_BalancerV3_LPT_KernelTest.sol";
 
 /**
  * @title BalancerVenueForkBase
@@ -28,11 +28,11 @@ import {
  *         assert against. Everything runs on the real forked Vault + Gyro E-CLP pool + E-CLP LP oracle the
  *         deploy template ships — nothing here touches a mock.
  * @dev Transient-cache discipline: foundry executes a whole test as ONE
- *      transaction, so the quoter's transient `ST_SHARE_RATE` cache persists across helper calls. `getRate()`
+ *      transaction, so the kernel's transient `ST_SHARE_PRICE` cache persists across helper calls. `getRate()`
  *      reads taken BEFORE any kernel op/sync in a test are cache-miss (fresh preview) reads; any read AFTER a
  *      sync observes the frozen cached mark of that sync. Each test states which regime it reads under.
  */
-abstract contract BalancerVenueForkBase is Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest {
+abstract contract BalancerVenueForkBase is Identical_ERC4626_Chainlink_BalancerV3_LPT_KernelTest {
     // ═══════════════════════════════════════════════════════════════════════════
     // EXTERNAL ACTORS — trade/LP through the canonical Router, never the kernel
     // ═══════════════════════════════════════════════════════════════════════════
@@ -41,7 +41,7 @@ abstract contract BalancerVenueForkBase is Identical_ERC4626_Chainlink_BalancerV
      * @notice Creates a labeled external actor with full Router allowances wired: the ST share and the quote
      *         asset through the Permit2 two-step (the Router pulls tokensIn through Permit2), and the BPT
      *         through a plain ERC20 approval (the Vault spends the pool token's allowance directly on burns).
-     * @dev Mirrors the allowance wiring of `_initializeLTVenueIfNeeded` (the venue bootstrap).
+     * @dev Mirrors the allowance wiring of `_initializeLPTVenueIfNeeded` (the venue bootstrap).
      */
     function _makeExternalLP(string memory _name) internal returns (address actor) {
         actor = makeAddr(_name);
@@ -161,7 +161,7 @@ abstract contract BalancerVenueForkBase is Identical_ERC4626_Chainlink_BalancerV
 
     /// @notice The kernel-wired manipulation-resistant E-CLP LP oracle.
     function _bptOracle() internal view returns (LPOracleBase) {
-        return LPOracleBase(BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).getBalancerV3QuoterState().bptOracle);
+        return LPOracleBase(BalancerV3LiquidityVenue(address(KERNEL)).getBalancerV3LiquidityVenueState().bptOracle);
     }
 
     /// @notice The oracle's TVL mark for the whole pool (NAV units, WAD).
@@ -194,9 +194,9 @@ abstract contract BalancerVenueForkBase is Identical_ERC4626_Chainlink_BalancerV
         return live[0] + live[1];
     }
 
-    /// @notice The kernel's share of the BPT supply (WAD): the slice of pool TVL that is the LT's.
+    /// @notice The kernel's share of the BPT supply (WAD): the slice of pool TVL that is the LPT's.
     function _kernelPoolShareWAD() internal view returns (uint256) {
-        return Math.mulDiv(toUint256(KERNEL.getState().ltOwnedYieldBearingAssets), WAD, _bptSupply());
+        return Math.mulDiv(toUint256(KERNEL.getState().totalLPTAssets), WAD, _bptSupply());
     }
 
     /// @notice The feed-price mark-to-market backing one BPT (WAD). The economics basis for adder/redeemer
@@ -262,7 +262,7 @@ abstract contract BalancerVenueForkBase is Identical_ERC4626_Chainlink_BalancerV
 
     /// @notice The kernel's senior-share rate (the pool rate provider). Cache regime is the caller's concern.
     function _kernelRate() internal view returns (uint256) {
-        return BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).getRate();
+        return BalancerV3LiquidityVenue(address(KERNEL)).getRate();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -340,13 +340,13 @@ abstract contract BalancerVenueForkBase is Identical_ERC4626_Chainlink_BalancerV
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Enables the LT overlay with a `minLiquidity` that pins the committed liquidity utilization at
+     * @notice Enables the LPT overlay with a `minLiquidity` that pins the committed liquidity utilization at
      *         `_targetUtilizationWAD` against the current real pool depth (the deployed market ships minLiquidity 0).
      * @dev Syncs first so the requirement derivation reads a fresh committed checkpoint.
      */
     function _driveLiquidityUtilizationTo(uint256 _targetUtilizationWAD) internal {
         _sync();
-        _enableLTOverlay(0.1e18, 0.5e18, _minLiquidityForTargetUtilization(_targetUtilizationWAD));
+        _enableLPTOverlay(0.1e18, 0.5e18, _minLiquidityForTargetUtilization(_targetUtilizationWAD));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

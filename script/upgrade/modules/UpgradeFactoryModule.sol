@@ -6,7 +6,7 @@ import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/ac
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_KERNEL_ROLE,
-    ADMIN_ORACLE_QUOTER_ROLE,
+    ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_UPGRADER_ROLE,
@@ -18,7 +18,7 @@ import {
     LP_ROLE_ADMIN_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
-} from "../../../src/factory/RolesConfiguration.sol";
+} from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoleConfigUtils } from "../../config/RoleConfigUtils.sol";
 
@@ -36,21 +36,21 @@ import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
  *
  *      Verification focuses on ownership + permission continuity:
  *        - `expiration()` — scheduled operations expiry timeout
- *        - For every role declared in `src/factory/RolesConfiguration.sol`:
+ *        - For every role declared in `src/factory/Roles.sol`:
  *            * role admin, role guardian, role grant-delay
  *            * membership of `ROOT_MULTISIG` and `EXECUTOR_MULTISIG` (is-member + execution delay)
  *      If any of these drift across the upgrade, `verify()` reverts.
  *
- *      Inherits `RolesConfiguration` directly so role-id constants are read from the same source
+ *      Inherits `Roles` directly so role-id constants are read from the same source
  *      of truth used by `RoycoFactory`. This removes a previous duplication risk where renaming a
- *      role in `RolesConfiguration` would silently misalign the verifier.
+ *      role in `Roles` would silently misalign the verifier.
  *
  *      ⚠ ROLE-LIST MAINTENANCE: `_allRoles()` enumerates the role IDs to check. If a new role
- *      is added to `RolesConfiguration`, it MUST also be added here — otherwise verify will
+ *      is added to `Roles`, it MUST also be added here — otherwise verify will
  *      silently skip checking the new role's admin/guardian/grant-delay/membership across the
  *      upgrade. There is no compile-time link between this list and the source enum because
  *      Solidity does not support constant enumeration; treat this list as a checked invariant
- *      to update whenever `RolesConfiguration` changes.
+ *      to update whenever `Roles` changes.
  */
 contract UpgradeFactoryModule is UpgradeModuleBase, RoleConfigUtils {
     error UpgradeFactoryModule__NotAFactoryProxy(address proxy);
@@ -62,9 +62,9 @@ contract UpgradeFactoryModule is UpgradeModuleBase, RoleConfigUtils {
     error UpgradeFactoryModule__MembershipChanged(uint64 role, address account, bool expectedIsMember, bool actualIsMember);
     error UpgradeFactoryModule__MembershipDelayChanged(uint64 role, address account, uint32 expectedDelay, uint32 actualDelay);
 
-    /// @dev All roles declared in `RolesConfiguration` + the AccessManager admin role (id 0).
+    /// @dev All roles declared in `Roles` + the AccessManager admin role (id 0).
     ///      Ordering is stable so snapshot encoding and verification stay aligned.
-    ///      Add an entry here when a new role is introduced in `RolesConfiguration`.
+    ///      Add an entry here when a new role is introduced in `Roles`.
     function _allRoles() internal pure returns (uint64[] memory roles) {
         roles = new uint64[](15);
         roles[0] = _ADMIN_ROLE; // OpenZeppelin AccessManager default
@@ -77,7 +77,7 @@ contract UpgradeFactoryModule is UpgradeModuleBase, RoleConfigUtils {
         roles[7] = ADMIN_KERNEL_ROLE;
         roles[8] = ADMIN_ACCOUNTANT_ROLE;
         roles[9] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        roles[10] = ADMIN_ORACLE_QUOTER_ROLE;
+        roles[10] = ADMIN_ORACLE_ROLE;
         roles[11] = DEPLOYER_ROLE;
         roles[12] = LP_ROLE_ADMIN_ROLE;
         roles[13] = DEPLOYER_ROLE_ADMIN_ROLE;

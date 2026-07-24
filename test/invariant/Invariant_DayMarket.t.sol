@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { DayMarketHandler } from "./handlers/DayMarketHandler.sol";
 import { StdInvariant } from "../../lib/forge-std/src/StdInvariant.sol";
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { console2 } from "../../lib/forge-std/src/console2.sol";
+import { DayMarketHandler } from "./handlers/DayMarketHandler.sol";
 
 /**
  * @title Invariant_DayMarket
@@ -42,10 +42,10 @@ contract Invariant_DayMarket is StdInvariant, Test {
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtRedeem.selector,
-            DayMarketHandler.op_ltDeposit.selector,
-            DayMarketHandler.op_ltDepositMultiAsset.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeemMultiAsset.selector,
+            DayMarketHandler.op_lptDeposit.selector,
+            DayMarketHandler.op_lptDepositMultiAsset.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeemMultiAsset.selector,
             DayMarketHandler.op_sync.selector,
             DayMarketHandler.op_reinvest.selector,
             DayMarketHandler.op_warp.selector,
@@ -53,7 +53,7 @@ contract Invariant_DayMarket is StdInvariant, Test {
             DayMarketHandler.op_stPnL.selector,
             DayMarketHandler.op_stPnL.selector,
             DayMarketHandler.op_jtPnL.selector,
-            DayMarketHandler.op_ltPnL.selector,
+            DayMarketHandler.op_lptPnL.selector,
             DayMarketHandler.op_adminParamNudge.selector,
             DayMarketHandler.op_externalPoolOp.selector,
             DayMarketHandler.aimed_toggleVenueSlippage.selector
@@ -66,7 +66,7 @@ contract Invariant_DayMarket is StdInvariant, Test {
         sels[weighted.length + 1] = DayMarketHandler.aimed_loseUntilLiquidation.selector;
         sels[weighted.length + 2] = DayMarketHandler.aimed_coveredDrawdown.selector;
         sels[weighted.length + 3] = DayMarketHandler.aimed_fullExit.selector;
-        sels[weighted.length + 4] = DayMarketHandler.aimed_ltRedeemToLiquidityGateBoundary.selector;
+        sels[weighted.length + 4] = DayMarketHandler.aimed_lptRedeemToLiquidityGateBoundary.selector;
     }
 
     /**
@@ -91,15 +91,27 @@ contract Invariant_DayMarket is StdInvariant, Test {
     }
 
     /**
-     * @notice The two-term NAV conservation identity at wei precision after every op:
-     *         stRawNAV + jtRawNAV == stEffectiveNAV + jtEffectiveNAV
+     * @notice The NAV conservation identity at wei precision after every op:
+     *         collateralNAV == stEffectiveNAV + jtEffectiveNAV
      * @dev Load-bearing because the liquidity premium is minted as covered senior shares inside
      *      stEffectiveNAV, never a third NAV leg: if the fee and liquidity premium share mint (or any
      *      sync arm) ever created or destroyed a wei of NAV, this is where it would surface. On a breach
      *      the full committed checkpoint is dumped in the failure message
      */
-    function invariant_stRawPlusJtRawEqualsStEffPlusJtEff() public view {
+    function invariant_collateralNAVEqualsStEffPlusJtEff() public view {
         (bool holds, string memory report) = handler.conservationCheckpointReport();
+        assertTrue(holds, report);
+    }
+
+    /**
+     * @notice The state-machine biconditional after every op: the market is PERPETUAL iff the committed
+     *         impermanent-loss ledger is zero
+     * @dev Load-bearing because every PERPETUAL commit erases the IL ledger and the FIXED_TERM branch
+     *      never zeroes it: a breach in either direction means a sync committed a state the two-branch
+     *      machine cannot produce
+     */
+    function invariant_perpetualIffZeroImpermanentLoss() public view {
+        (bool holds, string memory report) = handler.stateMachineCheckpointReport();
         assertTrue(holds, report);
     }
 
@@ -115,21 +127,21 @@ contract Invariant_DayMarket is StdInvariant, Test {
         console2.log("premium shares minted     ", handler.ghost_liquidityPremiumSharesMinted());
         console2.log("premium shares reinvested ", handler.ghost_liquidityPremiumSharesReinvested());
         console2.log("idle shares paid out      ", handler.ghost_idlePremiumSeniorSharesPaidToRedeemers());
-        console2.log("coverage-loss events      ", handler.jtCoverageImpermanentLossEventCount());
+        console2.log("impermanent-loss events      ", handler.jtImpermanentLossEventCount());
         _logOpLedger("stDeposit");
         _logOpLedger("stRedeem");
         _logOpLedger("jtDeposit");
         _logOpLedger("jtRedeem");
-        _logOpLedger("ltDeposit");
-        _logOpLedger("ltDepositMultiAsset");
-        _logOpLedger("ltRedeem");
-        _logOpLedger("ltRedeemMultiAsset");
+        _logOpLedger("lptDeposit");
+        _logOpLedger("lptDepositMultiAsset");
+        _logOpLedger("lptRedeem");
+        _logOpLedger("lptRedeemMultiAsset");
         _logOpLedger("sync");
         _logOpLedger("reinvest");
         _logOpLedger("warp");
         _logOpLedger("stPnL");
         _logOpLedger("jtPnL");
-        _logOpLedger("ltPnL");
+        _logOpLedger("lptPnL");
         _logOpLedger("adminParamNudge");
         _logOpLedger("externalPoolOp");
         _logOpLedger("toggleVenueSlippage");
@@ -137,16 +149,13 @@ contract Invariant_DayMarket is StdInvariant, Test {
         _logOpLedger("aimedLoseUntilLiquidation");
         _logOpLedger("aimedCoveredDrawdown");
         _logOpLedger("aimedFullExit");
-        _logOpLedger("aimedLtRedeemToLiquidityGateBoundary");
+        _logOpLedger("aimedLptRedeemToLiquidityGateBoundary");
     }
 
     /// @dev One line of the per-op anti-vacuity ledger: calls, successes, and predicted gate rejections
     function _logOpLedger(string memory _op) internal view {
         console2.log(
-            string.concat("op ", _op, " calls/successes/predicted-rejections"),
-            handler.opCalls(_op),
-            handler.opSuccesses(_op),
-            handler.opPredictedReverts(_op)
+            string.concat("op ", _op, " calls/successes/predicted-rejections"), handler.opCalls(_op), handler.opSuccesses(_op), handler.opPredictedReverts(_op)
         );
     }
 }
