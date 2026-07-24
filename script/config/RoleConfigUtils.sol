@@ -20,8 +20,8 @@ import {
     DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
-    LP_ROLE_ADMIN_ROLE,
     LPT_LP_ROLE,
+    LP_ROLE_ADMIN_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../src/factory/Roles.sol";

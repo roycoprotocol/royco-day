@@ -269,6 +269,8 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
 
         AccessManager am = AccessManager(authority());
         for (uint256 i; i < _roleIds.length; ++i) {
+            // No template ever legitimately grants the access manager's root-admin role
+            require(_roleIds[i] != ADMIN_ROLE, FACTORY_GRANT_ROLE_FORBIDDEN());
             am.grantRole(_roleIds[i], _accounts[i], _executionDelays[i]);
         }
     }
@@ -284,6 +286,9 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         onlyActiveTemplate
         returns (bytes memory result)
     {
+        // The access manager is never a legitimate target for an arbitrary call
+        require(_target != authority(), FACTORY_CALL_TARGET_FORBIDDEN());
+
         bool success;
         (success, result) = _target.call(_data);
         require(success, FACTORY_CALL_FAILED(result));
