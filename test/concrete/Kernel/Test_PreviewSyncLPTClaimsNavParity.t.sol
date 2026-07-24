@@ -11,7 +11,7 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
  * @title Test_PreviewSyncLPTClaimsNavParity
- * @notice Pins the preview/execution parity of the LIQUIDITY branch of previewSyncTrancheAccounting: the returned
+ * @notice Pins the preview/execution parity of the LIQUIDITY branch of previewSyncTrancheAccountingFor: the returned
  *         claims struct must be internally consistent, valuing its own (post-mint patched) stShares at the same
  *         post-mint senior pair the execution path's storage-derived claims would use — claims.nav must equal
  *         lptRawNAV plus the value of claims.stShares at (stEffectiveNAV / post-mint ST supply)
@@ -28,9 +28,9 @@ contract Test_PreviewSyncLPTClaimsNavParity is DayMarketTestBase {
 
     /// @dev The parity assertion: claims.nav == lptRawNAV + value(claims.stShares @ stEffectiveNAV / post-mint ST supply)
     function _assertLPTClaimsNavMatchesPostMintPair(string memory _ctx) internal {
-        (SyncedAccountingState memory state, AssetClaims memory lptClaims,) = kernel.previewSyncTrancheAccounting(TrancheType.LIQUIDITY_PROVIDER);
+        (SyncedAccountingState memory state, AssetClaims memory lptClaims,) = kernel.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
         // The SENIOR branch's totalTrancheShares is the post-mint ST supply (premium + ST fee shares included)
-        (,, uint256 stSupplyAfterMints) = kernel.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (,, uint256 stSupplyAfterMints) = kernel.previewSyncTrancheAccountingFor(TrancheType.SENIOR);
 
         uint256 expectedNav = toUint256(state.lptRawNAV)
             + toUint256(ValuationLogic._convertToValue(lptClaims.stShares, stSupplyAfterMints, state.stEffectiveNAV, Math.Rounding.Floor));
@@ -62,7 +62,7 @@ contract Test_PreviewSyncLPTClaimsNavParity is DayMarketTestBase {
         _warpAndRefreshFeed(1 days);
 
         // Sanity: the previewed sync must actually be paying a liquidity premium for this vector to bite
-        (SyncedAccountingState memory state, AssetClaims memory lptClaims,) = kernel.previewSyncTrancheAccounting(TrancheType.LIQUIDITY_PROVIDER);
+        (SyncedAccountingState memory state, AssetClaims memory lptClaims,) = kernel.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
         assertGt(toUint256(state.lptLiquidityPremium), 0, "the previewed sync must accrue a liquidity premium");
         assertGt(lptClaims.stShares, 0, "the preview must patch stShares to the post-mint premium share count");
 
@@ -87,7 +87,7 @@ contract Test_PreviewSyncLPTClaimsNavParity is DayMarketTestBase {
         _warpAndRefreshFeed(1 days);
 
         // Sanity: a premium must actually be pending
-        (SyncedAccountingState memory state,,) = kernel.previewSyncTrancheAccounting(TrancheType.LIQUIDITY_PROVIDER);
+        (SyncedAccountingState memory state,,) = kernel.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
         assertGt(toUint256(state.lptLiquidityPremium), 0, "the previewed sync must accrue a liquidity premium");
 
         // Quote a small in-kind redemption with the accrual still pending, then execute it

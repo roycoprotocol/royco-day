@@ -79,13 +79,10 @@ interface IRoycoDayEntryPoint {
 
     /**
      * @notice The asset composition a redemption exits to
-     * @dev The senior and junior tranches only ever redeem in-kind, so their requests must use INKIND. MULTIASSET and
-     *      OPTIMIZED are liquidity-provider-tranche only
-     * @custom:field INKIND - Redeem in-kind: collateral assets for the senior and junior tranches, and the LP token plus
-     *                        the idle senior shares for the liquidity provider tranche
+     * @dev The senior and junior tranches only ever redeem in-kind while the liquidity provider tranche can use any of the three
+     * @custom:field INKIND - Redeem in-kind: collateral assets for the senior and junior tranches, and the LP token plus the idle senior shares for the liquidity provider tranche
      * @custom:field MULTIASSET - Liquidity provider tranche only: exit to the LP token's underlying constituent plus the quote asset
-     * @custom:field OPTIMIZED - Liquidity provider tranche only: redeem in-kind when the in-kind bound serves the whole
-     *                           request, otherwise take whichever of the in-kind or multi-asset bound redeems more shares
+     * @custom:field OPTIMIZED - Liquidity provider tranche only: redeem in-kind when the in-kind bound serves the whole request, otherwise take whichever of the in-kind or multi-asset bound redeems more shares
      */
     enum RedemptionMode {
         INKIND,
@@ -97,7 +94,7 @@ interface IRoycoDayEntryPoint {
      * @notice A pending redemption request
      * @custom:field shares - The amount of escrowed shares pending redemption
      * @custom:field valueAtRequestTime - The total value of the escrowed shares at request time
-     * @custom:field mode - The asset composition this redemption exits to (see RedemptionMode)
+     * @custom:field mode - The asset composition this redemption exits to
      * @custom:field baseRequest - The base request data shared across request types
      */
     struct RedemptionRequest {

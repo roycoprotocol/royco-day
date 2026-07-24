@@ -36,7 +36,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
 
     /// @dev Live senior-side synced state (utilizations, effective NAVs, market state). `getState()` is stale marks.
     function _stSynced() internal view returns (SyncedAccountingState memory s) {
-        (s,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (s,,) = KERNEL.previewSyncTrancheAccountingFor(TrancheType.SENIOR);
     }
 
     /// @dev One of the 4 ST-LP provider addresses (all hold ST_LP_ROLE + are funded in setUp).

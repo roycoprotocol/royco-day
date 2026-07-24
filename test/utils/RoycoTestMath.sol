@@ -354,6 +354,11 @@ library RoycoTestMath {
         value = Math.mulDiv(totalValue + VIRTUAL_VALUE, shares, supply + VIRTUAL_SHARES);
     }
 
+    /// @notice The pro-rata NAV claim of shares on a tranche's post-sync claims, mirrors TrancheClaimsLogic._scaleAssetClaims.nav (virtual shares, no virtual value)
+    function scaleClaimNav(uint256 shares, uint256 claimNav, uint256 supply) internal pure returns (uint256 value) {
+        value = Math.mulDiv(claimNav, shares, supply + VIRTUAL_SHARES);
+    }
+
     /**
      * @notice The ST fee and liquidity premium share mints, both computed at the pre-sync supply
      *         over the retained denominator stEffectiveNAV − premium − fee.

@@ -96,8 +96,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _;
     }
 
-    /// @dev Initializes the price cache at the start of the call, no teardown is needed since the transient cache auto-clears at transaction end
-    /// @dev Should be placed on all functions that use the price cache
+    /// @dev Initializes the collateral price cache at the start of the call and clears it at the end
+    /// @dev Should be placed on all state mutating functions that use the collateral price
     modifier withCollateralPriceCached() {
         // Poke the collateral asset oracle as the operation's first action: can revert as a circuit-breaker
         IRoycoPriceOracle(_getRoycoDayKernelStorage().collateralAssetOracle).poke();
@@ -116,7 +116,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoDayKernelConstructionParams memory _params) {
         // Ensure that the tranche and accountant addresses are not null
-        // The senior and junior tranches are coinvested structurally: both deposit the one collateral asset
+        // The senior and junior tranches are coinvested structurally: both deposit the same collateral asset
         require(
             _params.seniorTranche != address(0) && _params.juniorTranche != address(0) && _params.liquidityProviderTranche != address(0)
                 && _params.collateralAsset != address(0) && _params.lptAsset != address(0) && _params.accountant != address(0),
@@ -274,20 +274,21 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function reinvestLiquidityPremium(uint256 _stShares)
-        external
+    function syncTrancheAccountingFor(TrancheType _trancheType)
+        public
         virtual
         override(IRoycoDayKernel)
         whenNotPaused
         restricted
         nonReentrant
         withCollateralPriceCached
+        returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
-        AccountingSyncLogic.reinvestLiquidityPremium(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _stShares);
+        return AccountingSyncLogic.syncTrancheAccountingFor(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _trancheType);
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function previewSyncTrancheAccounting(TrancheType _trancheType)
+    function previewSyncTrancheAccountingFor(TrancheType _trancheType)
         public
         view
         virtual
@@ -298,7 +299,20 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         // Simulate the poke first so a circuit-breaking oracle reverts identically to a real operation
         IRoycoPriceOracle($.collateralAssetOracle).previewPoke();
-        return AccountingSyncLogic.previewSyncTrancheAccounting($, _getRoycoDayKernelImmutableState(), _trancheType);
+        return AccountingSyncLogic.previewSyncTrancheAccountingFor($, _getRoycoDayKernelImmutableState(), _trancheType);
+    }
+
+    /// @inheritdoc IRoycoDayKernel
+    function reinvestLiquidityPremium(uint256 _stShares)
+        external
+        virtual
+        override(IRoycoDayKernel)
+        whenNotPaused
+        restricted
+        nonReentrant
+        withCollateralPriceCached
+    {
+        AccountingSyncLogic.reinvestLiquidityPremium(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _stShares);
     }
 
     // =============================

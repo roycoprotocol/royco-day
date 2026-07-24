@@ -169,7 +169,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     function convertToAssets(uint256 _shares) public view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
         // Get the post-sync tranche state: applying NAV reconciliation
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
-            IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+            IRoycoDayKernel(KERNEL).previewSyncTrancheAccountingFor(TRANCHE_TYPE());
         if (TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER) {
             // We exclude any idle (not reinvested) ST shares from the LPT claims in order to ensure that its share price does not drop due to slippage incurred on reinvestment
             trancheClaims.stShares = 0;
@@ -187,7 +187,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
 
         // Get the post-sync tranche state
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
-            IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+            IRoycoDayKernel(KERNEL).previewSyncTrancheAccountingFor(TRANCHE_TYPE());
 
         // We exclude any idle (not reinvested) ST shares from the LPT NAV basis in order to ensure that its NAV per share does not drop due to slippage incurred on reinvestment
         NAV_UNIT navBasis = ((TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER) ? state.lptRawNAV : trancheClaims.nav);
@@ -229,7 +229,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
 
     /// @inheritdoc IRoycoVaultTranche
     function totalAssets() external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
-        (, claims,) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        (, claims,) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccountingFor(TRANCHE_TYPE());
     }
 
     /// @inheritdoc IRoycoVaultTranche

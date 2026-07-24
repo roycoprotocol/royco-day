@@ -4271,7 +4271,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // The view surface bricks identically since the transient cache is cleared at the end of every operation
         vm.expectRevert(staleSelector);
-        KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        KERNEL.previewSyncTrancheAccountingFor(TrancheType.SENIOR);
 
         // A brick, not a corruption: a fresh oracle update resumes the market
         _refreshOraclesAfterWarp();
@@ -4322,7 +4322,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         KERNEL.reinvestLiquidityPremium(type(uint256).max);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        KERNEL.previewSyncTrancheAccountingFor(TrancheType.SENIOR);
 
         if (testConfig.hasLiquidityProviderTranche) {
             assertEq(LPT.maxDeposit(LPT_ALICE_ADDRESS), ZERO_TRANCHE_UNITS, "lptMaxDeposit must report zero while paused");

@@ -505,11 +505,13 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         targetBindings[9] =
             TargetBinding({ target: targets[9], selectors: _p.collateralAssetOracleBindingSelectors, roleIds: _p.collateralAssetOracleBindingRoleIds });
 
-        // Post-init grants: accountant SYNC, kernel BURNER, and (hooked markets only) hook SYNC (all zero execution delay)
-        RoleGrant[] memory grants = new RoleGrant[](_p.deployPoolHook ? 3 : 2);
+        // Post-init grants: accountant SYNC, kernel BURNER, entry point SYNC, and (hooked markets only) hook SYNC (all zero execution delay)
+        // The entry point singleton is re-granted on every deployment: the grant is idempotent and the role is market-agnostic
+        RoleGrant[] memory grants = new RoleGrant[](_p.deployPoolHook ? 4 : 3);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
         grants[1] = RoleGrant({ roleId: BURNER_ROLE, account: _r.kernel, executionDelay: 0 });
-        if (_p.deployPoolHook) grants[2] = RoleGrant({ roleId: SYNC_ROLE, account: _balancerHook, executionDelay: 0 });
+        grants[2] = RoleGrant({ roleId: SYNC_ROLE, account: ROYCO_DAY_ENTRY_POINT, executionDelay: 0 });
+        if (_p.deployPoolHook) grants[3] = RoleGrant({ roleId: SYNC_ROLE, account: _balancerHook, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targetBindings, postInitGrants: grants });
     }
@@ -571,8 +573,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     }
 
     function _kernelBinding() private pure returns (bytes4[] memory s, uint64[] memory r) {
-        s = new bytes4[](8);
-        r = new uint64[](8);
+        s = new bytes4[](9);
+        r = new uint64[](9);
         s[0] = IRoycoDayKernel.setProtocolFeeRecipient.selector;
         r[0] = ADMIN_KERNEL_ROLE;
         s[1] = IRoycoAuth.pause.selector;
@@ -589,6 +591,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         r[6] = ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE;
         s[7] = IRoycoDayKernel.setRoycoBlacklist.selector;
         r[7] = ADMIN_MARKET_OPS_ROLE;
+        s[8] = IRoycoDayKernel.syncTrancheAccountingFor.selector;
+        r[8] = SYNC_ROLE;
     }
 
     function _accountantBinding() private pure returns (bytes4[] memory s, uint64[] memory r) {

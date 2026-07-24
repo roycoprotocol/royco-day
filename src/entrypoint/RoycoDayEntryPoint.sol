@@ -206,8 +206,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
         // Ensure that the tranche is enabled
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
-        // Only the liquidity provider tranche can exit multi-asset. The senior and junior tranches must redeem in-kind
-        require(config.trancheType == TrancheType.LIQUIDITY_PROVIDER || _mode == RedemptionMode.INKIND, UNSUPPORTED_REDEMPTION_MODE());
+        // The senior and junior tranches must redeem in-kind
+        require(_mode == RedemptionMode.INKIND || config.trancheType == TrancheType.LIQUIDITY_PROVIDER, UNSUPPORTED_REDEMPTION_MODE());
 
         // Poke the market's collateral asset oracle to refresh it
         _pokeOracle(_tranche, config);
@@ -702,26 +702,24 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     }
 
     /// @dev Resolves the request-time SHARE reference for a deposit: the shares the deposit would mint at request-time pricing, the basis the execution-time forfeiture is measured against.
-    function _depositSharesReference(address _kernel, TrancheType _trancheType, address _tranche, TRANCHE_UNIT _assets) internal view returns (uint256 shares) {
+    function _depositSharesReference(address _kernel, TrancheType _trancheType, address _tranche, TRANCHE_UNIT _assets) internal returns (uint256 shares) {
         // Convert the assets to NAV units
         NAV_UNIT depositValue = (_trancheType == TrancheType.LIQUIDITY_PROVIDER)
             ? IRoycoDayKernel(_kernel).convertLPTAssetsToValue(_assets)
             : IRoycoDayKernel(_kernel).convertCollateralAssetsToValue(_assets);
         // Read the post-sync state so the NAV basis and supply come from one accounting state, a pre-sync supply would understate the reference by the sync's fee and premium mints
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 totalTrancheShares) =
-            IRoycoDayKernel(_kernel).previewSyncTrancheAccounting(_trancheType);
-        // Mirror the mint's pricing basis: the LPT mints against its raw NAV, excluding the idle liquidity premium senior shares
-        NAV_UNIT navBasis = ((_trancheType == TrancheType.LIQUIDITY_PROVIDER) ? state.lptRawNAV : trancheClaims.nav);
+            IRoycoDayKernel(_kernel).syncTrancheAccountingFor(_trancheType);
         // Use the clamp-free conversion so the dilution clamp never manufactures forfeiture, the real mint at execution is still clamped
-        return ValuationLogic._convertToSharesUnclamped(depositValue, navBasis, totalTrancheShares, Math.Rounding.Floor);
+        return ValuationLogic._convertToSharesUnclamped(depositValue, trancheClaims.nav, totalTrancheShares, Math.Rounding.Floor);
     }
 
     /// @dev Resolves the redemption value reference: the escrowed shares' pro-rata claim on the tranche's full post-sync claims
     /// @dev The full claims basis mirrors execution, an LPT redemption claims both effective-NAV legs including the idle liquidity premium senior shares
     /// @dev The reference excludes any self-liquidation bonus applied when the redemption executes, so the bonus is never skimmed as queue-time accrual
-    function _redemptionValueReference(address _kernel, TrancheType _trancheType, uint256 _shares) internal view returns (NAV_UNIT value) {
+    function _redemptionValueReference(address _kernel, TrancheType _trancheType, uint256 _shares) internal returns (NAV_UNIT value) {
         // Read the post-sync state so the claims and supply come from one accounting state, a pre-sync supply would overstate the reference and hide genuine post-request gains
-        (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(_kernel).previewSyncTrancheAccounting(_trancheType);
+        (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(_kernel).syncTrancheAccountingFor(_trancheType);
         return TrancheClaimsLogic._scaleAssetClaims(trancheClaims, _shares, totalTrancheShares, true).nav;
     }
 
@@ -756,19 +754,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         assembly ("memory-safe") {
             if probeSucceeded { maxRedeemMultiAsset := mload(add(probeReturnData, 0x20)) }
         }
-    }
-
-    /**
-     * @dev Batch-screens two accounts against the market's blacklist through the tranche's kernel
-     * @param _kernel The kernel of the market that the tranche belongs to, consulted for the market's configured blacklist
-     * @param _account0 The address of the first account to screen
-     * @param _account1 The address of the second account to screen
-     */
-    function _enforceNotBlacklisted(address _kernel, address _account0, address _account1) internal view {
-        address[] memory accountsToScreen = new address[](2);
-        accountsToScreen[0] = _account0;
-        accountsToScreen[1] = _account1;
-        IRoycoDayKernel(_kernel).enforceNotBlacklisted(accountsToScreen);
     }
 
     /**
@@ -861,6 +846,19 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
             emit TrancheConfigUpdated(tranche, _configs[i]);
         }
+    }
+
+    /**
+     * @dev Batch-screens two accounts against the market's blacklist through the tranche's kernel
+     * @param _kernel The kernel of the market that the tranche belongs to, consulted for the market's configured blacklist
+     * @param _account0 The address of the first account to screen
+     * @param _account1 The address of the second account to screen
+     */
+    function _enforceNotBlacklisted(address _kernel, address _account0, address _account1) internal view {
+        address[] memory accountsToScreen = new address[](2);
+        accountsToScreen[0] = _account0;
+        accountsToScreen[1] = _account1;
+        IRoycoDayKernel(_kernel).enforceNotBlacklisted(accountsToScreen);
     }
 
     /**

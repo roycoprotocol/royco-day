@@ -261,7 +261,7 @@ library RedemptionLogic {
 
         // Get the senior tranche's total claim on the market's assets
         SyncedAccountingState memory state;
-        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccountingFor(TrancheType.SENIOR);
 
         // ST redemptions are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
@@ -295,7 +295,7 @@ library RedemptionLogic {
 
         // Get the junior tranche's total claim on the market's assets
         SyncedAccountingState memory state;
-        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.JUNIOR);
+        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccountingFor(TrancheType.JUNIOR);
 
         // JT redemptions are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
@@ -328,7 +328,7 @@ library RedemptionLogic {
 
         // Get the total claims the liquidity provider tranche has on its own assets
         SyncedAccountingState memory state;
-        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY_PROVIDER);
+        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
 
         // LPT redemptions are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
@@ -370,7 +370,7 @@ library RedemptionLogic {
         // Get the total claims the liquidity provider tranche has on its own assets
         SyncedAccountingState memory state;
         AssetClaims memory lptClaims;
-        (state, lptClaims, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY_PROVIDER);
+        (state, lptClaims, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
 
         // LPT redemptions are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);

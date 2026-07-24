@@ -67,7 +67,7 @@ contract Test_EntryPointDepositForfeitureMatrix is EntryPointTestBase {
         bool isLPT = (entryPoint.getTrancheConfig(_tranche).trancheType == TrancheType.LIQUIDITY_PROVIDER);
         NAV_UNIT depositValue = isLPT ? kernel.convertLPTAssetsToValue(toTrancheUnits(_assets)) : kernel.convertCollateralAssetsToValue(toTrancheUnits(_assets));
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 totalTrancheShares) =
-            kernel.previewSyncTrancheAccounting(entryPoint.getTrancheConfig(_tranche).trancheType);
+            kernel.previewSyncTrancheAccountingFor(entryPoint.getTrancheConfig(_tranche).trancheType);
         NAV_UNIT navBasis = (isLPT ? state.lptRawNAV : trancheClaims.nav);
         return RoycoTestMath.convertToSharesUnclamped(toUint256(depositValue), toUint256(navBasis), totalTrancheShares);
     }

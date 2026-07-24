@@ -45,7 +45,7 @@ contract Test_LPTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
 
         // The committed post-sync state the deposit prices against (the +10% gain is already synced)
-        (SyncedAccountingState memory st,,) = kernel.previewSyncTrancheAccounting(TrancheType.LIQUIDITY_PROVIDER);
+        (SyncedAccountingState memory st,,) = kernel.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
 
         // Independently value the idle leg at the senior share rate through the virtual-share/asset offset:
         // convertToValue = floor((stEff + 1) x idleShares / (stSupply + 1e6))
@@ -100,7 +100,7 @@ contract Test_LPTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         assertEq(idleShares, 846_660_395_108_192_850, "the staged premium must be the hand-derived senior share count net of the LPT protocol fee");
         assertEq(seniorTranche.totalSupply(), 101_599_247_412_982_142_050, "the senior supply must carry exactly the net premium and pooled fee mints");
 
-        (SyncedAccountingState memory st,,) = kernel.previewSyncTrancheAccounting(TrancheType.LIQUIDITY_PROVIDER);
+        (SyncedAccountingState memory st,,) = kernel.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
         assertEq(toUint256(st.stEffectiveNAV), 108e18, "the senior effective NAV must be exactly seed plus residual gain plus premium");
         assertEq(toUint256(st.lptRawNAV), 6e18, "the pool depth must be exactly the untouched auto-seed");
         assertEq(liquidityProviderTranche.totalSupply(), 6e18, "the LPT supply must be exactly the auto-seed's 1:1 bootstrap mint");

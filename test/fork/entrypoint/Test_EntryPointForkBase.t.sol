@@ -307,21 +307,22 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
     // INDEPENDENT DERIVATIONS (RoycoTestMath over raw state reads)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev The deposit share reference: the kernel-priced deposit value over the tranche's totalAssets-implied
-    ///      share price at the UNCLAMPED fair virtual-shares rate
+    /// @dev The deposit share reference: the kernel-priced deposit value over the post-sync mint basis at the
+    ///      UNCLAMPED fair virtual-shares rate (LPT prices on raw NAV, others on effective NAV, supply includes the sync mints)
     function _derivedDepositReference(address _tranche, uint256 _assets) internal view returns (uint256 shares) {
-        NAV_UNIT depositValue = (_tranche == address(LPT))
-            ? KERNEL.convertLPTAssetsToValue(toTrancheUnits(_assets))
-            : KERNEL.convertCollateralAssetsToValue(toTrancheUnits(_assets));
-        return RoycoTestMath.convertToSharesUnclamped(
-            toUint256(depositValue), toUint256(IRoycoVaultTranche(_tranche).totalAssets().nav), IERC20(_tranche).totalSupply()
-        );
+        bool isLPT = (_tranche == address(LPT));
+        NAV_UNIT depositValue = isLPT ? KERNEL.convertLPTAssetsToValue(toTrancheUnits(_assets)) : KERNEL.convertCollateralAssetsToValue(toTrancheUnits(_assets));
+        (SyncedAccountingState memory state, AssetClaims memory claims, uint256 supply) =
+            KERNEL.previewSyncTrancheAccountingFor(ENTRY_POINT.getTrancheConfig(_tranche).trancheType);
+        NAV_UNIT navBasis = (isLPT ? state.lptRawNAV : claims.nav);
+        return RoycoTestMath.convertToSharesUnclamped(toUint256(depositValue), toUint256(navBasis), supply);
     }
 
-    /// @dev The redemption value reference: the shares' claim on the tranche's totalAssets NAV at the virtual-shares
-    ///      rate (mirrors ValuationLogic._convertToValue, the same basis the tranche's own redeem scales by)
+    /// @dev The redemption value reference: the shares' claim on the post-sync full tranche claims at the virtual-shares
+    ///      rate (mirrors _redemptionValueReference via TrancheClaimsLogic._scaleAssetClaims, post-sync supply and claims)
     function _valueOf(address _tranche, uint256 _shares) internal view returns (uint256 value) {
-        return RoycoTestMath.convertToValue(_shares, toUint256(IRoycoVaultTranche(_tranche).totalAssets().nav), IERC20(_tranche).totalSupply());
+        (, AssetClaims memory claims, uint256 supply) = KERNEL.previewSyncTrancheAccountingFor(ENTRY_POINT.getTrancheConfig(_tranche).trancheType);
+        return RoycoTestMath.scaleClaimNav(_shares, toUint256(claims.nav), supply);
     }
 
     /// @dev The exact redemption skim: floor(shares * (vExec - vReq) / vExec), zero when value fell

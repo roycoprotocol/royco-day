@@ -195,7 +195,7 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
      *         mark while the market is halted for a mispricing or other incident
      * @dev In-kind previews simulate the real whenNotPaused kernel deposit and redeem entrypoints, so the pause
      *      bubbles out of them exactly as it would out of execution. Conversions and multi-asset previews route
-     *      through the kernel's whenNotPaused previewSyncTrancheAccounting, and the senior share rate the venue
+     *      through the kernel's whenNotPaused previewSyncTrancheAccountingFor, and the senior share rate the venue
      *      prices against is itself whenNotPaused, so the pool cannot trade on a paused mark
      */
     function test_PausedKernel_PriceBearingReadsRevert() public {

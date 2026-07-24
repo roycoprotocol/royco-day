@@ -41,6 +41,31 @@ library AccountingSyncLogic {
     }
 
     /**
+     * @notice Synchronizes and persists the collateral NAV and the effective NAVs of both tranches, returning the specified tranche's post-sync claims and supply
+     * @dev Only executes a pre-op sync because there is no operation being executed in the same call as this sync
+     * @dev Syncs every tranche exactly as `syncTrancheAccounting` does, the tranche type only scopes the claims and supply returned alongside the state
+     * @dev The executed counterpart of `previewSyncTrancheAccountingFor`: the claims and supply are read after this sync has minted its
+     *      premium and protocol fee shares, so no post-mint simulation is needed
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _trancheType An enumerator indicating which tranche to return claims and total tranche shares for
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
+     * @return claims The asset claims that the specified tranche has denominated in tranche-native units
+     * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares: the protocol fee shares for the senior and junior tranches, plus the liquidity premium shares for the senior tranche (the liquidity provider tranche mints none)
+     */
+    function syncTrancheAccountingFor(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        TrancheType _trancheType
+    )
+        external
+        returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
+    {
+        // Execute a NAV accounting sync via the accountant to reconcile PNL, then read the specified tranche's post-mint claims and supply
+        return _preOpSyncTrancheAccounting($, _immutables, _trancheType);
+    }
+
+    /**
      * @notice Syncs the tranche accounting and attempts to reinvest the liquidity provider tranche's idle liquidity-premium senior shares into its market-making inventory
      * @dev Values the reinvested shares against the freshly synced senior share rate, so a smaller amount can clear the venue's slippage gate when reinvesting the entire idle balance would not
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
@@ -72,7 +97,7 @@ library AccountingSyncLogic {
      * @return claims The asset claims that the specified tranche has denominated in tranche-native units
      * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares: the protocol fee shares for the senior and junior tranches, plus the liquidity premium shares for the senior tranche (the liquidity provider tranche mints none)
      */
-    function previewSyncTrancheAccounting(
+    function previewSyncTrancheAccountingFor(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         TrancheType _trancheType
