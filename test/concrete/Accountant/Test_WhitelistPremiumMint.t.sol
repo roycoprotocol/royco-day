@@ -126,12 +126,12 @@ contract Test_WhitelistPremiumMint is DayMarketTestBase {
 
     /**
      * @notice When the single-sided reinvestment fails the slippage gate, the premium mint still succeeds and the
-     *         freshly minted senior shares stay idle in the kernel (ltOwnedSeniorTrancheShares), not deployed into
-     *         ltRawNAV and not forfeited. The un-deployed premium is held by the kernel as idle liquidity premium
+     *         freshly minted senior shares stay idle in the kernel (lptOwnedSeniorTrancheShares), not deployed into
+     *         lptRawNAV and not forfeited. The un-deployed premium is held by the kernel as idle liquidity premium
      *         senior shares, claimable and never forfeited, and a tranche operation tolerates a failing
      *         reinvestment without reverting
      * @dev An attacker forcing venue slippage only defers deployment: the metric keeps reading under-provisioned
-     *      (ltRawNAV excludes the idle shares) so the LDM keeps paying
+     *      (lptRawNAV excludes the idle shares) so the LDM keeps paying
      */
     function test_griefedReinvestment_stagesPremiumAsIdleSeniorShares() public {
         _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
@@ -140,18 +140,18 @@ contract Test_WhitelistPremiumMint is DayMarketTestBase {
         setVenueSlippageMode(true);
 
         // Record the pre-gain staged premium (zero, seeding was flat) and pool depth
-        uint256 stagedBefore = kernel.getState().ltOwnedSeniorTrancheShares;
+        uint256 stagedBefore = kernel.getState().lptOwnedSeniorTrancheShares;
         assertEq(stagedBefore, 0, "no premium is staged after a flat seed");
-        uint256 ltRawBefore = toUint256(accountant.getState().lastLTRawNAV);
+        uint256 lptRawBefore = toUint256(accountant.getState().lastLPTRawNAV);
 
         // Book a +10% senior gain, then sync: the premium mints but the reinvestment is rejected by the gate
         applySTPnL(1000);
         SyncedAccountingState memory s = _sync();
 
         // The sync does not revert, the premium is staged (not deployed, not forfeited)
-        uint256 stagedAfter = kernel.getState().ltOwnedSeniorTrancheShares;
+        uint256 stagedAfter = kernel.getState().lptOwnedSeniorTrancheShares;
         assertGt(stagedAfter, stagedBefore, "the griefed premium is staged as idle senior shares, not forfeited");
-        // ltRawNAV (the BPT depth) does not grow from the premium: the staged pile stays out of the liquidity metric
-        assertEq(toUint256(s.ltRawNAV), ltRawBefore, "the failed reinvestment leaves pool depth unchanged, so the metric stays under-provisioned");
+        // lptRawNAV (the BPT depth) does not grow from the premium: the staged pile stays out of the liquidity metric
+        assertEq(toUint256(s.lptRawNAV), lptRawBefore, "the failed reinvestment leaves pool depth unchanged, so the metric stays under-provisioned");
     }
 }

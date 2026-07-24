@@ -31,11 +31,11 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
 
     /// @dev Deposit amount sized so ST's coverage/liquidity gates never bind in the seeded market
     function _depositAmount(address _tranche) internal view returns (uint256) {
-        return _tranche == address(liquidityTranche) ? 10e18 : 10 * stUnit;
+        return _tranche == address(liquidityProviderTranche) ? 10e18 : 10 * stUnit;
     }
 
     function _tranches() internal view returns (address[3] memory) {
-        return [address(seniorTranche), address(juniorTranche), address(liquidityTranche)];
+        return [address(seniorTranche), address(juniorTranche), address(liquidityProviderTranche)];
     }
 
     // ---------------------------------------------------------------------
@@ -342,9 +342,9 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
 
     function test_executeDeposits_acrossUsersAndTranches() public {
         uint256 jtAmount = _depositAmount(address(juniorTranche));
-        uint256 ltAmount = _depositAmount(address(liquidityTranche));
+        uint256 lptAmount = _depositAmount(address(liquidityProviderTranche));
         (uint256 nonceA,) = _requestDeposit(USER_A, address(juniorTranche), jtAmount, USER_A, 0);
-        (uint256 nonceB,) = _requestDeposit(USER_B, address(liquidityTranche), ltAmount, USER_B, 0);
+        (uint256 nonceB,) = _requestDeposit(USER_B, address(liquidityProviderTranche), lptAmount, USER_B, 0);
         _warpPastDepositDelay();
 
         address[] memory users = new address[](2);
@@ -360,7 +360,7 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
         vm.prank(USER_A);
         uint256[] memory minted = entryPoint.executeDeposits(users, nonces, amounts);
         assertGt(minted[0], 0, "the JT deposit in the batch must mint shares");
-        assertGt(minted[1], 0, "the LT deposit in the batch must mint shares");
+        assertGt(minted[1], 0, "the LPT deposit in the batch must mint shares");
     }
 
     function test_executeDeposits_revertsOnLengthMismatch() public {

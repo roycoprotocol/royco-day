@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { LT_LP_ROLE } from "../../../src/factory/Roles.sol";
+import { LPT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { MAX_MINT_DILUTION_WAD, VIRTUAL_SHARES, WAD } from "../../../src/libraries/Constants.sol";
 import { NAV_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { ValuationLogic } from "../../../src/libraries/logic/ValuationLogic.sol";
@@ -18,11 +18,11 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *         (supply == 0 AND backing == 0), and an empty-with-backing state prices against the (supply + VIRTUAL_SHARES)
  *         over (backing + VIRTUAL_ASSETS) basis, stranding the pre-existing backing to the virtual shares instead of
  *         handing it to the bootstrap depositor. Every tranche deposit prices through this primitive, so these pins
- *         cover ST/JT/LT at once.
+ *         cover ST/JT/LPT at once.
  *
  *         The amplifier that made this reachable WITHOUT an external donation is protocol-credited value that is
  *         independent of a tranche's own share supply:
- *           - LT: the liquidity premium (senior shares the kernel stages for the LT) accrues even with zero LT holders
+ *           - LPT: the liquidity premium (senior shares the kernel stages for the LPT) accrues even with zero LPT holders
  *           - JT: the risk premium is booked into jtEffectiveNAV independent of JT tranche supply
  *         The senior tranche has no such amplifier: its NAV basis is its own underlying (which scales with its shares)
  *         plus loss cross-claims, and the kernel accounts assets internally (`totalCollateralAssets`, not
@@ -42,7 +42,7 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
     function setUp() public {
         MarketParamsConfig memory p = defaultParams();
         p.minLiquidityWAD = 0; // decouple deposits from a liquidity gate so a bare bootstrap deposit lands
-        p.ltYieldShareProtocolFeeWAD = 0; // no LT protocol fee, so the fee mint does not create a phantom first LT share
+        p.lptYieldShareProtocolFeeWAD = 0; // no LPT protocol fee, so the fee mint does not create a phantom first LPT share
         _deployMarket(cellA(), p);
         stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
@@ -57,7 +57,7 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
      * pre-existing backing. Under the virtual offset the empty-with-backing state falls through to the priced branch
      * (floor((0 + 1e6) x deposit / (backing + 1))), so the backing stays stranded to the virtual shares and the
      * depositor's round-trip claim is strictly below its deposit (both conversions floor). This is the single
-     * primitive every tranche deposit prices through, so this pin covers ST/JT/LT at once.
+     * primitive every tranche deposit prices through, so this pin covers ST/JT/LPT at once.
      */
     function test_Root_ZeroSupply_FirstMintMustNotCaptureBackingNAV() public pure {
         uint256 backingNAV = 1000e18;
@@ -123,19 +123,19 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                LT PREMIUM STAGED FOR AN EMPTY TRANCHE (windfall)
+                LPT PREMIUM STAGED FOR AN EMPTY TRANCHE (windfall)
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * INSTANCE LT-WINDFALL: the liquidity premium (ST shares staged for the LT) accrues while the LT tranche has
-     * ZERO shares (minLiquidity 0, LT yield-share curve nonzero), so `_getLiquidityTrancheEffectiveNAV` is positive
-     * with LT supply 0. Pre-hardening the first LT depositor minted 1:1 and captured the entire staged premium,
-     * under the virtual offset the premium stays stranded to the virtual shares and the first LT depositor's
+     * INSTANCE LPT-WINDFALL: the liquidity premium (ST shares staged for the LPT) accrues while the LPT tranche has
+     * ZERO shares (minLiquidity 0, LPT yield-share curve nonzero), so `_getLiquidityProviderTrancheEffectiveNAV` is positive
+     * with LPT supply 0. Pre-hardening the first LPT depositor minted 1:1 and captured the entire staged premium,
+     * under the virtual offset the premium stays stranded to the virtual shares and the first LPT depositor's
      * position is worth ~its deposit (1% slack absorbs the integration path's multiple floors)
      */
-    function test_LT_PremiumToEmptyTranche_FirstDepositorMustNotCaptureIt() public {
+    function test_LPT_PremiumToEmptyTranche_FirstDepositorMustNotCaptureIt() public {
         _seedMarket(1000 * stUnit, 500 * stUnit);
-        assertEq(liquidityTranche.totalSupply(), 0, "precondition: LT has zero shares");
+        assertEq(liquidityProviderTranche.totalSupply(), 0, "precondition: LPT has zero shares");
 
         // Keep the premium staged as idle senior shares (venue reinvestment fails), then accrue senior yield
         setVenueSlippageMode(true);
@@ -145,25 +145,25 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
             syncVenuePrices();
             _sync();
         }
-        assertGt(kernel.getState().ltOwnedSeniorTrancheShares, 0, "precondition: premium staged for an empty LT");
-        assertEq(liquidityTranche.totalSupply(), 0, "precondition: LT still empty");
+        assertGt(kernel.getState().lptOwnedSeniorTrancheShares, 0, "precondition: premium staged for an empty LPT");
+        assertEq(liquidityProviderTranche.totalSupply(), 0, "precondition: LPT still empty");
 
-        // First LT depositor arrives with a tiny position
+        // First LPT depositor arrives with a tiny position
         address dave = makeAddr("DAVE_FIRST_LP");
-        accessManager.grantRole(LT_LP_ROLE, dave, 0);
+        accessManager.grantRole(LPT_LP_ROLE, dave, 0);
         uint256 daveBpt = 1e18;
         _mintBptTo(dave, daveBpt, quoteUnit);
-        uint256 daveDepositNAV = toUint256(kernel.convertLTAssetsToValue(toTrancheUnits(daveBpt)));
+        uint256 daveDepositNAV = toUint256(kernel.convertLPTAssetsToValue(toTrancheUnits(daveBpt)));
 
         vm.startPrank(dave);
-        bpt.approve(address(liquidityTranche), daveBpt);
-        uint256 daveShares = liquidityTranche.deposit(toTrancheUnits(daveBpt), dave);
+        bpt.approve(address(liquidityProviderTranche), daveBpt);
+        uint256 daveShares = liquidityProviderTranche.deposit(toTrancheUnits(daveBpt), dave);
         vm.stopPrank();
 
         // Dave's own redeemable claim (not the tranche total): the staged premium must stay stranded to the phantom
         // shares, so Dave can only redeem ~his deposit
-        uint256 daveClaimNAV = toUint256(liquidityTranche.previewRedeem(daveShares).nav);
-        assertLe(daveClaimNAV, daveDepositNAV + daveDepositNAV / 100, "LT-WINDFALL: first LT depositor must not capture the staged premium");
+        uint256 daveClaimNAV = toUint256(liquidityProviderTranche.previewRedeem(daveShares).nav);
+        assertLe(daveClaimNAV, daveDepositNAV + daveDepositNAV / 100, "LPT-WINDFALL: first LPT depositor must not capture the staged premium");
     }
     // NOTE: the "wiped JT + fresh deposit captures the recovery" scenario is intentionally NOT a test here. Once
     // jtEffectiveNAV hits zero the existing JT shares back zero NAV and are correctly diluted, a fresh depositor

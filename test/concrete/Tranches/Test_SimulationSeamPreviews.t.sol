@@ -29,7 +29,7 @@ abstract contract SimulationSeamPreviewsTestBase is MarketFuzzTestBase {
         bytes32 accountantStateHash;
         uint256 stSupply;
         uint256 jtSupply;
-        uint256 ltSupply;
+        uint256 lptSupply;
         uint256 kernelVaultShareBalance;
         uint256 kernelBPTBalance;
         uint256 kernelSTShareBalance;
@@ -43,7 +43,7 @@ abstract contract SimulationSeamPreviewsTestBase is MarketFuzzTestBase {
         s.accountantStateHash = keccak256(abi.encode(accountant.getState()));
         s.stSupply = seniorTranche.totalSupply();
         s.jtSupply = juniorTranche.totalSupply();
-        s.ltSupply = liquidityTranche.totalSupply();
+        s.lptSupply = liquidityProviderTranche.totalSupply();
         s.kernelVaultShareBalance = stJtVault.balanceOf(address(kernel));
         s.kernelBPTBalance = bpt.balanceOf(address(kernel));
         s.kernelSTShareBalance = seniorTranche.balanceOf(address(kernel));
@@ -59,7 +59,7 @@ abstract contract SimulationSeamPreviewsTestBase is MarketFuzzTestBase {
         assertEq(a.accountantStateHash, _before.accountantStateHash, string.concat(_ctx, ": accountant checkpoints must be untouched"));
         assertEq(a.stSupply, _before.stSupply, string.concat(_ctx, ": senior supply must be untouched"));
         assertEq(a.jtSupply, _before.jtSupply, string.concat(_ctx, ": junior supply must be untouched"));
-        assertEq(a.ltSupply, _before.ltSupply, string.concat(_ctx, ": liquidity supply must be untouched"));
+        assertEq(a.lptSupply, _before.lptSupply, string.concat(_ctx, ": liquidity supply must be untouched"));
         assertEq(a.kernelVaultShareBalance, _before.kernelVaultShareBalance, string.concat(_ctx, ": kernel vault-share custody must be untouched"));
         assertEq(a.kernelBPTBalance, _before.kernelBPTBalance, string.concat(_ctx, ": kernel BPT custody must be untouched"));
         assertEq(a.kernelSTShareBalance, _before.kernelSTShareBalance, string.concat(_ctx, ": kernel staged senior shares must be untouched"));
@@ -70,7 +70,7 @@ abstract contract SimulationSeamPreviewsTestBase is MarketFuzzTestBase {
     /// @notice Asserts all four claim legs of an executed redemption equal the same-block preview byte-for-byte
     function _assertClaimsParity(AssetClaims memory _executed, AssetClaims memory _previewed, string memory _flow) internal pure {
         assertEq(_executed.collateralAssets, _previewed.collateralAssets, string.concat(_flow, ": collateral leg must match the preview"));
-        assertEq(_executed.ltAssets, _previewed.ltAssets, string.concat(_flow, ": LT-asset leg must match the preview"));
+        assertEq(_executed.lptAssets, _previewed.lptAssets, string.concat(_flow, ": LPT-asset leg must match the preview"));
         assertEq(_executed.stShares, _previewed.stShares, string.concat(_flow, ": senior-share leg must match the preview"));
         assertEq(_executed.nav, _previewed.nav, string.concat(_flow, ": claim NAV must match the preview"));
     }
@@ -83,7 +83,7 @@ abstract contract SimulationSeamPreviewsTestBase is MarketFuzzTestBase {
  *         regime with the ST self-liquidation bonus), full state neutrality of both previews, verbatim revert
  *         bubbling (pause, zero amounts), and the ONLY_SELF gate on the simulation callbacks
  * @dev Seeded once per test in setUp so every literal below is wei-exact: ST 100e18 and JT 30e18 vault shares at
- *      a 1.0 rate (coverage (100 + 30) x 0.2 / 30 = 0.8667 <= 1) plus the auto-seeded quote-only LT depth of
+ *      a 1.0 rate (coverage (100 + 30) x 0.2 / 30 = 0.8667 <= 1) plus the auto-seeded quote-only LPT depth of
  *      exactly 6e18 NAV (required ceil(100e18 x 0.05) = 5e18 in whole quote wei plus one whole-quote cushion),
  *      so every tranche starts at a 1.0 share price
  */
@@ -103,7 +103,7 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
      * @dev All rates are 1.0 so each quote is pinned absolutely, not just relatively, under the virtual-shares/assets
      *      offset the mint carries (floor((supply + 1e6) x value / (effNAV + 1))): ST 10e18 assets = 10e18 NAV against
      *      100e18 effective NAV over 100e18 shares mints floor((100e18 + 1e6) x 10e18 / (100e18 + 1)) = 10000000000000099999,
-     *      JT the same at 30e18 over 30e18 mints floor((30e18 + 1e6) x 10e18 / (30e18 + 1)) = 10000000000000333332, and LT
+     *      JT the same at 30e18 over 30e18 mints floor((30e18 + 1e6) x 10e18 / (30e18 + 1)) = 10000000000000333332, and LPT
      *      5e18 quote-backed BPT (NAV-per-BPT 1.0) against 6e18 effective NAV over 6e18 shares mints
      *      floor((6e18 + 1e6) x 5e18 / (6e18 + 1)) = 5000000000000833332
      */
@@ -116,12 +116,12 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         assertEq(jtPreviewed, 10_000_000_000_000_333_332, "the flat-market junior quote must be the exact offset-adjusted mint");
         assertEq(_depositJunior(10e18), jtPreviewed, "the junior deposit must mint exactly the previewed shares");
 
-        _mintQuoteBackedBPT(LT_PROVIDER, 5e18, 5e6);
-        uint256 ltPreviewed = liquidityTranche.previewDeposit(toTrancheUnits(5e18));
-        assertEq(ltPreviewed, 5_000_000_000_000_833_332, "the flat-market liquidity quote must be the exact offset-adjusted mint");
-        vm.startPrank(LT_PROVIDER);
-        bpt.approve(address(liquidityTranche), 5e18);
-        assertEq(liquidityTranche.deposit(toTrancheUnits(5e18), LT_PROVIDER), ltPreviewed, "the liquidity deposit must mint exactly the previewed shares");
+        _mintQuoteBackedBPT(LPT_PROVIDER, 5e18, 5e6);
+        uint256 lptPreviewed = liquidityProviderTranche.previewDeposit(toTrancheUnits(5e18));
+        assertEq(lptPreviewed, 5_000_000_000_000_833_332, "the flat-market liquidity quote must be the exact offset-adjusted mint");
+        vm.startPrank(LPT_PROVIDER);
+        bpt.approve(address(liquidityProviderTranche), 5e18);
+        assertEq(liquidityProviderTranche.deposit(toTrancheUnits(5e18), LPT_PROVIDER), lptPreviewed, "the liquidity deposit must mint exactly the previewed shares");
         vm.stopPrank();
     }
 
@@ -143,13 +143,13 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         uint256 jtPreviewed = juniorTranche.previewDeposit(toTrancheUnits(10e18));
         assertEq(_depositJunior(10e18), jtPreviewed, "the junior deposit must mint exactly the shares previewed under pending mints");
 
-        _mintQuoteBackedBPT(LT_PROVIDER, 5e18, 5e6);
-        uint256 ltPreviewed = liquidityTranche.previewDeposit(toTrancheUnits(5e18));
-        vm.startPrank(LT_PROVIDER);
-        bpt.approve(address(liquidityTranche), 5e18);
+        _mintQuoteBackedBPT(LPT_PROVIDER, 5e18, 5e6);
+        uint256 lptPreviewed = liquidityProviderTranche.previewDeposit(toTrancheUnits(5e18));
+        vm.startPrank(LPT_PROVIDER);
+        bpt.approve(address(liquidityProviderTranche), 5e18);
         assertEq(
-            liquidityTranche.deposit(toTrancheUnits(5e18), LT_PROVIDER),
-            ltPreviewed,
+            liquidityProviderTranche.deposit(toTrancheUnits(5e18), LPT_PROVIDER),
+            lptPreviewed,
             "the liquidity deposit must mint exactly the shares previewed under pending mints"
         );
         vm.stopPrank();
@@ -165,8 +165,8 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
      * @dev All value sits on each tranche's own raw NAV at a 1.0 rate, and the claim scaler carries the virtual-shares
      *      offset (floor(leg x shares / (supply + 1e6)), leaving a virtual-dust sliver): 10e18 ST shares of 100e18
      *      supply claim floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 senior assets and NAV, 5e18 JT
-     *      shares of 30e18 claim floor(30e18 x 5e18 / (30e18 + 1e6)) = 4999999999999833333, 1e18 LT shares of 6e18
-     *      claim floor(6e18 x 1e18 / (6e18 + 1e6)) = 999999999999833333 BPT. The LT slice is sized so the
+     *      shares of 30e18 claim floor(30e18 x 5e18 / (30e18 + 1e6)) = 4999999999999833333, 1e18 LPT shares of 6e18
+     *      claim floor(6e18 x 1e18 / (6e18 + 1e6)) = 999999999999833333 BPT. The LPT slice is sized so the
      *      post-redemption depth 5e18 clears the 5% liquidity floor on the post-exit senior effective NAV of 90e18 (required 4.5e18)
      */
     function test_PreviewRedeem_FreshMarket_ExactQuotesAndExecParity() public {
@@ -184,12 +184,12 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         AssetClaims memory jtClaims = juniorTranche.redeem(5e18, JT_PROVIDER, JT_PROVIDER);
         _assertClaimsParity(jtClaims, jtPreviewed, "junior redemption");
 
-        AssetClaims memory ltPreviewed = liquidityTranche.previewRedeem(1e18);
-        assertEq(ltPreviewed.ltAssets, toTrancheUnits(999_999_999_999_833_333), "the liquidity quote must claim exactly its pro-rata BPT");
-        assertEq(ltPreviewed.nav, toNAVUnits(uint256(999_999_999_999_833_333)), "the liquidity quote must claim exactly its pro-rata NAV");
-        vm.prank(LT_PROVIDER);
-        AssetClaims memory ltClaims = liquidityTranche.redeem(1e18, LT_PROVIDER, LT_PROVIDER);
-        _assertClaimsParity(ltClaims, ltPreviewed, "liquidity redemption");
+        AssetClaims memory lptPreviewed = liquidityProviderTranche.previewRedeem(1e18);
+        assertEq(lptPreviewed.lptAssets, toTrancheUnits(999_999_999_999_833_333), "the liquidity quote must claim exactly its pro-rata BPT");
+        assertEq(lptPreviewed.nav, toNAVUnits(uint256(999_999_999_999_833_333)), "the liquidity quote must claim exactly its pro-rata NAV");
+        vm.prank(LPT_PROVIDER);
+        AssetClaims memory lptClaims = liquidityProviderTranche.redeem(1e18, LPT_PROVIDER, LPT_PROVIDER);
+        _assertClaimsParity(lptClaims, lptPreviewed, "liquidity redemption");
     }
 
     /**
@@ -215,11 +215,11 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         AssetClaims memory jtClaims = juniorTranche.redeem(jtShares, JT_PROVIDER, JT_PROVIDER);
         _assertClaimsParity(jtClaims, jtPreviewed, "junior redemption under pending mints");
 
-        uint256 ltShares = liquidityTranche.maxRedeem(LT_PROVIDER) / 2;
-        AssetClaims memory ltPreviewed = liquidityTranche.previewRedeem(ltShares);
-        vm.prank(LT_PROVIDER);
-        AssetClaims memory ltClaims = liquidityTranche.redeem(ltShares, LT_PROVIDER, LT_PROVIDER);
-        _assertClaimsParity(ltClaims, ltPreviewed, "liquidity redemption under pending mints");
+        uint256 lptShares = liquidityProviderTranche.maxRedeem(LPT_PROVIDER) / 2;
+        AssetClaims memory lptPreviewed = liquidityProviderTranche.previewRedeem(lptShares);
+        vm.prank(LPT_PROVIDER);
+        AssetClaims memory lptClaims = liquidityProviderTranche.redeem(lptShares, LPT_PROVIDER, LPT_PROVIDER);
+        _assertClaimsParity(lptClaims, lptPreviewed, "liquidity redemption under pending mints");
     }
 
     /**
@@ -271,8 +271,8 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         // Redemption slices come from the live liquidity-respecting maxes so the simulated exits clear every gate
         uint256 stShares = seniorTranche.maxRedeem(ST_PROVIDER) / 2;
         uint256 jtShares = juniorTranche.maxRedeem(JT_PROVIDER) / 2;
-        uint256 ltShares = liquidityTranche.maxRedeem(LT_PROVIDER) / 2;
-        assertGt(stShares * jtShares * ltShares, 0, "arrange: every tranche must have a redeemable slice to simulate");
+        uint256 lptShares = liquidityProviderTranche.maxRedeem(LPT_PROVIDER) / 2;
+        assertGt(stShares * jtShares * lptShares, 0, "arrange: every tranche must have a redeemable slice to simulate");
 
         MarketSnapshot memory before = _snapshotMarket();
 
@@ -280,14 +280,14 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         _assertSnapshotUnchanged(before, "senior previewDeposit");
         juniorTranche.previewDeposit(toTrancheUnits(10e18));
         _assertSnapshotUnchanged(before, "junior previewDeposit");
-        liquidityTranche.previewDeposit(toTrancheUnits(5e18));
+        liquidityProviderTranche.previewDeposit(toTrancheUnits(5e18));
         _assertSnapshotUnchanged(before, "liquidity previewDeposit");
 
         seniorTranche.previewRedeem(stShares);
         _assertSnapshotUnchanged(before, "senior previewRedeem");
         juniorTranche.previewRedeem(jtShares);
         _assertSnapshotUnchanged(before, "junior previewRedeem");
-        liquidityTranche.previewRedeem(ltShares);
+        liquidityProviderTranche.previewRedeem(lptShares);
         _assertSnapshotUnchanged(before, "liquidity previewRedeem");
     }
 
@@ -337,17 +337,17 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         vm.prank(JT_PROVIDER);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
         juniorTranche.deposit(toTrancheUnits(0), JT_PROVIDER);
-        vm.prank(LT_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
-        liquidityTranche.deposit(toTrancheUnits(0), LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LPT_DEPOSIT));
+        liquidityProviderTranche.deposit(toTrancheUnits(0), LPT_PROVIDER);
 
         // Preview side: the identical errors bubble verbatim through the simulation seam
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
         seniorTranche.previewDeposit(toTrancheUnits(0));
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
         juniorTranche.previewDeposit(toTrancheUnits(0));
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
-        liquidityTranche.previewDeposit(toTrancheUnits(0));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LPT_DEPOSIT));
+        liquidityProviderTranche.previewDeposit(toTrancheUnits(0));
 
         // Zero-share redemptions: exec and preview raise the identical tranche-level guard
         vm.prank(ST_PROVIDER);
@@ -358,7 +358,7 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
         juniorTranche.previewRedeem(0);
         vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
-        liquidityTranche.previewRedeem(0);
+        liquidityProviderTranche.previewRedeem(0);
     }
 
     /**
@@ -387,13 +387,13 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         juniorTranche.previewDeposit(toTrancheUnits(1e18));
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        liquidityTranche.previewDeposit(toTrancheUnits(1e18));
+        liquidityProviderTranche.previewDeposit(toTrancheUnits(1e18));
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         seniorTranche.previewRedeem(1e18);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         juniorTranche.previewRedeem(1e18);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        liquidityTranche.previewRedeem(1e18);
+        liquidityProviderTranche.previewRedeem(1e18);
     }
 
     // =============================
@@ -421,18 +421,18 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         vm.prank(address(juniorTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
         kernel.jtRedeem(true, 1e18, address(kernel));
-        vm.prank(address(liquidityTranche));
+        vm.prank(address(liquidityProviderTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.ltDeposit(true, toTrancheUnits(1e18));
-        vm.prank(address(liquidityTranche));
+        kernel.lptDeposit(true, toTrancheUnits(1e18));
+        vm.prank(address(liquidityProviderTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.ltRedeem(true, 1e18, address(kernel));
-        vm.prank(address(liquidityTranche));
+        kernel.lptRedeem(true, 1e18, address(kernel));
+        vm.prank(address(liquidityProviderTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.ltDepositMultiAsset(true, toTrancheUnits(0), 1e6, toTrancheUnits(0));
-        vm.prank(address(liquidityTranche));
+        kernel.lptDepositMultiAsset(true, toTrancheUnits(0), 1e6, toTrancheUnits(0));
+        vm.prank(address(liquidityProviderTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.ltRedeemMultiAsset(true, 1e18, 0, 0, address(kernel));
+        kernel.lptRedeemMultiAsset(true, 1e18, 0, 0, address(kernel));
 
         assertEq(keccak256(abi.encode(accountant.getState(), kernel.getState())), digestBefore, "a flagged flow must leave the committed state untouched");
     }
@@ -442,8 +442,8 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
  * @title Test_SimulationSeamPreviewsFixedTerm_Tranches
  * @notice The fixed-term revert parity the seam introduces, including the BEHAVIOR FLIP from the old view
  *         previews: redeem previews now revert DISABLED_IN_FIXED_TERM_STATE exactly like redeem() instead of
- *         returning empty claims, ST and JT deposit previews revert like their deposits, and the LT in-kind
- *         deposit preview keeps quoting because the LT deposit stays enabled in every market state
+ *         returning empty claims, ST and JT deposit previews revert like their deposits, and the LPT in-kind
+ *         deposit preview keeps quoting because the LPT deposit stays enabled in every market state
  * @dev Seeded ST 100e18 / JT 30e18 flat, then a covered -20% drawdown marks coverage utilization at
  *      ceil(104e18 x 0.2 / 4e18) = 5.2e18, above WAD and below the 6.4667e18 liquidation threshold, so the
  *      market enters FIXED_TERM with deposits into loss-bearing tranches and all redemptions locked
@@ -484,19 +484,19 @@ contract Test_SimulationSeamPreviewsFixedTerm_Tranches is SimulationSeamPreviews
     }
 
     /**
-     * @notice In FIXED_TERM the LT in-kind deposit preview still quotes (the in-kind LT deposit only deepens
+     * @notice In FIXED_TERM the LPT in-kind deposit preview still quotes (the in-kind LPT deposit only deepens
      *         liquidity and stays enabled in every market state) and execution matches it exactly
      * @dev The drawdown lives entirely on the ST/JT vault rate: the quote-only pool is untouched, so 5e18
-     *      quote-backed BPT is worth 5e18 NAV against the 6e18 LT effective NAV over 6e18 shares, minting the
+     *      quote-backed BPT is worth 5e18 NAV against the 6e18 LPT effective NAV over 6e18 shares, minting the
      *      offset-adjusted floor((6e18 + 1e6) x 5e18 / (6e18 + 1)) = 5000000000000833332
      */
     function test_FixedTerm_LiquidityPreviewDepositStillQuotes_ExecParity() public {
-        _mintQuoteBackedBPT(LT_PROVIDER, 5e18, 5e6);
-        uint256 previewed = liquidityTranche.previewDeposit(toTrancheUnits(5e18));
-        assertEq(previewed, 5_000_000_000_000_833_332, "the fixed-term LT quote must price the exact offset-adjusted mint on the untouched pool");
-        vm.startPrank(LT_PROVIDER);
-        bpt.approve(address(liquidityTranche), 5e18);
-        assertEq(liquidityTranche.deposit(toTrancheUnits(5e18), LT_PROVIDER), previewed, "the fixed-term LT deposit must mint exactly the previewed shares");
+        _mintQuoteBackedBPT(LPT_PROVIDER, 5e18, 5e6);
+        uint256 previewed = liquidityProviderTranche.previewDeposit(toTrancheUnits(5e18));
+        assertEq(previewed, 5_000_000_000_000_833_332, "the fixed-term LPT quote must price the exact offset-adjusted mint on the untouched pool");
+        vm.startPrank(LPT_PROVIDER);
+        bpt.approve(address(liquidityProviderTranche), 5e18);
+        assertEq(liquidityProviderTranche.deposit(toTrancheUnits(5e18), LPT_PROVIDER), previewed, "the fixed-term LPT deposit must mint exactly the previewed shares");
         vm.stopPrank();
     }
 
@@ -519,11 +519,11 @@ contract Test_SimulationSeamPreviewsFixedTerm_Tranches is SimulationSeamPreviews
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
         juniorTranche.previewRedeem(1e18);
 
-        vm.prank(LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
-        liquidityTranche.redeem(1e18, LT_PROVIDER, LT_PROVIDER);
+        liquidityProviderTranche.redeem(1e18, LPT_PROVIDER, LPT_PROVIDER);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
-        liquidityTranche.previewRedeem(1e18);
+        liquidityProviderTranche.previewRedeem(1e18);
     }
 }
 
@@ -535,7 +535,7 @@ contract Test_SimulationSeamPreviewsFixedTerm_Tranches is SimulationSeamPreviews
  * @dev The PnL band spans -5% to +100%. Appreciation runs sync-free so pending premium and fee mints commit
  *      inside the simulated frame. A covered drawdown beyond dust books JT impermanent loss and the next
  *      sync enters FIXED_TERM regardless of utilization, so the drawdown arm first syncs into FIXED_TERM and then
- *      lets the two-week protection term lapse: every flow reopens and each preview must reconcile the
+ *      lets the two-week observation term lapse: every flow reopens and each preview must reconcile the
  *      FIXED_TERM-to-PERPETUAL transition (including the IL erasure) inside its own frame, exactly like exec
  */
 contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase {
@@ -565,7 +565,7 @@ contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestB
         int256 pnlBps = int256(bound(_pnlSeed, 0, 10_500)) - 500; // signed band -5% to +100%
         uint256 elapsed = bound(_elapsed, 1 hours, 365 days); // accrual window from an hour to a year
         // Extra quote-only depth worth 15% of the senior seed keeps the liquidity gate clear after up to +100%
-        // senior appreciation, so the senior-deposit and LT-redemption capacities stay positive on every run
+        // senior appreciation, so the senior-deposit and LPT-redemption capacities stay positive on every run
         _seedFlatMarket(st, jt, st.mulDiv(3, 20) / QUOTE_TO_NAV_SCALE + 1);
 
         applySTPnL(pnlBps);
@@ -584,7 +584,7 @@ contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestB
         syncVenuePrices();
 
         // Flow 1: senior deposit, bounded by the live coverage-and-liquidity capacity. A pending premium
-        // reinvestment can mark the post-sync LT below the max's idle-premium assumption, overstating the
+        // reinvestment can mark the post-sync LPT below the max's idle-premium assumption, overstating the
         // liquidity-capped capacity, the preview must then revert on the gate exactly like the execution
         {
             uint256 assets = bound(_amountSeedA, 1e12, toUint256(seniorTranche.maxDeposit(ST_PROVIDER))); // dust-to-max sizes
@@ -619,13 +619,13 @@ contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestB
         {
             uint256 quoteLeg = bound(_amountSeedC, 1, st / QUOTE_TO_NAV_SCALE); // 1 quote wei up to the senior seed in depth
             uint256 bptIn = quoteLeg * QUOTE_TO_NAV_SCALE;
-            _mintQuoteBackedBPT(LT_PROVIDER, bptIn, quoteLeg);
+            _mintQuoteBackedBPT(LPT_PROVIDER, bptIn, quoteLeg);
             MarketSnapshot memory before = _snapshotMarket();
-            uint256 previewed = liquidityTranche.previewDeposit(toTrancheUnits(bptIn));
+            uint256 previewed = liquidityProviderTranche.previewDeposit(toTrancheUnits(bptIn));
             _assertSnapshotUnchanged(before, "liquidity previewDeposit");
-            vm.startPrank(LT_PROVIDER);
-            bpt.approve(address(liquidityTranche), bptIn);
-            assertEq(liquidityTranche.deposit(toTrancheUnits(bptIn), LT_PROVIDER), previewed, "liquidity deposit must mint exactly the previewed shares");
+            vm.startPrank(LPT_PROVIDER);
+            bpt.approve(address(liquidityProviderTranche), bptIn);
+            assertEq(liquidityProviderTranche.deposit(toTrancheUnits(bptIn), LPT_PROVIDER), previewed, "liquidity deposit must mint exactly the previewed shares");
             vm.stopPrank();
         }
 
@@ -655,12 +655,12 @@ contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestB
         // Flow 6: in-kind liquidity redemption, bounded by the live liquidity-respecting max, guarded on the
         // gate like flow 1 since the same reinvestment wedge can overstate the redemption capacity
         {
-            uint256 shares = bound(_sharesSeedC, 1e6, liquidityTranche.maxRedeem(LT_PROVIDER)); // dust floor as in flow 4
+            uint256 shares = bound(_sharesSeedC, 1e6, liquidityProviderTranche.maxRedeem(LPT_PROVIDER)); // dust floor as in flow 4
             MarketSnapshot memory before = _snapshotMarket();
-            try liquidityTranche.previewRedeem(shares) returns (AssetClaims memory previewed) {
+            try liquidityProviderTranche.previewRedeem(shares) returns (AssetClaims memory previewed) {
                 _assertSnapshotUnchanged(before, "liquidity previewRedeem");
-                vm.prank(LT_PROVIDER);
-                AssetClaims memory claims = liquidityTranche.redeem(shares, LT_PROVIDER, LT_PROVIDER);
+                vm.prank(LPT_PROVIDER);
+                AssetClaims memory claims = liquidityProviderTranche.redeem(shares, LPT_PROVIDER, LPT_PROVIDER);
                 _assertClaimsParity(claims, previewed, "liquidity redemption");
             } catch (bytes memory err) {
                 assertEq(
@@ -669,9 +669,9 @@ contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestB
                     "the liquidity redemption preview may only revert on the liquidity gate"
                 );
                 _assertSnapshotUnchanged(before, "liquidity previewRedeem");
-                vm.prank(LT_PROVIDER);
+                vm.prank(LPT_PROVIDER);
                 vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-                liquidityTranche.redeem(shares, LT_PROVIDER, LT_PROVIDER);
+                liquidityProviderTranche.redeem(shares, LPT_PROVIDER, LPT_PROVIDER);
             }
         }
     }

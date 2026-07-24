@@ -32,13 +32,13 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
         accountant.preOpSyncTrancheAccounting(toNAVUnits(uint256(1e18)));
     }
 
-    /// commitLiquidityTrancheRawNAV reverts for any non-kernel caller, including the admin
+    /// commitLiquidityProviderTrancheRawNAV reverts for any non-kernel caller, including the admin
     function test_RevertIf_CommitFromNonKernel() public {
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.commitLiquidityTrancheRawNAV(toNAVUnits(uint256(1e18)));
+        accountant.commitLiquidityProviderTrancheRawNAV(toNAVUnits(uint256(1e18)));
         vm.prank(stranger);
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.commitLiquidityTrancheRawNAV(toNAVUnits(uint256(1e18)));
+        accountant.commitLiquidityProviderTrancheRawNAV(toNAVUnits(uint256(1e18)));
     }
 
     /// postOpSyncTrancheAccounting reverts for any non-kernel caller, including the admin
@@ -58,7 +58,7 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
             calls[i] = hardSync[i];
         }
         calls[10] = abi.encodeCall(IRoycoDayAccountant.setJuniorTrancheYDM, (address(0xBEEF), bytes("")));
-        calls[11] = abi.encodeCall(IRoycoDayAccountant.setLiquidityTrancheYDM, (address(0xBEEF), bytes("")));
+        calls[11] = abi.encodeCall(IRoycoDayAccountant.setLiquidityProviderTrancheYDM, (address(0xBEEF), bytes("")));
         calls[12] = abi.encodeCall(IRoycoAuth.pause, ());
         calls[13] = abi.encodeCall(IRoycoAuth.unpause, ());
         for (uint256 i; i < calls.length; ++i) {
@@ -102,9 +102,9 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
         MockRecordingYDM newJT = new MockRecordingYDM();
         accountant.setJuniorTrancheYDM(address(newJT), "");
         assertEq(accountant.getState().jtYDM, address(newJT), "jt ydm updated despite reverting kernel");
-        MockRecordingYDM newLT = new MockRecordingYDM();
-        accountant.setLiquidityTrancheYDM(address(newLT), "");
-        assertEq(accountant.getState().ltYDM, address(newLT), "lt ydm updated despite reverting kernel");
+        MockRecordingYDM newLPT = new MockRecordingYDM();
+        accountant.setLiquidityProviderTrancheYDM(address(newLPT), "");
+        assertEq(accountant.getState().lptYDM, address(newLPT), "lt ydm updated despite reverting kernel");
     }
 
     /// the tolerated kernel sync is still attempted by both YDM setters (counted in NONE mode)
@@ -113,8 +113,8 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
         MockRecordingYDM newJT = new MockRecordingYDM();
         accountant.setJuniorTrancheYDM(address(newJT), "");
         assertEq(kernel.syncCallCount(), countBefore + 1, "jt setter attempted the sync");
-        MockRecordingYDM newLT = new MockRecordingYDM();
-        accountant.setLiquidityTrancheYDM(address(newLT), "");
+        MockRecordingYDM newLPT = new MockRecordingYDM();
+        accountant.setLiquidityProviderTrancheYDM(address(newLPT), "");
         assertEq(kernel.syncCallCount(), countBefore + 2, "lt setter attempted the sync");
     }
 }

@@ -47,11 +47,11 @@ contract Test_EntryPointConstructionAndAdmin is EntryPointTestBase {
         // The fixture initializes the entry point empty and routes the initial configs through the factory
         // (mirroring production market deployments); the stored configs must be enriched with the tranche's
         // asset, kernel, and type
-        IRoycoDayEntryPoint.EnrichedTrancheConfig memory config = entryPoint.getTrancheConfig(address(liquidityTranche));
-        assertEq(config.asset, address(bpt), "the LT config must cache the tranche asset");
-        assertEq(config.kernel, address(kernel), "the LT config must cache the market kernel");
-        assertEq(uint8(config.trancheType), uint8(TrancheType.LIQUIDITY), "the LT config must cache the tranche type");
-        assertTrue(config.baseConfig.enabled, "the LT must be enabled by the factory-routed initial configuration");
+        IRoycoDayEntryPoint.EnrichedTrancheConfig memory config = entryPoint.getTrancheConfig(address(liquidityProviderTranche));
+        assertEq(config.asset, address(bpt), "the LPT config must cache the tranche asset");
+        assertEq(config.kernel, address(kernel), "the LPT config must cache the market kernel");
+        assertEq(uint8(config.trancheType), uint8(TrancheType.LIQUIDITY_PROVIDER), "the LPT config must cache the tranche type");
+        assertTrue(config.baseConfig.enabled, "the LPT must be enabled by the factory-routed initial configuration");
     }
 
     function test_initialize_cannotBeReinitialized() public {

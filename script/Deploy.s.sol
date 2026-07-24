@@ -32,7 +32,7 @@ import {
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
     ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
-    ADMIN_ORACLE_QUOTER_ROLE,
+    ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_ROLE,
@@ -42,25 +42,14 @@ import {
     DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
+    LPT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
-    LT_LP_ROLE,
     PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../src/factory/Roles.sol";
 import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
-import {
-    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
-} from "../src/factory/templates/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
-import {
-    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
-} from "../src/factory/templates/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
-import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
-} from "../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
-import {
-    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
-} from "../src/factory/templates/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import {
     TAG_ACCOUNTANT_IMPL,
     TAG_ACCOUNTANT_PROXY,
@@ -71,13 +60,12 @@ import {
     TAG_KERNEL_IMPL,
     TAG_KERNEL_PROXY,
     TAG_LDM,
-    TAG_LT_IMPL,
-    TAG_LT_PROXY,
+    TAG_LPT_IMPL,
+    TAG_LPT_PROXY,
     TAG_ST_IMPL,
     TAG_ST_PROXY,
     TAG_YDM
 } from "../src/factory/templates/base/Constants.sol";
-import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../src/factory/templates/liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
 import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -86,33 +74,15 @@ import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
-import {
-    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel
-} from "../src/kernels/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
-import {
-    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel
-} from "../src/kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
-import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
-} from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
-import {
-    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
-} from "../src/kernels/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
-import {
-    IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter
-} from "../src/kernels/base/quoter/identical-st-jt/IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.sol";
-import {
-    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import {
-    IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter
-} from "../src/kernels/base/quoter/identical-st-jt/IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter.sol";
-import {
-    IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../src/kernels/base/quoter/identical-st-jt/IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
+import { RoycoDayBalancerV3Kernel } from "../src/kernels/RoycoDayBalancerV3Kernel.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
+import { ChainlinkPriceOracle } from "../src/oracle/ChainlinkPriceOracle.sol";
+import { ERC4626SharePriceOracle } from "../src/oracle/ERC4626SharePriceOracle.sol";
+import { IdleCDOTranchePriceOracle } from "../src/oracle/IdleCDOTranchePriceOracle.sol";
+import { MakinaSharePriceOracle } from "../src/oracle/MakinaSharePriceOracle.sol";
+import { OracleClockBase } from "../src/oracle/base/clock/OracleClockBase.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
-import { RoycoLiquidityTranche } from "../src/tranches/RoycoLiquidityTranche.sol";
+import { RoycoLiquidityProviderTranche } from "../src/tranches/RoycoLiquidityProviderTranche.sol";
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
 import { AdaptiveCurveYDM_V1 } from "../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../src/ydm/AdaptiveCurveYDM_V2.sol";
@@ -121,14 +91,15 @@ import {
     AdaptiveCurveYDM_V1_Params,
     AdaptiveCurveYDM_V2_Params,
     ChainConfig,
+    ChainlinkPriceOracleParams,
     DeploymentResult,
+    ERC4626SharePriceOracleParams,
     GyroECLPPoolParams,
-    IdenticalAssets_ST_JT_ChainlinkToAdminOracle_QuoterKernelParams,
-    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams,
-    IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams,
-    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams,
+    IdleCDOTranchePriceOracleParams,
     KernelType,
+    MakinaSharePriceOracleParams,
     MarketConfig,
+    OracleType,
     ProtocolScaffolding,
     RoleAssignment,
     RoleAssignmentAddresses,
@@ -150,6 +121,7 @@ import { console2 } from "lib/forge-std/src/console2.sol";
 contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     error UnsupportedKernelType(KernelType kernelType);
     error UnsupportedYDMType(YDMType ydmType);
+    error UnsupportedOracleType(OracleType oracleType);
     error UnknownRole(uint64 role);
     error RateProviderRequiredWhenPayingYieldFees(address token);
     error SeniorTrancheNotFirstPoolToken(address seniorTranche, address quoteAsset);
@@ -207,7 +179,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
                 adminKernelAddress: chainConfig.adminKernelAddress,
                 adminAccountantAddress: chainConfig.adminAccountantAddress,
                 adminProtocolFeeSetterAddress: chainConfig.adminProtocolFeeSetterAddress,
-                adminOracleQuoterAddress: chainConfig.adminOracleQuoterAddress,
+                adminOracleAddress: chainConfig.adminOracleAddress,
                 lpRoleAdminAddress: chainConfig.lpRoleAdminAddress,
                 guardianAddress: chainConfig.guardianAddress,
                 deployerAddress: chainConfig.deployerAddress,
@@ -314,7 +286,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         roleAssignments[3] = _assignment(ADMIN_KERNEL_ROLE, _addresses.adminKernelAddress);
         roleAssignments[4] = _assignment(ADMIN_ACCOUNTANT_ROLE, _addresses.adminAccountantAddress);
         roleAssignments[5] = _assignment(ADMIN_PROTOCOL_FEE_SETTER_ROLE, _addresses.adminProtocolFeeSetterAddress);
-        roleAssignments[6] = _assignment(ADMIN_ORACLE_QUOTER_ROLE, _addresses.adminOracleQuoterAddress);
+        roleAssignments[6] = _assignment(ADMIN_ORACLE_ROLE, _addresses.adminOracleAddress);
         roleAssignments[7] = _assignment(LP_ROLE_ADMIN_ROLE, _addresses.lpRoleAdminAddress);
         roleAssignments[8] = _assignment(ST_LP_ROLE, _addresses.protocolFeeRecipientAddress);
         roleAssignments[9] = _assignment(JT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
@@ -322,7 +294,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         roleAssignments[11] = _assignment(DEPLOYER_ROLE, _addresses.deployerAddress);
         roleAssignments[12] = _assignment(DEPLOYER_ROLE_ADMIN_ROLE, _addresses.deployerAdminAddress);
         roleAssignments[13] = _assignment(ADMIN_UNPAUSER_ROLE, _addresses.unpauserAddress);
-        roleAssignments[14] = _assignment(LT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
+        roleAssignments[14] = _assignment(LPT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
         roleAssignments[15] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
         roleAssignments[16] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
         roleAssignments[17] = _assignment(ADMIN_BLACKLIST_ROLE, _addresses.marketOpsAddress);
@@ -346,13 +318,13 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == ADMIN_KERNEL_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         if (role == ADMIN_ACCOUNTANT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
-        if (role == ADMIN_ORACLE_QUOTER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_ORACLE_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == GUARDIAN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
         if (role == DEPLOYER_ROLE) return RoleConfig({ adminRole: DEPLOYER_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == DEPLOYER_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_FACTORY_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_UNPAUSER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == LT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == LPT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
@@ -413,18 +385,22 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         returns (DeploymentResult memory)
     {
         bytes32 marketId = _s.marketId;
-        BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory marketContracts =
+        // Resolve the kernel's collateral asset oracle before params are built (deployed here when the config leaves it unset)
+        if (_config.collateralAssetOracle == address(0)) {
+            _config.collateralAssetOracle = _deployCollateralAssetOracle(_config, marketId, address(_s.accessManager));
+        }
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory marketContracts =
             _deployMarketContracts(_config, marketId, _s.factory, _s.template, address(_s.accessManager));
-        BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory params =
-            _buildDayParams(_config, marketId, _protocolFeeRecipient, _s.roycoBlacklist, marketContracts);
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params =
+            _buildMarketParams(_config, marketId, _protocolFeeRecipient, _s.roycoBlacklist, marketContracts);
         IRoycoProtocolTemplate.DeploymentResult memory r = _s.factory.executeMarketDeployment(_s.template, abi.encode(params));
 
-        // The template deploys the remaining proxies (kernel, JT, LT, accountant) and the real hook inside this wiring
+        // The template deploys the remaining proxies (kernel, JT, LPT, accountant) and the real hook inside this wiring
         // transaction (the senior tranche + hook proxies were pre-deployed above) and wires the whole market.
         _logSection("Market wiring transaction (executeMarketDeployment)");
         _logCreated("Kernel (proxy)         ", r.kernel);
         _logCreated("JuniorTranche (proxy)  ", r.juniorTranche);
-        _logCreated("LiquidityTranche (proxy)", r.liquidityTranche);
+        _logCreated("LiquidityProviderTranche (proxy)", r.liquidityProviderTranche);
         _logCreated("Accountant (proxy)     ", r.accountant);
 
         return DeploymentResult({
@@ -506,20 +482,20 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         _logDeploy("Template           ", template, false);
     }
 
-    /// @notice Public wrapper over `_buildDayParams` so tests can construct real template deploy params from a market config.
+    /// @notice Public wrapper over `_buildMarketParams` so tests can construct real template deploy params from a market config.
     /// @dev The caller supplies the `MarketContracts` (externally deployed impls/YDMs/pool), typically via `deployMarketContractsForTest`.
-    function buildDayParams(
+    function buildMarketParams(
         MarketConfig memory _config,
         bytes32 _marketId,
         address _protocolFeeRecipient,
         address _roycoBlacklist,
-        BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory _marketContracts
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory _marketContracts
     )
         public
         pure
-        returns (BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory)
+        returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory)
     {
-        return _buildDayParams(_config, _marketId, _protocolFeeRecipient, _roycoBlacklist, _marketContracts);
+        return _buildMarketParams(_config, _marketId, _protocolFeeRecipient, _roycoBlacklist, _marketContracts);
     }
 
     /// @notice Public wrapper over `_deployMarketContracts` so tests can externally deploy a market's impls/YDMs/pool
@@ -532,41 +508,20 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address _accessManager
     )
         public
-        returns (BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory)
+        returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory)
     {
         return _deployMarketContracts(_config, _marketId, _factory, _template, _accessManager);
     }
 
     /// @notice Deploys the concrete Day template for a kernel type.
     function _deployTemplate(IRoycoFactory _factory, KernelType _kernelType, address _entryPoint, address _marketSyncer) internal returns (address template) {
-        // The concrete Balancer-V3 templates are constructed with the chain's Gyro E-CLP pool factory and the
+        // The concrete Balancer-V3 template is constructed with the chain's Gyro E-CLP pool factory and the
         // pre-deployed periphery singletons (entry point + market syncer) the template configures for each deployed market.
         ChainConfig memory chainConfig = getChainConfig(block.chainid, isTestEnv);
         GyroECLPPoolFactory poolFactory = GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory);
 
-        if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
-            return address(
-                new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
-                    _factory, poolFactory, _entryPoint, _marketSyncer
-                )
-            );
-        }
-        if (_kernelType == KernelType.Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
-            return address(
-                new Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
-                    _factory, poolFactory, _entryPoint, _marketSyncer
-                )
-            );
-        }
-        if (_kernelType == KernelType.Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel) {
-            return address(
-                new Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(_factory, poolFactory, _entryPoint, _marketSyncer)
-            );
-        }
-        if (_kernelType == KernelType.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel) {
-            return address(
-                new Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(_factory, poolFactory, _entryPoint, _marketSyncer)
-            );
+        if (_kernelType == KernelType.RoycoDayBalancerV3Kernel) {
+            return address(new RoycoDayBalancerV3MarketDeploymentTemplate(_factory, poolFactory, _entryPoint, _marketSyncer));
         }
         revert UnsupportedKernelType(_kernelType);
     }
@@ -575,59 +530,67 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     // INTERNAL: PARAM BUILDING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Builds the template `DayParams` from a `MarketConfig` and the externally deployed `MarketContracts`.
-    function _buildDayParams(
+    /// @notice Builds the template `MarketParams` from a `MarketConfig` and the externally deployed `MarketContracts`.
+    function _buildMarketParams(
         MarketConfig memory _config,
         bytes32 _marketId,
         address _protocolFeeRecipient,
         address _roycoBlacklist,
-        BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory _marketContracts
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory _marketContracts
     )
         internal
         pure
-        returns (BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory params)
+        returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params)
     {
         params.marketId = _marketId;
 
-        // JT/LT tranche init params — the template overwrites `initialAuthority` with the market authority. The senior
+        // JT/LPT tranche init params — the template overwrites `initialAuthority` with the market authority. The senior
         // tranche proxy is pre-deployed by the script (its init data is built in `_deployMarketContracts`).
         params.jtTranche =
             IRoycoVaultTranche.RoycoTrancheInitParams({ name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, initialAuthority: address(0) });
-        params.ltTranche = IRoycoVaultTranche.RoycoTrancheInitParams({
-            name: _config.liquidityTrancheName, symbol: _config.liquidityTrancheSymbol, initialAuthority: address(0)
+        params.lptTranche = IRoycoVaultTranche.RoycoTrancheInitParams({
+            name: _config.liquidityProviderTrancheName, symbol: _config.liquidityProviderTrancheSymbol, initialAuthority: address(0)
         });
         params.collateralAsset = _config.collateralAsset;
         params.marketContracts = _marketContracts;
 
-        // Accountant init params. `jtYDM`/`ltYDM` are overwritten by the template with the deployed instances. BOTH YDMs get
-        // initialization data so the accountant initializes each of them. The LT premium/liquidity overlay is at its zero
-        // baseline (LT service off) — but the LDM is still deployed, initialized, and distinct from the JT YDM.
+        // Accountant init params. `jtYDM`/`lptYDM` are overwritten by the template with the deployed instances. BOTH YDMs get
+        // initialization data so the accountant initializes each of them. The LPT premium/liquidity overlay is at its zero
+        // baseline (LPT service off) — but the LDM is still deployed, initialized, and distinct from the JT YDM.
         params.accountant = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             minCoverageWAD: _config.minCoverageWAD,
             coverageLiquidationUtilizationWAD: _config.coverageLiquidationUtilizationWAD,
             minLiquidityWAD: 0,
             jtYDM: address(0),
             jtYDMInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams),
-            ltYDM: address(0),
-            ltYDMInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ltYdmSpecificParams),
+            lptYDM: address(0),
+            lptYDMInitializationData: _buildYDMInitializationData(_config.ydmType, _config.lptYdmSpecificParams),
             maxJTYieldShareWAD: uint64(1e18), // uncapped at the WAD ceiling; the real JT cap comes from the JT YDM curve
-            maxLTYieldShareWAD: 0, // LT liquidity premium disabled in the baseline
+            maxLPTYieldShareWAD: 0, // LPT liquidity premium disabled in the baseline
             fixedTermDurationSeconds: _config.fixedTermDurationSeconds,
             dustTolerance: toNAVUnits(_config.dustTolerance),
             stProtocolFeeWAD: _config.stProtocolFeeWAD,
             jtProtocolFeeWAD: _config.jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: _config.jtYieldShareProtocolFeeWAD,
-            ltYieldShareProtocolFeeWAD: 0
+            lptYieldShareProtocolFeeWAD: 0
         });
 
-        params.kernelSpecificParams = _config.kernelSpecificParams; // template KernelParams are field-identical to the config blobs
+        params.kernelSpecificParams = _config.kernelSpecificParams; // the venue init params blob (BalancerV3LiquidityVenue.LiquidityVenueInitParams)
         params.protocolFeeRecipient = _protocolFeeRecipient;
         params.stSelfLiquidationBonusWAD = _config.stSelfLiquidationBonusWAD;
         params.roycoBlacklist = _roycoBlacklist;
+        params.collateralAssetOracle = _config.collateralAssetOracle;
+        params.stalenessThresholdSeconds = _config.stalenessThresholdSeconds;
+        params.sequencerUptimeFeed = _config.sequencerUptimeFeed;
+        params.gracePeriodSeconds = _config.gracePeriodSeconds;
+        // The oracle's restricted surface bindings are declared per oracle kind here and applied by the template
+        // alongside the market's other role bindings (the factory only binds roles for an active template)
+        (params.collateralAssetOracleBindingSelectors, params.collateralAssetOracleBindingRoleIds) =
+            _collateralAssetOracleRoleBindings(_config.collateralAssetOracleType);
         params.enforceVaultSharesTransferWhitelist = _config.enforceVaultSharesTransferWhitelist;
         // Per-tranche entry point configs applied by the template (via the factory) after the market is deployed.
-        params.entryPointTrancheConfigs = BalancerV3_GyroECLP_LT_DeploymentTemplate.EntryPointTrancheConfigs({
-            st: _config.stEntryPointConfig, jt: _config.jtEntryPointConfig, lt: _config.ltEntryPointConfig
+        params.entryPointTrancheConfigs = RoycoDayBalancerV3MarketDeploymentTemplate.EntryPointTrancheConfigs({
+            st: _config.stEntryPointConfig, jt: _config.jtEntryPointConfig, lt: _config.lptEntryPointConfig
         });
     }
 
@@ -711,11 +674,11 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /**
      * @notice Deploys the market's implementations + YDMs, creates the Gyro E-CLP pool, and pre-deploys the senior
      *         tranche and pool-hook proxies through the factory, returning the addresses the template wires and verifies
-     * @dev Ordering mirrors the dependency graph: predict the four template-deployed proxy addresses (kernel, JT, LT,
+     * @dev Ordering mirrors the dependency graph: predict the four template-deployed proxy addresses (kernel, JT, LPT,
      *      accountant) so the implementations can pin them as immutables; deploy the ST impl and its proxy (the pool
      *      needs the ST share as a token); pre-deploy the hook proxy against the template's shared stand-in impl (the
      *      pool must register against a hook); create the pool (senior leg's rate provider = the predicted kernel, still
-     *      codeless, which keeps the pool inert until the wiring tx); then deploy the remaining impls (LT pins the pool)
+     *      codeless, which keeps the pool inert until the wiring tx); then deploy the remaining impls (LPT pins the pool)
      *      and both YDMs.
      */
     function _deployMarketContracts(
@@ -726,7 +689,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address _accessManager
     )
         internal
-        returns (BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc)
+        returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc)
     {
         _logSection("Market off-factory contracts (impls, YDMs, pool, pre-deployed proxies)");
 
@@ -744,7 +707,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         mc.bptOracle = bptOracle;
     }
 
-    /// @notice Deploys the market's JT/LT/accountant/kernel/real-hook implementations and both YDMs, returning them
+    /// @notice Deploys the market's JT/LPT/accountant/kernel/real-hook implementations and both YDMs, returning them
     ///         (with the pre-created pool) as the `MarketContracts` the template consumes
     function _deployImplsAndYdms(
         MarketConfig memory _config,
@@ -754,36 +717,39 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address _balancerPool
     )
         internal
-        returns (BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc)
+        returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc)
     {
         mc.balancerPool = _balancerPool;
         mc.jtImpl = _deployImplWithArgs(
             "JuniorTranche (impl)   ", type(RoycoJuniorTranche).creationCode, abi.encode(_config.collateralAsset, _kernelProxy), _salt(_marketId, TAG_JT_IMPL)
         );
-        mc.ltImpl = _deployImplWithArgs(
-            "LiquidityTranche (impl)", type(RoycoLiquidityTranche).creationCode, abi.encode(_balancerPool, _kernelProxy), _salt(_marketId, TAG_LT_IMPL)
+        mc.lptImpl = _deployImplWithArgs(
+            "LiquidityProviderTranche (impl)",
+            type(RoycoLiquidityProviderTranche).creationCode,
+            abi.encode(_balancerPool, _kernelProxy),
+            _salt(_marketId, TAG_LPT_IMPL)
         );
         mc.accountantImpl = _deployImplWithArgs(
             "Accountant (impl)      ", type(RoycoDayAccountant).creationCode, abi.encode(_kernelProxy), _salt(_marketId, TAG_ACCOUNTANT_IMPL)
         );
         mc.kernelImpl = _deployKernelImpl(_config, _factory, _marketId, _balancerPool);
         // The real kernel-bound hook implementation is deployed inside the template's wiring tx (its constructor reads
-        // the kernel's LT_ASSET, so it cannot be deployed before the kernel proxy exists)
-        (mc.jtYdm, mc.ltYdm) = _deployYDMs(_config);
+        // the kernel's LPT_ASSET, so it cannot be deployed before the kernel proxy exists)
+        (mc.jtYdm, mc.lptYdm) = _deployYDMs(_config);
     }
 
-    /// @notice Deploys the market's JT YDM and LT LDM as market-agnostic shared singletons
+    /// @notice Deploys the market's JT YDM and LPT LDM as market-agnostic shared singletons
     /// @dev Deployed separately from the per-market Constants and shared across markets: the salt is market-agnostic
     ///      and role-specific (`TAG_YDM` / `TAG_LDM`), so markets with the same model + params reuse one instance (their
     ///      per-market curve state is keyed per accountant). CREATE2's initcode binding still gives distinct params
-    ///      distinct addresses (no silent first-writer-wins reuse) and keeps the JT YDM and LT LDM distinct
-    function _deployYDMs(MarketConfig memory _config) internal returns (address jtYdm, address ltYdm) {
+    ///      distinct addresses (no silent first-writer-wins reuse) and keeps the JT YDM and LPT LDM distinct
+    function _deployYDMs(MarketConfig memory _config) internal returns (address jtYdm, address lptYdm) {
         jtYdm = _deployYDM("JT YDM (shared)        ", _config.ydmType, _config.jtYdmTargetUtilizationWAD, _ydmSalt(TAG_YDM));
-        ltYdm = _deployYDM("LT LDM (shared)        ", _config.ydmType, _config.ltYdmTargetUtilizationWAD, _ydmSalt(TAG_LDM));
+        lptYdm = _deployYDM("LPT LDM (shared)        ", _config.ydmType, _config.lptYdmTargetUtilizationWAD, _ydmSalt(TAG_LDM));
     }
 
     /// @notice Market-agnostic, role-specific CREATE2 salt for a shared YDM singleton (`TAG_YDM` for the JT YDM,
-    ///         `TAG_LDM` for the LT LDM)
+    ///         `TAG_LDM` for the LPT LDM)
     function _ydmSalt(bytes32 _roleTag) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked("ROYCO_YDM_", _roleTag));
     }
@@ -795,9 +761,82 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         _logDeploy(_name, impl, existed);
     }
 
+    /// @notice CREATE2-deploys the market's collateral asset oracle adapter selected by `collateralAssetOracleType`,
+    ///         decoding the kind-specific constructor params from `collateralAssetOracleSpecificParams`
+    /// @dev Only runs when the config leaves `collateralAssetOracle` unset; a pre-deployed oracle address bypasses this.
+    ///      The IdleCDO kind is UUPS-proxied: the impl is CREATE2-deployed, then wrapped in an ERC1967 proxy initialized
+    ///      with the market AccessManager (`_authority`) and the config's deviation-clock threshold
+    function _deployCollateralAssetOracle(MarketConfig memory _config, bytes32 _marketId, address _authority) internal returns (address oracle) {
+        _logSection("Collateral asset oracle");
+        bytes memory ctorArgs;
+        bytes memory creationCode;
+        if (_config.collateralAssetOracleType == OracleType.ChainlinkPrice) {
+            ChainlinkPriceOracleParams memory p = abi.decode(_config.collateralAssetOracleSpecificParams, (ChainlinkPriceOracleParams));
+            creationCode = type(ChainlinkPriceOracle).creationCode;
+            ctorArgs = abi.encode(_config.collateralAsset, p.collateralToNavAssetFeed);
+        } else if (_config.collateralAssetOracleType == OracleType.ERC4626SharePrice) {
+            ERC4626SharePriceOracleParams memory p = abi.decode(_config.collateralAssetOracleSpecificParams, (ERC4626SharePriceOracleParams));
+            creationCode = type(ERC4626SharePriceOracle).creationCode;
+            ctorArgs = abi.encode(_config.collateralAsset, p.baseAssetToNavAssetFeed);
+        } else if (_config.collateralAssetOracleType == OracleType.MakinaSharePrice) {
+            MakinaSharePriceOracleParams memory p = abi.decode(_config.collateralAssetOracleSpecificParams, (MakinaSharePriceOracleParams));
+            creationCode = type(MakinaSharePriceOracle).creationCode;
+            ctorArgs = abi.encode(p.makinaMachine, p.accountingAssetToNavAssetFeed);
+        } else if (_config.collateralAssetOracleType == OracleType.IdleCDOTranchePrice) {
+            return _deployIdleCDOTranchePriceOracle(_config, _marketId, _authority);
+        } else {
+            revert UnsupportedOracleType(_config.collateralAssetOracleType);
+        }
+        bool existed;
+        (oracle, existed) = deployWithSanityChecks(_salt(_marketId, "COLLATERAL_ASSET_ORACLE"), abi.encodePacked(creationCode, ctorArgs), false);
+        _logDeploy("CollateralAssetOracle  ", oracle, existed);
+    }
+
+    /// @notice CREATE2-deploys the IdleCDO tranche oracle impl (CDO virtual price x feed) and its ERC1967 proxy,
+    ///         initialized with the market AccessManager and the config's minimum deviation threshold
+    /// @dev The tranche the oracle prices is the market's collateral asset (the impl verifies it is an AA or BB tranche)
+    function _deployIdleCDOTranchePriceOracle(MarketConfig memory _config, bytes32 _marketId, address _authority) internal returns (address oracle) {
+        IdleCDOTranchePriceOracleParams memory p = abi.decode(_config.collateralAssetOracleSpecificParams, (IdleCDOTranchePriceOracleParams));
+        address impl = _deployImplWithArgs(
+            "CollateralAssetOracle (impl)",
+            type(IdleCDOTranchePriceOracle).creationCode,
+            abi.encode(p.idleCDO, _config.collateralAsset, p.underlyingTokenToNavAssetFeed),
+            _salt(_marketId, "COLLATERAL_ASSET_ORACLE_IMPL")
+        );
+        bytes memory initData = abi.encodeCall(IdleCDOTranchePriceOracle.initialize, (_authority, p.minDeviationWAD, p.lastUpdate));
+        bool existed;
+        (oracle, existed) = deployWithSanityChecks(_salt(_marketId, "COLLATERAL_ASSET_ORACLE"), getERC1967ProxyCreationCode(impl, initData), false);
+        _logDeploy("CollateralAssetOracle  ", oracle, existed);
+    }
+
+    /// @notice Returns the collateral asset oracle's restricted selector to role bindings for the specified oracle kind
+    /// @dev The immutable adapter kinds carry no authority, so they have no restricted surface to bind. The proxied
+    ///      clock-based kind binds its deviation clock surface to ADMIN_ORACLE_ROLE (matching the kernel's pricing
+    ///      setters) and pause/unpause/upgrade to the protocol-wide roles
+    function _collateralAssetOracleRoleBindings(OracleType _oracleType) internal pure returns (bytes4[] memory selectors, uint64[] memory roleIds) {
+        if (_oracleType == OracleType.ChainlinkPrice || _oracleType == OracleType.ERC4626SharePrice || _oracleType == OracleType.MakinaSharePrice) {
+            return (selectors, roleIds);
+        } else if (_oracleType == OracleType.IdleCDOTranchePrice) {
+            selectors = new bytes4[](5);
+            roleIds = new uint64[](5);
+            selectors[0] = OracleClockBase.tick.selector;
+            roleIds[0] = ADMIN_ORACLE_ROLE;
+            selectors[1] = OracleClockBase.setMinDeviationWAD.selector;
+            roleIds[1] = ADMIN_ORACLE_ROLE;
+            selectors[2] = IRoycoAuth.pause.selector;
+            roleIds[2] = ADMIN_PAUSER_ROLE;
+            selectors[3] = IRoycoAuth.unpause.selector;
+            roleIds[3] = ADMIN_UNPAUSER_ROLE;
+            selectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
+            roleIds[4] = ADMIN_UPGRADER_ROLE;
+        } else {
+            revert UnsupportedOracleType(_oracleType);
+        }
+    }
+
     /// @notice Deploys the market's manipulation-resistant E-CLP BPT TVL oracle through Balancer's LP oracle factory
     /// @dev Each pool leg's live balance is already priced by its rate provider, so every leg uses the shared stateless
-    ///      constant-1.0 price feed. The kernel's LT quoter verifies `oracle.pool() == LT_ASSET` on-chain at init
+    ///      constant-1.0 price feed. The kernel's liquidity venue verifies `oracle.pool() == LPT_ASSET` on-chain at init
     function _deployBPTOracle(address _pool) internal returns (address bptOracle) {
         ChainConfig memory chainConfig = getChainConfig(block.chainid, isTestEnv);
         IVault vault = IVault(address(GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory).getVault()));
@@ -862,7 +901,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         returns (address balancerPool, address bptOracle)
     {
         address hookProxy = _factory.deployDeterministicProxy(
-            BalancerV3_GyroECLP_LT_DeploymentTemplate(_template).BALANCER_HOOK_STANDIN_IMPL(), bytes("no-op"), _salt(_marketId, TAG_BALANCER_HOOK_PROXY)
+            RoycoDayBalancerV3MarketDeploymentTemplate(_template).BALANCER_HOOK_STANDIN_IMPL(), bytes("no-op"), _salt(_marketId, TAG_BALANCER_HOOK_PROXY)
         );
         _logCreated("Pool hook (proxy)      ", hookProxy);
 
@@ -874,7 +913,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Deploys the kernel implementation for a kernel type, appending the family's extra constructor arg(s)
     /// @dev Ports the per-kernel constructor-arg branching that previously lived in the templates' `_kernelConstructionArgs`.
-    ///      The kernel construction params pin the predicted senior/junior/liquidity tranche and accountant proxy addresses
+    ///      The kernel construction params pin the predicted senior/junior/liquidity provider tranche and accountant proxy addresses
     function _deployKernelImpl(
         MarketConfig memory _config,
         RoycoFactory _factory,
@@ -889,28 +928,14 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             juniorTranche: _factory.predictDeterministicAddress(_salt(_marketId, TAG_JT_PROXY)),
             collateralAsset: _config.collateralAsset,
             accountant: _factory.predictDeterministicAddress(_salt(_marketId, TAG_ACCOUNTANT_PROXY)),
-            liquidityTranche: _factory.predictDeterministicAddress(_salt(_marketId, TAG_LT_PROXY)),
-            ltAsset: _balancerPool,
+            liquidityProviderTranche: _factory.predictDeterministicAddress(_salt(_marketId, TAG_LPT_PROXY)),
+            lptAsset: _balancerPool,
             enforceVaultSharesTransferWhitelist: _config.enforceVaultSharesTransferWhitelist
         });
 
         bytes memory creationCode;
-        if (_config.kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
-            creationCode =
-                abi.encodePacked(type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode, abi.encode(cp));
-        } else if (_config.kernelType == KernelType.Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
-            IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams memory p =
-                abi.decode(_config.kernelSpecificParams, (IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams));
-            creationCode = abi.encodePacked(
-                type(Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode, abi.encode(cp, p.makinaMachine)
-            );
-        } else if (_config.kernelType == KernelType.Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel) {
-            creationCode = abi.encodePacked(type(Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode, abi.encode(cp));
-        } else if (_config.kernelType == KernelType.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel) {
-            Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams memory p =
-                abi.decode(_config.kernelSpecificParams, (Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams));
-            creationCode =
-                abi.encodePacked(type(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode, abi.encode(cp, p.idleCDO));
+        if (_config.kernelType == KernelType.RoycoDayBalancerV3Kernel) {
+            creationCode = abi.encodePacked(type(RoycoDayBalancerV3Kernel).creationCode, abi.encode(cp));
         } else {
             revert UnsupportedKernelType(_config.kernelType);
         }
@@ -1029,7 +1054,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         lpSelectors[7] = IRoycoDayEntryPoint.executeRedemptions.selector;
         lpSelectors[8] = IRoycoDayEntryPoint.cancelRedemptionRequest.selector;
         lpSelectors[9] = IRoycoDayEntryPoint.cancelRedemptionRequests.selector;
-        lpSelectors[10] = IRoycoDayEntryPoint.pokeOracleClock.selector;
+        lpSelectors[10] = IRoycoDayEntryPoint.pokeCollateralAssetOracle.selector;
         _accessManager.setTargetFunctionRole(_entryPoint, lpSelectors, PUBLIC_ROLE);
 
         _accessManager.setTargetFunctionRole(_entryPoint, _sel(IRoycoDayEntryPoint.modifyTrancheConfigs.selector), ADMIN_ENTRY_POINT_ROLE);
@@ -1042,7 +1067,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // on whitelist-enforcing markets). MUST run while the LP roles' admin is still ADMIN_ROLE (the deployer).
         _accessManager.grantRole(ST_LP_ROLE, _entryPoint, 0);
         _accessManager.grantRole(JT_LP_ROLE, _entryPoint, 0);
-        _accessManager.grantRole(LT_LP_ROLE, _entryPoint, 0);
+        _accessManager.grantRole(LPT_LP_ROLE, _entryPoint, 0);
     }
 
     /// @notice Binds the syncer's selectors to their roles and grants it SYNC_ROLE.

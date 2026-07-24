@@ -12,7 +12,7 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     JT_LP_ROLE,
-    LT_LP_ROLE,
+    LPT_LP_ROLE,
     PUBLIC_ROLE,
     ST_LP_ROLE
 } from "../../src/factory/Roles.sol";
@@ -30,7 +30,7 @@ import { DayMarketTestBase } from "./DayMarketTestBase.sol";
  * @notice The shared fixture for RoycoDayEntryPoint suites: deploys the entry point behind an ERC1967 proxy over a
  *         full Day market, wires the production-shaped role bindings, and provides request/execute/cancel helpers
  * @dev Suites call _deployMarket(...) with their chosen cell/params, then _deployEntryPoint(). Time helpers route
- *      through _warpAndRefreshFeed so delay warps never trip the ST/JT quoter's Chainlink staleness gate
+ *      through _warpAndRefreshFeed so delay warps never trip the kernel's collateral oracle staleness gate
  */
 abstract contract EntryPointTestBase is DayMarketTestBase {
     using Math for uint256;
@@ -77,7 +77,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
 
     /**
      * @notice Deploys the entry point proxy over the already-deployed market and wires its production role bindings
-     * @dev Must be called after _deployMarket. Registers all three tranches (ST, JT, LT) enabled with the default
+     * @dev Must be called after _deployMarket. Registers all three tranches (ST, JT, LPT) enabled with the default
      *      delays, grants the entry point the three LP roles, and creates the user/executor/admin actors
      */
     function _deployEntryPoint() internal virtual {
@@ -85,7 +85,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         entryPointFactory = new MockRoycoFactory(address(accessManager));
         entryPointFactory.setTrancheKernel(address(seniorTranche), address(kernel));
         entryPointFactory.setTrancheKernel(address(juniorTranche), address(kernel));
-        entryPointFactory.setTrancheKernel(address(liquidityTranche), address(kernel));
+        entryPointFactory.setTrancheKernel(address(liquidityProviderTranche), address(kernel));
         vm.label(address(entryPointFactory), "MockRoycoFactory");
 
         // Deploy the entry point behind an ERC1967 proxy, initialized with no tranche configs: the initial
@@ -124,7 +124,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
             ),
             PUBLIC_ROLE
         );
-        accessManager.setTargetFunctionRole(ep, _sels(IRoycoDayEntryPoint.pokeOracleClock.selector), PUBLIC_ROLE);
+        accessManager.setTargetFunctionRole(ep, _sels(IRoycoDayEntryPoint.pokeCollateralAssetOracle.selector), PUBLIC_ROLE);
         accessManager.setTargetFunctionRole(ep, _sels(IRoycoDayEntryPoint.modifyTrancheConfigs.selector), ADMIN_ENTRY_POINT_ROLE);
         accessManager.setTargetFunctionRole(ep, _sels(IRoycoDayEntryPoint.collectProtocolFees.selector), ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE);
         accessManager.setTargetFunctionRole(ep, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
@@ -134,7 +134,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         // The entry point deposits, redeems, and receives escrowed shares
         accessManager.grantRole(ST_LP_ROLE, ep, 0);
         accessManager.grantRole(JT_LP_ROLE, ep, 0);
-        accessManager.grantRole(LT_LP_ROLE, ep, 0);
+        accessManager.grantRole(LPT_LP_ROLE, ep, 0);
 
         // Apply the initial tranche configs through the factory, as production market deployments do: the factory
         // holds ADMIN_ENTRY_POINT_ROLE (mirroring RoycoFactory.initialize) and forwards the admin-gated call
@@ -152,16 +152,16 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         EXECUTOR = _generateEntryPointUser("EXECUTOR");
     }
 
-    /// @notice Builds the default 3-tranche (ST, JT, LT) config arrays: enabled, default delays, no oracle clock
+    /// @notice Builds the default 3-tranche (ST, JT, LPT) config arrays: enabled, default delays, oracle gate disabled
     function _defaultTrancheConfigs() internal view returns (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) {
         tranches = new address[](3);
         tranches[0] = address(seniorTranche);
         tranches[1] = address(juniorTranche);
-        tranches[2] = address(liquidityTranche);
+        tranches[2] = address(liquidityProviderTranche);
         configs = new IRoycoDayEntryPoint.TrancheConfig[](3);
         for (uint256 i = 0; i < 3; ++i) {
             configs[i] = IRoycoDayEntryPoint.TrancheConfig({
-                enabled: true, depositDelaySeconds: DEFAULT_DEPOSIT_DELAY, redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY, oracleClock: address(0)
+                enabled: true, depositDelaySeconds: DEFAULT_DEPOSIT_DELAY, redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY, gateByOracleUpdate: false
             });
         }
     }
@@ -172,7 +172,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         vm.deal(user, 100 ether);
         accessManager.grantRole(ST_LP_ROLE, user, 0);
         accessManager.grantRole(JT_LP_ROLE, user, 0);
-        accessManager.grantRole(LT_LP_ROLE, user, 0);
+        accessManager.grantRole(LPT_LP_ROLE, user, 0);
     }
 
     // =============================
@@ -181,7 +181,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
 
     /**
      * @notice Applies senior PnL and re-syncs, so quoter-cache state models the real transaction boundary
-     * @dev The kernel's transient quoter cache clears at transaction end on-chain, but a forge test without isolation
+     * @dev The kernel's transient price cache clears at transaction end on-chain, but a forge test without isolation
      *      runs as ONE transaction: a cache warmed by an earlier kernel call in the same test would leak the pre-PnL
      *      rate into the entry point's execution-time forfeiture quotes (making forfeitures silently read as zero)
      *      Syncing after the PnL re-initializes the cache at the fresh rate, matching what any real cross-transaction
@@ -198,9 +198,9 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         _sync();
     }
 
-    /// @notice Applies liquidity tranche PnL and re-syncs (see applySTPnL for the transaction-boundary rationale)
-    function applyLTPnL(int256 _bps) internal virtual override {
-        super.applyLTPnL(_bps);
+    /// @notice Applies liquidity provider tranche PnL and re-syncs (see applySTPnL for the transaction-boundary rationale)
+    function applyLPTPnL(int256 _bps) internal virtual override {
+        super.applyLPTPnL(_bps);
         _sync();
     }
 
@@ -208,10 +208,10 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     // Funding Helpers
     // =============================
 
-    /// @notice Funds an account with a tranche's asset: shared vault shares for ST/JT, quote-backed BPT for LT
+    /// @notice Funds an account with a tranche's asset: shared vault shares for ST/JT, quote-backed BPT for LPT
     /// @dev The BPT leg is minted against a value-matched quote-only pool leg so the pool's NAV-per-BPT stays ~1.0
     function _fundTrancheAssets(address _to, address _tranche, uint256 _amount) internal virtual {
-        if (_tranche == address(liquidityTranche)) {
+        if (_tranche == address(liquidityProviderTranche)) {
             uint256 quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
             uint256 quoteLeg = _amount.mulDiv(quoteUnit, WAD, Math.Rounding.Ceil) + quoteUnit;
             quoteToken.mint(address(this), quoteLeg);
@@ -227,7 +227,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     /**
      * @notice Acquires tranche shares for an account through the production deposit path
      * @dev Funds the account with the tranche's asset and deposits it directly on the tranche (the account holds
-     *      the LP roles). ST deposits are liquidity-gated, so LT capacity is auto-topped-up first
+     *      the LP roles). ST deposits are liquidity-gated, so LPT capacity is auto-topped-up first
      * @return shares The tranche shares minted to the account
      */
     function _acquireTrancheShares(address _user, address _tranche, uint256 _assets) internal virtual returns (uint256 shares) {
@@ -375,7 +375,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
 
     /// @notice Asserts every leg of an AssetClaims is zero
     function assertAssetClaimsZero(AssetClaims memory _claims, string memory _err) internal pure {
-        assertEq(toUint256(_claims.collateralAssets) + toUint256(_claims.ltAssets) + _claims.stShares + toUint256(_claims.nav), 0, _err);
+        assertEq(toUint256(_claims.collateralAssets) + toUint256(_claims.lptAssets) + _claims.stShares + toUint256(_claims.nav), 0, _err);
     }
 }
 

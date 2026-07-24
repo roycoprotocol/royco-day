@@ -4,17 +4,15 @@ pragma solidity ^0.8.28;
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
-import {
-    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { BalancerV3LiquidityVenue } from "../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import {
     AdaptiveCurveYDM_V2_Params,
     ChainConfig,
+    ERC4626SharePriceOracleParams,
     GyroECLPPoolParams,
-    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams,
     KernelType,
     MarketConfig,
+    OracleType,
     YDMType
 } from "./DeploymentTypes.sol";
 
@@ -122,11 +120,14 @@ abstract contract MarketDeploymentConfig {
     ///      production deployer and the test harness's `vm.createWallet("DEPLOYER")` each stand up.
     function _initializeMinedMarketIds() internal {
         bytes32 snUSDHash = keccak256(bytes(SNUSD));
+        // The factory proxy addresses moved with the oracle-collapse refactor (the RoycoFactory creation code feeds the
+        // CREATE2 derivation), so the "_PROD" entries below were re-mined against the new addresses (nonce 0 still wins).
         // snUSD against the production factory (prod deployer, "_PROD" salts).
-        _marketIds[snUSDHash][0x8a49E091fc78Ec84f8c75DB9508891F3Ea69f29A] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
+        _marketIds[snUSDHash][0x7FcE8a894d418B4FB1c67E44e38d98da13E38220] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
         // snUSD against the local test factory (test-harness deployer, "_PROD" salts — the suite runs on the prod config).
-        _marketIds[snUSDHash][0xE650e118eaEa886a5B415f27a9Dc08d5AE93a6Ed] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
-        // snUSD against the test-environment factory on mainnet ("_TEST" salts).
+        _marketIds[snUSDHash][0xCBc6b42FdE77F3D12Ed9108E60988bdc18Be5F65] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
+        // snUSD against the test-environment factory on mainnet ("_TEST" salts). STALE since the refactor moved the
+        // factory: re-mine (script/mine-market-id) against the new test-env factory before the next test-env deploy.
         _marketIds[snUSDHash][0xE9B3356dAc63Cca56fAAAdD9Ba91C41712BF121C] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
     }
 
@@ -161,7 +162,7 @@ abstract contract MarketDeploymentConfig {
             adminKernelAddress: rootRole,
             adminAccountantAddress: rootRole,
             adminProtocolFeeSetterAddress: rootRole,
-            adminOracleQuoterAddress: rootRole,
+            adminOracleAddress: rootRole,
             lpRoleAdminAddress: rootRole,
             guardianAddress: guardian,
             deployerAddress: DEPLOYER,
@@ -226,28 +227,27 @@ abstract contract MarketDeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(SNUSD),
             juniorTrancheName: _juniorTrancheName(SNUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(SNUSD),
-            liquidityTrancheName: _liquidityTrancheName(SNUSD),
-            liquidityTrancheSymbol: _liquidityTrancheSymbol(SNUSD),
+            liquidityProviderTrancheName: _liquidityProviderTrancheName(SNUSD),
+            liquidityProviderTrancheSymbol: _liquidityProviderTrancheSymbol(SNUSD),
             collateralAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
+            // The script deploys an ERC4626SharePriceOracle over the feed below (share price x feed) at deployment
+            collateralAssetOracle: address(0),
+            collateralAssetOracleType: OracleType.ERC4626SharePrice,
+            collateralAssetOracleSpecificParams: abi.encode(
+                ERC4626SharePriceOracleParams({ baseAssetToNavAssetFeed: 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95 })
+            ),
+            // RedStone pushes updates ~every 12 hours; 48h staleness threshold for safety
+            stalenessThresholdSeconds: 48 hours,
+            // Ethereum mainnet has no L2 sequencer, so the sequencer-uptime check is disabled
+            sequencerUptimeFeed: address(0),
+            gracePeriodSeconds: 0,
             dustTolerance: 5,
-            kernelType: KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel,
+            kernelType: KernelType.RoycoDayBalancerV3Kernel,
             kernelSpecificParams: abi.encode(
-                IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
-                        stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
-                            // Enable the oracle leg by using the sentinel initial conversion rate
-                            initialConversionRateWAD: 0,
-                            baseAssetToNavAssetOracle: 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95,
-                            // RedStone pushes updates ~every 12 hours; 48h staleness threshold for safety
-                            stalenessThresholdSeconds: 48 hours,
-                            // Ethereum mainnet has no L2 sequencer, so the sequencer-uptime check is disabled
-                            sequencerUptimeFeed: address(0),
-                            gracePeriodSeconds: 0
-                        }),
-                        ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
-                            bptOracle: address(0), // This is deployed by the template after the pool is created and ignored here
-                            maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
-                        })
-                    })
+                BalancerV3LiquidityVenue.LiquidityVenueInitParams({
+                    bptOracle: address(0), // This is deployed by the script after the pool is created and overwritten by the template
+                    maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
+                })
             ),
             enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.005e18,
@@ -261,11 +261,11 @@ abstract contract MarketDeploymentConfig {
             ydmSpecificParams: abi.encode(
                 AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })
             ),
-            ltYdmSpecificParams: abi.encode(
+            lptYdmSpecificParams: abi.encode(
                 AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })
             ),
             jtYdmTargetUtilizationWAD: 0.9e18,
-            ltYdmTargetUtilizationWAD: 0.9e18,
+            lptYdmTargetUtilizationWAD: 0.9e18,
             gyroECLPPoolParams: GyroECLPPoolParams({
                 name: _poolName(SNUSD, USDC[block.chainid]),
                 symbol: _poolSymbol(SNUSD, USDC[block.chainid]),
@@ -297,14 +297,14 @@ abstract contract MarketDeploymentConfig {
             }),
             stEntryPointConfig: _defaultEntryPointTrancheConfig(),
             jtEntryPointConfig: _defaultEntryPointTrancheConfig(),
-            ltEntryPointConfig: _defaultEntryPointTrancheConfig()
+            lptEntryPointConfig: _defaultEntryPointTrancheConfig()
         });
     }
 
     /// @notice The default entry point config a tranche is enabled with at market deployment
-    /// @dev The oracle clock is deployed externally per market and wired post-deployment (a null clock disables the gate)
+    /// @dev The collateral asset oracle gate starts disabled and is armed post-deployment (the oracle itself is resolved live from the kernel)
     function _defaultEntryPointTrancheConfig() internal pure returns (IRoycoDayEntryPoint.TrancheConfig memory) {
-        return IRoycoDayEntryPoint.TrancheConfig({ enabled: true, depositDelaySeconds: 5 minutes, redemptionDelaySeconds: 24 hours, oracleClock: address(0) });
+        return IRoycoDayEntryPoint.TrancheConfig({ enabled: true, depositDelaySeconds: 5 minutes, redemptionDelaySeconds: 24 hours, gateByOracleUpdate: false });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -321,9 +321,9 @@ abstract contract MarketDeploymentConfig {
         return string(abi.encodePacked("Royco Junior Tranche ", marketName));
     }
 
-    /// @notice Returns the liquidity tranche name for a given market name
-    function _liquidityTrancheName(string memory marketName) internal pure returns (string memory) {
-        return string(abi.encodePacked("Royco Liquidity Tranche ", marketName));
+    /// @notice Returns the liquidity provider tranche name for a given market name
+    function _liquidityProviderTrancheName(string memory marketName) internal pure returns (string memory) {
+        return string(abi.encodePacked("Royco Liquidity Provider Tranche ", marketName));
     }
 
     /// @notice Returns the senior tranche symbol for a given market name
@@ -336,9 +336,9 @@ abstract contract MarketDeploymentConfig {
         return string(abi.encodePacked("ROY-JT-", marketName));
     }
 
-    /// @notice Returns the liquidity tranche symbol for a given market name
-    function _liquidityTrancheSymbol(string memory marketName) internal pure returns (string memory) {
-        return string(abi.encodePacked("ROY-LT-", marketName));
+    /// @notice Returns the liquidity provider tranche symbol for a given market name
+    function _liquidityProviderTrancheSymbol(string memory marketName) internal pure returns (string memory) {
+        return string(abi.encodePacked("ROY-LPT-", marketName));
     }
 
     /// @notice Returns the pool name for a given market name and quote asset (e.g. "Royco Day LP ROY-ST-snUSD-USDC")

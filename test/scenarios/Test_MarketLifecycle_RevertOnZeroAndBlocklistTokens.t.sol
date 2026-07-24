@@ -54,6 +54,6 @@ contract Test_MarketLifecycle_RevertOnZeroAndBlocklistTokens_NonStandardTokens i
         // With the deny list empty again, the full canonical seed lands the exact shape-independent depth:
         // 6e18 auto-seed + 20e18 explicit = 26e18, byte-identical to the baseline shape
         _seedDefault();
-        assertEq(_liveLTRawNAV(), SEEDED_LT_RAW_NAV, "armed-but-untouched hostile behaviors must not perturb the seeded depth");
+        assertEq(_liveLPTRawNAV(), SEEDED_LPT_RAW_NAV, "armed-but-untouched hostile behaviors must not perturb the seeded depth");
     }
 }

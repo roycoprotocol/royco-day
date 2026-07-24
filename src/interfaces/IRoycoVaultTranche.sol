@@ -12,8 +12,8 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
  */
 interface IRoycoVaultTranche is IERC20Metadata {
     /**
-     * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST", "Royco-JT", or "Royco-LT")
-     * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST", "JT", or "LT")
+     * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST", "Royco-JT", or "Royco-LPT")
+     * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST", "JT", or "LPT")
      * @custom:field initialAuthority - The initial authority for the tranche
      */
     struct RoycoTrancheInitParams {
@@ -35,7 +35,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @notice Emitted when a redemption is made from the tranche
      * @param sender The address that initiated the redemption
      * @param receiver The address that received the redeemed assets
-     * @param claims The asset claims received by the receiver, including claims on the collateral assets, LT assets, ST shares, and their total NAV value
+     * @param claims The asset claims received by the receiver, including claims on the collateral assets, LPT assets, ST shares, and their total NAV value
      * @param shares The amount of shares redeemed
      */
     event Redeem(address indexed sender, address indexed receiver, AssetClaims claims, uint256 shares);
@@ -79,7 +79,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @param _shares The number of shares to redeem
      * @param _receiver The address that will receive the redeemed assets
      * @param _owner The address that owns the shares being redeemed
-     * @return claims The asset claims transferred to the receiver, including claims on the collateral assets, LT assets, ST shares, and their total NAV value
+     * @return claims The asset claims transferred to the receiver, including claims on the collateral assets, LPT assets, ST shares, and their total NAV value
      */
     function redeem(uint256 _shares, address _receiver, address _owner) external returns (AssetClaims memory claims);
 
@@ -97,7 +97,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /**
      * @notice Mints tranche shares to the specified account
      * @dev Authorized via the AccessManager `restricted` modifier, the deploy template grants the market's kernel the role
-     *      for this selector so the kernel can mint senior shares to itself when seeding the LT's liquidity venue
+     *      for this selector so the kernel can mint senior shares to itself when seeding the LPT's liquidity venue
      * @dev Takes a raw share count: the caller (kernel) is responsible for computing a fair, non-diluting amount
      * @param _to The account to mint the shares to
      * @param _shares The number of shares to mint
@@ -118,27 +118,27 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @dev NON-VIEW: routes the redemption through its execute-and-revert simulation, which mutates no state net
      * @dev The quote is produced by the actual kernel redemption path, so any revert the redemption would raise bubbles unchanged
      * @param _shares The number of shares to redeem
-     * @return claims The asset claims that would be received, including claims on the collateral assets, LT assets, ST shares, and their total NAV value
+     * @return claims The asset claims that would be received, including claims on the collateral assets, LPT assets, ST shares, and their total NAV value
      */
     function previewRedeem(uint256 _shares) external returns (AssetClaims memory claims);
 
     /**
      * @notice Converts a specified number of shares to asset claims using the current exchange rate
      * @dev Does not mutate any state
-     * @dev For the liquidity tranche this is the composability-facing exchange rate and is LT-asset-only (the raw NAV,
+     * @dev For the liquidity provider tranche this is the composability-facing exchange rate and is LPT-asset-only (the raw NAV,
      *      `stShares` always zero): the claimable idle liquidity-premium senior shares are excluded, so the quoted
      *      price is a conservative floor that cannot dip when a staged premium deploys into the pool
      *      Use `previewRedeem` for the accurate redemption quote, which includes the idle slice paid in-kind, the two
      *      coincide exactly when no premium is staged
      * @param _shares The number of shares to convert
-     * @return claims The equivalent asset claims for the specified share amount, including claims on the collateral assets, LT assets, ST shares, and their total NAV value
+     * @return claims The equivalent asset claims for the specified share amount, including claims on the collateral assets, LPT assets, ST shares, and their total NAV value
      */
     function convertToAssets(uint256 _shares) external view returns (AssetClaims memory claims);
 
     /**
      * @notice Converts a specified amount of assets to shares using the current exchange rate
      * @dev Does not mutate any state
-     * @dev For the liquidity tranche the exchange rate is LT-asset-only (the raw NAV): the claimable idle
+     * @dev For the liquidity provider tranche the exchange rate is LPT-asset-only (the raw NAV): the claimable idle
      *      liquidity-premium senior shares are excluded, so the quoted rate cannot dip when a staged premium deploys
      *      Use `previewDeposit` for the accurate deposit quote, which prices at the idle-inclusive effective NAV
      * @param _assets The amount of assets to convert, denominated in the tranche's base asset units
@@ -165,7 +165,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /**
      * @notice Returns the total effective assets held by this tranche
      * @dev The effective assets include the claims on the collateral assets after accounting for coverage and yield sharing
-     * @return claims The total asset claims held by this tranche, including claims on the collateral assets, LT assets, ST shares, and their total NAV value
+     * @return claims The total asset claims held by this tranche, including claims on the collateral assets, LPT assets, ST shares, and their total NAV value
      */
     function totalAssets() external view returns (AssetClaims memory claims);
 
@@ -173,7 +173,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @return asset The address of the ERC20 token used as the base asset for deposits into this tranche
     function asset() external view returns (address asset);
 
-    /// @notice Returns the tranche type indicating whether this is a senior, junior, or liquidity tranche
+    /// @notice Returns the tranche type indicating whether this is a senior, junior, or liquidity provider tranche
     /// @return trancheType An enumerator indicating SENIOR, JUNIOR, or LIQUIDITY tranche type
     function TRANCHE_TYPE() external view returns (TrancheType trancheType);
 }

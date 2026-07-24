@@ -19,7 +19,7 @@ import { ValuationLogic } from "../../libraries/logic/ValuationLogic.sol";
 /**
  * @title RoycoVaultTranche
  * @author Ankur Dubey, Shivaansh Kapoor
- * @notice Abstract base contract implementing core vault functionality for Royco tranches (ST, JT, and LT)
+ * @notice Abstract base contract implementing core vault functionality for Royco tranches (ST, JT, and LPT)
  * @dev Tranches interact with the kernel to execute all operations based on the current holistic state of the Royco market
  */
 abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20BurnableUpgradeable, ERC20PermitUpgradeable {
@@ -170,10 +170,10 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         // Get the post-sync tranche state: applying NAV reconciliation
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
             IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
-        if (TRANCHE_TYPE() == TrancheType.LIQUIDITY) {
-            // We exclude any idle (not reinvested) ST shares from the LT claims in order to ensure that its share price does not drop due to slippage incurred on reinvestment
+        if (TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER) {
+            // We exclude any idle (not reinvested) ST shares from the LPT claims in order to ensure that its share price does not drop due to slippage incurred on reinvestment
             trancheClaims.stShares = 0;
-            trancheClaims.nav = state.ltRawNAV;
+            trancheClaims.nav = state.lptRawNAV;
         }
         return TrancheClaimsLogic._scaleAssetClaims(trancheClaims, _shares, trancheTotalShares);
     }
@@ -181,16 +181,16 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     /// @inheritdoc IRoycoVaultTranche
     function convertToShares(TRANCHE_UNIT _assets) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
         // Value the assets specified in NAV units
-        NAV_UNIT value = (TRANCHE_TYPE() == TrancheType.LIQUIDITY)
-            ? IRoycoDayKernel(KERNEL).convertLTAssetsToValue(_assets)
+        NAV_UNIT value = (TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER)
+            ? IRoycoDayKernel(KERNEL).convertLPTAssetsToValue(_assets)
             : IRoycoDayKernel(KERNEL).convertCollateralAssetsToValue(_assets);
 
         // Get the post-sync tranche state
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
             IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
 
-        // We exclude any idle (not reinvested) ST shares from the LT NAV basis in order to ensure that its NAV per share does not drop due to slippage incurred on reinvestment
-        NAV_UNIT navBasis = ((TRANCHE_TYPE() == TrancheType.LIQUIDITY) ? state.ltRawNAV : trancheClaims.nav);
+        // We exclude any idle (not reinvested) ST shares from the LPT NAV basis in order to ensure that its NAV per share does not drop due to slippage incurred on reinvestment
+        NAV_UNIT navBasis = ((TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER) ? state.lptRawNAV : trancheClaims.nav);
         shares = ValuationLogic._convertToShares(value, navBasis, trancheTotalShares, Math.Rounding.Floor);
     }
 
@@ -202,7 +202,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
         if (TRANCHE_TYPE() == TrancheType.SENIOR) assets = IRoycoDayKernel(KERNEL).stMaxDeposit(_receiver);
         else if (TRANCHE_TYPE() == TrancheType.JUNIOR) assets = IRoycoDayKernel(KERNEL).jtMaxDeposit(_receiver);
-        else assets = IRoycoDayKernel(KERNEL).ltMaxDeposit(_receiver);
+        else assets = IRoycoDayKernel(KERNEL).lptMaxDeposit(_receiver);
     }
 
     /// @inheritdoc IRoycoVaultTranche
@@ -213,7 +213,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         uint256 totalTrancheShares;
         if (TRANCHE_TYPE() == TrancheType.SENIOR) (claimNAV, maxWithdrawableNAV, totalTrancheShares) = IRoycoDayKernel(KERNEL).stMaxWithdrawable(_owner);
         else if (TRANCHE_TYPE() == TrancheType.JUNIOR) (claimNAV, maxWithdrawableNAV, totalTrancheShares) = IRoycoDayKernel(KERNEL).jtMaxWithdrawable(_owner);
-        else (claimNAV, maxWithdrawableNAV, totalTrancheShares) = IRoycoDayKernel(KERNEL).ltMaxWithdrawable(_owner);
+        else (claimNAV, maxWithdrawableNAV, totalTrancheShares) = IRoycoDayKernel(KERNEL).lptMaxWithdrawable(_owner);
 
         // We do not allow redemptions if the tranche has no claim on the assets
         if (claimNAV == ZERO_NAV_UNITS) return 0;
@@ -266,7 +266,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         bytes memory callData;
         if (TRANCHE_TYPE() == TrancheType.SENIOR) callData = abi.encodeCall(IRoycoDayKernel.stDeposit, (_isPreview, _assets));
         else if (TRANCHE_TYPE() == TrancheType.JUNIOR) callData = abi.encodeCall(IRoycoDayKernel.jtDeposit, (_isPreview, _assets));
-        else callData = abi.encodeCall(IRoycoDayKernel.ltDeposit, (_isPreview, _assets));
+        else callData = abi.encodeCall(IRoycoDayKernel.lptDeposit, (_isPreview, _assets));
         (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, uint256 totalTrancheShares) =
             abi.decode(KERNEL._dispatchAndUnwrap(_isPreview, callData), (NAV_UNIT, NAV_UNIT, uint256));
 
@@ -294,7 +294,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         bytes memory callData;
         if (TRANCHE_TYPE() == TrancheType.SENIOR) callData = abi.encodeCall(IRoycoDayKernel.stRedeem, (_isPreview, _shares, _receiver));
         else if (TRANCHE_TYPE() == TrancheType.JUNIOR) callData = abi.encodeCall(IRoycoDayKernel.jtRedeem, (_isPreview, _shares, _receiver));
-        else callData = abi.encodeCall(IRoycoDayKernel.ltRedeem, (_isPreview, _shares, _receiver));
+        else callData = abi.encodeCall(IRoycoDayKernel.lptRedeem, (_isPreview, _shares, _receiver));
         return abi.decode(KERNEL._dispatchAndUnwrap(_isPreview, callData), (AssetClaims));
     }
 

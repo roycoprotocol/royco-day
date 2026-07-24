@@ -89,9 +89,9 @@ contract Test_Utilization_Accountant is AccountantTestBase {
      * ceil(1000e18 * 0.1e18 / 250e18) = 0.4e18
      */
     function test_Utilization_coverageNumeratorIsWholeCollateralNAV() public {
-        _seedFlatWithLT(SEED_LT_RAW);
+        _seedFlatWithLPT(SEED_LPT_RAW);
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_EFF + 250e18), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+            kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_EFF + 250e18), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, false);
         assertEq(state.coverageUtilizationWAD, 0.5e18, "coverage numerator is the whole collateral NAV");
     }
 
@@ -103,7 +103,7 @@ contract Test_Utilization_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.minLiquidityWAD = 0;
         _deploy(p);
-        _seedFlatWithLT(0);
+        _seedFlatWithLPT(0);
         SyncedAccountingState memory state =
             kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 100e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
         assertEq(state.liquidityUtilizationWAD, 0, "zero minimum liquidity precedes the zero-inventory max edge");
@@ -111,8 +111,8 @@ contract Test_Utilization_Accountant is AccountantTestBase {
     }
 
     /// a zero market-making inventory against a live requirement reads uint256 max and fires the enforced liquidity gate
-    function test_Utilization_liquidityMaxWhenLTRawZero() public {
-        _seedFlatWithLT(0);
+    function test_Utilization_liquidityMaxWhenLPTRawZero() public {
+        _seedFlatWithLPT(0);
         SyncedAccountingState memory state =
             kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 10e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
         assertEq(state.liquidityUtilizationWAD, type(uint256).max, "zero inventory against a live requirement reads max");
@@ -126,16 +126,16 @@ contract Test_Utilization_Accountant is AccountantTestBase {
      * while the post-op returns the fresh real values
      */
     function test_Utilization_preOpPlaceholdersAndPostOpFreshValues() public {
-        _seedFlatWithLT(SEED_LT_RAW);
+        _seedFlatWithLPT(SEED_LPT_RAW);
         SyncedAccountingState memory preOpState = kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF));
-        assertEq(toUint256(preOpState.ltRawNAV), 0, "pre-op lt raw NAV is a zero placeholder");
+        assertEq(toUint256(preOpState.lptRawNAV), 0, "pre-op lt raw NAV is a zero placeholder");
         assertEq(preOpState.liquidityUtilizationWAD, 0, "pre-op liquidity utilization is a zero placeholder");
-        assertEq(toUint256(accountant.getState().lastLTRawNAV), SEED_LT_RAW, "the placeholder never clobbers the committed lt mark");
+        assertEq(toUint256(accountant.getState().lastLPTRawNAV), SEED_LPT_RAW, "the placeholder never clobbers the committed lt mark");
 
         // The post-op returns the freshly marked liquidity values: liquidityUtilization = ceil(1010e18 * 0.05e18 / 100e18) = 0.505e18
         SyncedAccountingState memory postOpState =
-            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 10e18), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
-        assertEq(toUint256(postOpState.ltRawNAV), SEED_LT_RAW, "post-op returns the real lt raw NAV");
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 10e18), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(postOpState.lptRawNAV), SEED_LPT_RAW, "post-op returns the real lt raw NAV");
         assertEq(postOpState.liquidityUtilizationWAD, 0.505e18, "post-op returns the fresh liquidity utilization");
     }
 }

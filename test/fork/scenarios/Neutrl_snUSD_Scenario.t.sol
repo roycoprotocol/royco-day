@@ -11,7 +11,7 @@ import { Test_BalancerLPGateReinvestBase } from "../balancer/base/Test_BalancerL
 /**
  * @title Neutrl_snUSD_Scenario
  * @notice Scenario-based fork tests for the Neutrl snUSD market: multiple actors run permutations of every
- *         deposit/redeem flow (ST/JT/LT, in-kind and multi-asset) interleaved with yield, loss, warps, syncs,
+ *         deposit/redeem flow (ST/JT/LPT, in-kind and multi-asset) interleaved with yield, loss, warps, syncs,
  *         and external Balancer swaps/LP adds, and the FULL protocol state is exhaustively verified after every
  *         step via one shared `_assertProtocolState` verifier. Delivered as both scripted permutations and a
  *         fuzzed op-sequence sharing that verifier.
@@ -36,7 +36,7 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
             stAsset: SNUSD_VAULT,
             jtAsset: SNUSD_VAULT,
             quoteAsset: USDC,
-            hasLiquidityTranche: true,
+            hasLiquidityProviderTranche: true,
             initialFunding: 1_000_000e18
         });
     }
@@ -87,12 +87,12 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
         }
 
         // 3. Raw NAVs: the per-tranche raw NAV surface is retired, the snapshot's single collateral mark and
-        //    LT mark are read straight off the kernel ledger through the production quoter path in _snap
+        //    LPT mark are read straight off the kernel ledger through the production pricing path in _snap
 
         // 4. Effective NAVs and the full view surface are live (must not revert) after every step.
         _sweepViewSurface(address(ST), string.concat(_ctx, ": ST"));
         _sweepViewSurface(address(JT), string.concat(_ctx, ": JT"));
-        if (testConfig.hasLiquidityTranche) _sweepViewSurface(address(LT), string.concat(_ctx, ": LT"));
+        if (testConfig.hasLiquidityProviderTranche) _sweepViewSurface(address(LPT), string.concat(_ctx, ": LPT"));
     }
 
     /// @dev Reads every ERC4626-style view on a tranche and runs the redeem-preview simulation so a revert
@@ -120,7 +120,7 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
 
     /// @notice A healthy multi-party lifecycle: several actors deposit into all three tranches, yield accrues over
     ///         a window, an external arb swap hits the pool, then each actor partially exits — verified after every step.
-    function test_Scenario_multiPartyHealthyLifecycle() public whenLT {
+    function test_Scenario_multiPartyHealthyLifecycle() public whenLPT {
         uint256 fund = testConfig.initialFunding / 10;
 
         _doDepositJT(JT_ALICE_ADDRESS, fund);
@@ -128,9 +128,9 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
         _doDepositST(ST_ALICE_ADDRESS, fund);
         _assertProtocolState("after ST_ALICE deposit");
 
-        _seedDefaultLT();
-        _enableLTOverlay(0.5e18, 0.3e18, 0.05e18);
-        _assertProtocolState("after LT overlay enable + seed");
+        _seedDefaultLPT();
+        _enableLPTOverlay(0.5e18, 0.3e18, 0.05e18);
+        _assertProtocolState("after LPT overlay enable + seed");
 
         _doDepositST(ST_BOB_ADDRESS, fund / 2);
         _assertProtocolState("after ST_BOB deposit");
@@ -146,20 +146,20 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
         _assertProtocolState("after ST_ALICE partial redeem");
         _doRedeemJT(JT_ALICE_ADDRESS, JT.balanceOf(JT_ALICE_ADDRESS) / 4);
         _assertProtocolState("after JT_ALICE partial redeem");
-        _doRedeemLT(LT_ALICE_ADDRESS, LT.balanceOf(LT_ALICE_ADDRESS) / 4);
-        _assertProtocolState("after LT_ALICE partial in-kind redeem");
+        _doRedeemLPT(LPT_ALICE_ADDRESS, LPT.balanceOf(LPT_ALICE_ADDRESS) / 4);
+        _assertProtocolState("after LPT_ALICE partial in-kind redeem");
     }
 
     /// @notice LPs entering and exiting around a premium window while liquidity is provisioned, exercising the
-    ///         multi-asset LT flows and a covered senior drawdown plus recovery. snUSD runs permanently
+    ///         multi-asset LPT flows and a covered senior drawdown plus recovery. snUSD runs permanently
     ///         perpetual (term duration 0), so every commit resolves PERPETUAL and erases the drawdown's IL.
-    function test_Scenario_premiumWindowAndCoveredDrawdown() public whenLT {
+    function test_Scenario_premiumWindowAndCoveredDrawdown() public whenLPT {
         uint256 fund = testConfig.initialFunding / 10;
 
         _doDepositJT(JT_ALICE_ADDRESS, fund);
         _doDepositST(ST_ALICE_ADDRESS, fund);
-        _seedDefaultLT();
-        _enableLTOverlay(0.5e18, 0.3e18, 0.05e18);
+        _seedDefaultLPT();
+        _enableLPTOverlay(0.5e18, 0.3e18, 0.05e18);
         _assertProtocolState("arranged");
 
         // Premium window: yield accrues, sync deploys the liquidity premium.
@@ -187,12 +187,12 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
     /// @notice Fuzzes a randomized sequence of deposit/redeem/yield/sync steps across actors, verifying the full
     ///         protocol state after every successful step. Amounts are bounded by the live max reads so no step
     ///         trips a gate, keeping every iteration on the verification path.
-    function testFuzz_RandomOpSequence(uint256 _seed) public whenLT {
+    function testFuzz_RandomOpSequence(uint256 _seed) public whenLPT {
         uint256 fund = testConfig.initialFunding / 20;
         _doDepositJT(JT_ALICE_ADDRESS, fund);
         _doDepositST(ST_ALICE_ADDRESS, fund);
-        _seedDefaultLT();
-        _enableLTOverlay(0.5e18, 0.3e18, 0.05e18);
+        _seedDefaultLPT();
+        _enableLPTOverlay(0.5e18, 0.3e18, 0.05e18);
         _assertProtocolState("fuzz: arranged");
 
         uint256 seed = _seed;
@@ -214,10 +214,10 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
                 if (maxR < 1e12) continue;
                 _doRedeemJT(JT_ALICE_ADDRESS, maxR / 4 + 1);
             } else if (op == 3) {
-                // LT in-kind redeem — bounded by the liquidity-respecting max.
-                uint256 maxR = LT.maxRedeem(LT_ALICE_ADDRESS);
+                // LPT in-kind redeem — bounded by the liquidity-respecting max.
+                uint256 maxR = LPT.maxRedeem(LPT_ALICE_ADDRESS);
                 if (maxR < 1e12) continue;
-                _doRedeemLT(LT_ALICE_ADDRESS, maxR / 4 + 1);
+                _doRedeemLPT(LPT_ALICE_ADDRESS, maxR / 4 + 1);
             } else if (op == 4) {
                 // Up-only senior yield over a window, then a sync.
                 _applySTYield(0.01e18);

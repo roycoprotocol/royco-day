@@ -177,24 +177,24 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
     }
 
     /**
-     * @notice The kernel's multi-asset entrypoints only accept the liquidity tranche as caller, an external
+     * @notice The kernel's multi-asset entrypoints only accept the liquidity provider tranche as caller, an external
      *         intruder is rejected on both entrypoints in both preview modes
      * @dev A direct call with _isPreview true is the dangerous shape: the flow's mutations commit with no outer
      *      preview revert to unwind them, the deposit arm credits ST assets never received and mints senior
      *      shares against them then skips the post-op validation, the redeem arm debits the kernel's senior
-     *      share and LT asset ledgers with no senior burn and no post-op sync, so this gate is the sole defense
+     *      share and LPT asset ledgers with no senior burn and no post-op sync, so this gate is the sole defense
      *      against committing phantom accounting
      */
     function test_RevertIf_KernelMultiAssetEntrypointsCalledByNonTranche() public {
         vm.startPrank(ATTACKER);
-        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_TRANCHE.selector);
-        kernel.ltDepositMultiAsset(false, toTrancheUnits(1e18), 1e6, toTrancheUnits(0));
-        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_TRANCHE.selector);
-        kernel.ltDepositMultiAsset(true, toTrancheUnits(1e18), 1e6, toTrancheUnits(0));
-        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_TRANCHE.selector);
-        kernel.ltRedeemMultiAsset(false, 1e18, 0, 0, ATTACKER);
-        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_TRANCHE.selector);
-        kernel.ltRedeemMultiAsset(true, 1e18, 0, 0, ATTACKER);
+        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
+        kernel.lptDepositMultiAsset(false, toTrancheUnits(1e18), 1e6, toTrancheUnits(0));
+        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
+        kernel.lptDepositMultiAsset(true, toTrancheUnits(1e18), 1e6, toTrancheUnits(0));
+        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
+        kernel.lptRedeemMultiAsset(false, 1e18, 0, 0, ATTACKER);
+        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
+        kernel.lptRedeemMultiAsset(true, 1e18, 0, 0, ATTACKER);
         vm.stopPrank();
     }
 

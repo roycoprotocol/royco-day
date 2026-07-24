@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { LT_LP_ROLE } from "../../../src/factory/Roles.sol";
+import { LPT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
@@ -36,55 +36,55 @@ contract Test_TrancheTransferWhitelist_Kernel is DayMarketTestBase {
     }
 
     /**
-     * @notice On a whitelist-enforcing market, a liquidity tranche share transfer to an LT_LP_ROLE holder
-     *         succeeds (LT deposits are role-gated, so a roled address is a whitelisted LT depositor), while the
+     * @notice On a whitelist-enforcing market, a liquidity provider tranche share transfer to an LPT_LP_ROLE holder
+     *         succeeds (LPT deposits are role-gated, so a roled address is a whitelisted LPT depositor), while the
      *         SAME amount from the SAME sender to the access manager reverts ACCOUNT_NOT_WHITELISTED_TRANCHE_LP
      * @dev With both receivers otherwise admissible, the pair isolates receiver identity as the only
      *      discriminant: the authority is the one address the hook must reject no matter what, because
      *      shares held by the access manager would be controlled by whoever can route calls through its execute
      */
     function test_TransferToAuthority_RevertsAsNotWhitelistedTrancheLP_OnWhitelistEnforcingMarket() public {
-        // Seed LT_PROVIDER with LT shares through the production deposit path: a 5e6 quote-wei leg (5.0 units of
+        // Seed LPT_PROVIDER with LPT shares through the production deposit path: a 5e6 quote-wei leg (5.0 units of
         // the 6-decimal quote at its 1.0 price) is worth 5e18 in 18-decimal NAV, backing 5e18 BPT at the pool's
-        // genesis NAV-per-BPT of exactly 1.0, and the first LT deposit mints 1 share-wei per NAV-wei, so
-        // LT_PROVIDER holds exactly 5e18 LT shares
-        _seedLT(5e18, 0, 5e6);
-        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 5e18, "the quote-only seed must mint exactly 5e18 LT shares to LT_PROVIDER");
+        // genesis NAV-per-BPT of exactly 1.0, and the first LPT deposit mints 1 share-wei per NAV-wei, so
+        // LPT_PROVIDER holds exactly 5e18 LPT shares
+        _seedLPT(5e18, 0, 5e6);
+        assertEq(liquidityProviderTranche.balanceOf(LPT_PROVIDER), 5e18, "the quote-only seed must mint exactly 5e18 LPT shares to LPT_PROVIDER");
 
-        // Leg 1: transfer 2e18 shares to a fresh address holding LT_LP_ROLE. LT deposits are role-gated, so the
+        // Leg 1: transfer 2e18 shares to a fresh address holding LPT_LP_ROLE. LPT deposits are role-gated, so the
         // hook's receiver check passes for the roled address and the transfer moves exactly the requested amount
-        address recipient = makeAddr("FRESH_LT_RECIPIENT");
-        accessManager.grantRole(LT_LP_ROLE, recipient, 0);
-        vm.prank(LT_PROVIDER);
-        liquidityTranche.transfer(recipient, 2e18);
-        assertEq(liquidityTranche.balanceOf(recipient), 2e18, "the fresh receiver must gain exactly the transferred shares");
-        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 3e18, "the sender must lose exactly the transferred shares (5e18 - 2e18)");
+        address recipient = makeAddr("FRESH_LPT_RECIPIENT");
+        accessManager.grantRole(LPT_LP_ROLE, recipient, 0);
+        vm.prank(LPT_PROVIDER);
+        liquidityProviderTranche.transfer(recipient, 2e18);
+        assertEq(liquidityProviderTranche.balanceOf(recipient), 2e18, "the fresh receiver must gain exactly the transferred shares");
+        assertEq(liquidityProviderTranche.balanceOf(LPT_PROVIDER), 3e18, "the sender must lose exactly the transferred shares (5e18 - 2e18)");
 
         // Leg 2: the identical transfer to the access manager. The revert here is overdetermined (the authority
-        // holds no LT_LP_ROLE and is also the carved-out receiver identity), so the authority-only conjunct is
+        // holds no LPT_LP_ROLE and is also the carved-out receiver identity), so the authority-only conjunct is
         // isolated by the companion access manager execute test where the role check passes mid-execute
-        vm.prank(LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayKernel.ACCOUNT_NOT_WHITELISTED_TRANCHE_LP.selector, address(accessManager)));
-        liquidityTranche.transfer(address(accessManager), 2e18);
+        liquidityProviderTranche.transfer(address(accessManager), 2e18);
 
         // The failed transfer must leave every balance untouched
-        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 3e18, "the rejected transfer must not move the sender's shares");
-        assertEq(liquidityTranche.balanceOf(address(accessManager)), 0, "the authority must never end up holding tranche shares");
+        assertEq(liquidityProviderTranche.balanceOf(LPT_PROVIDER), 3e18, "the rejected transfer must not move the sender's shares");
+        assertEq(liquidityProviderTranche.balanceOf(address(accessManager)), 0, "the authority must never end up holding tranche shares");
     }
 
     /**
-     * @notice The access manager cannot deposit into the liquidity tranche WITH ITSELF as the share receiver, even
+     * @notice The access manager cannot deposit into the liquidity provider tranche WITH ITSELF as the share receiver, even
      *         through its own execute path where its canCall answer is true: the deposit reverts
      *         ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(accessManager) and no shares are minted to it
      * @dev This pins the `_to != authority` conjunct of the hook as load-bearing. Mid-execute, the access manager
-     *      resolves canCall(accessManager, liquidityTranche, deposit) to true from its is-executing marker, so the
+     *      resolves canCall(accessManager, liquidityProviderTranche, deposit) to true from its is-executing marker, so the
      *      role half of the whitelist check PASSES for the authority — if the explicit authority carve-out were
      *      dropped, this exact call would park tranche shares on the access manager, where anyone able to route
      *      the matching call through execute could move or redeem them
      */
     function test_AccessManagerExecuteDepositToItself_RevertsDespiteExecutionContextCanCall() public {
-        // LT deposits are LT_LP_ROLE-gated, so the execute caller needs the role for execute to admit the call
-        accessManager.grantRole(LT_LP_ROLE, address(this), 0);
+        // LPT deposits are LPT_LP_ROLE-gated, so the execute caller needs the role for execute to admit the call
+        accessManager.grantRole(LPT_LP_ROLE, address(this), 0);
         // Fund the access manager with 5e18 BPT backed by a real 5e6 quote-wei pool leg (worth 5e18 NAV at the
         // quote's 1.0 price), so the deposit attempt is fully collateralized and would mint nonzero shares
         quoteToken.mint(address(this), 5e6);
@@ -95,17 +95,17 @@ contract Test_TrancheTransferWhitelist_Kernel is DayMarketTestBase {
 
         // The tranche pulls the deposit assets from its caller, so the access manager must approve it first
         vm.prank(address(accessManager));
-        bpt.approve(address(liquidityTranche), 5e18);
+        bpt.approve(address(liquidityProviderTranche), 5e18);
 
         // Route the deposit through the access manager's own execute: the roled caller lets execute admit the
         // call, and mid-execute the manager's canCall answers true for itself on this exact target and selector.
         // The deposit runs all the way to the share mint, whose balance-update hook screens the receiver — and the
         // ONLY conjunct left standing against the authority is `_to != authority`
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayKernel.ACCOUNT_NOT_WHITELISTED_TRANCHE_LP.selector, address(accessManager)));
-        accessManager.execute(address(liquidityTranche), abi.encodeCall(IRoycoVaultTranche.deposit, (toTrancheUnits(5e18), address(accessManager))));
+        accessManager.execute(address(liquidityProviderTranche), abi.encodeCall(IRoycoVaultTranche.deposit, (toTrancheUnits(5e18), address(accessManager))));
 
         // The revert must unwind the whole deposit: no shares minted, and the BPT never left the access manager
-        assertEq(liquidityTranche.balanceOf(address(accessManager)), 0, "the blocked deposit must mint no shares to the authority");
+        assertEq(liquidityProviderTranche.balanceOf(address(accessManager)), 0, "the blocked deposit must mint no shares to the authority");
         assertEq(bpt.balanceOf(address(accessManager)), 5e18, "the reverted deposit must return the full BPT collateral to the authority");
     }
 

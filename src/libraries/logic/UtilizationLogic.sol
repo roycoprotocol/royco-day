@@ -42,17 +42,17 @@ library UtilizationLogic {
     /**
      * @notice Computes the liquidity utilization of the Royco market given the market's state
      * @dev Informally: (total required market making inventory) / (market making inventory)
-     * @dev Formally: LIQUIDITY_UTILIZATION = (ST_EFFECTIVE_NAV * MIN_LIQUIDITY) / LT_RAW_NAV
+     * @dev Formally: LIQUIDITY_UTILIZATION = (ST_EFFECTIVE_NAV * MIN_LIQUIDITY) / LPT_RAW_NAV
      * @dev Rounding favors ensuring senior tranche liquidity
      * @param _stEffectiveNAV The total net asset value that the senior tranche is entitled to
-     * @param _minLiquidityWAD The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
-     * @param _ltRawNAV The raw net asset value of the liquidity tranche's market making inventory
+     * @param _minLiquidityWAD The percentage of the senior tranche NAV that must be in the liquidity provider tranche's market making inventory, scaled to WAD precision
+     * @param _lptRawNAV The raw net asset value of the liquidity provider tranche's market making inventory
      * @return liquidityUtilizationWAD The liquidity utilization of the Royco market, scaled to WAD precision
      */
     function _computeLiquidityUtilization(
         NAV_UNIT _stEffectiveNAV,
         uint256 _minLiquidityWAD,
-        NAV_UNIT _ltRawNAV
+        NAV_UNIT _lptRawNAV
     )
         internal
         pure
@@ -60,9 +60,9 @@ library UtilizationLogic {
     {
         // If there is no senior tranche value to market make or no minimum liquidity requirement, the liquidity utilization is 0
         if (_stEffectiveNAV == ZERO_NAV_UNITS || _minLiquidityWAD == 0) return 0;
-        // If there is no market making inventory in the liquidity tranche but there is a minimum required inventory value, the liquidity utilization is effectively infinite
-        if (_ltRawNAV == ZERO_NAV_UNITS) return type(uint256).max;
+        // If there is no market making inventory in the liquidity provider tranche but there is a minimum required inventory value, the liquidity utilization is effectively infinite
+        if (_lptRawNAV == ZERO_NAV_UNITS) return type(uint256).max;
         // Compute the liquidity utilization, rounding in favor of the senior tranche
-        liquidityUtilizationWAD = _stEffectiveNAV.mulDiv(_minLiquidityWAD, _ltRawNAV, Math.Rounding.Ceil);
+        liquidityUtilizationWAD = _stEffectiveNAV.mulDiv(_minLiquidityWAD, _lptRawNAV, Math.Rounding.Ceil);
     }
 }

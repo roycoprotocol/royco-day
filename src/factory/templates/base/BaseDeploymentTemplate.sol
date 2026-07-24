@@ -149,23 +149,23 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
 
     /**
      * @notice Builds `initialize(...)` calldata for an accountant proxy from its canonical init params
-     * @dev The caller supplies the full accountant configuration (including both the JT and LT YDM initialization data, so
+     * @dev The caller supplies the full accountant configuration (including both the JT and LPT YDM initialization data, so
      *      both YDMs are initialized), the template injects only the deployment-derived YDM addresses and the market authority
-     * @param _params The accountant's canonical init params (its `jtYDM`/`ltYDM` fields are overwritten with the deployed instances)
+     * @param _params The accountant's canonical init params (its `jtYDM`/`lptYDM` fields are overwritten with the deployed instances)
      * @param _jtYdm The JT YDM (risk-premium model) instance
-     * @param _ltYdm The LT YDM (liquidity-premium model / LDM) instance, a distinct instance from `_jtYdm`
+     * @param _lptYdm The LPT YDM (liquidity-premium model / LDM) instance, a distinct instance from `_jtYdm`
      */
     function _encodeAccountantInitData(
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params,
         address _jtYdm,
-        address _ltYdm
+        address _lptYdm
     )
         internal
         view
         returns (bytes memory)
     {
         _params.jtYDM = _jtYdm;
-        _params.ltYDM = _ltYdm;
+        _params.lptYDM = _lptYdm;
         return abi.encodeCall(RoycoDayAccountant.initialize, (_params, ROYCO_FACTORY.ROYCO_AUTHORITY()));
     }
 

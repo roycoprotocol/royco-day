@@ -70,7 +70,7 @@ contract Test_SeniorTrancheSelfLiquidationBonus_Accountant is AccountantTestBase
     /// @dev Asserts the four claim fields match the expected literals
     function _assertClaims(AssetClaims memory _c, uint256 _collateralAssets, uint256 _nav, string memory _tag) internal pure {
         assertEq(toUint256(_c.collateralAssets), _collateralAssets, string.concat(_tag, ": collateralAssets"));
-        assertEq(toUint256(_c.ltAssets), 0, string.concat(_tag, ": ltAssets"));
+        assertEq(toUint256(_c.lptAssets), 0, string.concat(_tag, ": lptAssets"));
         assertEq(_c.stShares, 0, string.concat(_tag, ": stShares"));
         assertEq(toUint256(_c.nav), _nav, string.concat(_tag, ": nav"));
     }
@@ -312,7 +312,7 @@ contract Test_SeniorTrancheSelfLiquidationBonus_Accountant is AccountantTestBase
      * A bonus-carrying ST redemption never increases the coverage utilization (derivation at
      * SelfLiquidationLogic.sol:62-73) — the bonus is sized to be utilization-neutral, so paying it can never
      * worsen the market it is winding down.
-     * Seed 1000e18/90e18 flat (collateral 1090e18) with 100e18 of LT depth:
+     * Seed 1000e18/90e18 flat (collateral 1090e18) with 100e18 of LPT depth:
      *   coverageUtilizationPre = ceil(1090e18 * 0.1e18 / 90e18) = 1_211_111_111_111_111_112 >= 1.1e18 (bonus active)
      * The redeeming user claims (collateralAssets 100e18, nav 100e18) at bonusWAD 0.05e18: bonus = min(5e18, 90e18, 9e18)
      * = 5e18 (the desired-bound vector above), so the redemption plus the bonus reduce the collateral to

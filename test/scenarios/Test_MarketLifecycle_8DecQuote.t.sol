@@ -21,9 +21,9 @@ contract Test_MarketLifecycle_8DecQuote_NonStandardTokens is Test_MarketLifecycl
     }
 
     /**
-     * @dev Hand derivation for this shape: one whole ST asset = 1e18 share-wei, at initialRateWAD 1.0 that
-     *      converts to 1e18 underlying-wei = 1.0 whole 18-decimal underlying, and the 1.0 oracle price maps one
-     *      whole underlying to exactly 1e18 NAV wei. The quote decimals do not enter the ST quoter at all
+     * @dev Hand derivation for this shape: one whole ST asset = 1e18 share-wei, and the 1.0 WAD oracle price
+     *      (initialRateWAD) maps one whole collateral asset to exactly 1e18 NAV wei. The quote decimals do not
+     *      enter the ST pricing at all
      */
     function _expectedSTUnitNAV() internal pure override returns (uint256) {
         return 1e18;
@@ -49,6 +49,6 @@ contract Test_MarketLifecycle_8DecQuote_NonStandardTokens is Test_MarketLifecycl
         );
         // The kernel-owned depth those wei back is the same shape-independent WAD mark every shape seeds:
         // 6e8 wei x 1e18 / 1e8 = 6e18 plus the 20e18 explicit BPT = 26e18
-        assertEq(_liveLTRawNAV(), SEEDED_LT_RAW_NAV, "the 8-decimal quote leg must still mark 26e18 WAD of seeded depth");
+        assertEq(_liveLPTRawNAV(), SEEDED_LPT_RAW_NAV, "the 8-decimal quote leg must still mark 26e18 WAD of seeded depth");
     }
 }

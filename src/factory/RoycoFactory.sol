@@ -163,13 +163,13 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         // Deploy the market
         result = IBaseTemplate(_template).deployMarket(_params);
 
-        // A valid market must have a kernel, a senior tranche and a liquidity tranche
-        require(result.kernel != address(0) && result.seniorTranche != address(0) && result.liquidityTranche != address(0), INVALID_DEPLOYMENT_RESULT());
+        // A valid market must have a kernel, a senior tranche and a liquidity provider tranche
+        require(result.kernel != address(0) && result.seniorTranche != address(0) && result.liquidityProviderTranche != address(0), INVALID_DEPLOYMENT_RESULT());
 
         // Register each deployed tranche against the market's kernel
         $.trancheToKernel[result.seniorTranche] = result.kernel;
         $.trancheToKernel[result.juniorTranche] = result.kernel;
-        $.trancheToKernel[result.liquidityTranche] = result.kernel;
+        $.trancheToKernel[result.liquidityProviderTranche] = result.kernel;
 
         // Configure the market's periphery, may read trancheToKernel mapping set above.
         IBaseTemplate(_template).postMarketRegistration(result, _params);
@@ -303,14 +303,14 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         external
         view
         override(IRoycoFactory)
-        returns (address seniorTranche, address juniorTranche, address liquidityTranche, address kernel)
+        returns (address seniorTranche, address juniorTranche, address liquidityProviderTranche, address kernel)
     {
         kernel = _getRoycoFactoryStorage().trancheToKernel[_tranche];
         // Unknown tranche: every component resolves to zero
         if (kernel == address(0)) return (address(0), address(0), address(0), address(0));
         // The kernel's immutables are the single source of truth for the market's tranche set
         IRoycoDayKernel dayKernel = IRoycoDayKernel(kernel);
-        return (dayKernel.SENIOR_TRANCHE(), dayKernel.JUNIOR_TRANCHE(), dayKernel.LIQUIDITY_TRANCHE(), kernel);
+        return (dayKernel.SENIOR_TRANCHE(), dayKernel.JUNIOR_TRANCHE(), dayKernel.LIQUIDITY_PROVIDER_TRANCHE(), kernel);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

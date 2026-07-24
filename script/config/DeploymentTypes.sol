@@ -9,19 +9,6 @@ import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.so
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
-import {
-    IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.sol";
-import {
-    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import {
-    IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter.sol";
-import {
-    IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ENUMS
@@ -30,10 +17,7 @@ import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/li
 /// @notice Day kernel types the deployment path can deploy.
 /// @dev New Day kernel types are added here as they ship.
 enum KernelType {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel,
-    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel,
-    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel,
-    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel
+    RoycoDayBalancerV3Kernel
 }
 
 /// @notice YDM types.
@@ -41,6 +25,16 @@ enum YDMType {
     StaticCurve,
     AdaptiveCurve_V1,
     AdaptiveCurve_V2
+}
+
+/// @notice Collateral asset oracle kinds the deployment path can deploy (one per `src/oracle/` adapter).
+/// @dev New oracle adapters are added here as they ship. Each kind decodes its own params struct from
+///      `MarketConfig.collateralAssetOracleSpecificParams` (mirroring how `ydmSpecificParams` is typed by `ydmType`).
+enum OracleType {
+    ChainlinkPrice,
+    ERC4626SharePrice,
+    MakinaSharePrice,
+    IdleCDOTranchePrice
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -63,7 +57,7 @@ struct RoleAssignmentAddresses {
     address adminKernelAddress;
     address adminAccountantAddress;
     address adminProtocolFeeSetterAddress;
-    address adminOracleQuoterAddress;
+    address adminOracleAddress;
     address lpRoleAdminAddress;
     address guardianAddress;
     address deployerAddress;
@@ -85,38 +79,6 @@ struct RoleAssignment {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// KERNEL-SPECIFIC PARAM STRUCTS
-// ═══════════════════════════════════════════════════════════════════════════
-
-// ─── Day ERC4626-Chainlink-Balancer kernel (field-identical to the template's) ───
-struct IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams {
-    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
-    BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
-}
-
-// ─── Day Makina-Chainlink-Balancer kernel (encoding-identical to the template's KernelSpecificParams wrapper,
-//     all fields static so flat and nested encodings agree) ───
-struct IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams {
-    address makinaMachine;
-    IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
-    BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
-}
-
-// ─── Day Chainlink-to-admin-Balancer kernel (field-identical to the template's) ───
-struct IdenticalAssets_ST_JT_ChainlinkToAdminOracle_QuoterKernelParams {
-    IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
-    BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
-}
-
-// ─── Day IdleCDO-VirtualPrice-Balancer kernel (encoding-identical to the template's KernelSpecificParams wrapper,
-//     all fields static so flat and nested encodings agree) ───
-struct Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams {
-    address idleCDO;
-    IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
-    BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // YDM PARAM STRUCTS
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -135,6 +97,39 @@ struct AdaptiveCurveYDM_V2_Params {
     uint64 yieldShareAtZeroUtilWAD;
     uint64 yieldShareAtTargetUtilWAD;
     uint64 yieldShareAtFullUtilWAD;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COLLATERAL ASSET ORACLE PARAM STRUCTS (one per OracleType)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// @notice Params for `OracleType.ChainlinkPrice`: identity hop, the feed prices the collateral asset in NAV units directly.
+struct ChainlinkPriceOracleParams {
+    address collateralToNavAssetFeed;
+}
+
+/// @notice Params for `OracleType.ERC4626SharePrice`: share price via `convertToAssets` x the base-asset-to-NAV feed.
+/// @dev The vault is the market's collateral asset itself.
+struct ERC4626SharePriceOracleParams {
+    address baseAssetToNavAssetFeed;
+}
+
+/// @notice Params for `OracleType.MakinaSharePrice`: machine share price via `convertToAssets` x the accounting-asset-to-NAV feed.
+/// @dev The machine's share token must be the market's collateral asset (the oracle resolves it at construction).
+struct MakinaSharePriceOracleParams {
+    address makinaMachine;
+    address accountingAssetToNavAssetFeed;
+}
+
+/// @notice Params for `OracleType.IdleCDOTranchePrice`: CDO virtual price x the underlying-token-to-NAV feed, deployed
+///         behind an ERC1967 proxy and initialized with the market AccessManager and the deviation-clock threshold.
+/// @dev The market's collateral asset must be one of the CDO's two tranche tokens (AA or BB).
+struct IdleCDOTranchePriceOracleParams {
+    address idleCDO;
+    address underlyingTokenToNavAssetFeed;
+    uint256 minDeviationWAD;
+    // Admin-attested timestamp of the virtual price's last update (zero holds pricing shut until the first observed deviation)
+    uint32 lastUpdate;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -181,13 +176,13 @@ struct ChainConfig {
     address adminKernelAddress;
     address adminAccountantAddress;
     address adminProtocolFeeSetterAddress;
-    address adminOracleQuoterAddress;
+    address adminOracleAddress;
     address lpRoleAdminAddress;
     address guardianAddress;
     address deployerAddress;
     address deployerAdminAddress;
     uint32 scheduledOperationsExpirySeconds;
-    // Day: the Balancer V3 Gyro E-CLP pool factory the LT pool is created against.
+    // Day: the Balancer V3 Gyro E-CLP pool factory the LPT pool is created against.
     address gyroECLPPoolFactory;
     // Day: Balancer's E-CLP LP oracle factory; the template deploys each market's BPT oracle through it.
     address eclpLPOracleFactory;
@@ -196,7 +191,7 @@ struct ChainConfig {
     address marketOpsAddress;
     // Holder of the dedicated liquidity-premium reinvestment retry knob (split from market ops).
     address marketReinvestLiquidityPremiumAddress;
-    // Entry point admins: config changes (delays, oracle clocks, enable flags) and protocol fee collection.
+    // Entry point admins: config changes (delays, oracle gate flags, enable flags) and protocol fee collection.
     address adminEntryPointAddress;
     address entryPointFeeCollectorAddress;
 }
@@ -206,7 +201,7 @@ struct ChainConfig {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @notice Gyro E-CLP pool params for a market's LT `{ST_share, quote}` pool. The deployer's scripts create the pool
+ * @notice Gyro E-CLP pool params for a market's LPT `{ST_share, quote}` pool. The deployer's scripts create the pool
  *         from these params (under EIP-7825 the pool is created outside the market's wiring transaction), and the
  *         template verifies the resulting pool
  * @custom:field name - The name of the Gyro E-CLP BPT
@@ -240,10 +235,19 @@ struct MarketConfig {
     string seniorTrancheSymbol;
     string juniorTrancheName;
     string juniorTrancheSymbol;
-    string liquidityTrancheName;
-    string liquidityTrancheSymbol;
+    string liquidityProviderTrancheName;
+    string liquidityProviderTrancheSymbol;
     // Assets
     address collateralAsset;
+    // Collateral asset pricing: the IRoycoPriceOracle wired into the kernel at initialization. When
+    // `collateralAssetOracle` is unset the deploy script deploys the `collateralAssetOracleType` adapter from its
+    // kind-specific params (each OracleType decodes its own struct from the bytes blob).
+    address collateralAssetOracle;
+    OracleType collateralAssetOracleType;
+    bytes collateralAssetOracleSpecificParams;
+    uint48 stalenessThresholdSeconds;
+    address sequencerUptimeFeed;
+    uint48 gracePeriodSeconds;
     // Dust tolerance
     uint256 dustTolerance;
     // Kernel
@@ -260,13 +264,13 @@ struct MarketConfig {
     uint24 fixedTermDurationSeconds;
     YDMType ydmType;
     bytes ydmSpecificParams; // JT YDM curve
-    bytes ltYdmSpecificParams; // LDM curve
+    bytes lptYdmSpecificParams; // LDM curve
     uint256 jtYdmTargetUtilizationWAD; // JT YDM target-utilization kink
-    uint256 ltYdmTargetUtilizationWAD; // LDM target-utilization kink
-    // Liquidity tranche: the Gyro E-CLP {ST_share, quote} pool the LT BPT is minted from.
+    uint256 lptYdmTargetUtilizationWAD; // LDM target-utilization kink
+    // Liquidity provider tranche: the Gyro E-CLP {ST_share, quote} pool the LPT BPT is minted from.
     GyroECLPPoolParams gyroECLPPoolParams;
     // Entry point config per tranche
     IRoycoDayEntryPoint.TrancheConfig stEntryPointConfig;
     IRoycoDayEntryPoint.TrancheConfig jtEntryPointConfig;
-    IRoycoDayEntryPoint.TrancheConfig ltEntryPointConfig;
+    IRoycoDayEntryPoint.TrancheConfig lptEntryPointConfig;
 }

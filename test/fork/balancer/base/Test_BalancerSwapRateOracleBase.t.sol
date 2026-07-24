@@ -27,7 +27,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     /// @dev Standard swap-test arrange: seeded ST/JT market plus a default-depth real pool.
     function _seedForSwaps() internal {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
-        _seedDefaultLT();
+        _seedDefaultLPT();
     }
 
     /// @dev Probes capacity, sizes a swap at `_fractionWAD` of it, and returns a funded swapper with the sized input.
@@ -78,7 +78,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
      * @notice an external swap's before-hook syncs the kernel FIRST: the committed checkpoint equals what
      *         an explicit sync would have committed pre-swap, and the swap's own effects land after the commit.
      * @dev A pending (unsynced) feed move makes the sync non-trivial; the snapshot probe measures the exact
-     *      checkpoint an explicit sync would commit. Ordering discriminator: the committed LT raw NAV equals
+     *      checkpoint an explicit sync would commit. Ordering discriminator: the committed LPT raw NAV equals
      *      the PRE-swap pool mark exactly, while the post-swap live mark exceeds it by the accrued swap fee.
      */
     function test_ExternalSwap_syncsBeforeSwap_commitsPreSwapMarks() public {
@@ -99,8 +99,8 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         assertEq(committed.lastCollateralNAV, expected.lastCollateralNAV, "committed collateral NAV must equal the pre-swap explicit-sync probe");
         assertEq(committed.lastSTEffectiveNAV, expected.lastSTEffectiveNAV, "committed ST effective NAV must equal the pre-swap explicit-sync probe");
         assertEq(committed.lastJTEffectiveNAV, expected.lastJTEffectiveNAV, "committed JT effective NAV must equal the pre-swap explicit-sync probe");
-        assertEq(committed.lastLTRawNAV, expected.lastLTRawNAV, "committed LT raw NAV must be the PRE-swap pool mark (sync-before-swap ordering)");
-        assertGt(toUint256(_liveLTRawNAV()), toUint256(committed.lastLTRawNAV), "the swap's fee must land in the pool AFTER the commit");
+        assertEq(committed.lastLPTRawNAV, expected.lastLPTRawNAV, "committed LPT raw NAV must be the PRE-swap pool mark (sync-before-swap ordering)");
+        assertGt(toUint256(_liveLPTRawNAV()), toUint256(committed.lastLPTRawNAV), "the swap's fee must land in the pool AFTER the commit");
     }
 
     /**
@@ -129,23 +129,23 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     }
 
     /**
-     * @notice the kernel's LT raw NAV captures exactly its pro-rata share of the swap-fee TVL growth:
-     *         the kernel valuation path (quoter -> oracle) moves with the venue, not with its own ledger.
+     * @notice the kernel's LPT raw NAV captures exactly its pro-rata share of the swap-fee TVL growth:
+     *         the kernel valuation path (venue pricing -> oracle) moves with the venue, not with its own ledger.
      */
-    function test_ExternalSwap_ltRawNAVGain_isPhiOfFee() public {
+    function test_ExternalSwap_lptRawNAVGain_isPhiOfFee() public {
         _seedForSwaps();
         _sync();
         uint256 tvl0 = _poolTVL();
-        uint256 ltRaw0 = toUint256(_liveLTRawNAV());
-        uint256 ltOwnedBPT = toUint256(KERNEL.getState().totalLTAssets);
+        uint256 lptRaw0 = toUint256(_liveLPTRawNAV());
+        uint256 lptOwnedBPT = toUint256(KERNEL.getState().totalLPTAssets);
         uint256 supply0 = _bptSupply();
 
         (address swapper, uint256 amountIn) = _armSwapper(testConfig.quoteAsset, 0.25e18);
         _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
 
-        assertEq(toUint256(KERNEL.getState().totalLTAssets), ltOwnedBPT, "a swap must not move the kernel's owned-BPT ledger");
-        uint256 expectedGain = Math.mulDiv(_poolTVL() - tvl0, ltOwnedBPT, supply0);
-        assertApproxEqAbs(toUint256(_liveLTRawNAV()) - ltRaw0, expectedGain, _tol2(), "LT raw NAV must gain its pool share of the accrued fee");
+        assertEq(toUint256(KERNEL.getState().totalLPTAssets), lptOwnedBPT, "a swap must not move the kernel's owned-BPT ledger");
+        uint256 expectedGain = Math.mulDiv(_poolTVL() - tvl0, lptOwnedBPT, supply0);
+        assertApproxEqAbs(toUint256(_liveLPTRawNAV()) - lptRaw0, expectedGain, _tol2(), "LPT raw NAV must gain its pool share of the accrued fee");
     }
 
     /**
@@ -167,7 +167,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     }
 
     /**
-     * @notice a paused hook does NOT touch kernel-routed LT flows: the `router == kernel` exemption
+     * @notice a paused hook does NOT touch kernel-routed LPT flows: the `router == kernel` exemption
      *         short-circuits before the `whenNotPaused` sync, so deposits and redemptions keep functioning.
      *         Pins the pause blast-radius: hook pause stops external pool traffic only.
      */
@@ -177,10 +177,10 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
 
         uint256 stLeg = testConfig.initialFunding / 1000;
         uint256 quoteLeg = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(stLeg)));
-        uint256 shares = _doDepositLTMulti(LT_ALICE_ADDRESS, stLeg, quoteLeg, 0).shares;
+        uint256 shares = _doDepositLPTMulti(LPT_ALICE_ADDRESS, stLeg, quoteLeg, 0).shares;
         assertGt(shares, 0, "the kernel-routed multi-asset deposit must succeed while the hook is paused");
 
-        uint256 redeemed = _doRedeemLTMulti(LT_ALICE_ADDRESS, shares / 2, 0, 0).quoteAssets;
+        uint256 redeemed = _doRedeemLPTMulti(LPT_ALICE_ADDRESS, shares / 2, 0, 0).quoteAssets;
         assertGt(redeemed, 0, "the kernel-routed multi-asset redemption must succeed while the hook is paused");
     }
 
@@ -362,7 +362,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
      *         `floor(WAD * (lastSTEffectiveNAV + VIRTUAL_ASSETS) / (stTotalSupply + VIRTUAL_SHARES))` right after
      *         a sync. This is the number the pool's WITH_RATE leg prices at.
      * @dev Cache regime: frozen-cache read of the sync's written value — the exact value the Vault consumes.
-     *      (Cache-miss vs live-path parity is pinned in the mock-based quoter suite (test/concrete/Quoters);
+     *      (Cache-miss vs live-path parity is pinned in the mock-based pricing suites;
      *      here the fork asserts the committed coherence of the value real pool ops execute against.)
      */
     function test_GetRate_matchesCommittedSeniorNAVPerShare() public {
@@ -406,7 +406,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
      * @notice the rate is monotone under senior yield and, after a premium-minting sync, still equals the
      *         committed NAV per POST-MINT share: the fee/premium share mints dilute the rate path exactly as
      *         committed.
-     * @dev The LT overlay is enabled so the sync mints liquidity-premium ST shares (a real supply change
+     * @dev The LPT overlay is enabled so the sync mints liquidity-premium ST shares (a real supply change
      *      between the two reads); the mirror divides by the observed post-mint supply.
      */
     function test_GetRate_monotoneUnderYield_tracksCommittedMark() public {
@@ -450,7 +450,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
 
     /// @notice the Vault's own view of the pool token rates reads the kernel rate provider live: the
     ///         WITH_RATE registration is empirically wired to `getRate`, and the STANDARD quote leg reads 1.0.
-    function test_GetRate_vaultTokenRateView_matchesQuoter() public {
+    function test_GetRate_vaultTokenRateView_matchesKernelPricing() public {
         _seedForSwaps();
         _sync();
         (, uint256[] memory tokenRates) = VAULT.getPoolTokenRates(POOL);
@@ -485,7 +485,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
      * @notice manipulation resistance, quantified: a swap of half the pool's capacity moves the oracle TVL
      *         by no more than the retained fee, while the pool's real composition and spot price move heavily.
      * @dev The invariant-based TVL sees a swap only through fee-driven invariant growth (the oracle reads the
-     *      invariant, not the balances directly), so spot/composition manipulation cannot move the LT mark.
+     *      invariant, not the balances directly), so spot/composition manipulation cannot move the LPT mark.
      */
     function test_ComputeTVL_underSwapManipulation_boundedByFee() public {
         _seedForSwaps();
@@ -551,7 +551,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
 
     /**
      * @notice `computeTVL` reads cleanly INSIDE `Vault.unlock`: an external Router add triggers the hook's
-     *         sync, whose LT raw NAV commit calls the oracle mid-unlock. Validates the template's
+     *         sync, whose LPT raw NAV commit calls the oracle mid-unlock. Validates the template's
      *         `shouldRevertIfVaultUnlocked = false` choice empirically (flipping it would brick every external
      *         pool op, since the hook syncs before each one).
      */
@@ -572,14 +572,14 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         assertEq(syncCount, 1, "the hook must have synced (and read the oracle) inside the unlock");
     }
 
-    /// @notice the kernel's LT conversions round-trip on the LIVE oracle TVL with bounded floor loss:
+    /// @notice the kernel's LPT conversions round-trip on the LIVE oracle TVL with bounded floor loss:
     ///         `back <= x` and the gap is at most one NAV-wei's worth of BPT plus the final floor.
-    function test_LTConversions_roundTripFloor_onLiveTVL() public {
+    function test_LPTConversions_roundTripFloor_onLiveTVL() public {
         _seedForSwaps();
         _sync();
-        uint256 x = toUint256(KERNEL.getState().totalLTAssets) / 3;
-        uint256 nav = toUint256(KERNEL.convertLTAssetsToValue(toTrancheUnits(x)));
-        uint256 back = toUint256(KERNEL.convertValueToLTAssets(toNAVUnits(nav)));
+        uint256 x = toUint256(KERNEL.getState().totalLPTAssets) / 3;
+        uint256 nav = toUint256(KERNEL.convertLPTAssetsToValue(toTrancheUnits(x)));
+        uint256 back = toUint256(KERNEL.convertValueToLPTAssets(toNAVUnits(nav)));
         assertLe(back, x, "the round trip must never create BPT");
         uint256 maxGap = Math.mulDiv(_bptSupply(), 1, _poolTVL()) + 2; // one NAV-wei of BPT + the two floors
         assertLe(x - back, maxGap, "the round-trip floor loss must stay within one NAV-wei of BPT");

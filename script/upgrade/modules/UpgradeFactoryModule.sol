@@ -6,7 +6,7 @@ import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/ac
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_KERNEL_ROLE,
-    ADMIN_ORACLE_QUOTER_ROLE,
+    ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_UPGRADER_ROLE,
@@ -77,7 +77,7 @@ contract UpgradeFactoryModule is UpgradeModuleBase, RoleConfigUtils {
         roles[7] = ADMIN_KERNEL_ROLE;
         roles[8] = ADMIN_ACCOUNTANT_ROLE;
         roles[9] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        roles[10] = ADMIN_ORACLE_QUOTER_ROLE;
+        roles[10] = ADMIN_ORACLE_ROLE;
         roles[11] = DEPLOYER_ROLE;
         roles[12] = LP_ROLE_ADMIN_ROLE;
         roles[13] = DEPLOYER_ROLE_ADMIN_ROLE;

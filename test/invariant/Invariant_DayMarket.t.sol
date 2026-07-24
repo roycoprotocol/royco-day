@@ -42,10 +42,10 @@ contract Invariant_DayMarket is StdInvariant, Test {
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtRedeem.selector,
-            DayMarketHandler.op_ltDeposit.selector,
-            DayMarketHandler.op_ltDepositMultiAsset.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeemMultiAsset.selector,
+            DayMarketHandler.op_lptDeposit.selector,
+            DayMarketHandler.op_lptDepositMultiAsset.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeemMultiAsset.selector,
             DayMarketHandler.op_sync.selector,
             DayMarketHandler.op_reinvest.selector,
             DayMarketHandler.op_warp.selector,
@@ -53,7 +53,7 @@ contract Invariant_DayMarket is StdInvariant, Test {
             DayMarketHandler.op_stPnL.selector,
             DayMarketHandler.op_stPnL.selector,
             DayMarketHandler.op_jtPnL.selector,
-            DayMarketHandler.op_ltPnL.selector,
+            DayMarketHandler.op_lptPnL.selector,
             DayMarketHandler.op_adminParamNudge.selector,
             DayMarketHandler.op_externalPoolOp.selector,
             DayMarketHandler.aimed_toggleVenueSlippage.selector
@@ -66,7 +66,7 @@ contract Invariant_DayMarket is StdInvariant, Test {
         sels[weighted.length + 1] = DayMarketHandler.aimed_loseUntilLiquidation.selector;
         sels[weighted.length + 2] = DayMarketHandler.aimed_coveredDrawdown.selector;
         sels[weighted.length + 3] = DayMarketHandler.aimed_fullExit.selector;
-        sels[weighted.length + 4] = DayMarketHandler.aimed_ltRedeemToLiquidityGateBoundary.selector;
+        sels[weighted.length + 4] = DayMarketHandler.aimed_lptRedeemToLiquidityGateBoundary.selector;
     }
 
     /**
@@ -132,16 +132,16 @@ contract Invariant_DayMarket is StdInvariant, Test {
         _logOpLedger("stRedeem");
         _logOpLedger("jtDeposit");
         _logOpLedger("jtRedeem");
-        _logOpLedger("ltDeposit");
-        _logOpLedger("ltDepositMultiAsset");
-        _logOpLedger("ltRedeem");
-        _logOpLedger("ltRedeemMultiAsset");
+        _logOpLedger("lptDeposit");
+        _logOpLedger("lptDepositMultiAsset");
+        _logOpLedger("lptRedeem");
+        _logOpLedger("lptRedeemMultiAsset");
         _logOpLedger("sync");
         _logOpLedger("reinvest");
         _logOpLedger("warp");
         _logOpLedger("stPnL");
         _logOpLedger("jtPnL");
-        _logOpLedger("ltPnL");
+        _logOpLedger("lptPnL");
         _logOpLedger("adminParamNudge");
         _logOpLedger("externalPoolOp");
         _logOpLedger("toggleVenueSlippage");
@@ -149,7 +149,7 @@ contract Invariant_DayMarket is StdInvariant, Test {
         _logOpLedger("aimedLoseUntilLiquidation");
         _logOpLedger("aimedCoveredDrawdown");
         _logOpLedger("aimedFullExit");
-        _logOpLedger("aimedLtRedeemToLiquidityGateBoundary");
+        _logOpLedger("aimedLptRedeemToLiquidityGateBoundary");
     }
 
     /// @dev One line of the per-op anti-vacuity ledger: calls, successes, and predicted gate rejections

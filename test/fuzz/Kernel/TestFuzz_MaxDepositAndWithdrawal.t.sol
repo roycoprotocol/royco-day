@@ -31,7 +31,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
      * that binds. This is the no-overfill guarantee: the advertised max is achievable and nothing beyond the
      * boundary can enter.
      *
-     * Derivation (flat marks collateralNAV = st + jt with stEffectiveNAV = st, jtEffectiveNAV = jt, ltRawNAV = depth,
+     * Derivation (flat marks collateralNAV = st + jt with stEffectiveNAV = st, jtEffectiveNAV = jt, lptRawNAV = depth,
      * exact because 0.2e18 and 0.05e18 divide WAD):
      *   coverage gate:  ceil((st + jt + d) * 0.2e18 / jt) <= WAD  <=>  d <= 4*jt - st            (covBound)
      *   liquidity gate: ceil((st + d) * 0.05e18 / depth) <= WAD   <=>  d <= 20*depth - st        (liqBound)
@@ -165,7 +165,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
      * more share reverts on the liquidity gate. This is the no-run guarantee: pooled depth can be pulled down
      * to the senior tranche's required liquidity floor but never below it.
      *
-     * Derivation (flat marks, NAV-per-BPT exactly 1.0, and the LT supply == depth ltRawNAV on the seed, but redeeming s
+     * Derivation (flat marks, NAV-per-BPT exactly 1.0, and the LPT supply == depth lptRawNAV on the seed, but redeeming s
      * shares withdraws floor(depth * s / (depth + VIRTUAL_SHARES)) NAV under the redemption-side offset):
      *   post-redemption liquidity gate for a total withdrawal w:
      *     ceil(st * 0.05e18 / (depth - w)) <= WAD  <=>  ceil(st/20) <= depth - w  <=>  w <= depth - ceil(st/20)
@@ -184,16 +184,16 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         uint256 requiredFloor = (st + 19) / 20;
 
         // The independent mirror pins the exact reported max. maxRedeem converts the NAV bound to shares through the
-        // offset-aware primitive (supply + VIRTUAL_SHARES over ltRawNAV + VIRTUAL_VALUE), capped by the balance, so the
+        // offset-aware primitive (supply + VIRTUAL_SHARES over lptRawNAV + VIRTUAL_VALUE), capped by the balance, so the
         // reported max is a SHARE count that no longer equals the withdrawable NAV 1:1. The claim NAV is the pool depth
-        // (depth == ltRawNAV), but the LT SUPPLY no longer equals depth: the fresh auto-seed mints 1:1 while the
-        // extraQuote seed mints through the offset, so the conversion must use the actual live LT supply, not depth.
-        uint256 supply = liquidityTranche.totalSupply();
-        uint256 maxWithdrawNAV = RoycoTestMath.maxLTWithdrawal(depth, st, 0.05e18, 1); // == depth - floor(st/20) - 1
-        uint256 reportedMax = liquidityTranche.maxRedeem(LT_PROVIDER);
+        // (depth == lptRawNAV), but the LPT SUPPLY no longer equals depth: the fresh auto-seed mints 1:1 while the
+        // extraQuote seed mints through the offset, so the conversion must use the actual live LPT supply, not depth.
+        uint256 supply = liquidityProviderTranche.totalSupply();
+        uint256 maxWithdrawNAV = RoycoTestMath.maxLPTWithdrawal(depth, st, 0.05e18, 1); // == depth - floor(st/20) - 1
+        uint256 reportedMax = liquidityProviderTranche.maxRedeem(LPT_PROVIDER);
         assertEq(
             reportedMax,
-            Math.min(liquidityTranche.balanceOf(LT_PROVIDER), RoycoTestMath.convertToShares(maxWithdrawNAV, depth, supply)),
+            Math.min(liquidityProviderTranche.balanceOf(LPT_PROVIDER), RoycoTestMath.convertToShares(maxWithdrawNAV, depth, supply)),
             "independent mirror must agree with the reported max"
         );
 
@@ -210,18 +210,18 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // One share past the true max drops the retained depth below the required floor and violates the liquidity
         // requirement, from the preview and the execution alike (both from the untouched pre-redemption state)
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        liquidityTranche.previewRedeem(sStar + 1);
+        liquidityProviderTranche.previewRedeem(sStar + 1);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        vm.prank(LT_PROVIDER);
-        liquidityTranche.redeem(sStar + 1, LT_PROVIDER, LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
+        liquidityProviderTranche.redeem(sStar + 1, LPT_PROVIDER, LPT_PROVIDER);
 
         // Redeeming exactly the true max succeeds and leaves the pool at or above the required liquidity floor
-        vm.prank(LT_PROVIDER);
-        liquidityTranche.redeem(sStar, LT_PROVIDER, LT_PROVIDER);
-        uint256 ltRawAfter = toUint256(accountant.getState().lastLTRawNAV);
-        assertGe(ltRawAfter, requiredFloor, "the max redemption must leave the required liquidity floor in the pool");
+        vm.prank(LPT_PROVIDER);
+        liquidityProviderTranche.redeem(sStar, LPT_PROVIDER, LPT_PROVIDER);
+        uint256 lptRawAfter = toUint256(accountant.getState().lastLPTRawNAV);
+        assertGe(lptRawAfter, requiredFloor, "the max redemption must leave the required liquidity floor in the pool");
         assertLe(
-            RoycoTestMath.computeLiquidityUtilization(st, 0.05e18, ltRawAfter), WAD, "liquidity utilization must hold at or below 100% after the max redemption"
+            RoycoTestMath.computeLiquidityUtilization(st, 0.05e18, lptRawAfter), WAD, "liquidity utilization must hold at or below 100% after the max redemption"
         );
     }
 }

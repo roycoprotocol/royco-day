@@ -12,46 +12,38 @@ import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/acc
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import {
-    DeploymentResult,
-    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams,
-    KernelType,
-    MarketConfig
-} from "../../../script/config/DeploymentTypes.sol";
-import { Create2DeployUtils } from "../../../script/utils/Create2DeployUtils.sol";
+import { MarketConfig } from "../../../script/config/DeploymentTypes.sol";
 import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_QUOTER_ROLE, ADMIN_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE, ADMIN_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import {
-    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
-} from "../../../src/factory/templates/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
-import { TAG_ST_PROXY } from "../../../src/factory/templates/base/Constants.sol";
-import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../../../src/factory/templates/liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
+    RoycoDayBalancerV3MarketDeploymentTemplate
+} from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
+import { AggregatorV3Interface } from "../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { IIdleCDO } from "../../../src/interfaces/external/idle-finance/IIdleCDO.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
-import {
-    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel
-} from "../../../src/kernels/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
-import {
-    IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter
-} from "../../../src/kernels/base/quoter/identical-st-jt/IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
+import { NAV_UNIT } from "../../../src/libraries/Units.sol";
+import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
 
 /// @title Test_IdleCDOMarketDeployment
-/// @notice Fork test for the REAL Idle CDO Day template
-///         (`Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate`), modeled on
-///         Test_RoycoFactory's direct-template pattern. Covers the deltas the golden ERC4626 suite cannot: the
-///         CDO address threading from `kernelSpecificParams` into the kernel constructor, the BPT oracle
-///         injection on this kernel family, the sole ST/JT quoter selector role binding, the senior pool leg's kernel
-///         rate provider, and the atomic unwind when the CDO's AA tranche token mismatches the ST asset.
+/// @notice Fork test for the single Day template (`RoycoDayBalancerV3MarketDeploymentTemplate`) deployed against a
+///         market whose collateral is a REAL Idle CDO AA tranche priced by the proxied `IdleCDOTranchePriceOracle`
+///         adapter, modeled on Test_RoycoFactory's direct-template pattern. Covers the deltas the golden ERC4626
+///         suite cannot: the proxied adapter's CDO threading + tranche-identity guard, the live virtual-price
+///         composition against the real CDO + feed, the deviation-clock timestamp seam, the BPT oracle injection,
+///         the pricing-admin selector role bindings, and the senior pool leg's kernel rate provider.
 /// @dev Requires a mainnet fork (real Balancer V3 + Gyro E-CLP + the REAL Pareto Idle CDO). FAILS (env not
 ///      found) when `MAINNET_RPC_URL` is unset, instead of silently passing.
 contract Test_IdleCDOMarketDeployment is Test {
+    using Math for uint256;
+
     uint256 internal constant FORK_BLOCK = 25_400_000;
     address internal constant GYRO_ECLP_POOL_FACTORY = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
     address internal constant ECLP_LP_ORACLE_FACTORY = 0x301EDe5Fd4f9d7266B09c3A2E38F97776447154B;
@@ -59,15 +51,21 @@ contract Test_IdleCDOMarketDeployment is Test {
     /// @dev IdleCDO contract address (Pareto Falconx Prime Brokerage Vault)
     address internal constant PARETO_FALCONX_CDO = 0x433D5B175148dA32Ffe1e1A37a939E1b7e79be4d;
 
-    /// @dev AA Tranche token address (the asset for both ST and JT)
+    /// @dev AA Tranche token address (the market's collateral asset)
     address internal constant AA_TRANCHE_TOKEN = 0xC26A6Fa2C37b38E549a4a1807543801Db684f99C;
 
-    address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // mismatched ST/JT asset for the revert test
+    /// @notice Chainlink USDC / USD feed, the underlying-token->NAV leg of the composed oracle
+    address internal constant USDC_USD_FEED = 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6;
+
+    /// @dev The deviation-clock threshold the proxied adapter is initialized with (0.1%)
+    uint256 internal constant MIN_DEVIATION_WAD = 0.001e18;
+
+    address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // non-tranche collateral for the guard test
 
     AccessManager internal am;
     RoycoFactory internal factory;
     DeployScript internal deployScript;
-    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate internal template;
+    RoycoDayBalancerV3MarketDeploymentTemplate internal template;
     IRoycoDayEntryPoint internal entryPoint;
     RoycoMarketSyncer internal syncer;
 
@@ -127,13 +125,13 @@ contract Test_IdleCDOMarketDeployment is Test {
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
-        // The real Idle CDO Day template, bound to this factory. `deployScript` externally deploys each market's
-        // impls/YDMs/pool and pre-deploys its ST + hook proxies (`deployMarketContractsForTest`), then builds the
-        // template params (`buildDayParams`). Its nested `deployDeterministicProxy` calls run with `msg.sender == address(deployScript)`,
+        // The real Day template, bound to this factory. `deployScript` externally deploys each market's impls/YDMs/pool
+        // and pre-deploys its ST + hook proxies (`deployMarketContractsForTest`), then builds the template params
+        // (`buildMarketParams`). Its nested `deployDeterministicProxy` calls run with `msg.sender == address(deployScript)`,
         // so the deployScript must hold DEPLOYER_ROLE.
         deployScript = new DeployScript();
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
-        template = new Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
+        template = new RoycoDayBalancerV3MarketDeploymentTemplate(
             IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(entryPoint), address(syncer)
         );
     }
@@ -145,86 +143,84 @@ contract Test_IdleCDOMarketDeployment is Test {
         factory.registerTemplate(address(template));
     }
 
-    /// @dev Clones the snUSD market config in memory and swaps in the collateral asset plus the Idle CDO kernel type +
-    ///      params blob. No config file entry exists for this kernel yet, so the test IS the params source
-    ///      (MarketDeploymentConfig untouched).
-    function _marketConfig(address _idleCDO, address _stJtAsset) internal view returns (MarketConfig memory cfg) {
-        cfg = deployScript.getMarketConfig("snUSD");
-        cfg.collateralAsset = _stJtAsset;
-        cfg.kernelType = KernelType.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel;
-        cfg.kernelSpecificParams = abi.encode(
-            Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams({
-                idleCDO: _idleCDO,
-                stAndJTQuoterParams: IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter.ST_JT_QuoterSpecificParams({
-                    // Virtual-price-primary configuration: the zero sentinel makes the quoter read the CDO's
-                    // virtualPrice live (the shipped Dawn behavior, the admin rate stays an override)
-                    initialConversionRateWAD: 0
-                }),
-                ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
-                    bptOracle: address(0), // deployed by the template after the pool is created, overwritten by it
-                    maxReinvestmentSlippageWAD: 0.001e18
-                })
-            })
+    /// @dev Deploys the proxied Idle CDO tranche oracle the production script deploys: the impl pins the CDO + tranche +
+    ///      feed as immutables and the ERC1967 proxy initializes the deviation clock (mirrors `_deployIdleCDOTranchePriceOracle`).
+    function _deployIdleOracle(address _tranche) internal returns (address oracle) {
+        IdleCDOTranchePriceOracle oracleImpl = new IdleCDOTranchePriceOracle(PARETO_FALCONX_CDO, _tranche, USDC_USD_FEED);
+        // The attested last update is now: the deployer vouches the virtual price is current at deployment.
+        return address(
+            new ERC1967Proxy(
+                address(oracleImpl), abi.encodeCall(IdleCDOTranchePriceOracle.initialize, (address(am), MIN_DEVIATION_WAD, uint32(block.timestamp)))
+            )
         );
     }
 
-    function _encodedParams(bytes32 _marketId, address _idleCDO, address _stJtAsset) internal returns (bytes memory) {
-        MarketConfig memory cfg = _marketConfig(_idleCDO, _stJtAsset);
-        BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc =
-            deployScript.deployMarketContractsForTest(cfg, _marketId, factory, address(template), address(am));
-        return abi.encode(deployScript.buildDayParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
-    }
-
-    function _deploy(bytes32 _marketId) internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
-        // Precompute the params first: `_encodedParams` externally deploys the market contracts as `deployScript`,
-        // which would otherwise consume the `vm.prank(DEPLOYER)` intended for `executeMarketDeployment`.
-        bytes memory p = _encodedParams(_marketId, PARETO_FALCONX_CDO, AA_TRANCHE_TOKEN);
-        vm.prank(DEPLOYER);
-        return factory.executeMarketDeployment(address(template), p);
+    /// @dev Clones the snUSD market config in memory and swaps in the CDO AA tranche collateral + its proxied
+    ///      virtual-price oracle. The direct-template path must supply the deployed oracle itself (the `deploy()` flow resolves it).
+    function _marketConfig() internal returns (MarketConfig memory cfg) {
+        cfg = deployScript.getMarketConfig("snUSD");
+        cfg.collateralAsset = AA_TRANCHE_TOKEN;
+        cfg.collateralAssetOracle = _deployIdleOracle(AA_TRANCHE_TOKEN);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT WIRING (the Idle-CDO-specific deltas)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice The template threads the REAL CDO address from `kernelSpecificParams` into the kernel constructor,
-    ///         quotes a live composed rate off the CDO's real virtual price, injects its template-deployed BPT
-    ///         oracle into the kernel quoter, binds the sole ST/JT quoter admin selector to ADMIN_ORACLE_QUOTER_ROLE,
-    ///         and prices the senior pool leg via the kernel
-    function test_ExecuteMarketDeployment_IdleCDOKernelWiring() external {
+    /// @notice The proxied adapter pins the REAL CDO, the kernel initializes against it (the COLLATERAL_ASSET
+    ///         identity check passes), the composed price is live against the real CDO's virtual price + feed with
+    ///         the deviation clock as its timestamp, the template-deployed BPT oracle is injected into the kernel's
+    ///         liquidity venue, the pricing-admin selectors bind to ADMIN_ORACLE_ROLE, and the senior pool leg is
+    ///         priced via the kernel
+    function test_ExecuteMarketDeployment_IdleCDOOracleKernelWiring() external {
         _register();
-        IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(MARKET_ID);
+        MarketConfig memory cfg = _marketConfig();
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
+            deployScript.deployMarketContractsForTest(cfg, MARKET_ID, factory, address(template), address(am));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
-        // The kernel proxy pinned the REAL CDO as its constructor immutable.
+        // The kernel initialized with the configured proxied adapter, which pins the REAL CDO and prices its AA tranche.
+        assertEq(IRoycoDayKernel(r.kernel).getCollateralAssetOracle(), cfg.collateralAssetOracle, "kernel oracle != configured adapter");
+        IdleCDOTranchePriceOracle oracle = IdleCDOTranchePriceOracle(cfg.collateralAssetOracle);
+        assertEq(oracle.IDLE_CDO(), PARETO_FALCONX_CDO, "adapter CDO != configured CDO");
+        assertEq(oracle.COLLATERAL_ASSET(), AA_TRANCHE_TOKEN, "adapter collateral != AA tranche");
+
+        // The composed price is live against the real CDO: the AA virtual price lifted from the underlying token's
+        // decimals to WAD, times the real feed's answer lifted from feed decimals, floored in one mulDiv. The report's
+        // timestamp is the deviation clock's, NOT the feed's (the virtual price is what gates staleness).
+        uint256 virtualPriceWAD =
+            IIdleCDO(PARETO_FALCONX_CDO).virtualPrice(AA_TRANCHE_TOKEN) * 10 ** (18 - IERC20Metadata(IIdleCDO(PARETO_FALCONX_CDO).token()).decimals());
+        (, int256 answer,,,) = AggregatorV3Interface(USDC_USD_FEED).latestRoundData();
+        (NAV_UNIT price, uint256 updatedAt) = oracle.getPrice();
         assertEq(
-            Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel(r.kernel).IDLE_CDO(),
-            PARETO_FALCONX_CDO,
-            "kernel IDLE_CDO != configured CDO"
+            NAV_UNIT.unwrap(price),
+            virtualPriceWAD.mulDiv(uint256(answer), 10 ** AggregatorV3Interface(USDC_USD_FEED).decimals()),
+            "composed price != CDO virtual price x feed"
         );
-
-        // The composed rate is live against the real CDO. The stored rate is the zero sentinel, so the quoter
-        // returns the CDO's real virtual price lifted from the underlying token's decimals to WAD exactly.
-        uint256 underlyingDecimals = IERC20Metadata(IIdleCDO(PARETO_FALCONX_CDO).token()).decimals();
-        uint256 rate = IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter(r.kernel).getTrancheUnitToNAVUnitConversionRateWAD();
-        assertEq(rate, IIdleCDO(PARETO_FALCONX_CDO).virtualPrice(AA_TRANCHE_TOKEN) * 10 ** (18 - underlyingDecimals), "composed rate != CDO virtual price");
-        assertGt(rate, 0.01e18, "composed rate implausibly low");
-        assertLt(rate, 100e18, "composed rate implausibly high");
+        assertEq(updatedAt, oracle.previewPoke(), "report timestamp must be the deviation clock's");
+        assertGt(NAV_UNIT.unwrap(price), 0.01e18, "composed price implausibly low");
+        assertLt(NAV_UNIT.unwrap(price), 100e18, "composed price implausibly high");
 
         // The template deployed the BPT oracle through Balancer's E-CLP LP oracle factory and injected it into the
-        // kernel quoter, overwriting the null placeholder in the params blob.
-        address pool = IRoycoDayKernel(r.kernel).LT_ASSET();
-        address bptOracle = BalancerV3_LT_BPTOracle_Quoter(r.kernel).getBalancerV3QuoterState().bptOracle;
+        // kernel's liquidity venue, overwriting the null placeholder in the params blob.
+        address pool = IRoycoDayKernel(r.kernel).LPT_ASSET();
+        address bptOracle = BalancerV3LiquidityVenue(r.kernel).getBalancerV3LiquidityVenueState().bptOracle;
         assertTrue(bptOracle != address(0), "bptOracle unset");
         assertGt(bptOracle.code.length, 0, "bptOracle has no code");
         assertTrue(ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY).isOracleFromFactory(ILPOracleBase(bptOracle)), "not from oracle factory");
         assertEq(address(LPOracleBase(bptOracle).pool()), pool, "oracle.pool() != market pool");
 
-        // The sole ST/JT quoter admin selector resolves to ADMIN_ORACLE_QUOTER_ROLE on the market AM. This kernel
-        // family has no Chainlink layer, so the Chainlink setter selectors do not exist on the kernel and stay at
-        // the unbound ADMIN_ROLE default.
-        assertEq(am.getTargetFunctionRole(r.kernel, bytes4(keccak256("setConversionRate(uint256,bool)"))), ADMIN_ORACLE_QUOTER_ROLE, "setConversionRate role");
-        assertEq(am.getTargetFunctionRole(r.kernel, bytes4(keccak256("setChainlinkOracle(address,uint48,bool)"))), ADMIN_ROLE, "setChainlinkOracle bound");
-        assertEq(am.getTargetFunctionRole(r.kernel, bytes4(keccak256("setSequencerUptimeFeed(address,uint48)"))), ADMIN_ROLE, "setSequencerUptimeFeed bound");
+        // The four pricing-admin selectors resolve to ADMIN_ORACLE_ROLE on the market AM.
+        assertEq(am.getTargetFunctionRole(r.kernel, IRoycoDayKernel.setCollateralAssetOracle.selector), ADMIN_ORACLE_ROLE, "setCollateralAssetOracle role");
+        assertEq(am.getTargetFunctionRole(r.kernel, IRoycoDayKernel.setSequencerUptimeFeed.selector), ADMIN_ORACLE_ROLE, "setSequencerUptimeFeed role");
+        assertEq(am.getTargetFunctionRole(r.kernel, BalancerV3LiquidityVenue.setBPTOracle.selector), ADMIN_ORACLE_ROLE, "setBPTOracle role");
+        assertEq(
+            am.getTargetFunctionRole(r.kernel, BalancerV3LiquidityVenue.setMaxReinvestmentSlippage.selector),
+            ADMIN_ORACLE_ROLE,
+            "setMaxReinvestmentSlippage role"
+        );
 
         // The senior pool leg is WITH_RATE priced by the kernel and the quote leg is STANDARD.
         IVault vault = IVault(address(GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY).getVault()));
@@ -242,29 +238,14 @@ contract Test_IdleCDOMarketDeployment is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // REVERT UNWIND (the kernel constructor guard fails the whole deployment atomically)
+    // GUARD (the adapter constructor rejects a non-tranche collateral against the REAL CDO)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice The REAL CDO's AA tranche token mismatches a market whose ST asset is the snUSD vault, failing
-    ///         the kernel constructor's TRANCHE_ASSET_MUST_BE_CDO_AA_TRANCHE guard. Under the split deployment flow the
-    ///         kernel implementation is deployed EXTERNALLY (in `deployMarketContractsForTest`) before the wiring
-    ///         transaction, so the mismatch now aborts there: the CREATE2 factory surfaces the constructor revert as a
-    ///         failed deployment, and the whole external call unwinds atomically — no market contracts, no registry entries
-    function test_RevertIf_CDOAATrancheMismatchesSTAsset_DeploymentUnwindsAtomically() external {
-        _register();
-
-        bytes32 marketId = MARKET_ID;
-        // The REAL CDO against the WRONG ST asset (the snUSD vault, not the CDO's AA tranche token).
-        MarketConfig memory cfg = _marketConfig(PARETO_FALCONX_CDO, SNUSD_VAULT);
-        address predictedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", marketId, TAG_ST_PROXY)));
-
-        // The canonical CREATE2 deployer swallows the kernel quoter's constructor revert reason, so the failure
-        // surfaces as `DeploymentFailed` with empty return data
-        vm.expectRevert(abi.encodeWithSelector(Create2DeployUtils.DeploymentFailed.selector, bytes("")));
-        deployScript.deployMarketContractsForTest(cfg, marketId, factory, address(template), address(am));
-
-        // Atomic unwind: nothing was deployed or registered.
-        assertEq(predictedST.code.length, 0, "no tranche deployed");
-        assertEq(factory.trancheToKernel(predictedST), address(0), "no registry entry");
+    /// @notice The adapter refuses to price a collateral that is neither of the REAL CDO's tranche tokens: the CDO's
+    ///         virtualPrice treats unknown addresses as the BB tranche, so the constructor guard is what stops a
+    ///         mispointed market from silently pricing the wrong asset
+    function test_RevertIf_CollateralIsNotACDOTranche() external {
+        vm.expectRevert(IdleCDOTranchePriceOracle.COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE.selector);
+        new IdleCDOTranchePriceOracle(PARETO_FALCONX_CDO, SNUSD_VAULT, USDC_USD_FEED);
     }
 }

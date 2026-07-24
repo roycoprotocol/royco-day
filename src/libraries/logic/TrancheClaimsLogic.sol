@@ -45,9 +45,9 @@ library TrancheClaimsLogic {
             claims.nav = _trancheType == TrancheType.SENIOR ? _state.stEffectiveNAV : _state.jtEffectiveNAV;
             if (claims.nav != ZERO_NAV_UNITS) claims.collateralAssets = IRoycoDayKernel(address(this)).convertValueToCollateralAssets(claims.nav);
         } else {
-            if (_state.ltRawNAV != ZERO_NAV_UNITS) claims.ltAssets = IRoycoDayKernel(address(this)).convertValueToLTAssets(_state.ltRawNAV);
-            claims.stShares = $.ltOwnedSeniorTrancheShares;
-            claims.nav = ValuationLogic._getLiquidityTrancheEffectiveNAV(
+            if (_state.lptRawNAV != ZERO_NAV_UNITS) claims.lptAssets = IRoycoDayKernel(address(this)).convertValueToLPTAssets(_state.lptRawNAV);
+            claims.stShares = $.lptOwnedSeniorTrancheShares;
+            claims.nav = ValuationLogic._getLiquidityProviderTrancheEffectiveNAV(
                 $, _state.stEffectiveNAV, IRoycoVaultTranche(_immutables.seniorTranche).totalSupply(), claims.stShares
             );
         }
@@ -57,7 +57,7 @@ library TrancheClaimsLogic {
      * @notice Withdraws any specified assets from each tranche and transfer them to the receiver
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _claims The collateral assets, LT assets, and ST shares to withdraw and transfer to the specified receiver
+     * @param _claims The collateral assets, LPT assets, and ST shares to withdraw and transfer to the specified receiver
      * @param _receiver The receiver of the tranche asset claims
      */
     function _withdrawAssets(
@@ -70,27 +70,27 @@ library TrancheClaimsLogic {
     {
         // Cache the individual claims
         TRANCHE_UNIT collateralAssetsToClaim = _claims.collateralAssets;
-        TRANCHE_UNIT ltAssetsToClaim = _claims.ltAssets;
+        TRANCHE_UNIT lptAssetsToClaim = _claims.lptAssets;
         uint256 stSharesToClaim = _claims.stShares;
 
-        // Debit the collateral assets, LT assets, and/or ST shares being withdrawn if non-zero
+        // Debit the collateral assets, LPT assets, and/or ST shares being withdrawn if non-zero
         if (collateralAssetsToClaim != ZERO_TRANCHE_UNITS) $.totalCollateralAssets = $.totalCollateralAssets - collateralAssetsToClaim;
-        if (ltAssetsToClaim != ZERO_TRANCHE_UNITS) $.totalLTAssets = $.totalLTAssets - ltAssetsToClaim;
-        if (stSharesToClaim != 0) $.ltOwnedSeniorTrancheShares -= stSharesToClaim;
+        if (lptAssetsToClaim != ZERO_TRANCHE_UNITS) $.totalLPTAssets = $.totalLPTAssets - lptAssetsToClaim;
+        if (stSharesToClaim != 0) $.lptOwnedSeniorTrancheShares -= stSharesToClaim;
 
         // No need to execute a transfer if the caller is the receiver
         if (_receiver != address(this)) {
             // Credit the collateral assets being withdrawn to the receiver
             if (collateralAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(_immutables.collateralAsset).safeTransfer(_receiver, toUint256(collateralAssetsToClaim));
-            // Credit the LT assets being withdrawn to the receiver
-            if (ltAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(_immutables.ltAsset).safeTransfer(_receiver, toUint256(ltAssetsToClaim));
+            // Credit the LPT assets being withdrawn to the receiver
+            if (lptAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(_immutables.lptAsset).safeTransfer(_receiver, toUint256(lptAssetsToClaim));
             // Credit the senior tranche shares being withdrawn to the receiver
             if (stSharesToClaim != 0) IERC20(_immutables.seniorTranche).safeTransfer(_receiver, stSharesToClaim);
         }
     }
 
     /**
-     * @notice Scales a tranche's asset claims (collateral assets, LT assets, ST shares, and NAV) by a given shares assuming total shares in a vault
+     * @notice Scales a tranche's asset claims (collateral assets, LPT assets, ST shares, and NAV) by a given shares assuming total shares in a vault
      * @param _claims The asset claims of the tranche
      * @param _shares The number of shares to scale the claims by
      * @param _totalTrancheShares The total number of shares that exist in the tranche
@@ -112,7 +112,7 @@ library TrancheClaimsLogic {
         uint256 effectiveTrancheShares = _totalTrancheShares + VIRTUAL_SHARES;
         scaledClaims.nav = _claims.nav.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
         scaledClaims.collateralAssets = _claims.collateralAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
-        scaledClaims.ltAssets = _claims.ltAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
+        scaledClaims.lptAssets = _claims.lptAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
         scaledClaims.stShares = _claims.stShares.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
     }
 }

@@ -7,7 +7,7 @@ import { AssetClaims } from "../../src/libraries/Types.sol";
 /**
  * @title EntryPointRemitClaimsHarness
  * @notice Exposes RoycoDayEntryPoint._remitRedemptionAndBonusClaims so the per-leg transfer gating (collateral,
- *         LT asset, senior shares, and quote) is unit-testable against a mock kernel
+ *         LPT asset, senior shares, and quote) is unit-testable against a mock kernel
  */
 contract EntryPointRemitClaimsHarness is RoycoDayEntryPoint {
     constructor(address _roycoFactory) RoycoDayEntryPoint(_roycoFactory) { }
@@ -31,13 +31,13 @@ contract EntryPointRemitClaimsHarness is RoycoDayEntryPoint {
 /// @notice Mock kernel exposing only the asset getters _remitRedemptionAndBonusClaims resolves
 contract MockKernelAssets {
     address public immutable COLLATERAL_ASSET;
-    address public immutable LT_ASSET;
+    address public immutable LPT_ASSET;
     address public immutable SENIOR_TRANCHE;
     address public immutable QUOTE_ASSET;
 
-    constructor(address _collateralAsset, address _ltAsset, address _seniorTranche, address _quoteAsset) {
+    constructor(address _collateralAsset, address _lptAsset, address _seniorTranche, address _quoteAsset) {
         COLLATERAL_ASSET = _collateralAsset;
-        LT_ASSET = _ltAsset;
+        LPT_ASSET = _lptAsset;
         SENIOR_TRANCHE = _seniorTranche;
         QUOTE_ASSET = _quoteAsset;
     }

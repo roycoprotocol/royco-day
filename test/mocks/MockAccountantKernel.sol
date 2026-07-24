@@ -53,22 +53,22 @@ contract MockAccountantKernel {
         return accountant.preOpSyncTrancheAccounting(_collateralNAV);
     }
 
-    /// @dev Passthrough so msg.sender == kernel for the LT raw NAV commit
-    function doCommit(NAV_UNIT _ltRawNAV) external {
-        accountant.commitLiquidityTrancheRawNAV(_ltRawNAV);
+    /// @dev Passthrough so msg.sender == kernel for the LPT raw NAV commit
+    function doCommit(NAV_UNIT _lptRawNAV) external {
+        accountant.commitLiquidityProviderTrancheRawNAV(_lptRawNAV);
     }
 
     /// @dev Passthrough so msg.sender == kernel for the post-op sync
     function doPostOp(
         Operation _op,
         NAV_UNIT _collateralNAV,
-        NAV_UNIT _ltRawNAV,
+        NAV_UNIT _lptRawNAV,
         NAV_UNIT _stSelfLiquidationBonusNAV,
         bool _enforce
     )
         external
         returns (SyncedAccountingState memory)
     {
-        return accountant.postOpSyncTrancheAccounting(_op, _collateralNAV, _ltRawNAV, _stSelfLiquidationBonusNAV, _enforce);
+        return accountant.postOpSyncTrancheAccounting(_op, _collateralNAV, _lptRawNAV, _stSelfLiquidationBonusNAV, _enforce);
     }
 }

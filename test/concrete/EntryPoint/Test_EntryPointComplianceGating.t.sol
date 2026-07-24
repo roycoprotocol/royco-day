@@ -79,16 +79,16 @@ contract Test_EntryPointComplianceGating is EntryPointTestBase {
         _cancelRedemption(USER_A, nonce, USER_A);
     }
 
-    function test_whitelist_ltRedemptionStSharesLegToNonWhitelistedReceiverReverts() public {
-        // Stage an idle premium so LT redemptions pay a senior-share leg
+    function test_whitelist_lptRedemptionStSharesLegToNonWhitelistedReceiverReverts() public {
+        // Stage an idle premium so LPT redemptions pay a senior-share leg
         setVenueSlippageMode(true);
         applySTPnL(1000);
         _sync();
 
-        uint256 shares = _acquireTrancheShares(USER_A, address(liquidityTranche), 10e18);
-        // Revoke the receiver's senior whitelist eligibility AFTER acquiring shares: USER_B keeps JT/LT roles
+        uint256 shares = _acquireTrancheShares(USER_A, address(liquidityProviderTranche), 10e18);
+        // Revoke the receiver's senior whitelist eligibility AFTER acquiring shares: USER_B keeps JT/LPT roles
         accessManager.revokeRole(ST_LP_ROLE, USER_B);
-        (uint256 nonce,) = _requestRedemption(USER_A, address(liquidityTranche), shares, USER_B, 0);
+        (uint256 nonce,) = _requestRedemption(USER_A, address(liquidityProviderTranche), shares, USER_B, 0);
         _warpPastRedemptionDelay();
 
         // The BPT leg would pass, but the in-kind senior-share leg is an ST share transfer to a non-whitelisted receiver

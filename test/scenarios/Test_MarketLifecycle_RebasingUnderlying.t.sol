@@ -46,7 +46,7 @@ contract Test_MarketLifecycle_RebasingUnderlying_NonStandardTokens is Test_Marke
         _seedDefault();
         uint256 stNavBefore = toUint256(seniorTranche.totalAssets().nav);
         uint256 jtNavBefore = toUint256(juniorTranche.totalAssets().nav);
-        uint256 ltNavBefore = _liveLTRawNAV();
+        uint256 lptNavBefore = _liveLPTRawNAV();
 
         // The rebase flag is live: 100 whole underlying minted at index 1.0 (100e18 internal shares) must read
         // 100e18 x 1.1e18 / 1e18 = 110e18 after a +10% index move
@@ -58,7 +58,7 @@ contract Test_MarketLifecycle_RebasingUnderlying_NonStandardTokens is Test_Marke
         // No tranche mark may move: the kernel holds vault SHARES and the share rate is still exactly 1.0
         assertEq(toUint256(seniorTranche.totalAssets().nav), stNavBefore, "an underlying rebase must not move the senior mark");
         assertEq(toUint256(juniorTranche.totalAssets().nav), jtNavBefore, "an underlying rebase must not move the junior mark");
-        assertEq(_liveLTRawNAV(), ltNavBefore, "an underlying rebase must not move the LT depth mark");
+        assertEq(_liveLPTRawNAV(), lptNavBefore, "an underlying rebase must not move the LPT depth mark");
 
         // Drift bound through a full sync is exactly zero: a day passes with the rebase armed, and the sync must
         // read the seeded marks byte-identically (collateralNAV = 130e18 with stEff = 100e18 and jtEff = 30e18)
@@ -68,11 +68,11 @@ contract Test_MarketLifecycle_RebasingUnderlying_NonStandardTokens is Test_Marke
         assertEq(toUint256(state.collateralNAV), 130e18, "post-rebase sync: collateralNAV must still be 130 whole coinvested shares x 1.0 x 1.0");
         assertEq(toUint256(state.stEffectiveNAV), 100e18, "post-rebase sync: stEff must be unchanged (zero gain to split)");
         assertEq(toUint256(state.jtEffectiveNAV), 30e18, "post-rebase sync: jtEff must be unchanged (zero gain to split)");
-        assertEq(toUint256(state.ltLiquidityPremium), 0, "post-rebase sync: zero senior gain must pay zero liquidity premium");
+        assertEq(toUint256(state.lptLiquidityPremium), 0, "post-rebase sync: zero senior gain must pay zero liquidity premium");
         assertEq(toUint256(state.stProtocolFee), 0, "post-rebase sync: zero gain must take zero ST fee");
         assertEq(toUint256(state.jtProtocolFee), 0, "post-rebase sync: zero gain must take zero JT fee");
-        assertEq(toUint256(state.ltProtocolFee), 0, "post-rebase sync: zero premium must take zero LT fee");
-        assertEq(toUint256(state.ltRawNAV), SEEDED_LT_RAW_NAV, "post-rebase sync: the committed LT depth must be the seeded 26e18");
+        assertEq(toUint256(state.lptProtocolFee), 0, "post-rebase sync: zero premium must take zero LPT fee");
+        assertEq(toUint256(state.lptRawNAV), SEEDED_LPT_RAW_NAV, "post-rebase sync: the committed LPT depth must be the seeded 26e18");
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "post-rebase sync: a zero-drift sync must stay PERPETUAL");
         // A PERPETUAL commit never carries a drawdown (marketState == PERPETUAL iff jtImpermanentLoss == 0)
         assertEq(toUint256(state.jtImpermanentLoss), 0, "post-rebase sync: a PERPETUAL commit must carry zero JT impermanent loss");

@@ -133,11 +133,11 @@ interface IRoycoFactory {
 
     /**
      * @notice Resolves a whole market from ANY one of its three tranches
-     * @param _tranche Any of the market's senior, junior, or liquidity tranche addresses
+     * @param _tranche Any of the market's senior, junior, or liquidity provider tranche addresses
      * @return seniorTranche The market's senior tranche (zero if `_tranche` is unknown)
      * @return juniorTranche The market's junior tranche (zero if `_tranche` is unknown)
-     * @return liquidityTranche The market's liquidity tranche (zero if `_tranche` is unknown)
+     * @return liquidityProviderTranche The market's liquidity provider tranche (zero if `_tranche` is unknown)
      * @return kernel The market's kernel (zero if `_tranche` is unknown)
      */
-    function getMarket(address _tranche) external view returns (address seniorTranche, address juniorTranche, address liquidityTranche, address kernel);
+    function getMarket(address _tranche) external view returns (address seniorTranche, address juniorTranche, address liquidityProviderTranche, address kernel);
 }

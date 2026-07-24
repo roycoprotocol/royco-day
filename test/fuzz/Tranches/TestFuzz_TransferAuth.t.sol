@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
-import { JT_LP_ROLE, LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
+import { JT_LP_ROLE, LPT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
@@ -22,7 +22,7 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *      what role the receiver holds, which enforcement the market was deployed with) and asserted in both
  *      directions: a predicted revert must revert with exactly the predicted error and account, and a
  *      predicted success must move exactly the transferred balance
- * @dev All three tranches' deposits are role-gated (ST_LP_ROLE, JT_LP_ROLE, LT_LP_ROLE), so the receiver
+ * @dev All three tranches' deposits are role-gated (ST_LP_ROLE, JT_LP_ROLE, LPT_LP_ROLE), so the receiver
  *      whitelist bites on every tranche and the receiver-role axis is fuzzed uniformly across them
  */
 contract TestFuzz_TransferAuth_Tranches is DayMarketTestBase {
@@ -38,7 +38,7 @@ contract TestFuzz_TransferAuth_Tranches is DayMarketTestBase {
      * @notice Seeds the market and hands `_from` a positive share balance of the chosen tranche through
      *         production paths only (tranche deposits by the providers, then a plain provider transfer)
      * @dev The seeding transfer itself passes the hook: no blacklist is configured yet, and `_from` is granted
-     *      the tranche's depositor role first so a whitelist-enforcing market accepts it as receiver. The LT
+     *      the tranche's depositor role first so a whitelist-enforcing market accepts it as receiver. The LPT
      *      balance comes from the fixture's auto-seeded quote-only depth backing the senior deposit (5% of
      *      100e18 plus cushion)
      */
@@ -56,10 +56,10 @@ contract TestFuzz_TransferAuth_Tranches is DayMarketTestBase {
             vm.prank(JT_PROVIDER);
             juniorTranche.transfer(_from, jtHalf);
         } else {
-            accessManager.grantRole(LT_LP_ROLE, _from, 0);
-            uint256 ltHalf = liquidityTranche.balanceOf(LT_PROVIDER) / 2;
-            vm.prank(LT_PROVIDER);
-            liquidityTranche.transfer(_from, ltHalf);
+            accessManager.grantRole(LPT_LP_ROLE, _from, 0);
+            uint256 lptHalf = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 2;
+            vm.prank(LPT_PROVIDER);
+            liquidityProviderTranche.transfer(_from, lptHalf);
         }
     }
 
@@ -120,14 +120,14 @@ contract TestFuzz_TransferAuth_Tranches is DayMarketTestBase {
         MarketParamsConfig memory params = defaultParams();
         params.enforceWhitelistOnTransfer = _enforceWhitelist;
         _deployMarket(cellA(), params);
-        IERC20 tranche = trancheIdx == 0 ? IERC20(address(seniorTranche)) : trancheIdx == 1 ? IERC20(address(juniorTranche)) : IERC20(address(liquidityTranche));
+        IERC20 tranche = trancheIdx == 0 ? IERC20(address(seniorTranche)) : trancheIdx == 1 ? IERC20(address(juniorTranche)) : IERC20(address(liquidityProviderTranche));
 
         _seedActorWithShares(trancheIdx, from);
 
         // Set the receiver's depositor-role membership per the fuzzed axis AFTER seeding, so it also overrides
         // the seeding grant when the receiver aliases the sender. All three tranches' deposits are role-gated,
         // so the receiver is whitelisted exactly when it holds the tranche's depositor role
-        uint64 depositRole = trancheIdx == 0 ? ST_LP_ROLE : trancheIdx == 1 ? JT_LP_ROLE : LT_LP_ROLE;
+        uint64 depositRole = trancheIdx == 0 ? ST_LP_ROLE : trancheIdx == 1 ? JT_LP_ROLE : LPT_LP_ROLE;
         if (_toHoldsDepositRole) accessManager.grantRole(depositRole, to, 0);
         else accessManager.revokeRole(depositRole, to);
         bool receiverWhitelisted = _toHoldsDepositRole;

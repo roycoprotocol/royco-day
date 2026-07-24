@@ -10,7 +10,7 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 /**
  * @title TestFuzz_TrancheClaims_Logic
  * @notice Fuzz properties for the pro-rata claim scaling a redemption applies to all four claim legs
- *         (collateral assets, LT assets, idle liquidity premium senior shares, NAV): exact four-field
+ *         (collateral assets, LPT assets, idle liquidity premium senior shares, NAV): exact four-field
  *         equality against the independent RoycoTestMath mirror, the pro-rata ceiling, and floor-dust
  *         conservation when the whole supply redeems in parts
  * @dev Pure-library layer, no market deploy. Production is asserted against RoycoTestMath or a hand-derived
@@ -26,7 +26,7 @@ contract TestFuzz_TrancheClaims_Logic is Test {
     /// @dev Wraps four raw claim totals into the production AssetClaims struct
     function _claims(uint256 _collateral, uint256 _lt, uint256 _stShares, uint256 _nav) internal pure returns (AssetClaims memory c) {
         c.collateralAssets = toTrancheUnits(_collateral);
-        c.ltAssets = toTrancheUnits(_lt);
+        c.lptAssets = toTrancheUnits(_lt);
         c.stShares = _stShares;
         c.nav = toNAVUnits(_nav);
     }
@@ -34,14 +34,14 @@ contract TestFuzz_TrancheClaims_Logic is Test {
     /// @dev Asserts all four fields of a production-scaled AssetClaims equal the RoycoTestMath mirror exactly
     function _assertFieldsEq(AssetClaims memory _got, RoycoTestMath.Claims memory _want, string memory _leg) internal pure {
         assertEq(toUint256(_got.collateralAssets), _want.collateralAssets, string.concat(_leg, ": collateralAssets == RoycoTestMath.scaleClaims"));
-        assertEq(toUint256(_got.ltAssets), _want.ltAssets, string.concat(_leg, ": ltAssets == RoycoTestMath.scaleClaims"));
+        assertEq(toUint256(_got.lptAssets), _want.lptAssets, string.concat(_leg, ": lptAssets == RoycoTestMath.scaleClaims"));
         assertEq(_got.stShares, _want.stShares, string.concat(_leg, ": stShares == RoycoTestMath.scaleClaims"));
         assertEq(toUint256(_got.nav), _want.nav, string.concat(_leg, ": nav == RoycoTestMath.scaleClaims"));
     }
 
     /**
      * A redeemer burning `shares` of a `totalShares` supply is owed the same fraction of every claim leg,
-     * floored - including the idle liquidity premium senior shares an LT redeemer receives directly - so no leg can
+     * floored - including the idle liquidity premium senior shares an LPT redeemer receives directly - so no leg can
      * be scaled by a different rule and quietly favor one side. Property:
      *   scaled == floor(claim * shares / (totalShares + VIRTUAL_SHARES)) == RoycoTestMath.scaleClaims(...)  [exact, all four]
      * and the floor direction caps the redeemer at pro-rata: scaled <= total per field whenever
@@ -69,13 +69,13 @@ contract TestFuzz_TrancheClaims_Logic is Test {
         AssetClaims memory scaled = TrancheClaimsLogic._scaleAssetClaims(total, _shares, _totalShares);
 
         RoycoTestMath.Claims memory want = RoycoTestMath.scaleClaims(
-            RoycoTestMath.Claims({ collateralAssets: _collateral, ltAssets: _lt, stShares: _stShares, nav: _nav }), _shares, _totalShares
+            RoycoTestMath.Claims({ collateralAssets: _collateral, lptAssets: _lt, stShares: _stShares, nav: _nav }), _shares, _totalShares
         );
         _assertFieldsEq(scaled, want, "scaled slice");
 
         // Floor direction: the scaled slice never exceeds the total on any field (shares <= totalShares)
         assertLe(toUint256(scaled.collateralAssets), _collateral, "pro-rata cap: collateralAssets");
-        assertLe(toUint256(scaled.ltAssets), _lt, "pro-rata cap: ltAssets");
+        assertLe(toUint256(scaled.lptAssets), _lt, "pro-rata cap: lptAssets");
         assertLe(scaled.stShares, _stShares, "pro-rata cap: stShares");
         assertLe(toUint256(scaled.nav), _nav, "pro-rata cap: nav");
     }
@@ -125,7 +125,7 @@ contract TestFuzz_TrancheClaims_Logic is Test {
             _partitionDustBound(_collateral, _totalShares),
             "collateralAssets"
         );
-        _assertPartitionField(toUint256(a.ltAssets) + toUint256(b.ltAssets) + toUint256(c.ltAssets), _lt, _partitionDustBound(_lt, _totalShares), "ltAssets");
+        _assertPartitionField(toUint256(a.lptAssets) + toUint256(b.lptAssets) + toUint256(c.lptAssets), _lt, _partitionDustBound(_lt, _totalShares), "lptAssets");
         _assertPartitionField(a.stShares + b.stShares + c.stShares, _stShares, _partitionDustBound(_stShares, _totalShares), "stShares");
         _assertPartitionField(toUint256(a.nav) + toUint256(b.nav) + toUint256(c.nav), _nav, _partitionDustBound(_nav, _totalShares), "nav");
     }

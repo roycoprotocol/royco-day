@@ -11,15 +11,15 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
  * @title Test_MaxDepositAndWithdrawal_Accountant
- * @notice Hand-derived scenarios for the maxSTDeposit / maxJTWithdrawal / maxLTWithdrawal closed forms over the
+ * @notice Hand-derived scenarios for the maxSTDeposit / maxJTWithdrawal / maxLPTWithdrawal closed forms over the
  *         single collateral NAV and the single dust tolerance, cross-asserted against the independent
  *         RoycoTestMath mirrors, plus the exact gate-boundary probes the sync suite does not cover — the
  *         liquidity-binding deposit with a dust slack, the JT-withdrawal gate boundary on a non-exact ceil'd
- *         required value, and the LT-withdrawal dust slack boundary
+ *         required value, and the LPT-withdrawal dust slack boundary
  * @dev Existing coverage NOT duplicated here: the zero-dust coverage-binding and liquidity-binding
  *      maxSTDeposit gate boundaries, the coverage-side dust-slack boundary, the flat-market maxJTWithdrawal
  *      gate boundary on an exactly-divisible required value, the non-flat-seed probe, and the
- *      maxLTWithdrawal zero-dust exact boundary all live in the closed-form section below
+ *      maxLPTWithdrawal zero-dust exact boundary all live in the closed-form section below
  */
 contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
     function setUp() public {
@@ -84,7 +84,7 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
     /**
      * The liquidity-binding gate boundary with a live dust tolerance — the slack on the liquidity leg is the
      * single dustTolerance, and the reported max is exact against the real gate.
-     * Seed 1000e18/300e18 flat (collateral 1300e18) with 100e18 of LT depth, dust 10:
+     * Seed 1000e18/300e18 flat (collateral 1300e18) with 100e18 of LPT depth, dust 10:
      *   coverage leg = floor(300e18 / 0.1) - (1300e18 + 10) = 1700e18 - 10
      *   liquidity leg = floor(100e18 / 0.05) - (1000e18 + 10) = 1000e18 - 10 -> liquidity binds
      * Depositing max lands stEffectiveNAV = 2000e18 - 10: liquidityUtilization = ceil((2000e18 - 10) * 0.05 / 100e18) = WAD (the ceil
@@ -193,7 +193,7 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                    maxLTWithdrawal RTM PARITY AND GATE BOUNDARIES
+                    maxLPTWithdrawal RTM PARITY AND GATE BOUNDARIES
     //////////////////////////////////////////////////////////////////////*/
 
     /**
@@ -202,72 +202,72 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * Required depth = ceil((600e18 + 11) * 0.03) = 18e18 + 1 (the 0.33 wei remainder rounds up):
      *   max = 40e18 - (18e18 + 1) = 22e18 - 1
      * minLiquidity 0 -> full 40e18. coverageUtilization at, above, and below the liquidation threshold all read 22e18 - 1.
-     * ltRawNAV 10e18 < required -> saturates to 0
+     * lptRawNAV 10e18 < required -> saturates to 0
      */
-    function test_MaxLTWithdrawal_matchesRTM_ceilCoverageIndependenceAndSaturation() public view {
+    function test_MaxLPTWithdrawal_matchesRTM_ceilCoverageIndependenceAndSaturation() public view {
         // Ceil'd required depth
         SyncedAccountingState memory st = _bareState(700e18 + 11, 40e18, 600e18 + 11, 100e18, 0.1e18, 0.03e18);
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 22e18 - 1, "ceil'd required depth at the hand literal");
-        assertEq(RoycoTestMath.maxLTWithdrawal(40e18, 600e18 + 11, 0.03e18, 0), 22e18 - 1, "RTM ceil case");
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 22e18 - 1, "ceil'd required depth at the hand literal");
+        assertEq(RoycoTestMath.maxLPTWithdrawal(40e18, 600e18 + 11, 0.03e18, 0), 22e18 - 1, "RTM ceil case");
 
         // Zero-requirement bypass
         st.minLiquidityWAD = 0;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 40e18, "no requirement leaves the full inventory withdrawable");
-        assertEq(RoycoTestMath.maxLTWithdrawal(40e18, 600e18 + 11, 0, 0), 40e18, "RTM zero-requirement bypass");
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 40e18, "no requirement leaves the full inventory withdrawable");
+        assertEq(RoycoTestMath.maxLPTWithdrawal(40e18, 600e18 + 11, 0, 0), 40e18, "RTM zero-requirement bypass");
 
         // Coverage independence: a breached liquidation threshold no longer unlocks the inventory, the requirement holds at all coverage levels
         st.minLiquidityWAD = 0.03e18;
         st.coverageLiquidationUtilizationWAD = 1.1e18;
         st.coverageUtilizationWAD = 1.1e18;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 22e18 - 1, "the exact liquidation boundary stays requirement-restricted");
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 22e18 - 1, "the exact liquidation boundary stays requirement-restricted");
         st.coverageUtilizationWAD = type(uint256).max;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 22e18 - 1, "a wipeout-grade utilization stays requirement-restricted");
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 22e18 - 1, "a wipeout-grade utilization stays requirement-restricted");
         st.coverageUtilizationWAD = 1.1e18 - 1;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 22e18 - 1, "one below the boundary reads identically");
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 22e18 - 1, "one below the boundary reads identically");
 
         // Saturation
         st.coverageUtilizationWAD = 0;
         st.coverageLiquidationUtilizationWAD = type(uint256).max;
-        st.ltRawNAV = toNAVUnits(uint256(10e18));
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 0, "under-provisioned inventory saturates to zero");
-        assertEq(RoycoTestMath.maxLTWithdrawal(10e18, 600e18 + 11, 0.03e18, 0), 0, "RTM saturation");
+        st.lptRawNAV = toNAVUnits(uint256(10e18));
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 0, "under-provisioned inventory saturates to zero");
+        assertEq(RoycoTestMath.maxLPTWithdrawal(10e18, 600e18 + 11, 0.03e18, 0), 0, "RTM saturation");
     }
 
     /**
-     * The LT-withdrawal gate boundary with a live dust tolerance — the dust folds into the senior NAV before
+     * The LPT-withdrawal gate boundary with a live dust tolerance — the dust folds into the senior NAV before
      * the requirement scaling, and the reported max is exact against the real post-op liquidity gate.
-     * Seed 1000e18/200e18 flat with 100e18 of LT depth, dust 3: required = ceil((1000e18 + 3) * 0.05) = 50e18 + 1,
+     * Seed 1000e18/200e18 flat with 100e18 of LPT depth, dust 3: required = ceil((1000e18 + 3) * 0.05) = 50e18 + 1,
      * max = 100e18 - (50e18 + 1) = 50e18 - 1.
-     * Redeeming max leaves ltRawNAV = 50e18 + 1: liquidityUtilization = ceil(5e37 / (5e19 + 1)) = WAD (ceil absorbs the
-     * shortfall). Consuming the 1 wei slack leaves ltRawNAV = 50e18 exactly on WAD, and one more wei computes
+     * Redeeming max leaves lptRawNAV = 50e18 + 1: liquidityUtilization = ceil(5e37 / (5e19 + 1)) = WAD (ceil absorbs the
+     * shortfall). Consuming the 1 wei slack leaves lptRawNAV = 50e18 exactly on WAD, and one more wei computes
      * liquidityUtilization = WAD + 1 and violates
      */
-    function test_MaxLTWithdrawal_DustSlackGateBoundary() public {
+    function test_MaxLPTWithdrawal_DustSlackGateBoundary() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.dustTolerance = toNAVUnits(uint256(3));
         _deploy(p);
         _seedSymmetric(1000e18, 200e18, 100e18);
 
-        NAV_UNIT max = accountant.maxLTWithdrawal(_checkpointState());
+        NAV_UNIT max = accountant.maxLPTWithdrawal(_checkpointState());
         assertEq(toUint256(max), 50e18 - 1, "closed form off the dust-padded required depth");
         // coverageUtilization at the flat seed = ceil(1200e18 * 0.1 / 200e18) = 0.6e18, below the 1.1e18 threshold: no bypass
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 0.05e18, 3), toUint256(max), "RTM parity");
+        assertEq(RoycoTestMath.maxLPTWithdrawal(100e18, 1000e18, 0.05e18, 3), toUint256(max), "RTM parity");
 
         // Redeem exactly the reported max
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(100e18 - toUint256(max)), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(100e18 - toUint256(max)), ZERO_NAV_UNITS, true);
         assertEq(state.liquidityUtilizationWAD, WAD, "the exact max lands liquidity utilization on WAD via the ceil");
         // Consume the 1 wei of ceil slack, landing exactly on the algebraic boundary
-        state = kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(uint256(50e18)), ZERO_NAV_UNITS, true);
+        state = kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(uint256(50e18)), ZERO_NAV_UNITS, true);
         assertEq(state.liquidityUtilizationWAD, WAD, "the slack consumed lands exactly on WAD");
         // One wei beyond max + slack violates the liquidity requirement
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(uint256(50e18 - 1)), ZERO_NAV_UNITS, true);
+        kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(uint256(50e18 - 1)), ZERO_NAV_UNITS, true);
     }
 
     /*//////////////////////////////////////////////////////////////////////
             CLOSED FORMS AND EXACT GATE BOUNDARIES (maxSTDeposit /
-                    maxJTWithdrawal / maxLTWithdrawal)
+                    maxJTWithdrawal / maxLPTWithdrawal)
     //////////////////////////////////////////////////////////////////////*/
 
     /**
@@ -285,7 +285,7 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
 
     /**
      * with a zero minimum coverage the result is the liquidity leg alone:
-     * floor(ltRawNAV * WAD / minLiquidity) - (stEffectiveNAV + dustTolerance)
+     * floor(lptRawNAV * WAD / minLiquidity) - (stEffectiveNAV + dustTolerance)
      * Derivation with zero dust: floor(123e18 * 1e18 / 0.05e18) = 2460e18, minus (1000e18 + 7) = 1460e18 - 7
      */
     function test_MaxSTDeposit_liquidityLegExactWhenMinCoverageZero() public view {
@@ -322,7 +322,7 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * liquidity = floor(1000e18 * 1e18 / 0.05e18) - 1000e18 = 19000e18, so coverage binds with zero slack
      */
     function test_MaxSTDeposit_CoverageBindingExactGateBoundary() public {
-        _seedFlatWithLT(1000e18);
+        _seedFlatWithLPT(1000e18);
         NAV_UNIT max = accountant.maxSTDeposit(_checkpointState());
         assertEq(toUint256(max), 800e18, "coverage leg binds at the independently derived value");
         SyncedAccountingState memory state =
@@ -358,7 +358,7 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.dustTolerance = toNAVUnits(uint256(10));
         _deploy(p);
-        _seedFlatWithLT(1000e18);
+        _seedFlatWithLPT(1000e18);
         NAV_UNIT max = accountant.maxSTDeposit(_checkpointState());
         assertEq(toUint256(max), 800e18 - 10, "coverage leg minus the dust slack");
         // Deposit exactly the reported max
@@ -411,15 +411,15 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * and max leaves jtEffectiveNAV' exactly on it, so one more redeemed wei is the first violating buffer
      */
     function test_MaxJTWithdrawal_FlatMarketExactGateBoundary() public {
-        _seedFlatWithLT(SEED_LT_RAW);
+        _seedFlatWithLPT(SEED_LPT_RAW);
         NAV_UNIT jtW = accountant.maxJTWithdrawal(_checkpointState());
         assertEq(toUint256(jtW), RoycoTestMath.maxJTWithdrawal(SEED_ST_EFF + SEED_JT_EFF, SEED_JT_EFF, 0.1e18, 0), "RTM parity");
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF - toUint256(jtW)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF - toUint256(jtW)), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, true);
         assertEq(state.coverageUtilizationWAD, WAD, "the exact max lands coverage utilization on WAD");
         // One wei beyond max crosses the boundary ceil(SEED_ST_EFF / 9) and violates
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF - toUint256(jtW) - 1), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF - toUint256(jtW) - 1), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, true);
     }
 
     /**
@@ -431,15 +431,15 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * 9 * jtEffectiveNAV' = 980e18 + 1 >= 980e18, and one more wei leaves 9 * (jtEffectiveNAV' - 1) < 980e18
      */
     function test_MaxJTWithdrawal_NonFlatSeedExactGateBoundary() public {
-        _seedSymmetric(980e18, 220e18, SEED_LT_RAW);
+        _seedSymmetric(980e18, 220e18, SEED_LPT_RAW);
         NAV_UNIT jtW = accountant.maxJTWithdrawal(_checkpointState());
         assertEq(toUint256(jtW), 111_111_111_111_111_111_111, "hand literal at the non-flat seed");
         assertEq(toUint256(jtW), RoycoTestMath.maxJTWithdrawal(1200e18, 220e18, 0.1e18, 0), "RTM parity");
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(1200e18 - toUint256(jtW)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(1200e18 - toUint256(jtW)), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, true);
         assertEq(state.coverageUtilizationWAD, WAD, "the exact max lands coverage utilization on WAD");
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(1200e18 - toUint256(jtW) - 1), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(1200e18 - toUint256(jtW) - 1), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, true);
     }
 
     /**
@@ -448,15 +448,15 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * surplus, since the withdrawal bound no longer reads coverage
      * required = ceil(1000e18 * 0.05) = 50e18, so max = 100e18 - 50e18 = 50e18 regardless of coverage
      */
-    function test_MaxLTWithdrawal_enforcedRegardlessOfLiquidationBoundary() public view {
+    function test_MaxLPTWithdrawal_enforcedRegardlessOfLiquidationBoundary() public view {
         SyncedAccountingState memory st = _bareState(1200e18, 100e18, 1000e18, 200e18, 0.1e18, 0.05e18);
         st.coverageLiquidationUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
         st.coverageUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18, "the exact liquidation boundary stays requirement-restricted");
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 50e18, "the exact liquidation boundary stays requirement-restricted");
         st.coverageUtilizationWAD = type(uint256).max;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18, "a wipeout-grade utilization stays requirement-restricted");
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 50e18, "a wipeout-grade utilization stays requirement-restricted");
         st.coverageUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD - 1;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18, "one below the boundary reads identically");
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 50e18, "one below the boundary reads identically");
     }
 
     /**
@@ -466,31 +466,31 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * zero, and a dust of 100 folds into the senior NAV before scaling: required = ceil((1000e18 + 107) * 0.05)
      * = 50e18 + 6, shrinking the withdrawable to 50e18 - 6
      */
-    function test_MaxLTWithdrawal_closedFormCeilAndSaturation() public {
+    function test_MaxLPTWithdrawal_closedFormCeilAndSaturation() public {
         SyncedAccountingState memory st = _bareState(1200e18 + 7, 100e18, 1000e18 + 7, 200e18, 0.1e18, 0.05e18);
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18 - 1, "inner ceil rounds the required depth up");
-        st.ltRawNAV = toNAVUnits(uint256(40e18));
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 0, "under-provisioned inventory saturates to zero");
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 50e18 - 1, "inner ceil rounds the required depth up");
+        st.lptRawNAV = toNAVUnits(uint256(40e18));
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 0, "under-provisioned inventory saturates to zero");
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.dustTolerance = toNAVUnits(uint256(100));
         _deploy(p);
-        st.ltRawNAV = toNAVUnits(uint256(100e18));
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18 - 6, "dust tolerance shrinks the withdrawable depth");
+        st.lptRawNAV = toNAVUnits(uint256(100e18));
+        assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 50e18 - 6, "dust tolerance shrinks the withdrawable depth");
     }
 
     /**
-     * the exact boundary of the LT_REDEEM liquidity gate — redeeming exactly maxLTWithdrawal passes with
+     * the exact boundary of the LPT_REDEEM liquidity gate — redeeming exactly maxLPTWithdrawal passes with
      * enforcement landing liquidity utilization exactly on WAD, and one more wei violates
      * Derivation: max = 100e18 - ceil(1000e18 * 0.05e18 / 1e18) = 50e18 with zero dust
      */
-    function test_MaxLTWithdrawal_ExactGateBoundary() public {
-        _seedFlatWithLT(SEED_LT_RAW);
-        NAV_UNIT max = accountant.maxLTWithdrawal(_checkpointState());
+    function test_MaxLPTWithdrawal_ExactGateBoundary() public {
+        _seedFlatWithLPT(SEED_LPT_RAW);
+        NAV_UNIT max = accountant.maxLPTWithdrawal(_checkpointState());
         assertEq(toUint256(max), 50e18, "closed form at the flat seed");
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF), toNAVUnits(SEED_LT_RAW - toUint256(max)), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF), toNAVUnits(SEED_LPT_RAW - toUint256(max)), ZERO_NAV_UNITS, true);
         assertEq(state.liquidityUtilizationWAD, WAD, "the exact max lands liquidity utilization on WAD");
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF), toNAVUnits(SEED_LT_RAW - toUint256(max) - 1), ZERO_NAV_UNITS, true);
+        kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF), toNAVUnits(SEED_LPT_RAW - toUint256(max) - 1), ZERO_NAV_UNITS, true);
     }
 }

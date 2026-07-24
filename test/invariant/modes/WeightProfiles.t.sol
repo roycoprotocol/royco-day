@@ -28,7 +28,7 @@ abstract contract WeightProfileBase is Invariant_DayMarket {
  * @title Invariant_CalmMarket
  * @notice A healthy, flow-dominated market: deposits, redemptions, reinvestments, and time passing dominate,
  *         with only occasional small rate moves and a clean venue throughout
- * @dev This regime maximizes successful executions of every production flow (including both multi-asset LT
+ * @dev This regime maximizes successful executions of every production flow (including both multi-asset LPT
  *      flows and the premium mint-and-reinvest loop), so share pricing, claim scaling, and the fee and
  *      liquidity premium share mint get the deepest coverage of states where the gates are far from binding
  */
@@ -43,13 +43,13 @@ contract Invariant_CalmMarket is WeightProfileBase {
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtRedeem.selector,
-            DayMarketHandler.op_ltDeposit.selector,
-            DayMarketHandler.op_ltDeposit.selector,
-            DayMarketHandler.op_ltDepositMultiAsset.selector,
-            DayMarketHandler.op_ltDepositMultiAsset.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeemMultiAsset.selector,
+            DayMarketHandler.op_lptDeposit.selector,
+            DayMarketHandler.op_lptDeposit.selector,
+            DayMarketHandler.op_lptDepositMultiAsset.selector,
+            DayMarketHandler.op_lptDepositMultiAsset.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeemMultiAsset.selector,
             DayMarketHandler.op_sync.selector,
             DayMarketHandler.op_reinvest.selector,
             DayMarketHandler.op_reinvest.selector,
@@ -57,7 +57,7 @@ contract Invariant_CalmMarket is WeightProfileBase {
             DayMarketHandler.op_warp.selector,
             DayMarketHandler.op_warp.selector,
             DayMarketHandler.op_stPnL.selector,
-            DayMarketHandler.op_ltPnL.selector,
+            DayMarketHandler.op_lptPnL.selector,
             DayMarketHandler.aimed_depositExactlyMaxST.selector
         ];
         sels = new bytes4[](weighted.length);
@@ -84,8 +84,8 @@ contract Invariant_StressedMarket is WeightProfileBase {
             DayMarketHandler.op_stPnL.selector,
             DayMarketHandler.op_jtPnL.selector,
             DayMarketHandler.op_jtPnL.selector,
-            DayMarketHandler.op_ltPnL.selector,
-            DayMarketHandler.op_ltPnL.selector,
+            DayMarketHandler.op_lptPnL.selector,
+            DayMarketHandler.op_lptPnL.selector,
             DayMarketHandler.aimed_coveredDrawdown.selector,
             DayMarketHandler.aimed_coveredDrawdown.selector,
             DayMarketHandler.aimed_toggleVenueSlippage.selector,
@@ -99,9 +99,9 @@ contract Invariant_StressedMarket is WeightProfileBase {
             DayMarketHandler.op_stRedeem.selector,
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtRedeem.selector,
-            DayMarketHandler.op_ltDeposit.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeemMultiAsset.selector,
+            DayMarketHandler.op_lptDeposit.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeemMultiAsset.selector,
             DayMarketHandler.op_sync.selector,
             DayMarketHandler.op_adminParamNudge.selector
         ];
@@ -132,9 +132,9 @@ contract Invariant_LiquidationMarket is WeightProfileBase {
             DayMarketHandler.op_stRedeem.selector,
             DayMarketHandler.op_jtRedeem.selector,
             DayMarketHandler.op_jtRedeem.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeemMultiAsset.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeemMultiAsset.selector,
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_stDeposit.selector,

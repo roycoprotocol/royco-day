@@ -49,11 +49,11 @@ contract Test_FactoryTrancheRegistry is Test {
         return IRoycoProtocolTemplate.DeploymentResult({
             seniorTranche: _st,
             juniorTranche: _jt,
-            liquidityTranche: _lt,
+            liquidityProviderTranche: _lt,
             kernel: _kernel,
             accountant: makeAddr("ACCOUNTANT"),
             ydm: makeAddr("YDM"),
-            ltYdm: address(0),
+            lptYdm: address(0),
             extras: ""
         });
     }
@@ -68,7 +68,7 @@ contract Test_FactoryTrancheRegistry is Test {
     /// A template result without a kernel is rejected: every tranche registers against the kernel, so there is
     /// nothing to anchor a market to
     function test_ExecuteMarketDeployment_RevertIf_ResultHasNoKernel() external {
-        template.setDeploymentResult(_result(makeAddr("ST"), makeAddr("JT"), makeAddr("LT"), address(0)));
+        template.setDeploymentResult(_result(makeAddr("ST"), makeAddr("JT"), makeAddr("LPT"), address(0)));
         vm.prank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.INVALID_DEPLOYMENT_RESULT.selector);
         factory.executeMarketDeployment(address(template), "");
@@ -77,15 +77,15 @@ contract Test_FactoryTrancheRegistry is Test {
     /// A template result without a senior tranche is rejected: every market is anchored on protected senior capital,
     /// so a result with no ST names no valid market
     function test_ExecuteMarketDeployment_RevertIf_ResultHasNoSeniorTranche() external {
-        template.setDeploymentResult(_result(address(0), makeAddr("JT"), makeAddr("LT"), makeAddr("KERNEL")));
+        template.setDeploymentResult(_result(address(0), makeAddr("JT"), makeAddr("LPT"), makeAddr("KERNEL")));
         vm.prank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.INVALID_DEPLOYMENT_RESULT.selector);
         factory.executeMarketDeployment(address(template), "");
     }
 
-    /// A template result without a liquidity tranche is rejected: every market has a liquidity tranche, so a result
+    /// A template result without a liquidity provider tranche is rejected: every market has a liquidity provider tranche, so a result
     /// missing it names no valid market
-    function test_ExecuteMarketDeployment_RevertIf_ResultHasNoLiquidityTranche() external {
+    function test_ExecuteMarketDeployment_RevertIf_ResultHasNoLiquidityProviderTranche() external {
         template.setDeploymentResult(_result(makeAddr("ST"), makeAddr("JT"), address(0), makeAddr("KERNEL")));
         vm.prank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.INVALID_DEPLOYMENT_RESULT.selector);
@@ -96,7 +96,7 @@ contract Test_FactoryTrancheRegistry is Test {
     function test_ExecuteMarketDeployment_AllThreeTranches_RegisterAgainstKernel() external {
         address st = makeAddr("ST");
         address jt = makeAddr("JT");
-        address lt = makeAddr("LT");
+        address lt = makeAddr("LPT");
         address kernel = makeAddr("KERNEL");
         _deploy(_result(st, jt, lt, kernel));
 

@@ -10,26 +10,19 @@ import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/co
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
 import { ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import {
-    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel as PlainAssetKernel
-} from "../../../src/kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
-import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as ShippedKernel
-} from "../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
-import {
-    IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter
-} from "../../../src/kernels/base/quoter/identical-st-jt/IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { RoycoDayBalancerV3Kernel } from "../../../src/kernels/RoycoDayBalancerV3Kernel.sol";
+import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../../src/tranches/RoycoJuniorTranche.sol";
-import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranche.sol";
+import { RoycoLiquidityProviderTranche } from "../../../src/tranches/RoycoLiquidityProviderTranche.sol";
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
 import { MockBalancerVault } from "../../mocks/MockBalancerVault.sol";
 import { MockBehaviors } from "../../mocks/MockBehaviors.sol";
+import { MockPriceOracle } from "../../mocks/MockPriceOracle.sol";
 import { MockReentrancyProbe } from "../../mocks/MockReentrancyProbe.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { zeroLiquidityParams } from "../../utils/MarketParams.sol";
@@ -45,19 +38,15 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *         cannot stop (moving the not-yet-burned shares with a plain ERC20 transfer) makes the outer redemption
  *         itself revert at the burn, unwinding the payout with it
  * @dev The shipped fixture's collateral asset is an ERC4626 share with no transfer callback, so a receiver can
- *      never run code during its payout. To open the window this suite deploys the plain-asset kernel
- *      composition (the Chainlink-to-admin quoter, which prices the tranche asset off a feed and an admin rate
- *      and works over any ERC20) with the collateral asset being the hookable MockERC20C underlying directly.
- *      The deployment mirrors the shipped fixture's order and role wiring with only the kernel implementation
- *      and the tranche asset swapped. Feed 1.0 x admin rate 1.0 pins one token = one NAV unit, and the market
+ *      never run code during its payout. To open the window this suite makes the hookable MockERC20C underlying
+ *      the collateral asset directly (the kernel prices any ERC20 through its collateral asset oracle). The
+ *      deployment mirrors the shipped fixture's order and role wiring with only the tranche asset and its
+ *      oracle swapped. The oracle's 1.0 price pins one token = one NAV unit, and the market
  *      runs at zero minimum liquidity with no PnL so every payout below is a wei-exact 1:1 literal
  */
 contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
-    /// @dev The admin-set reference-asset-to-NAV-unit second pricing hop (1.0, so the 1.0 feed alone prices the asset)
-    uint256 internal constant INITIAL_ADMIN_RATE_WAD = 1e18;
-
-    /// @notice The kernel proxy under its concrete plain-asset type (same address as the base's `kernel` handle)
-    PlainAssetKernel internal plainAssetKernel;
+    /// @dev The collateral oracle price (1.0, one token = one NAV unit)
+    uint256 internal constant INITIAL_ORACLE_PRICE_WAD = 1e18;
 
     /// @notice The malicious payout receiver, wired as the senior asset's transfer hook
     MockReentrancyProbe internal probe;
@@ -241,8 +230,8 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice Deploys the full Day market exactly like the shipped fixture, swapping in the plain-asset kernel and
-     *         making the hookable MockERC20C underlying the collateral asset directly
+     * @notice Deploys the full Day market exactly like the shipped fixture, making the hookable MockERC20C
+     *         underlying the collateral asset directly with the collateral oracle pricing it
      * @dev Mirrors the base deployment order 1:1 (tokens, oracles, venue, YDMs, predicted kernel address, impls,
      *      tranche and accountant proxies, pool registration, kernel impl, kernel proxy, role wiring) so the payout
      *      window under test runs behind production-shaped proxies and roles. Zero minimum liquidity keeps the
@@ -255,12 +244,15 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         // Access manager, admin'd by the fixture so role wiring needs no schedule/execute dance
         accessManager = new AccessManager(address(this));
 
-        // Tokens: quote stable + ONE hookable plain ERC20 serving as the coinvested collateral asset (this
-        // composition prices any ERC20 off the feed and the admin rate)
+        // Tokens: quote stable + ONE hookable plain ERC20 serving as the coinvested collateral asset (the
+        // collateral oracle prices any ERC20 in NAV units)
         quoteToken = _deployERC20("Quote Stable", "QUOTE", cell.quoteAsset);
         stJtUnderlying = _deployERC20("ST/JT Plain Asset", "UNDR", _toUnderlyingConfig(cell.collateralAsset));
 
-        // Oracles: the tranche-asset-to-reference-asset feed at 1.0 (8 decimals), sequencer checks disabled at init
+        // Oracles: the collateral asset oracle at 1.0 over the plain ERC20 (the kernel's only collateral price
+        // source) plus the quote-side feed at 1.0 (8 decimals), sequencer checks disabled at init
+        collateralAssetOracle = new MockPriceOracle(address(stJtUnderlying), INITIAL_ORACLE_PRICE_WAD);
+        collateralPriceWAD = INITIAL_ORACLE_PRICE_WAD;
         priceFeed = new MockAggregatorV3(PRICE_FEED_DECIMALS, PRICE_FEED_INITIAL_ANSWER);
 
         // Venue: mock Balancer vault, the BPT it ledgers, and the BPT oracle
@@ -270,9 +262,9 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
 
         // YDMs: always two distinct instances (the accountant rejects identical YDMs)
         bytes memory jtYdmInitData;
-        bytes memory ltYdmInitData;
+        bytes memory lptYdmInitData;
         (jtYdm, jtYdmInitData) = _deployYDM("JT_YDM", params.jtYdmKind, params.jtCurve, params.targetUtilizationWAD);
-        (ltYdm, ltYdmInitData) = _deployYDM("LT_YDM", params.ltYdmKind, params.ltCurve, params.targetUtilizationWAD);
+        (lptYdm, lptYdmInitData) = _deployYDM("LPT_YDM", params.lptYdmKind, params.lptCurve, params.targetUtilizationWAD);
 
         // Predict the kernel proxy address so the tranche and accountant impls can bake it into their immutables
         kernelProxyDeployer = makeAddr("KERNEL_PROXY_DEPLOYER");
@@ -282,23 +274,23 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         // payout transfer executes receiver code exactly where a callback-bearing production asset would
         RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(stJtUnderlying), predictedKernel);
         RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(stJtUnderlying), predictedKernel);
-        RoycoLiquidityTranche ltImpl = new RoycoLiquidityTranche(address(bpt), predictedKernel);
+        RoycoLiquidityProviderTranche lptImpl = new RoycoLiquidityProviderTranche(address(bpt), predictedKernel);
         RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel);
 
         // Tranche and accountant proxies must exist before the kernel impl (its constructor reads the accountant)
         seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));
         juniorTranche = RoycoJuniorTranche(_deployTrancheProxy(address(jtImpl), "Royco Junior Tranche", "RJT"));
-        liquidityTranche = RoycoLiquidityTranche(_deployTrancheProxy(address(ltImpl), "Royco Liquidity Tranche", "RLT"));
+        liquidityProviderTranche = RoycoLiquidityProviderTranche(_deployTrancheProxy(address(lptImpl), "Royco Liquidity Provider Tranche", "RLT"));
         accountant = RoycoDayAccountant(
             address(
                 new ERC1967Proxy(
                     address(accImpl),
-                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(params, jtYdmInitData, ltYdmInitData), address(accessManager)))
+                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(params, jtYdmInitData, lptYdmInitData), address(accessManager)))
                 )
             )
         );
 
-        // Register the pool before kernel impl construction (the LT quoter constructor validates the registration),
+        // Register the pool before kernel impl construction (the liquidity venue constructor validates the registration),
         // sorted ascending by address exactly as the production vault registers pool tokens
         bool stSortsFirst = address(seniorTranche) < address(quoteToken);
         stPoolTokenIndex = stSortsFirst ? 0 : 1;
@@ -307,15 +299,15 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         balancerVault.registerPool(address(bpt), poolTokens);
         _initializePoolMinimumSupply();
 
-        // THE KERNEL SWAP: the plain-asset Chainlink-to-admin kernel impl instead of the shipped ERC4626 kernel
-        PlainAssetKernel kernelImpl = new PlainAssetKernel(
+        // The shipped kernel impl over the plain asset (the oracle above carries the whole collateral pricing swap)
+        RoycoDayBalancerV3Kernel kernelImpl = new RoycoDayBalancerV3Kernel(
             IRoycoDayKernel.RoycoDayKernelConstructionParams({
                 seniorTranche: address(seniorTranche),
                 juniorTranche: address(juniorTranche),
                 collateralAsset: address(stJtUnderlying),
                 accountant: address(accountant),
-                liquidityTranche: address(liquidityTranche),
-                ltAsset: address(bpt),
+                liquidityProviderTranche: address(liquidityProviderTranche),
+                lptAsset: address(bpt),
                 enforceVaultSharesTransferWhitelist: params.enforceWhitelistOnTransfer
             })
         );
@@ -330,29 +322,22 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
                     initialAuthority: address(accessManager),
                     protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT,
                     stSelfLiquidationBonusWAD: params.stSelfLiquidationBonusWAD,
-                    roycoBlacklist: address(0)
+                    roycoBlacklist: address(0),
+                    collateralAssetOracle: address(collateralAssetOracle),
+                    stalenessThresholdSeconds: ORACLE_STALENESS_THRESHOLD_SECONDS,
+                    sequencerUptimeFeed: address(0),
+                    gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS
                 }),
-                PlainAssetKernel.KernelSpecificInitParams({
-                    stAndJTQuoterParams: IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.ST_JT_QuoterSpecificParams({
-                        initialConversionRateWAD: INITIAL_ADMIN_RATE_WAD,
-                        trancheAssetToReferenceAssetOracle: address(priceFeed),
-                        gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS,
-                        sequencerUptimeFeed: address(0),
-                        stalenessThresholdSeconds: ORACLE_STALENESS_THRESHOLD_SECONDS
-                    }),
-                    ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
-                        bptOracle: address(bptOracle), maxReinvestmentSlippageWAD: params.maxReinvestmentSlippageWAD
-                    })
+                BalancerV3LiquidityVenue.LiquidityVenueInitParams({
+                    bptOracle: address(bptOracle), maxReinvestmentSlippageWAD: params.maxReinvestmentSlippageWAD
                 })
             )
         );
         vm.prank(kernelProxyDeployer);
         address kernelProxy = address(new ERC1967Proxy(address(kernelImpl), kernelInitData));
         require(kernelProxy == predictedKernel, "Test_RedeemReentrancyWindow_Tranches: kernel proxy address prediction failed");
-        plainAssetKernel = PlainAssetKernel(kernelProxy);
-        // The base's handle points at the same proxy so its role-wiring helpers bind the shared selectors
-        kernel = ShippedKernel(kernelProxy);
-        vm.label(kernelProxy, "PlainAssetKernel");
+        kernel = RoycoDayBalancerV3Kernel(kernelProxy);
+        vm.label(kernelProxy, "Kernel");
 
         // Wire the kernel as the senior leg's live rate provider in both price stores, mirroring production
         balancerVault.setTokenRateProvider(address(seniorTranche), kernelProxy);

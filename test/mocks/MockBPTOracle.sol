@@ -11,7 +11,7 @@ import { MockBalancerVault } from "./MockBalancerVault.sol";
 /**
  * @title MockBPTOracle
  * @notice BPT oracle test mock satisfying LPOracleBase's computeTVL, the 18-decimal NAV of the whole pool the kernel quoter consumes
- * @dev AUTO mode derives the TVL live from the MockBalancerVault's pool balances at per-token WAD prices, so ltRawNAV stays consistent
+ * @dev AUTO mode derives the TVL live from the MockBalancerVault's pool balances at per-token WAD prices, so lptRawNAV stays consistent
  *      through adds and removes. MANUAL mode pins the TVL exactly for tests asserting hand-derived literals
  * @dev Fidelity gap vs the real E-CLP oracle: pricing is linear (balance x per-token price), not curve-implied, and the
  *      manipulation-resistance of the production oracle is a wiring property here, not an economic one
@@ -132,7 +132,7 @@ contract MockBPTOracle {
     }
 
     /**
-     * @notice Scales the oracle's value by (1e18 + bps * 1e14), the fixture's applyLTPnL hook
+     * @notice Scales the oracle's value by (1e18 + bps * 1e14), the fixture's applyLPTPnL hook
      * @dev In MANUAL mode the pinned TVL scales directly, in AUTO mode the static prices of both pool tokens scale
      * @dev Provider-backed tokens are skipped, their leg is pegged to the live senior mark and cannot drift from
      *      it independently, exactly as the production rate-scaled pool leg cannot

@@ -8,7 +8,7 @@ import { Math, NAV_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
 /**
  * @title ValuationLogic
  * @author Waymont
- * @notice Tranche NAV valuation for a Royco market: the collateral and LT raw NAV reads, the LT effective NAV, and NAV-to-shares conversion
+ * @notice Tranche NAV valuation for a Royco market: the collateral and LPT raw NAV reads, the LPT effective NAV, and NAV-to-shares conversion
  * @dev Invoked by the kernel via delegatecall
  */
 library ValuationLogic {
@@ -21,23 +21,23 @@ library ValuationLogic {
      * @return collateralNAV The pure value of the held collateral assets
      */
     function _getCollateralNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT collateralNAV) {
-        // Get the held collateral assets and convert them to NAV units via the configured quoter
+        // Get the held collateral assets and convert them to NAV units via the kernel's pricing
         return IRoycoDayKernel(address(this)).convertCollateralAssetsToValue($.totalCollateralAssets);
     }
 
     /**
-     * @notice Returns the raw net asset value of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+     * @notice Returns the raw net asset value of the liquidity provider tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @return ltRawNAV The pure net asset value of the liquidity tranche invested assets
+     * @return lptRawNAV The pure net asset value of the liquidity provider tranche invested assets
      */
-    function _getLiquidityTrancheRawNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT ltRawNAV) {
-        // Get the yield bearing assets owned by LT and convert them to NAV units via the configured quoter
-        return IRoycoDayKernel(address(this)).convertLTAssetsToValue($.totalLTAssets);
+    function _getLiquidityProviderTrancheRawNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT lptRawNAV) {
+        // Get the yield bearing assets owned by LPT and convert them to NAV units via the kernel's pricing
+        return IRoycoDayKernel(address(this)).convertLPTAssetsToValue($.totalLPTAssets);
     }
 
     /**
-     * @notice Returns the effective net asset value (NAV) of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @dev The effective NAV is the liquidity tranche's deployed market-making inventory (its raw NAV) plus the value of the
+     * @notice Returns the effective net asset value (NAV) of the liquidity provider tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+     * @dev The effective NAV is the liquidity provider tranche's deployed market-making inventory (its raw NAV) plus the value of the
      *      senior tranche shares it holds from accumulated, not yet reinvested, liquidity premium payments
      * @dev Reads the held senior-share count from storage, the value execution sees after the premium mint
      *      The preview path uses the overload below to inject the post-mint count that storage does not yet reflect
@@ -46,49 +46,49 @@ library ValuationLogic {
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stEffectiveNAV The senior tranche's post-sync effective NAV: the total NAV backing all senior shares after reconciling unrealized PnL
      * @param _totalSeniorTrancheShares The total senior tranche shares outstanding after minting the premium and protocol fee shares
-     * @return ltEffectiveNAV The effective net asset value of the liquidity tranche
+     * @return lptEffectiveNAV The effective net asset value of the liquidity provider tranche
      */
-    function _getLiquidityTrancheEffectiveNAV(
+    function _getLiquidityProviderTrancheEffectiveNAV(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         NAV_UNIT _stEffectiveNAV,
         uint256 _totalSeniorTrancheShares
     )
         internal
         view
-        returns (NAV_UNIT ltEffectiveNAV)
+        returns (NAV_UNIT lptEffectiveNAV)
     {
         // Value the held senior shares using the count committed to storage (the value execution sees after the premium mint)
-        return _getLiquidityTrancheEffectiveNAV($, _stEffectiveNAV, _totalSeniorTrancheShares, $.ltOwnedSeniorTrancheShares);
+        return _getLiquidityProviderTrancheEffectiveNAV($, _stEffectiveNAV, _totalSeniorTrancheShares, $.lptOwnedSeniorTrancheShares);
     }
 
     /**
-     * @notice Returns the effective net asset value of the liquidity tranche for an explicitly supplied held senior-share count
+     * @notice Returns the effective net asset value of the liquidity provider tranche for an explicitly supplied held senior-share count
      * @dev The preview path supplies the post-mint held-share count (current storage plus this sync's premium shares) before the
-     *      premium mint commits it to storage, so the previewed LT effective NAV matches the value execution computes from storage
+     *      premium mint commits it to storage, so the previewed LPT effective NAV matches the value execution computes from storage
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stEffectiveNAV The senior tranche's post-sync effective NAV: the total NAV backing all senior shares after reconciling unrealized PnL
      * @param _totalSeniorTrancheShares The total senior tranche shares outstanding after minting the premium and protocol fee shares
-     * @param _ltOwnedSeniorTrancheShares The senior tranche shares held by the liquidity tranche from accumulated liquidity premium payments
-     * @return ltEffectiveNAV The effective net asset value of the liquidity tranche
+     * @param _lptOwnedSeniorTrancheShares The senior tranche shares held by the liquidity provider tranche from accumulated liquidity premium payments
+     * @return lptEffectiveNAV The effective net asset value of the liquidity provider tranche
      */
-    function _getLiquidityTrancheEffectiveNAV(
+    function _getLiquidityProviderTrancheEffectiveNAV(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         NAV_UNIT _stEffectiveNAV,
         uint256 _totalSeniorTrancheShares,
-        uint256 _ltOwnedSeniorTrancheShares
+        uint256 _lptOwnedSeniorTrancheShares
     )
         internal
         view
-        returns (NAV_UNIT ltEffectiveNAV)
+        returns (NAV_UNIT lptEffectiveNAV)
     {
-        // Get the value of LT's market-making inventory
-        NAV_UNIT ltRawNAV = _getLiquidityTrancheRawNAV($);
+        // Get the value of LPT's market-making inventory
+        NAV_UNIT lptRawNAV = _getLiquidityProviderTrancheRawNAV($);
 
         // If there are no held senior shares or no senior shares outstanding, the effective NAV is just the raw NAV
-        if (_ltOwnedSeniorTrancheShares == 0 || _totalSeniorTrancheShares == 0) return ltRawNAV;
+        if (_lptOwnedSeniorTrancheShares == 0 || _totalSeniorTrancheShares == 0) return lptRawNAV;
 
-        // The LT effective NAV is the sum of the NAVs of its market-making inventory and its held ST shares
-        return (ltRawNAV + _convertToValue(_ltOwnedSeniorTrancheShares, _totalSeniorTrancheShares, _stEffectiveNAV, Math.Rounding.Floor));
+        // The LPT effective NAV is the sum of the NAVs of its market-making inventory and its held ST shares
+        return (lptRawNAV + _convertToValue(_lptOwnedSeniorTrancheShares, _totalSeniorTrancheShares, _stEffectiveNAV, Math.Rounding.Floor));
     }
 
     /**

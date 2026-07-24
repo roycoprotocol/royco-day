@@ -5,12 +5,12 @@ pragma solidity ^0.8.28;
 
 bytes32 constant TAG_ST_PROXY = "ST";
 bytes32 constant TAG_JT_PROXY = "JT";
-bytes32 constant TAG_LT_PROXY = "LT";
+bytes32 constant TAG_LPT_PROXY = "LPT";
 bytes32 constant TAG_KERNEL_PROXY = "KERNEL";
 bytes32 constant TAG_ACCOUNTANT_PROXY = "ACCOUNTANT";
 bytes32 constant TAG_ST_IMPL = "ST_IMPL";
 bytes32 constant TAG_JT_IMPL = "JT_IMPL";
-bytes32 constant TAG_LT_IMPL = "LT_IMPL";
+bytes32 constant TAG_LPT_IMPL = "LPT_IMPL";
 bytes32 constant TAG_KERNEL_IMPL = "KERNEL_IMPL";
 bytes32 constant TAG_ACCOUNTANT_IMPL = "ACCOUNTANT_IMPL";
 bytes32 constant TAG_YDM = "YDM";

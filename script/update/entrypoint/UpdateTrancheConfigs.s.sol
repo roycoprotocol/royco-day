@@ -10,13 +10,13 @@ import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
  * @title UpdateTrancheConfigs
- * @notice Updates every configured market's entry-point tranche configurations (delays, oracle clocks, enablement)
+ * @notice Updates every configured market's entry-point tranche configurations (delays, oracle gate flags, enablement)
  *         in one batched `modifyTrancheConfigs` call per chain.
  *
  * @dev Hooks into `ParameterUpdateBase`'s direct-call harness:
- *      - Resolves ST/JT addresses per market via `getMarketAddresses(name)` and the LT via the kernel's
- *        LIQUIDITY_TRANCHE immutable.
- *      - Sanity-checks each tranche's slot ordering (ST, JT, LT) via `TRANCHE_TYPE()`.
+ *      - Resolves ST/JT addresses per market via `getMarketAddresses(name)` and the LPT via the kernel's
+ *        LIQUIDITY_PROVIDER_TRANCHE immutable.
+ *      - Sanity-checks each tranche's slot ordering (ST, JT, LPT) via `TRANCHE_TYPE()`.
  *      - Encodes a single batched `modifyTrancheConfigs(tranches, configs)` call to the entry point per chain.
  *      - Runs the call via `_processChainDirect` pranking `WCE_MULTISIG` (immediate role).
  *      - Writes one Safe JSON per chain at `output/update/entrypoint/{chainId}_update_tranche_configs.json`.
@@ -35,9 +35,10 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
     uint24 internal constant NEW_DEPOSIT_DELAY = 5 minutes;
     uint24 internal constant NEW_REDEMPTION_DELAY = 5 minutes;
 
-    /// @dev The oracle clock applied to every configured tranche (the null address disables the execution gate).
-    /// @dev TODO: point at per-market oracle clocks once they are deployed.
-    address internal constant NEW_ORACLE_CLOCK = address(0);
+    /// @dev Whether the collateral asset oracle execution gate is armed for every configured tranche (the oracle
+    ///      itself is resolved live from each tranche's kernel).
+    /// @dev TODO: arm the gate once the per-market collateral asset oracles are verified live.
+    bool internal constant NEW_COLLATERAL_ASSET_ORACLE_ENABLED = false;
 
     string internal constant OUTPUT_SUBDIR = "entrypoint";
     string internal constant OUTPUT_PREFIX = "update_tranche_configs";
@@ -93,21 +94,24 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
 
             tranches[3 * i] = addrs.seniorTranche;
             tranches[3 * i + 1] = addrs.juniorTranche;
-            tranches[3 * i + 2] = IRoycoDayKernel(addrs.kernel).LIQUIDITY_TRANCHE();
+            tranches[3 * i + 2] = IRoycoDayKernel(addrs.kernel).LIQUIDITY_PROVIDER_TRANCHE();
             for (uint256 j = 0; j < 3; j++) {
                 configs[3 * i + j] = IRoycoDayEntryPoint.TrancheConfig({
-                    enabled: true, depositDelaySeconds: NEW_DEPOSIT_DELAY, redemptionDelaySeconds: NEW_REDEMPTION_DELAY, oracleClock: NEW_ORACLE_CLOCK
+                    enabled: true,
+                    depositDelaySeconds: NEW_DEPOSIT_DELAY,
+                    redemptionDelaySeconds: NEW_REDEMPTION_DELAY,
+                    gateByOracleUpdate: NEW_COLLATERAL_ASSET_ORACLE_ENABLED
                 });
             }
         }
 
-        // Defensive: the registered ST/JT/LT slots must actually be SENIOR/JUNIOR/LIQUIDITY per the
+        // Defensive: the registered ST/JT/LPT slots must actually be SENIOR/JUNIOR/LIQUIDITY per the
         // tranche contract's TRANCHE_TYPE getter.
         for (uint256 i = 0; i < nTranches; i++) {
             TrancheType tt = IRoycoVaultTranche(tranches[i]).TRANCHE_TYPE();
             require(
-                (i % 3 == 0 && tt == TrancheType.SENIOR) || (i % 3 == 1 && tt == TrancheType.JUNIOR) || (i % 3 == 2 && tt == TrancheType.LIQUIDITY),
-                "ST/JT/LT slot mismatch"
+                (i % 3 == 0 && tt == TrancheType.SENIOR) || (i % 3 == 1 && tt == TrancheType.JUNIOR) || (i % 3 == 2 && tt == TrancheType.LIQUIDITY_PROVIDER),
+                "ST/JT/LPT slot mismatch"
             );
         }
 
@@ -141,7 +145,7 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
             require(ec.baseConfig.enabled == configs[i].enabled, VerificationFailed("enabled mismatch"));
             require(ec.baseConfig.depositDelaySeconds == configs[i].depositDelaySeconds, VerificationFailed("depositDelay mismatch"));
             require(ec.baseConfig.redemptionDelaySeconds == configs[i].redemptionDelaySeconds, VerificationFailed("redemptionDelay mismatch"));
-            require(ec.baseConfig.oracleClock == configs[i].oracleClock, VerificationFailed("oracleClock mismatch"));
+            require(ec.baseConfig.gateByOracleUpdate == configs[i].gateByOracleUpdate, VerificationFailed("oracle gate mismatch"));
         }
         console2.log("    [OK] Post-state verified for", tranches.length, "tranches");
     }

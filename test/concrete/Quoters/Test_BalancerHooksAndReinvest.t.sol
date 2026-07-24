@@ -39,22 +39,22 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         // conversion chain: the whole idle pile values through the offset-aware _convertToValue to
         // floor((108e18 + 1) x 846660395108192850 / (101599247412982142050 + 1e6)) = 899999999999999999 at the committed
         // senior rate (the offset on the idle count and the supply cancels, so the value is unchanged from the naive ratio),
-        // the 0.9e18 NET premium it was minted for (the 1e18 gross premium less the 0.1e18 LT protocol fee), less a single
+        // the 0.9e18 NET premium it was minted for (the 1e18 gross premium less the 0.1e18 LPT protocol fee), less a single
         // floor-rounding wei. The pool's NAV per BPT is exactly 1.0 (6.000001e18 BPT backing 6.000001e18 of value), so the
         // fair BPT is that same figure, and the 0.1% max reinvestment slippage discount floors the add at
         // ceil(899999999999999999 x 999 / 1000) = 899100000000000000
         uint256 minOut = 0.8991e18;
 
-        uint256 ltOwnedBefore = toUint256(kernel.getState().totalLTAssets);
-        uint256 committedLtRawNAVBefore = toUint256(accountant.getState().lastLTRawNAV);
+        uint256 lptOwnedBefore = toUint256(kernel.getState().totalLPTAssets);
+        uint256 committedLptRawNAVBefore = toUint256(accountant.getState().lastLPTRawNAV);
 
         // Side 1: one wei under the gate, the inner add reverts, the failure is tolerated, and NOTHING moves
         balancerVault.setNextBptOutOverride(minOut - 1);
         vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(type(uint256).max);
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "under the gate: the idle pile must be untouched");
-        assertEq(toUint256(kernel.getState().totalLTAssets), ltOwnedBefore, "under the gate: no BPT may be credited");
-        assertEq(toUint256(accountant.getState().lastLTRawNAV), committedLtRawNAVBefore, "under the gate: the committed LT raw NAV must be unmoved");
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, idleShares, "under the gate: the idle pile must be untouched");
+        assertEq(toUint256(kernel.getState().totalLPTAssets), lptOwnedBefore, "under the gate: no BPT may be credited");
+        assertEq(toUint256(accountant.getState().lastLPTRawNAV), committedLptRawNAVBefore, "under the gate: the committed LPT raw NAV must be unmoved");
 
         // Side 2: exactly the gate, the entire pile deploys, exactly minOut BPT is credited, and the event fires
         balancerVault.setNextBptOutOverride(minOut);
@@ -62,14 +62,14 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         emit IRoycoDayKernel.LiquidityPremiumReinvested(idleShares, toTrancheUnits(minOut));
         vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(type(uint256).max);
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "at the gate: the entire idle pile must deploy");
-        assertEq(toUint256(kernel.getState().totalLTAssets), ltOwnedBefore + minOut, "at the gate: exactly minOut BPT must be credited");
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "at the gate: the entire idle pile must deploy");
+        assertEq(toUint256(kernel.getState().totalLPTAssets), lptOwnedBefore + minOut, "at the gate: exactly minOut BPT must be credited");
     }
 
     /**
      * @notice A partial reinvestment deploys only the requested senior shares and leaves the remainder idle and
      *         claimable, with the event carrying the exact partial amounts
-     * @dev The remainder staying in ltOwnedSeniorTrancheShares is what keeps a redeeming LT holder whole on the
+     * @dev The remainder staying in lptOwnedSeniorTrancheShares is what keeps a redeeming LPT holder whole on the
      *      undeployed slice, so a partial deploy that silently zeroed the pile would burn the premium
      */
     function test_ReinvestLiquidityPremium_PartialAmount_LeavesRemainderIdle() public {
@@ -86,7 +86,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         // ceil(449999999999999999 x 999 / 1000) = 449550000000000000
         uint256 minOut = 0.44955e18;
 
-        uint256 ltOwnedBefore = toUint256(kernel.getState().totalLTAssets);
+        uint256 lptOwnedBefore = toUint256(kernel.getState().totalLPTAssets);
 
         balancerVault.setNextBptOutOverride(minOut);
         vm.expectEmit(address(kernel));
@@ -94,8 +94,8 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(half);
 
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares - half, "the undeployed remainder must stay idle and claimable");
-        assertEq(toUint256(kernel.getState().totalLTAssets), ltOwnedBefore + minOut, "exactly the partial add's BPT must be credited");
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, idleShares - half, "the undeployed remainder must stay idle and claimable");
+        assertEq(toUint256(kernel.getState().totalLPTAssets), lptOwnedBefore + minOut, "exactly the partial add's BPT must be credited");
     }
 
     /**
@@ -105,7 +105,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
      *      the slippage tolerance. Once the pool's TVL dwarfs the premium's value that floor rounds to 0, and
      *      ceil(0 x 999 / 1000) is still 0. A zero floor would send minBptAmountOut = 0 to the venue — no slippage
      *      protection at all — so rather than let a ~1e18-value pile clear for as little as 1 wei, the reinvestment
-     *      returns early and leaves the shares idle. This is the exact regime where a sandwich costs the LT the most
+     *      returns early and leaves the shares idle. This is the exact regime where a sandwich costs the LPT the most
      *      relative to what it receives, so deferring is the safe outcome.
      */
     function test_ReinvestLiquidityPremium_ZeroMinOutFloor_DefersAddAndLeavesSharesIdle() public {
@@ -116,7 +116,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         // call's own internal pre-op sync below also mints nothing, leaving the idle pile intact for the explicit reinvestment
         vm.prank(SYNC_OPERATOR);
         kernel.syncTrancheAccounting();
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "arrange: the no-gain sync must not touch the idle pile");
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, idleShares, "arrange: the no-gain sync must not touch the idle pile");
 
         // Pin the oracle to a TVL that rounds the fair-value floor to zero. The pile values to under 1e18 NAV
         // (899999999999999999, the net premium pinned above) and the BPT supply is 6.000001e18, so the fair-BPT
@@ -125,15 +125,15 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
         bptOracle.setTVL(1e40);
 
-        uint256 ltOwnedBefore = toUint256(kernel.getState().totalLTAssets);
+        uint256 lptOwnedBefore = toUint256(kernel.getState().totalLPTAssets);
 
         // With a zero fair-value floor the reinvestment returns early before any venue add: it never reaches the
         // Vault, so no fill can occur and the idle pile is left untouched
         vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(idleShares);
 
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "the idle pile stays idle and claimable when the fair-value floor rounds to zero");
-        assertEq(toUint256(kernel.getState().totalLTAssets), ltOwnedBefore, "no BPT is credited: the zero-floor add is deferred, not executed");
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, idleShares, "the idle pile stays idle and claimable when the fair-value floor rounds to zero");
+        assertEq(toUint256(kernel.getState().totalLPTAssets), lptOwnedBefore, "no BPT is credited: the zero-floor add is deferred, not executed");
     }
 
     /**
@@ -175,7 +175,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         kernel.syncTrancheAccounting();
 
         // An ordinary senior deposit reverts identically: its pre-op sync mints the same pending premium and hits
-        // the same division, so the oracle outage locks out depositors with no exposure to the liquidity tranche
+        // the same division, so the oracle outage locks out depositors with no exposure to the liquidity provider tranche
         stJtVault.mintShares(ST_PROVIDER, 1e18);
         vm.startPrank(ST_PROVIDER);
         stJtVault.approve(address(seniorTranche), 1e18);
@@ -185,7 +185,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
 
         // Nothing committed and nothing staged: the premium was never minted, so the gain is still pending and every
         // future operation will retry the same reverting path until the oracle reports a nonzero TVL again
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "no premium may stage while every sync reverts");
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "no premium may stage while every sync reverts");
     }
 
     // =============================
@@ -195,7 +195,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
     /**
      * @dev Accrues an idle liquidity premium senior share pile: arm venue slippage so the sync's reinvestment
      *      attempt defers, accrue senior gain across a real time window, sync, then disarm so the boundary tests
-     *      control the venue's mint exactly via the one-shot override. Returns the idle ltOwnedSeniorTrancheShares
+     *      control the venue's mint exactly via the one-shot override. Returns the idle lptOwnedSeniorTrancheShares
      */
     function _accrueIdlePremiumSeniorShares() internal returns (uint256 idleShares) {
         _seedMarket(100e18, 50e18);
@@ -207,13 +207,13 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         // Arm the 50% unbalanced haircut so the gated reinvestment deterministically fails and the premium stays idle
         setVenueSlippageMode(true);
 
-        // Accrue senior gain across a real time window, then sync: the LT premium mints as idle senior shares
+        // Accrue senior gain across a real time window, then sync: the LPT premium mints as idle senior shares
         _warpAndRefreshFeed(1 days);
         applySTPnL(1000); // +10%
         vm.prank(SYNC_OPERATOR);
         kernel.syncTrancheAccounting();
 
-        idleShares = kernel.getState().ltOwnedSeniorTrancheShares;
+        idleShares = kernel.getState().lptOwnedSeniorTrancheShares;
         assertGt(idleShares, 0, "arrange: the premium must be idle (venue slippage armed)");
 
         setVenueSlippageMode(false);
@@ -226,18 +226,18 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
      *      - the collateral NAV moves 150e18 to 165e18 and the pro-rata attribution hands the senior side
      *        floor(15e18 x 100e18 / 150e18) = 10e18 of the gain, and the junior's pinned 20% risk
      *        premium routes 2e18 of it to the junior side, so the committed senior effective NAV is 108e18
-     *      - the liquidity tranche's pinned 10% premium carves 1e18 out of the gain, and the 10% senior protocol
+     *      - the liquidity provider tranche's pinned 10% premium carves 1e18 out of the gain, and the 10% senior protocol
      *        fee takes 0.7e18 (10% of the 7e18 senior residual after the 2e18 and 1e18 carve-outs), so the
      *        retained senior NAV is 108e18 - 1e18 - 0.7e18 = 106.3e18
-     *      - the 10% LT protocol fee carves ltFee = floor(1e18 x 0.1e18 / WAD) = 0.1e18 out of the LT premium, so
-     *        the LT is minted the NET premium and the protocol recipient is minted the ST fee PLUS that LT fee, both
+     *      - the 10% LPT protocol fee carves lptFee = floor(1e18 x 0.1e18 / WAD) = 0.1e18 out of the LPT premium, so
+     *        the LPT is minted the NET premium and the protocol recipient is minted the ST fee PLUS that LPT fee, both
      *        as senior shares against the retained NAV and the pre-mint 100e18 supply
-     *      - premium shares minted to the LT (net of the LT fee), through the offset-aware _convertToShares (numerator
+     *      - premium shares minted to the LPT (net of the LPT fee), through the offset-aware _convertToShares (numerator
      *        supply gains VIRTUAL_SHARES = 1e6, denominator gains VIRTUAL_VALUE = 1):
      *        floor((100e18 + 1e6) x (1e18 - 0.1e18) / (106.3e18 + 1)) = 846660395108192850 idle senior shares
-     *      - fee shares minted to the protocol recipient (ST fee plus LT fee):
+     *      - fee shares minted to the protocol recipient (ST fee plus LPT fee):
      *        floor((100e18 + 1e6) x (0.7e18 + 0.1e18) / (106.3e18 + 1)) = 752587017873949200, so the senior supply lands at
-     *        100e18 + 846660395108192850 + 752587017873949200 = 101599247412982142050 (no LT tranche shares mint on a sync)
+     *        100e18 + 846660395108192850 + 752587017873949200 = 101599247412982142050 (no LPT tranche shares mint on a sync)
      *      - the pool holds 6.000001e18 BPT backing 6.000001e18 of quote-leg value (the 6e6-quote-wei auto-seed
      *        plus the genesis backing of the dead minimum supply), so its NAV per BPT is exactly 1.0
      */
@@ -251,13 +251,13 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
 }
 
 /**
- * @title Test_MultiAssetPreviewParity_LiquidityTranche
- * @notice Multi-asset LT deposit and redeem preview parity: exact at zero venue fee, exact under a nonzero venue
+ * @title Test_MultiAssetPreviewParity_LiquidityProviderTranche
+ * @notice Multi-asset LPT deposit and redeem preview parity: exact at zero venue fee, exact under a nonzero venue
  *         fee, and exact for the multi-asset redemption
  * @dev Preview-vs-execution parity is the one property a preview cannot prove about itself, so each test runs both
  *      paths in the same block and compares
  */
-contract Test_MultiAssetPreviewParity_LiquidityTranche is DayMarketTestBase {
+contract Test_MultiAssetPreviewParity_LiquidityProviderTranche is DayMarketTestBase {
     function setUp() public virtual {
         _deployMarket(cellA(), defaultParams());
     }
@@ -267,7 +267,7 @@ contract Test_MultiAssetPreviewParity_LiquidityTranche is DayMarketTestBase {
      *         executed path's post-add mark equals the preview's discarded-quote pre-add mark and the share math
      *         coincides to the wei
      */
-    function test_LTDepositMultiAsset_PreviewParityExact_ZeroVenueFee() public {
+    function test_LPTDepositMultiAsset_PreviewParityExact_ZeroVenueFee() public {
         (uint256 previewShares, uint256 mintedShares) = _previewThenExecuteMultiAssetDeposit(5e18, 5e6);
         assertEq(mintedShares, previewShares, "zero venue fee: the multi-asset deposit preview must equal execution in the same block");
         assertGt(mintedShares, 0, "arrange: the deposit must be non-degenerate");
@@ -280,7 +280,7 @@ contract Test_MultiAssetPreviewParity_LiquidityTranche is DayMarketTestBase {
      * @dev This pins the migration away from the discarded-quote preview, which could only lower-bound execution
      *      under a fee because it marked the fresh BPT before the depositor's own fee accrued to TVL-per-BPT
      */
-    function test_LTDepositMultiAsset_PreviewParityExact_WithVenueFee() public {
+    function test_LPTDepositMultiAsset_PreviewParityExact_WithVenueFee() public {
         balancerVault.setUnbalancedFeeBps(30);
         (uint256 previewShares, uint256 mintedShares) = _previewThenExecuteMultiAssetDeposit(5e18, 5e6);
         assertEq(mintedShares, previewShares, "nonzero venue fee: the multi-asset deposit preview must equal execution in the same block");
@@ -288,16 +288,16 @@ contract Test_MultiAssetPreviewParity_LiquidityTranche is DayMarketTestBase {
     }
 
     /// @notice previewRedeemMultiAsset equals the executed redeemMultiAsset (senior tranche claims plus quote out), same block
-    function test_LTRedeemMultiAsset_PreviewMatchesExecution() public {
+    function test_LPTRedeemMultiAsset_PreviewMatchesExecution() public {
         _seedMarket(100e18, 50e18);
-        _seedLT(10e18, 0, 10e6); // quote-only LT depth on top of the auto-seed
+        _seedLPT(10e18, 0, 10e6); // quote-only LPT depth on top of the auto-seed
 
-        uint256 ltShares = liquidityTranche.balanceOf(LT_PROVIDER) / 2;
-        assertGt(ltShares, 0, "arrange: LT_PROVIDER must hold shares to redeem");
+        uint256 lptShares = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 2;
+        assertGt(lptShares, 0, "arrange: LPT_PROVIDER must hold shares to redeem");
 
-        vm.startPrank(LT_PROVIDER);
-        (AssetClaims memory previewClaims, uint256 previewQuote) = liquidityTranche.previewRedeemMultiAsset(ltShares);
-        (AssetClaims memory claims, uint256 quoteOut) = liquidityTranche.redeemMultiAsset(ltShares, 0, 0, LT_PROVIDER, LT_PROVIDER);
+        vm.startPrank(LPT_PROVIDER);
+        (AssetClaims memory previewClaims, uint256 previewQuote) = liquidityProviderTranche.previewRedeemMultiAsset(lptShares);
+        (AssetClaims memory claims, uint256 quoteOut) = liquidityProviderTranche.redeemMultiAsset(lptShares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
         vm.stopPrank();
 
         assertEq(quoteOut, previewQuote, "the quote leg preview must equal execution");
@@ -319,14 +319,14 @@ contract Test_MultiAssetPreviewParity_LiquidityTranche is DayMarketTestBase {
         vm.prank(SYNC_OPERATOR);
         kernel.syncTrancheAccounting();
 
-        stJtVault.mintShares(LT_PROVIDER, _collateralLeg);
-        quoteToken.mint(LT_PROVIDER, _quoteLeg);
+        stJtVault.mintShares(LPT_PROVIDER, _collateralLeg);
+        quoteToken.mint(LPT_PROVIDER, _quoteLeg);
 
-        vm.startPrank(LT_PROVIDER);
-        stJtVault.approve(address(liquidityTranche), _collateralLeg);
-        quoteToken.approve(address(liquidityTranche), _quoteLeg);
-        (previewShares,) = liquidityTranche.previewDepositMultiAsset(_collateralLeg, _quoteLeg);
-        (mintedShares,) = liquidityTranche.depositMultiAsset(_collateralLeg, _quoteLeg, 0, LT_PROVIDER);
+        vm.startPrank(LPT_PROVIDER);
+        stJtVault.approve(address(liquidityProviderTranche), _collateralLeg);
+        quoteToken.approve(address(liquidityProviderTranche), _quoteLeg);
+        (previewShares,) = liquidityProviderTranche.previewDepositMultiAsset(_collateralLeg, _quoteLeg);
+        (mintedShares,) = liquidityProviderTranche.depositMultiAsset(_collateralLeg, _quoteLeg, 0, LPT_PROVIDER);
         vm.stopPrank();
     }
 }

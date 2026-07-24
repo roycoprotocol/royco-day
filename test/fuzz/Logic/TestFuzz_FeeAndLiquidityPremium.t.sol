@@ -13,7 +13,7 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 /**
  * @title TestFuzz_FeeAndLiquidityPremium_Logic
  * @notice Fuzz properties for the post-sync fee and liquidity premium share mint
- *         (_computeSTFeeAndLiquidityPremiumSharesToMint), which pays the LT liquidity premium and the ST
+ *         (_computeSTFeeAndLiquidityPremiumSharesToMint), which pays the LPT liquidity premium and the ST
  *         protocol fee by minting new ST shares: the supply identity, exact share-count equality against
  *         the independent RoycoTestMath mirror, and a two-sided derived bound proving the minted shares
  *         are actually worth the premium and fee NAV they were minted for
@@ -29,15 +29,15 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
     /// @dev Builds the minimal synced state the pure share-mint computation reads
     function _syncedState(uint256 _stEff, uint256 _premium, uint256 _fee) internal pure returns (SyncedAccountingState memory s) {
         s.stEffectiveNAV = toNAVUnits(_stEff);
-        s.ltLiquidityPremium = toNAVUnits(_premium);
+        s.lptLiquidityPremium = toNAVUnits(_premium);
         s.stProtocolFee = toNAVUnits(_fee);
     }
 
     /**
-     * On a gain sync the accountant mints two batches of ST shares — the LT liquidity premium and the ST
+     * On a gain sync the accountant mints two batches of ST shares — the LPT liquidity premium and the ST
      * protocol fee — sized at the pre-mint supply over the retained NAV (stEffectiveNAV - premium - fee), so plain
      * ST holders fund both mints by dilution and no assets move. A miscount here either shorts the
-     * LT/fee recipient or over-dilutes senior. Property (FeeAndLiquidityPremiumLogic.sol:88-104):
+     * LPT/fee recipient or over-dilutes senior. Property (FeeAndLiquidityPremiumLogic.sol:88-104):
      *   supplyAfter == preSupply + premiumShares + feeShares                     [exact supply identity]
      *   (premiumShares, feeShares, supplyAfter) == RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(...)   [exact, incl. both edges]
      * The genuinely-fresh first-mint edge (preSupply == 0 AND retained == 0) is included and additionally pinned
@@ -81,7 +81,7 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
 
     /**
      * The minted share batches must be worth what they were minted for: valued at the post-mint senior share
-     * rate, each batch redeems for its premium/fee NAV to within floor dust, so the LT's premium is neither
+     * rate, each batch redeems for its premium/fee NAV to within floor dust, so the LPT's premium is neither
      * silently taxed nor silently subsidized by rounding. Property (two-sided, per leg):
      *   |valueFor(premiumShares, supplyAfter, stEffectiveNAV) - prem| <= 2*ceil(stEffectiveNAV/supplyAfter) + 2
      * and the identical bound for the fee leg.

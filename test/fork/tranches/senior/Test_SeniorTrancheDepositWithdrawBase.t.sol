@@ -8,8 +8,8 @@ import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol"
 import { AssetClaims, MarketState, SyncedAccountingState, TrancheType } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import {
-    Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest
-} from "../../kernels/Identical_ERC4626_Chainlink_BalancerV3_LT/base/Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest.sol";
+    Identical_ERC4626_Chainlink_BalancerV3_LPT_KernelTest
+} from "../../kernels/Identical_ERC4626_Chainlink_BalancerV3_LPT/base/Identical_ERC4626_Chainlink_BalancerV3_LPT_KernelTest.sol";
 
 /**
  * @title Test_SeniorTrancheDepositWithdrawBase
@@ -29,7 +29,7 @@ import {
  *      `simulate*` hooks move both legs together. FIXED_TERM / self-liquidation-bonus tests are therefore best-effort:
  *      they attempt to reach the target state and `vm.skip` (with a reason) if a symmetric-PnL market cannot get there.
  */
-abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest {
+abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Chainlink_BalancerV3_LPT_KernelTest {
     uint256 internal constant WAD = 1e18;
 
     // ─── senior helpers ──────────────────────────────────────────────────────
@@ -276,7 +276,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
     }
 
     /**
-     * @notice With a liquidity requirement set against zero pooled depth (`ltRawNAV == 0`) the liquidity
+     * @notice With a liquidity requirement set against zero pooled depth (`lptRawNAV == 0`) the liquidity
      *         utilization is unbounded, so every senior deposit reverts on the liquidity gate — pinning
      *         that senior deposits ARE liquidity-gated.
      */
@@ -353,7 +353,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         // Exact pro-rata ceiling: floor(eff * shares / supply); the payout may only round DOWN from it
         uint256 proRata = (toUint256(effBefore) * redeemShares) / supplyBefore;
         assertLe(toUint256(claims.nav), proRata, "the redeemer can never be paid more than its exact pro-rata slice");
-        assertGe(toUint256(claims.nav) + toUint256(maxNAVDelta()), proRata, "the rounding loss must stay within quoter dust");
+        assertGe(toUint256(claims.nav) + toUint256(maxNAVDelta()), proRata, "the rounding loss must stay within pricing dust");
         assertEq(ST.totalSupply(), supplyBefore - redeemShares, "supply must drop by exactly the redeemed shares");
         assertEq(ST.balanceOf(lp), shares - redeemShares, "the redeemer must burn exactly the redeemed shares");
         _assertNAVConservation();
@@ -362,7 +362,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
     /**
      * @notice Literal pro-rata anchors on a sole senior holder: half the supply can claim at most half the NAV
      *         (a hand halving, not the scaling formula), and the two halves of a full exit sum back to the whole
-     *         pre-exit NAV within quoter dust — floor scaling neither leaks value to the exiter nor strands it.
+     *         pre-exit NAV within pricing dust — floor scaling neither leaks value to the exiter nor strands it.
      */
     function test_redeem_splitExitHalvesSumToWholeNAV() external {
         _seedJT(200_000e18);
@@ -381,11 +381,11 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         assertEq(ST.totalSupply(), 0, "the full exit must drain the senior supply");
 
         // Whole-equals-sum-of-parts: the two exits drain the entire tranche, so together they must recover the
-        // whole pre-exit NAV. Each leg's booked raw delta can drift from its claim NAV by one quoter round-trip
+        // whole pre-exit NAV. Each leg's booked raw delta can drift from its claim NAV by one pricing round-trip
         // in either direction, so allow one maxNAVDelta per leg plus a floor wei each way.
         uint256 recovered = toUint256(first.nav) + toUint256(second.nav);
-        assertLe(recovered, toUint256(wholeNAV) + toUint256(maxNAVDelta()) + 1, "the split exit cannot recover more than the whole NAV plus quoter dust");
-        assertGe(recovered + 2 * toUint256(maxNAVDelta()) + 2, toUint256(wholeNAV), "the split exit must recover the whole NAV up to quoter dust");
+        assertLe(recovered, toUint256(wholeNAV) + toUint256(maxNAVDelta()) + 1, "the split exit cannot recover more than the whole NAV plus pricing dust");
+        assertGe(recovered + 2 * toUint256(maxNAVDelta()) + 2, toUint256(wholeNAV), "the split exit must recover the whole NAV up to pricing dust");
     }
 
     /// @notice Senior exits are never utilization-gated: a redemption succeeds with coverage parked at the brink.
@@ -396,7 +396,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         uint256 shares = _depositSTRaw(lp, ST.maxDeposit(lp)); // deposit up to the coverage limit
         _sync();
         // Threshold derivation: maxDeposit under-reports the exact coverage boundary only by the configured NAV
-        // dust tolerances plus quoter conversion floors — wei-to-dust magnitudes against a deposit seeded in the
+        // dust tolerances plus pricing conversion floors — wei-to-dust magnitudes against a deposit seeded in the
         // 1e22+ range — so a max-size deposit parks utilization within a sliver of 100%. A 0.9e18 floor sits far
         // above anything a failed arrange could read and far below the boundary, cleanly detecting "near the limit".
         assertGt(_stSynced().coverageUtilizationWAD, 0.9e18, "coverage should be near its limit after a max deposit");
@@ -478,7 +478,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         assertEq(executed.nav, previewed.nav, "previewRedeem nav must equal executed nav");
         // The st/jt claim legs merged into the one collateral leg, so one field equality covers both.
         assertEq(executed.collateralAssets, previewed.collateralAssets, "previewRedeem collateralAssets must equal executed");
-        assertEq(executed.ltAssets, previewed.ltAssets, "previewRedeem ltAssets must equal executed");
+        assertEq(executed.lptAssets, previewed.lptAssets, "previewRedeem lptAssets must equal executed");
         assertEq(executed.stShares, previewed.stShares, "previewRedeem stShares must equal executed");
     }
 

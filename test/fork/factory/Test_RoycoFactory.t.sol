@@ -14,7 +14,14 @@ import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/prox
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import { AdaptiveCurveYDM_V1_Params, DeploymentResult, MarketConfig, StaticCurveYDMParams, YDMType } from "../../../script/config/DeploymentTypes.sol";
+import {
+    AdaptiveCurveYDM_V1_Params,
+    DeploymentResult,
+    ERC4626SharePriceOracleParams,
+    MarketConfig,
+    StaticCurveYDMParams,
+    YDMType
+} from "../../../script/config/DeploymentTypes.sol";
 import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
 import {
     ADMIN_ENTRY_POINT_ROLE,
@@ -27,24 +34,24 @@ import {
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
-import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
-} from "../../../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
 import { TAG_JT_PROXY } from "../../../src/factory/templates/base/Constants.sol";
-import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../../../src/factory/templates/liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
+import {
+    RoycoDayBalancerV3MarketDeploymentTemplate
+} from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/EntryPointConfigurer.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
+import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
 
 /// @title Test_RoycoFactory
 /// @notice Fork tests for `RoycoFactory` driven by the REAL Day market template
-///         (`Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate`) — no mock. Covers: initialization + role wiring,
+///         (`RoycoDayBalancerV3MarketDeploymentTemplate`) — no mock. Covers: initialization + role wiring,
 ///         template registration/disabling, the deployment entrypoint standing up a real snUSD market (tranche
 ///         mappings + events + live contracts), auth/pause gating, the active-template-gated primitives rejecting
 ///         outside a deployment window, getters, and the UUPS upgrade gate.
@@ -57,7 +64,7 @@ contract Test_RoycoFactory is Test {
     AccessManager internal am;
     RoycoFactory internal factory;
     DeployScript internal deployScript;
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate internal template;
+    RoycoDayBalancerV3MarketDeploymentTemplate internal template;
     IRoycoDayEntryPoint internal entryPoint;
     RoycoMarketSyncer internal syncer;
 
@@ -132,11 +139,11 @@ contract Test_RoycoFactory is Test {
 
         // The real Day template, bound to this factory. `deployScript` externally deploys each market's impls/YDMs/pool
         // and pre-deploys its ST + hook proxies (`deployMarketContractsForTest`), then builds the template params
-        // (`buildDayParams`) — the factory + template above are the units under test. Its nested `deployDeterministicProxy` calls run
+        // (`buildMarketParams`) — the factory + template above are the units under test. Its nested `deployDeterministicProxy` calls run
         // with `msg.sender == address(deployScript)`, so the deployScript must hold DEPLOYER_ROLE.
         deployScript = new DeployScript();
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
-        template = new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
+        template = new RoycoDayBalancerV3MarketDeploymentTemplate(
             IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(entryPoint), address(syncer)
         );
     }
@@ -153,9 +160,21 @@ contract Test_RoycoFactory is Test {
     ///      `_marketId` must place the senior tranche as pool token0 for this suite's `factory` (see MARKET_ID_A/B).
     function _encodedParams(bytes32 _marketId) internal returns (bytes memory) {
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
-        BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc =
+        _resolveCollateralOracle(cfg);
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
             deployScript.deployMarketContractsForTest(cfg, _marketId, factory, address(template), address(am));
-        return abi.encode(deployScript.buildDayParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+    }
+
+    /// @dev The `deploy()` flow resolves an unset config oracle itself; the direct-template path must supply it, so
+    ///      deploy the config's ERC4626 share-price adapter over the market's collateral vault + base->NAV feed.
+    function _resolveCollateralOracle(MarketConfig memory _cfg) internal {
+        if (_cfg.collateralAssetOracle != address(0)) return;
+        _cfg.collateralAssetOracle = address(
+            new ERC4626SharePriceOracle(
+                _cfg.collateralAsset, abi.decode(_cfg.collateralAssetOracleSpecificParams, (ERC4626SharePriceOracleParams)).baseAssetToNavAssetFeed
+            )
+        );
     }
 
     function _deploy(bytes32 _marketId) internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
@@ -285,7 +304,7 @@ contract Test_RoycoFactory is Test {
         // factory: a bare (uninitialized) implementation suffices since ROYCO_FACTORY is a constructor immutable.
         address otherFactory = makeAddr("OTHER_FACTORY");
         RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(otherFactory);
-        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate foreign = new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
+        RoycoDayBalancerV3MarketDeploymentTemplate foreign = new RoycoDayBalancerV3MarketDeploymentTemplate(
             IRoycoFactory(otherFactory), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(foreignEntryPoint), address(syncer)
         );
         vm.prank(FACTORY_ADMIN);
@@ -297,7 +316,7 @@ contract Test_RoycoFactory is Test {
     function test_RevertIf_TemplateConstructedWithMisboundEntryPoint() external {
         RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(makeAddr("OTHER_FACTORY"));
         vm.expectRevert(EntryPointConfigurer.ENTRY_POINT_BOUND_TO_DIFFERENT_FACTORY.selector);
-        new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
+        new RoycoDayBalancerV3MarketDeploymentTemplate(
             IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(foreignEntryPoint), address(syncer)
         );
     }
@@ -367,24 +386,24 @@ contract Test_RoycoFactory is Test {
         // The real template produced live contracts.
         assertGt(r.seniorTranche.code.length, 0, "senior live");
         assertGt(r.juniorTranche.code.length, 0, "junior live");
-        assertGt(r.liquidityTranche.code.length, 0, "liquidity live");
+        assertGt(r.liquidityProviderTranche.code.length, 0, "liquidity live");
         assertGt(r.kernel.code.length, 0, "kernel live");
         assertGt(r.accountant.code.length, 0, "accountant live");
-        assertTrue(r.ydm != address(0) && r.ltYdm != address(0) && r.ydm != r.ltYdm, "distinct YDM + LDM");
+        assertTrue(r.ydm != address(0) && r.lptYdm != address(0) && r.ydm != r.lptYdm, "distinct YDM + LDM");
 
         // The registry resolves the WHOLE market from ANY of the three tranches.
         _assertGetMarketResolves(r, r.seniorTranche, "via senior");
         _assertGetMarketResolves(r, r.juniorTranche, "via junior");
-        _assertGetMarketResolves(r, r.liquidityTranche, "via liquidity");
+        _assertGetMarketResolves(r, r.liquidityProviderTranche, "via liquidity");
         assertEq(factory.trancheToKernel(r.seniorTranche), r.kernel, "st->kernel");
         assertEq(factory.trancheToKernel(r.juniorTranche), r.kernel, "jt->kernel");
-        assertEq(factory.trancheToKernel(r.liquidityTranche), r.kernel, "lt->kernel");
+        assertEq(factory.trancheToKernel(r.liquidityProviderTranche), r.kernel, "lt->kernel");
 
         // The template configured the entry point for all three tranches through the factory (post-registration hook).
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _assertEntryPointConfigured(r.seniorTranche, r.kernel, cfg.stEntryPointConfig, "st entry point config");
         _assertEntryPointConfigured(r.juniorTranche, r.kernel, cfg.jtEntryPointConfig, "jt entry point config");
-        _assertEntryPointConfigured(r.liquidityTranche, r.kernel, cfg.ltEntryPointConfig, "lt entry point config");
+        _assertEntryPointConfigured(r.liquidityProviderTranche, r.kernel, cfg.lptEntryPointConfig, "lt entry point config");
 
         // The template registered the market's kernel on the syncer through the factory.
         assertTrue(syncer.isMarketKernelRegistered(r.kernel), "kernel registered on the syncer");
@@ -405,7 +424,7 @@ contract Test_RoycoFactory is Test {
         assertEq(stored.baseConfig.enabled, _expected.enabled, string.concat(_ctx, ": enabled"));
         assertEq(stored.baseConfig.depositDelaySeconds, _expected.depositDelaySeconds, string.concat(_ctx, ": deposit delay"));
         assertEq(stored.baseConfig.redemptionDelaySeconds, _expected.redemptionDelaySeconds, string.concat(_ctx, ": redemption delay"));
-        assertEq(stored.baseConfig.oracleClock, _expected.oracleClock, string.concat(_ctx, ": oracle clock"));
+        assertEq(stored.baseConfig.gateByOracleUpdate, _expected.gateByOracleUpdate, string.concat(_ctx, ": oracle enabled"));
     }
 
     /// @notice A revoked SYNC_ROLE makes the syncer registration leg of the periphery hook fail, and the whole
@@ -456,7 +475,7 @@ contract Test_RoycoFactory is Test {
 
     /**
      * @notice The YDM salt is market-agnostic: two markets deployed with the same (role, model) pair share ONE JT
-     *         YDM instance and ONE LT LDM instance, while each market's JT-vs-LT pair stays distinct (the role tag
+     *         YDM instance and ONE LPT LDM instance, while each market's JT-vs-LPT pair stays distinct (the role tag
      *         is part of the salt), and each market's accountant initializes its own curve on the shared instance.
      *         A market configured with a DIFFERENT model resolves to a different instance (the component id is part
      *         of the salt), so sharing never crosses model boundaries
@@ -468,11 +487,11 @@ contract Test_RoycoFactory is Test {
         IRoycoProtocolTemplate.DeploymentResult memory b = _deploy(MARKET_ID_B);
         assertTrue(a.kernel != b.kernel, "distinct markets");
 
-        // Both markets share one JT YDM and one LT LDM singleton (market-agnostic salts) ...
+        // Both markets share one JT YDM and one LPT LDM singleton (market-agnostic salts) ...
         assertEq(a.ydm, b.ydm, "the JT YDM instance must be shared across markets");
-        assertEq(a.ltYdm, b.ltYdm, "the LT LDM instance must be shared across markets");
-        // ... while each market's JT YDM and LT LDM remain distinct instances (the role tag stays in the salt)
-        assertTrue(a.ydm != a.ltYdm, "the JT YDM and LT LDM must remain distinct instances within a market");
+        assertEq(a.lptYdm, b.lptYdm, "the LPT LDM instance must be shared across markets");
+        // ... while each market's JT YDM and LPT LDM remain distinct instances (the role tag stays in the salt)
+        assertTrue(a.ydm != a.lptYdm, "the JT YDM and LPT LDM must remain distinct instances within a market");
 
         // Each market's accountant initialized its OWN curve on the shared instance (state keyed per accountant):
         // the snUSD config's V2 curve (0.11e18 at zero, 0.11e18 at target, 0.31e18 at full) decomposes to
@@ -483,15 +502,16 @@ contract Test_RoycoFactory is Test {
 
         // A different-model market resolves to different instances: the YDM model is part of the deployed contract type
         MarketConfig memory staticCfg = deployScript.getMarketConfig("snUSD");
+        _resolveCollateralOracle(staticCfg);
         staticCfg.ydmType = YDMType.StaticCurve;
         bytes32 staticId = MARKET_ID_C;
-        BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory staticMc =
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory staticMc =
             deployScript.deployMarketContractsForTest(staticCfg, staticId, factory, address(template), address(am));
-        bytes memory p = abi.encode(deployScript.buildDayParams(staticCfg, staticId, PROTOCOL_FEE_RECIPIENT, address(0), staticMc));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(staticCfg, staticId, PROTOCOL_FEE_RECIPIENT, address(0), staticMc));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory s = factory.executeMarketDeployment(address(template), p);
         assertTrue(s.ydm != a.ydm, "a different YDM model must not share the adaptive markets' JT YDM instance");
-        assertTrue(s.ltYdm != a.ltYdm, "a different YDM model must not share the adaptive markets' LT LDM instance");
+        assertTrue(s.lptYdm != a.lptYdm, "a different YDM model must not share the adaptive markets' LPT LDM instance");
     }
 
     /// @dev Asserts the shared V2 YDM instance holds the snUSD config's initialized curve for the given accountant
@@ -525,7 +545,7 @@ contract Test_RoycoFactory is Test {
         internal
         view
     {
-        address pool = IRoycoDayKernel(_r.kernel).LT_ASSET();
+        address pool = IRoycoDayKernel(_r.kernel).LPT_ASSET();
         IVault vault = IVault(address(GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY).getVault()));
         (IERC20[] memory tokens, TokenInfo[] memory info,,) = vault.getPoolTokenInfo(pool);
 
@@ -546,7 +566,7 @@ contract Test_RoycoFactory is Test {
         (address st, address jt, address lt, address kernel) = factory.getMarket(_key);
         assertEq(st, _r.seniorTranche, string.concat(_ctx, ": senior"));
         assertEq(jt, _r.juniorTranche, string.concat(_ctx, ": junior"));
-        assertEq(lt, _r.liquidityTranche, string.concat(_ctx, ": liquidity"));
+        assertEq(lt, _r.liquidityProviderTranche, string.concat(_ctx, ": liquidity"));
         assertEq(kernel, _r.kernel, string.concat(_ctx, ": kernel"));
     }
 
@@ -745,7 +765,7 @@ contract Test_RoycoFactory is Test {
         _assertGetMarketResolves(first, first.seniorTranche, "first market intact after failed redeploy");
     }
 
-    /// @notice A StaticCurve YDM config deploys an actual StaticCurveYDM model for both the JT YDM and the LT LDM
+    /// @notice A StaticCurve YDM config deploys an actual StaticCurveYDM model for both the JT YDM and the LPT LDM
     /// @dev The template registers every YDM model's bytecode and selects the configured type by component id, so the
     ///      deployed contract matches the config even though StaticCurveYDM.initializeYDMForMarket(uint64,uint64,uint64)
     ///      shares its 4-byte selector with the V2 initializer. The reused snUSD params (0.11e18, 0.11e18, 0.31e18) are
@@ -754,11 +774,12 @@ contract Test_RoycoFactory is Test {
         _register();
 
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
         cfg.ydmType = YDMType.StaticCurve;
         bytes32 marketId = MARKET_ID_A;
-        BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc =
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
             deployScript.deployMarketContractsForTest(cfg, marketId, factory, address(template), address(am));
-        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -767,15 +788,15 @@ contract Test_RoycoFactory is Test {
         // so runtime code is target-dependent — compare against reference instances built with the SAME targets the
         // config carries, which isolates the model type as the only difference that matters.
         StaticCurveYDM refJtStatic = new StaticCurveYDM(cfg.jtYdmTargetUtilizationWAD);
-        StaticCurveYDM refLtStatic = new StaticCurveYDM(cfg.ltYdmTargetUtilizationWAD);
+        StaticCurveYDM refLptStatic = new StaticCurveYDM(cfg.lptYdmTargetUtilizationWAD);
         AdaptiveCurveYDM_V2 refV2 = new AdaptiveCurveYDM_V2(cfg.jtYdmTargetUtilizationWAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         assertEq(r.ydm.codehash, address(refJtStatic).codehash, "configured StaticCurve, ydm must be StaticCurveYDM");
-        assertEq(r.ltYdm.codehash, address(refLtStatic).codehash, "configured StaticCurve, ltYdm must be StaticCurveYDM");
+        assertEq(r.lptYdm.codehash, address(refLptStatic).codehash, "configured StaticCurve, lptYdm must be StaticCurveYDM");
         // And it is NOT the adaptive model that used to stand in for it under a static config.
         assertTrue(r.ydm.codehash != address(refV2).codehash, "ydm must not be the adaptive V2 code");
     }
 
-    /// @notice An AdaptiveCurve_V1 YDM config deploys an actual AdaptiveCurveYDM_V1 model for both the JT YDM and the LT LDM
+    /// @notice An AdaptiveCurve_V1 YDM config deploys an actual AdaptiveCurveYDM_V1 model for both the JT YDM and the LPT LDM
     /// @dev With every YDM model's bytecode registered and selected by component id, a V1 config deploys the V1 contract
     ///      and its two-argument initializeYDMForMarket(uint64,uint64) binds on it, so the deployment succeeds rather than
     ///      reverting against a stand-in V2 instance whose selector the V1 calldata could not match
@@ -783,24 +804,25 @@ contract Test_RoycoFactory is Test {
         _register();
 
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
         cfg.ydmType = YDMType.AdaptiveCurve_V1;
         // V1 takes only (target, full), so re-encode both curves as V1 params — a two-word init blob that binds on the V1 model
         bytes memory v1Params = abi.encode(AdaptiveCurveYDM_V1_Params({ yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 }));
         cfg.ydmSpecificParams = v1Params;
-        cfg.ltYdmSpecificParams = v1Params;
+        cfg.lptYdmSpecificParams = v1Params;
         bytes32 marketId = MARKET_ID_A;
-        BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc =
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
             deployScript.deployMarketContractsForTest(cfg, marketId, factory, address(template), address(am));
-        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
         // The deployed model is the configured AdaptiveCurveYDM_V1, compared against references built with the same targets
         AdaptiveCurveYDM_V1 refJtV1 = new AdaptiveCurveYDM_V1(cfg.jtYdmTargetUtilizationWAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
-        AdaptiveCurveYDM_V1 refLtV1 = new AdaptiveCurveYDM_V1(cfg.ltYdmTargetUtilizationWAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
+        AdaptiveCurveYDM_V1 refLptV1 = new AdaptiveCurveYDM_V1(cfg.lptYdmTargetUtilizationWAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         assertEq(r.ydm.codehash, address(refJtV1).codehash, "configured AdaptiveCurve_V1, ydm must be AdaptiveCurveYDM_V1");
-        assertEq(r.ltYdm.codehash, address(refLtV1).codehash, "configured AdaptiveCurve_V1, ltYdm must be AdaptiveCurveYDM_V1");
+        assertEq(r.lptYdm.codehash, address(refLptV1).codehash, "configured AdaptiveCurve_V1, lptYdm must be AdaptiveCurveYDM_V1");
     }
 
     // ─── internal ───

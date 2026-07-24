@@ -49,6 +49,6 @@ contract Test_MarketLifecycle_NoReturnValueQuote_NonStandardTokens is Test_Marke
         // The canonical seed routes every quote movement through SafeERC20 pulls and must land the exact
         // shape-independent depth: 6e18 auto-seed + 20e18 explicit = 26e18
         _seedDefault();
-        assertEq(_liveLTRawNAV(), SEEDED_LT_RAW_NAV, "the USDT-shaped quote must not perturb the seeded depth");
+        assertEq(_liveLPTRawNAV(), SEEDED_LPT_RAW_NAV, "the USDT-shaped quote must not perturb the seeded depth");
     }
 }

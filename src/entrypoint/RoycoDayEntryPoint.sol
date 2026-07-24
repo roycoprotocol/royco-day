@@ -7,7 +7,7 @@ import { SafeCast } from "../../lib/openzeppelin-contracts/contracts/utils/math/
 import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoDayEntryPoint } from "../interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
-import { IRoycoLiquidityTranche } from "../interfaces/IRoycoLiquidityTranche.sol";
+import { IRoycoLiquidityProviderTranche } from "../interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoPriceOracle } from "../interfaces/IRoycoPriceOracle.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
@@ -96,8 +96,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
         _enforceNotBlacklisted(config.kernel, msg.sender, _receiver);
 
-        // Poke the tranche's oracle clock so that a source update that predates this request can never open its execution gate
-        _pokeOracleClock(_tranche, config.baseConfig.oracleClock);
+        // Poke the market's collateral asset oracle to refresh it
+        _pokeOracle(_tranche, config);
 
         // Register the user's deposit request with a fresh nonce
         DepositRequest storage request = $.userToNonceToDepositRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)];
@@ -193,14 +193,14 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         require(_tranche != address(0) && _receiver != address(0), NULL_ADDRESS());
         require(_executorBonusWAD < WAD || _executorBonusWAD == type(uint64).max, INVALID_EXECUTOR_BONUS());
 
-        // Ensure that the tranche is enabled on this entry point and the receiver is not blacklisted (the share escrow transfer below screens the caller)
+        // Ensure that the tranche is enabled on this entry point (the share escrow transfer below screens the caller,
+        // and both execution paths screen the receiver where its value settles)
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
         EnrichedTrancheConfig memory config = $.trancheToConfig[_tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
-        _enforceNotBlacklisted(config.kernel, _receiver);
 
-        // Poke the tranche's oracle clock so that a source update that predates this request can never open its execution gate
-        _pokeOracleClock(_tranche, config.baseConfig.oracleClock);
+        // Poke the market's collateral asset oracle to refresh it
+        _pokeOracle(_tranche, config);
 
         // Register the user's redemption request with a fresh nonce
         RedemptionRequest storage request = $.userToNonceToRedemptionRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)];
@@ -280,8 +280,14 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      */
 
     /// @inheritdoc IRoycoDayEntryPoint
-    function pokeOracleClock(address _tranche) external override(IRoycoDayEntryPoint) whenNotPaused restricted returns (uint32 lastUpdatedAtTimestamp) {
-        return _pokeOracleClock(_tranche, _getRoycoDayEntryPointStorage().trancheToConfig[_tranche].baseConfig.oracleClock);
+    function pokeCollateralAssetOracle(address _tranche)
+        external
+        override(IRoycoDayEntryPoint)
+        whenNotPaused
+        restricted
+        returns (uint32 lastUpdatedAtTimestamp)
+    {
+        return _pokeOracle(_tranche, _getRoycoDayEntryPointStorage().trancheToConfig[_tranche]);
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
@@ -372,7 +378,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
 
         // Assert the validity of the request
-        _validateRequestExecution(_requestNonce, request.baseRequest, config.baseConfig.oracleClock);
+        _validateRequestExecution(_requestNonce, request.baseRequest, config);
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
         // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request (the tranche deposit below screens the receiver)
@@ -454,7 +460,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     /**
      * @notice Executes a pending redemption request for the specified user
      * @dev The request must exist and the configured delay period must have elapsed
-     *      A maximal liquidity tranche redemption exits in-kind whenever the in-kind bound serves the entire
+     *      A maximal liquidity provider tranche redemption exits in-kind whenever the in-kind bound serves the entire
      *      remaining request, and otherwise fills up to the dominant bound capped at the remaining request,
      *      exiting to the LP token's constituents only when the multi-asset bound is strictly wider (equal bounds
      *      stay in-kind), so a redemption the market can serve is never left behind by the in-kind gate. Explicit
@@ -482,17 +488,17 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
 
         // Assert the validity of the request
-        _validateRequestExecution(_requestNonce, request.baseRequest, config.baseConfig.oracleClock);
+        _validateRequestExecution(_requestNonce, request.baseRequest, config);
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
         // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request
         _enforceNotBlacklisted(config.kernel, msg.sender, _user);
 
-        // Resolve the actual amount of shares to redeem and the exit route for liquidity tranche redemptions specifically
+        // Resolve the actual amount of shares to redeem and the exit route for liquidity provider tranche redemptions specifically
         bool isMultiAssetRedemption;
         if (_sharesToRedeem == type(uint256).max) {
-            // If the tranche being redeemed from is a LT, default to the in-kind mode if it satisfies the redemption, and fallback to the multiasset flow if it provides a higher redeemable amount
-            if (config.trancheType == TrancheType.LIQUIDITY) {
+            // If the tranche being redeemed from is a LPT, default to the in-kind mode if it satisfies the redemption, and fallback to the multiasset flow if it provides a higher redeemable amount
+            if (config.trancheType == TrancheType.LIQUIDITY_PROVIDER) {
                 // Use the in-kind flow if it is sufficient for this redemption
                 uint256 maxRedeemInKind = IRoycoVaultTranche(tranche).maxRedeem(address(this));
                 if (maxRedeemInKind >= request.shares) {
@@ -500,7 +506,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
                 } else {
                     // Probe the multi-asset bound through a low-level call: the multi-asset preview can revert on venue constraints, but must not revert the redemption from utilizing the in-kind flow
                     (bool multiAssetProbeSucceeded, bytes memory multiAssetProbeReturnData) =
-                        tranche.call(abi.encodeCall(IRoycoLiquidityTranche.maxRedeemMultiAsset, (address(this))));
+                        tranche.call(abi.encodeCall(IRoycoLiquidityProviderTranche.maxRedeemMultiAsset, (address(this))));
                     // A reverted probe leaves the multi-asset route unavailable, fall back to the in-kind bound so the portion the market can serve is never left behind
                     uint256 maxRedeemMultiAsset;
                     assembly ("memory-safe") { if multiAssetProbeSucceeded { maxRedeemMultiAsset := mload(add(multiAssetProbeReturnData, 0x20)) } }
@@ -508,7 +514,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
                     isMultiAssetRedemption = (maxRedeemMultiAsset > maxRedeemInKind);
                 }
             }
-            // If the tranche being redeemed from is not a LT, redeem the maximum amount that can be redeemed in-kind, up to the requested amount
+            // If the tranche being redeemed from is not a LPT, redeem the maximum amount that can be redeemed in-kind, up to the requested amount
             else {
                 _sharesToRedeem = Math.min(IRoycoVaultTranche(tranche).maxRedeem(address(this)), request.shares);
             }
@@ -544,7 +550,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             // Ensure that the user has opted into third party execution
             require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
             // Screen the receiver against the market's blacklist, the asset and quote remittance legs below settle outside the kernel's screened flows (the self path's redemption screens the receiver)
-            _enforceNotBlacklisted(config.kernel, request.baseRequest.receiver);
+            IRoycoDayKernel(config.kernel).enforceNotBlacklisted(request.baseRequest.receiver);
 
             // Redeem shares to this contract for bonus calculation, forfeiting accrued yield as protocol fees
             (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) =
@@ -572,8 +578,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
         RedemptionRequest memory request = $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
         require(request.shares != 0, INVALID_REQUEST(_requestNonce));
-        // Screen the canceller against the market's blacklist, the share escrow return below screens the receiver through the kernel's balance update hook
-        _enforceNotBlacklisted($.trancheToConfig[request.baseRequest.tranche].kernel, msg.sender);
+        // The share escrow return below screens the canceller through the kernel's balance update hook
 
         // Mark the request as cancelled
         delete $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
@@ -587,35 +592,39 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
     /**
      * @dev Asserts that a request exists and is executable: not executed already or cancelled, past its delay, and
-     *      the tranche's oracle clock has observed at least one oracle update strictly after the request was queued,
+     *      the market's collateral asset oracle has observed at least one update strictly after the request was queued,
      *      so any information known at request time is priced into the mark before execution
-     *      A clock reporting no update yet (a zero timestamp) conservatively holds the gate shut
+     *      An oracle reporting no update yet (a zero timestamp) conservatively holds the gate shut
      * @param _requestNonce The nonce of the request being validated
      * @param _baseRequest The base request data shared across request types
-     * @param _oracleClock The tranche's oracle clock (the null address disables the gate)
+     * @param _config The tranche's enriched configuration
      */
-    function _validateRequestExecution(uint256 _requestNonce, BaseRequest memory _baseRequest, address _oracleClock) internal {
+    function _validateRequestExecution(uint256 _requestNonce, BaseRequest memory _baseRequest, EnrichedTrancheConfig memory _config) internal {
         // Ensure the request exists and the configured delay period has elapsed
         require(_baseRequest.executableAtTimestamp != 0 && _baseRequest.executableAtTimestamp <= block.timestamp, INVALID_REQUEST(_requestNonce));
-        // Ensure the tranche's oracle clock has observed an oracle update strictly after the request was queued
+        // Ensure the market's collateral asset oracle has observed an update strictly after the request was queued
         require(
-            _oracleClock == address(0) || (_pokeOracleClock(_baseRequest.tranche, _oracleClock) > _baseRequest.queuedAtTimestamp),
-            ORACLE_CLOCK_NOT_ADVANCED(_requestNonce)
+            !_config.baseConfig.gateByOracleUpdate || (_pokeOracle(_baseRequest.tranche, _config) > _baseRequest.queuedAtTimestamp),
+            COLLATERAL_ASSET_ORACLE_NOT_ADVANCED(_requestNonce)
         );
     }
 
     /**
-     * @dev Pokes the tranche's oracle clock
-     * @param _tranche The tranche whose oracle clock is being poked
-     * @param _oracleClock The tranche's oracle clock (the null address disables the gate and makes the poke a no-op)
-     * @return lastUpdatedAtTimestamp The clock's last update timestamp after the poke (zero when the tranche has no clock or it has observed no update yet)
+     * @dev Pokes the collateral asset oracle of the tranche's market
+     * @dev The oracle is resolved live from the kernel since an admin can replace it at any time
+     * @param _tranche The tranche whose market's collateral asset oracle is being poked
+     * @param _config The tranche's enriched configuration
+     * @return lastUpdatedAtTimestamp The oracle's last update timestamp after the poke (zero when the gate is disabled or no update has been observed yet)
      */
-    function _pokeOracleClock(address _tranche, address _oracleClock) internal returns (uint32 lastUpdatedAtTimestamp) {
-        if (_oracleClock == address(0)) return 0;
-        // The clock must never report a future update timestamp: it would satisfy the execution gate without a genuine update
+    function _pokeOracle(address _tranche, EnrichedTrancheConfig memory _config) internal returns (uint32 lastUpdatedAtTimestamp) {
+        if (!_config.baseConfig.gateByOracleUpdate) return 0;
+        // The oracle must never report a future update timestamp: it would satisfy the execution gate without a genuine update
         // The cast must fail loudly, truncating garbage could disguise a future timestamp as past and defeat the fail-shut check
-        require((lastUpdatedAtTimestamp = IRoycoPriceOracle(_oracleClock).poke().toUint32()) <= block.timestamp, ORACLE_CLOCK_IN_THE_FUTURE());
-        emit OracleClockTick(_tranche, lastUpdatedAtTimestamp);
+        require(
+            (lastUpdatedAtTimestamp = IRoycoPriceOracle(IRoycoDayKernel(_config.kernel).getCollateralAssetOracle()).poke().toUint32()) <= block.timestamp,
+            COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE()
+        );
+        emit CollateralAssetOraclePoked(_tranche, lastUpdatedAtTimestamp);
     }
 
     /**
@@ -663,7 +672,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      * @param _shares The amount of shares to redeem from the tranche
      * @param _navAtRequestTime The NAV of the shares being redeemed at the time the redemption was requested
      * @param _receiver The address to receive the redeemed assets
-     * @param _isMultiAssetRedemption Whether to exit a liquidity tranche redemption to the LP token's constituents instead of in-kind
+     * @param _isMultiAssetRedemption Whether to exit a liquidity provider tranche redemption to the LP token's constituents instead of in-kind
      * @return userSharesRedeemed The shares actually redeemed for the user (total minus forfeited)
      * @return protocolFeeShares The shares forfeited to the protocol equating to the yield accrued during the request lifecycle (zero if NAV decreased)
      * @return userClaims The assets withdrawn from the tranche for the user after forfeiting accrued yield
@@ -691,7 +700,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         if ((userSharesRedeemed -= protocolFeeShares) != 0) {
             if (_isMultiAssetRedemption) {
                 // Multi-asset redemptions mandate that liquidity is removed in a way that cannot render less value than promised at present NAV values
-                (userClaims, quoteAssets) = IRoycoLiquidityTranche(_tranche).redeemMultiAsset(userSharesRedeemed, 0, 0, _receiver, address(this));
+                (userClaims, quoteAssets) = IRoycoLiquidityProviderTranche(_tranche).redeemMultiAsset(userSharesRedeemed, 0, 0, _receiver, address(this));
             } else {
                 userClaims = IRoycoVaultTranche(_tranche).redeem(userSharesRedeemed, _receiver, address(this));
             }
@@ -701,30 +710,17 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     }
 
     /**
-     * @dev Converts an amount of a tranche's assets to NAV units using the market kernel's quoter for that asset
-     * @dev The senior and junior tranches price through the single coinvested collateral quoter
+     * @dev Converts an amount of a tranche's assets to NAV units using the market kernel's pricing for that asset
+     * @dev The senior and junior tranches price through the single coinvested collateral asset oracle
      * @param _kernel The kernel of the market that the tranche belongs to
      * @param _trancheType The type of the tranche (senior, junior, or liquidity)
      * @param _assets The amount of assets to convert, denominated in the tranche's base asset units
      * @return value The value of the specified assets, denominated in the kernel's NAV units
      */
     function _convertAssetsToValue(address _kernel, TrancheType _trancheType, TRANCHE_UNIT _assets) internal view returns (NAV_UNIT value) {
-        return (_trancheType == TrancheType.LIQUIDITY)
-            ? IRoycoDayKernel(_kernel).convertLTAssetsToValue(_assets)
+        return (_trancheType == TrancheType.LIQUIDITY_PROVIDER)
+            ? IRoycoDayKernel(_kernel).convertLPTAssetsToValue(_assets)
             : IRoycoDayKernel(_kernel).convertCollateralAssetsToValue(_assets);
-    }
-
-    /**
-     * @dev Screens an account against the market's blacklist through the tranche's kernel
-     *      Covers the addresses the kernel's own screened flows never reach: request operators, asset escrow movements,
-     *      executor bonuses, and third party remittances all settle outside the tranche balance update hooks
-     * @param _kernel The kernel of the market that the tranche belongs to, consulted for the market's configured blacklist
-     * @param _account The address of the account to screen
-     */
-    function _enforceNotBlacklisted(address _kernel, address _account) internal view {
-        address[] memory accountsToScreen = new address[](1);
-        accountsToScreen[0] = _account;
-        IRoycoDayKernel(_kernel).enforceNotBlacklisted(accountsToScreen);
     }
 
     /**
@@ -747,7 +743,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      *      receiver leg proves the whole leg is empty, so no bonus can be stranded behind the gate
      * @param _kernel The kernel of the market that the redeemed tranche belongs to, used to resolve the claim assets
      * @param _userClaims The redemption's total asset claims, reduced in place to the receiver's post-bonus portion
-     * @param _quoteAssets The redemption's total quote leg (zero unless a liquidity tranche redemption exits multi-asset)
+     * @param _quoteAssets The redemption's total quote leg (zero unless a liquidity provider tranche redemption exits multi-asset)
      * @param _executorBonusWAD The bonus percentage (0-100%) paid to the executor (the caller), scaled to WAD precision
      * @param _receiver The address to receive the user's claims
      * @return bonusClaims The asset claims remitted to the executor (the caller)
@@ -767,7 +763,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         bonusClaims = TrancheClaimsLogic._scaleAssetClaims(_userClaims, _executorBonusWAD, WAD);
         // Deduct the NAV of the bonus claims from the user's claims
         _userClaims.collateralAssets = _userClaims.collateralAssets - bonusClaims.collateralAssets;
-        _userClaims.ltAssets = _userClaims.ltAssets - bonusClaims.ltAssets;
+        _userClaims.lptAssets = _userClaims.lptAssets - bonusClaims.lptAssets;
         _userClaims.stShares = _userClaims.stShares - bonusClaims.stShares;
         _userClaims.nav = _userClaims.nav - bonusClaims.nav;
 
@@ -777,11 +773,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             IERC20(collateralAsset).safeTransfer(_receiver, toUint256(_userClaims.collateralAssets));
             if (bonusClaims.collateralAssets != ZERO_TRANCHE_UNITS) IERC20(collateralAsset).safeTransfer(msg.sender, toUint256(bonusClaims.collateralAssets));
         }
-        // Transfer the LT asset claims to the executor and receiver respectively
-        if (_userClaims.ltAssets != ZERO_TRANCHE_UNITS) {
-            address ltAsset = IRoycoDayKernel(_kernel).LT_ASSET();
-            IERC20(ltAsset).safeTransfer(_receiver, toUint256(_userClaims.ltAssets));
-            if (bonusClaims.ltAssets != ZERO_TRANCHE_UNITS) IERC20(ltAsset).safeTransfer(msg.sender, toUint256(bonusClaims.ltAssets));
+        // Transfer the LPT asset claims to the executor and receiver respectively
+        if (_userClaims.lptAssets != ZERO_TRANCHE_UNITS) {
+            address lptAsset = IRoycoDayKernel(_kernel).LPT_ASSET();
+            IERC20(lptAsset).safeTransfer(_receiver, toUint256(_userClaims.lptAssets));
+            if (bonusClaims.lptAssets != ZERO_TRANCHE_UNITS) IERC20(lptAsset).safeTransfer(msg.sender, toUint256(bonusClaims.lptAssets));
         }
         // Transfer the senior tranche share claims to the executor and receiver respectively
         if (_userClaims.stShares != 0) {
@@ -819,13 +815,15 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             address kernel = IRoycoFactory(ROYCO_FACTORY).trancheToKernel(tranche);
             require(kernel != address(0), INVALID_TRANCHE());
 
-            // A configured oracle clock must never report a future update timestamp
-            _pokeOracleClock(tranche, _configs[i].oracleClock);
-
             // Set the tranche configuration
-            $.trancheToConfig[tranche] = EnrichedTrancheConfig({
+            EnrichedTrancheConfig memory enrichedConfig = EnrichedTrancheConfig({
                 asset: IRoycoVaultTranche(tranche).asset(), kernel: kernel, trancheType: IRoycoVaultTranche(tranche).TRANCHE_TYPE(), baseConfig: _configs[i]
             });
+            $.trancheToConfig[tranche] = enrichedConfig;
+
+            // Poke the market's collateral asset oracle to validate it
+            _pokeOracle(tranche, enrichedConfig);
+
             emit TrancheConfigUpdated(tranche, _configs[i]);
         }
     }

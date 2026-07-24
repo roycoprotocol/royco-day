@@ -46,10 +46,10 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
     // ---------------------------------------------------------------------
 
     function test_requestRedemption_escrowsSharesAndRegistersRequest_allTranches() public {
-        address[3] memory tranches = [address(seniorTranche), address(juniorTranche), address(liquidityTranche)];
+        address[3] memory tranches = [address(seniorTranche), address(juniorTranche), address(liquidityProviderTranche)];
         for (uint256 i = 0; i < 3; ++i) {
             address tranche = tranches[i];
-            uint256 assets = tranche == address(liquidityTranche) ? 10e18 : 10 * stUnit;
+            uint256 assets = tranche == address(liquidityProviderTranche) ? 10e18 : 10 * stUnit;
             (uint256 shares, uint256 nonce) = _acquireAndRequest(USER_A, tranche, assets, USER_A, DEFAULT_EXECUTOR_BONUS);
 
             assertEq(IERC20Like(tranche).balanceOf(address(entryPoint)), shares, "shares must be escrowed in the entry point");

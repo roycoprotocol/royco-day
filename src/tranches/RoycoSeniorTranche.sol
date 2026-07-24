@@ -37,7 +37,7 @@ contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {
         onlyKernel
         returns (uint256 totalTrancheShares)
     {
-        // Mint the precomputed liquidity premium shares to the holder (the kernel custodies them for the liquidity tranche)
+        // Mint the precomputed liquidity premium shares to the holder (the kernel custodies them for the liquidity provider tranche)
         if (_liquidityPremiumShares != 0) _mint(_to, _liquidityPremiumShares);
 
         totalTrancheShares = totalSupply();

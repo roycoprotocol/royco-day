@@ -11,7 +11,7 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
  * @title Test_FixedTermRedemptionGates_Kernel
  * @notice Non-fork, exact-selector revert pins for the redemption operations that FIXED_TERM blocks. The only
  *         prior guards for these newly-blocked rules lived in the mainnet-fork abstract kernel suite, so a CI run
- *         without an RPC left JT redemption and both LT redemption flows in FIXED_TERM entirely unverified. These
+ *         without an RPC left JT redemption and both LPT redemption flows in FIXED_TERM entirely unverified. These
  *         bind them on the mock market
  * @dev Every tranche redemption pre-op syncs and then requires MarketState.PERPETUAL (RedemptionLogic), so each
  *      flow reverts DISABLED_IN_FIXED_TERM_STATE once a covered drawdown has put the market in FIXED_TERM
@@ -55,28 +55,28 @@ contract Test_FixedTermRedemptionGates_Kernel is DayMarketTestBase {
     }
 
     /// @notice An in-kind liquidity redemption in FIXED_TERM reverts on the PERPETUAL-only gate (newly-blocked op)
-    function test_RevertIf_LTRedeemInKindInFixedTerm() public {
-        uint256 shares = liquidityTranche.balanceOf(LT_PROVIDER) / 2;
-        vm.prank(LT_PROVIDER);
+    function test_RevertIf_LPTRedeemInKindInFixedTerm() public {
+        uint256 shares = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 2;
+        vm.prank(LPT_PROVIDER);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
-        liquidityTranche.redeem(shares, LT_PROVIDER, LT_PROVIDER);
+        liquidityProviderTranche.redeem(shares, LPT_PROVIDER, LPT_PROVIDER);
     }
 
     /// @notice A multi-asset liquidity redemption in FIXED_TERM reverts on the PERPETUAL-only gate (newly-blocked op)
-    function test_RevertIf_LTRedeemMultiAssetInFixedTerm() public {
-        uint256 shares = liquidityTranche.balanceOf(LT_PROVIDER) / 2;
-        vm.prank(LT_PROVIDER);
+    function test_RevertIf_LPTRedeemMultiAssetInFixedTerm() public {
+        uint256 shares = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 2;
+        vm.prank(LPT_PROVIDER);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
-        liquidityTranche.redeemMultiAsset(shares, 0, 0, LT_PROVIDER, LT_PROVIDER);
+        liquidityProviderTranche.redeemMultiAsset(shares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
     }
 
     /// @notice The multi-asset liquidity redeem preview reverts on the PERPETUAL-only gate in FIXED_TERM, matching the reverting redeemMultiAsset and the zero maxRedeemMultiAsset
     /// @dev previewRedeemMultiAsset now simulates the real kernel redemption, so the FIXED_TERM gate bubbles from the preview exactly as from exec instead of the deleted empty-claims quote
-    function test_RevertIf_LTPreviewRedeemMultiAssetInFixedTerm() public {
-        uint256 shares = liquidityTranche.balanceOf(LT_PROVIDER) / 2;
-        assertEq(liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER), 0, "liquidity maxRedeemMultiAsset must already zero in FIXED_TERM, so the preview must agree");
+    function test_RevertIf_LPTPreviewRedeemMultiAssetInFixedTerm() public {
+        uint256 shares = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 2;
+        assertEq(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), 0, "liquidity maxRedeemMultiAsset must already zero in FIXED_TERM, so the preview must agree");
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
-        liquidityTranche.previewRedeemMultiAsset(shares);
+        liquidityProviderTranche.previewRedeemMultiAsset(shares);
     }
 
     /// @notice The senior redeem preview reverts on the PERPETUAL-only gate in FIXED_TERM, matching the reverting redeem and the zero maxRedeem

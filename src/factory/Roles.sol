@@ -21,7 +21,7 @@ uint64 constant ADMIN_UPGRADER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO
 
 uint64 constant ST_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ST_LP_ROLE"))));
 uint64 constant JT_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_JT_LP_ROLE"))));
-uint64 constant LT_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LT_LP_ROLE"))));
+uint64 constant LPT_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LPT_LP_ROLE"))));
 uint64 constant BURNER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_BURNER_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -41,10 +41,10 @@ uint64 constant ADMIN_ACCOUNTANT_ROLE = uint64(uint256(keccak256(abi.encode("ROY
 uint64 constant ADMIN_PROTOCOL_FEE_SETTER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_PROTOCOL_FEE_SETTER_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// QUOTER ROLES
+// ORACLE ROLES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-uint64 constant ADMIN_ORACLE_QUOTER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_ORACLE_QUOTER_ROLE"))));
+uint64 constant ADMIN_ORACLE_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_ORACLE_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ENTRY POINT ROLES

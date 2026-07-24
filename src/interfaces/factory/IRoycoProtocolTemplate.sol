@@ -11,21 +11,21 @@ interface IRoycoProtocolTemplate {
      * @notice The set of contracts produced by a market deployment
      * @custom:field seniorTranche - The senior tranche proxy
      * @custom:field juniorTranche - The junior tranche proxy
-     * @custom:field liquidityTranche - The liquidity tranche proxy (Royco Day markets only, zero otherwise)
+     * @custom:field liquidityProviderTranche - The liquidity provider tranche proxy (Royco Day markets only, zero otherwise)
      * @custom:field kernel - The kernel proxy
      * @custom:field accountant - The accountant proxy
      * @custom:field ydm - The junior tranche's (possibly shared) YDM singleton
-     * @custom:field ltYdm - The liquidity tranche's (possibly shared) LDM singleton (zero for markets without a liquidity tranche)
+     * @custom:field lptYdm - The liquidity provider tranche's (possibly shared) LDM singleton (zero for markets without a liquidity provider tranche)
      * @custom:field extras - ABI-encoded template-specific addenda consumed by downstream tooling
      */
     struct DeploymentResult {
         address seniorTranche;
         address juniorTranche;
-        address liquidityTranche;
+        address liquidityProviderTranche;
         address kernel;
         address accountant;
         address ydm;
-        address ltYdm;
+        address lptYdm;
         bytes extras;
     }
 

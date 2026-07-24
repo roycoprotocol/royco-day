@@ -58,7 +58,7 @@ contract Test_CoverageCrossClaimFindings_Accountant is AccountantTestBase {
     ///      branch is the instantaneous one and prices exactly at these preview rates)
     function _pinRates() internal {
         jtYDM.setPreviewYieldShareReturn(0.1e18);
-        ltYDM.setPreviewYieldShareReturn(0.05e18);
+        lptYDM.setPreviewYieldShareReturn(0.05e18);
     }
 
     /// @dev Fresh accountant + symmetric 1000/300 seed + pinned rates (used for the A/B path comparisons)
@@ -141,7 +141,7 @@ contract Test_CoverageCrossClaimFindings_Accountant is AccountantTestBase {
     function test_Finding1_ZeroYieldShare_RoundTripStillNeutral() public {
         _seedSymmetric(ST_EFF_0, JT_EFF_0, 0);
         jtYDM.setPreviewYieldShareReturn(0);
-        ltYDM.setPreviewYieldShareReturn(0);
+        lptYDM.setPreviewYieldShareReturn(0);
 
         _dipSync();
         SyncedAccountingState memory rec = kernel.doPreOp(toNAVUnits(COLLATERAL_0));
@@ -158,11 +158,11 @@ contract Test_CoverageCrossClaimFindings_Accountant is AccountantTestBase {
     function test_Finding1_FullYieldShare_RoundTripStillNeutral() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _findingsParams();
         p.maxJTYieldShareWAD = 1e18;
-        p.maxLTYieldShareWAD = 0;
+        p.maxLPTYieldShareWAD = 0;
         _deploy(p);
         _seedSymmetric(ST_EFF_0, JT_EFF_0, 0);
         jtYDM.setPreviewYieldShareReturn(1e18);
-        ltYDM.setPreviewYieldShareReturn(0);
+        lptYDM.setPreviewYieldShareReturn(0);
 
         _dipSync();
         SyncedAccountingState memory rec = kernel.doPreOp(toNAVUnits(COLLATERAL_0));

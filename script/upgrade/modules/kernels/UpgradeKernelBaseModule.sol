@@ -43,7 +43,7 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
     /// @notice Creation code for the new kernel impl, given the construction params read off the proxy.
     function _kernelCreationCodeWith(IRoycoDayKernel.RoycoDayKernelConstructionParams memory cp) internal pure virtual returns (bytes memory);
 
-    /// @notice Module-specific snapshot bytes (e.g. quoter config, kernel-type immutables).
+    /// @notice Module-specific snapshot bytes (e.g. oracle config, kernel-type immutables).
     function _snapshotKernelSpecific(address proxy) internal view virtual returns (bytes memory);
 
     /// @notice Module-specific verification given the snapshot returned by `_snapshotKernelSpecific`.
@@ -98,8 +98,8 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         cp.juniorTranche = k.JUNIOR_TRANCHE();
         cp.collateralAsset = k.COLLATERAL_ASSET();
         cp.accountant = k.ACCOUNTANT();
-        cp.liquidityTranche = k.LIQUIDITY_TRANCHE();
-        cp.ltAsset = k.LT_ASSET();
+        cp.liquidityProviderTranche = k.LIQUIDITY_PROVIDER_TRANCHE();
+        cp.lptAsset = k.LPT_ASSET();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

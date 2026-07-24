@@ -13,9 +13,9 @@ contract MockCheckpointClock is OracleClockBase {
         SOURCE = MockValueSource(_source);
     }
 
-    function initialize(address _initialAuthority, uint256 _minDeviationWAD) external initializer {
+    function initialize(address _initialAuthority, uint256 _minDeviationWAD, uint32 _lastUpdate) external initializer {
         __RoycoBase_init(_initialAuthority);
-        __OracleClockBase_init_unchained(_minDeviationWAD);
+        __OracleClockBase_init_unchained(_lastUpdate, _minDeviationWAD);
     }
 
     function _getSourcePrice() internal view override returns (uint256 value) {

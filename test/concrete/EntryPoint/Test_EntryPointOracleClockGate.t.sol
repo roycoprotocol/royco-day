@@ -1,57 +1,50 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { MockFeedClock } from "../../mocks/MockFeedClock.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
-import { MockCheckpointClock } from "../../mocks/MockCheckpointClock.sol";
-import { MockValueSource } from "../../mocks/MockValueSource.sol";
+import { MockPriceOracle } from "../../mocks/MockPriceOracle.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
- * @title Test_EntryPointOracleClockGate
- * @notice The oracle-clock execution gate: a request queued against a tranche with an oracle clock can only execute
- *         once the clock has observed at least one oracle update AFTER the request, on top of the minimum delay,
+ * @title Test_EntryPointOracleGate
+ * @notice The collateral asset oracle execution gate: a request queued against a gated tranche can only execute
+ *         once the market's oracle has observed at least one update AFTER the request, on top of the minimum delay,
  *         so execution always happens at max(request + delay, first post-request update)
  * @dev The gate closes the one hole a pure time delay leaves: with deviation/heartbeat-driven oracles, a request can
  *      mature before the next update lands and execute at the same stale mark it was requested at, ahead of a
  *      predictable update. Requiring one observed update inside the request lifecycle puts that update inside the
  *      forfeiture window. The delay floor remains as the defense against induced updates
+ * @dev The oracle is resolved LIVE from the kernel on every poke, so the fixture drives the gate through the
+ *      market's MockPriceOracle updatedAt knob and oracle rotation goes through kernel.setCollateralAssetOracle
  */
-contract Test_EntryPointOracleClockGate is EntryPointTestBase {
+contract Test_EntryPointOracleGate is EntryPointTestBase {
     uint256 internal stUnit;
-    MockFeedClock internal chainlinkClock;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
         stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
-        // The market's Chainlink feed is the steppy pricing layer for every tranche in this kernel family
-        chainlinkClock = new MockFeedClock(address(priceFeed));
     }
 
-    /// @dev Deploys a checkpoint clock over the specified source behind an ERC1967 proxy, mirroring the production pattern
-    function _deployCheckpointClock(address _source, uint256 _minDeviationWAD) internal returns (MockCheckpointClock) {
-        address implementation = address(new MockCheckpointClock(_source));
-        return MockCheckpointClock(
-            address(new ERC1967Proxy(implementation, abi.encodeCall(MockCheckpointClock.initialize, (address(accessManager), _minDeviationWAD))))
-        );
-    }
-
-    /// @dev Rewrites all three tranche configs with the specified oracle clock (everything else unchanged)
-    function _setOracleClock(address _clock) internal {
+    /// @dev Rewrites all three tranche configs with the specified oracle gate state (everything else unchanged)
+    function _setOracleGate(bool _enabled) internal {
         (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
         for (uint256 i = 0; i < configs.length; ++i) {
-            configs[i].oracleClock = _clock;
+            configs[i].gateByOracleUpdate = _enabled;
         }
         vm.prank(ENTRY_POINT_ADMIN);
         entryPoint.modifyTrancheConfigs(tranches, configs);
+    }
+
+    /// @dev Rotates the market's collateral asset oracle to the specified replacement through the kernel admin surface
+    function _rotateOracle(address _oracle) internal {
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        kernel.setCollateralAssetOracle(_oracle, ORACLE_STALENESS_THRESHOLD_SECONDS, false);
     }
 
     // ---------------------------------------------------------------------
@@ -59,7 +52,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
     // ---------------------------------------------------------------------
 
     function test_request_stampsQueuedAtTimestamp() public {
-        _setOracleClock(address(chainlinkClock));
+        _setOracleGate(true);
         (uint256 depositNonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
         assertEq(
             entryPoint.getDepositRequest(USER_A, depositNonce).baseRequest.queuedAtTimestamp,
@@ -76,10 +69,10 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         );
     }
 
-    function test_request_withoutClock_stillStampsQueuedAtTimestamp() public {
-        // The stamp carries no clock semantics of its own: it is always the queueing time, clock or no clock
+    function test_request_withoutGate_stillStampsQueuedAtTimestamp() public {
+        // The stamp carries no gate semantics of its own: it is always the queueing time, gated or not
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
-        assertEq(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.queuedAtTimestamp, uint32(block.timestamp), "no clock must not skip the stamp");
+        assertEq(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.queuedAtTimestamp, uint32(block.timestamp), "no gate must not skip the stamp");
     }
 
     // ---------------------------------------------------------------------
@@ -87,170 +80,131 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
     // ---------------------------------------------------------------------
 
     function test_maturedDepositRequest_blockedUntilOracleUpdates() public {
-        _setOracleClock(address(chainlinkClock));
+        _setOracleGate(true);
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
 
-        // The delay elapses but the oracle never pushes: the mark is the same one the request was placed at
+        // The delay elapses but the oracle never updates: the mark is the same one the request was placed at
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
 
-        // The oracle pushes: the post-request update is now priced into the mark, and execution opens
-        priceFeed.setUpdatedAt(block.timestamp);
+        // The oracle updates: the post-request update is now priced into the mark, and execution opens
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
         assertGt(sharesMinted, 0, "execution must open once the oracle has updated");
     }
 
     function test_maturedRedemptionRequest_blockedUntilOracleUpdates() public {
-        _setOracleClock(address(chainlinkClock));
+        _setOracleGate(true);
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
 
         vm.warp(block.timestamp + DEFAULT_REDEMPTION_DELAY + 1);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
 
-        priceFeed.setUpdatedAt(block.timestamp);
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         AssetClaims memory claims = _executeRedemptionMax(USER_A, USER_A, nonce);
         assertGt(toUint256(claims.nav), 0, "execution must open once the oracle has updated");
     }
 
     function test_updateBeforeDelay_delayFloorStillBinds() public {
-        _setOracleClock(address(chainlinkClock));
+        _setOracleGate(true);
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
 
         // The oracle updates immediately (or is induced to): the gate opens but the delay floor must still hold,
         // otherwise inducing an update would collapse the queue into a spot market
         vm.warp(block.timestamp + 10);
-        priceFeed.setUpdatedAt(block.timestamp);
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.INVALID_REQUEST.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
     }
 
     // ---------------------------------------------------------------------
-    // Request-time poke correctness (the fold-in property)
-    // ---------------------------------------------------------------------
-
-    function test_requestTimePoke_foldsPendingUnobservedChangeIntoSnapshot() public {
-        // A checkpoint clock over a pull source: changes are only observed when someone pokes
-        MockValueSource source = new MockValueSource(1e18);
-        MockCheckpointClock checkpointClock = _deployCheckpointClock(address(source), 0);
-        _setOracleClock(address(checkpointClock));
-
-        // The source changes BEFORE the request with nobody poking: that change is already priced into the
-        // request-time mark and known to the requester, so it must NOT be able to satisfy the gate
-        source.setValue(1.1e18);
-        (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
-        assertEq(
-            checkpointClock.getOracleCheckpointClockState().lastUpdatedAt,
-            uint32(block.timestamp),
-            "the request-time poke must checkpoint the pending change at the queueing time, not after it"
-        );
-
-        // The delay elapses with no FURTHER change: still blocked, the pre-request change does not count
-        vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
-        vm.prank(USER_A);
-        entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
-
-        // A genuine post-request change opens the gate: the execution-time poke observes it in the same
-        // transaction, and the fresh value is priced into the very mark the execution settles at
-        source.setValue(1.2e18);
-        uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
-        assertGt(sharesMinted, 0, "a post-request change observed at execution time must open the gate");
-    }
-
-    // ---------------------------------------------------------------------
     // Configuration transitions and escapes
     // ---------------------------------------------------------------------
 
-    function test_nullClock_isPureDelayMode() public {
-        // Default configs carry no clock: the delay alone gates execution, with no oracle-update requirement
+    function test_disabledGate_isPureDelayMode() public {
+        // Default configs leave the gate disabled: the delay alone gates execution, with no oracle-update requirement
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
         uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
-        assertGt(sharesMinted, 0, "a clockless tranche must execute on the delay alone");
+        assertGt(sharesMinted, 0, "an ungated tranche must execute on the delay alone");
     }
 
-    function test_adminZeroingClock_degradesInFlightRequestsToPureDelay() public {
-        _setOracleClock(address(chainlinkClock));
+    function test_adminDisablingGate_degradesInFlightRequestsToPureDelay() public {
+        _setOracleGate(true);
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
-        _setOracleClock(address(0));
+        _setOracleGate(false);
 
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
         uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
-        assertGt(sharesMinted, 0, "zeroing the clock must degrade in-flight requests to pure-delay gating");
+        assertGt(sharesMinted, 0, "disabling the gate must degrade in-flight requests to pure-delay gating");
     }
 
-    function test_adminEnablingClockMidFlight_gatesPriorRequests() public {
+    function test_adminEnablingGateMidFlight_gatesPriorRequests() public {
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
-        _setOracleClock(address(chainlinkClock));
+        _setOracleGate(true);
 
-        // Configuring a clock expresses the intent to price pending information before execution: requests placed
-        // before the clock hold to the same gate, since the queueing stamp carries no clock lineage
+        // Enabling the gate expresses the intent to price pending information before execution: requests placed
+        // before the gate hold to the same rule, since the queueing stamp carries no gate lineage
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
 
-        // A genuine post-request update opens the pre-clock request like any other
-        priceFeed.setUpdatedAt(block.timestamp);
+        // A genuine post-request update opens the pre-gate request like any other
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
-        assertGt(sharesMinted, 0, "a post-request update must open requests placed before the clock was set");
+        assertGt(sharesMinted, 0, "a post-request update must open requests placed before the gate was enabled");
     }
 
-    function test_modifyTrancheConfigs_rejectsFutureReportingClock() public {
-        // A clock reporting a future update timestamp would satisfy the execution gate without a genuine update:
-        // the configuration must fail shut on the one half of clock honesty that is checkable on-chain
-        MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
-        address clock = address(new MockFeedClock(address(feed2)));
-        feed2.setUpdatedAt(block.timestamp + 1 days);
+    function test_modifyTrancheConfigs_rejectsFutureReportingOracle() public {
+        // An oracle reporting a future update timestamp would satisfy the execution gate without a genuine update:
+        // the configuration must fail shut on the one half of oracle honesty that is checkable on-chain
+        collateralAssetOracle.setUpdatedAt(block.timestamp + 1 days);
         (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
         for (uint256 i = 0; i < configs.length; ++i) {
-            configs[i].oracleClock = clock;
+            configs[i].gateByOracleUpdate = true;
         }
-        vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_IN_THE_FUTURE.selector);
+        vm.expectRevert(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE.selector);
         vm.prank(ENTRY_POINT_ADMIN);
         entryPoint.modifyTrancheConfigs(tranches, configs);
     }
 
-    function test_request_rejectsFutureReportingClock() public {
-        // The clock turns future-reporting after configuration (e.g. an aggregator migration to a broken feed):
-        // the request-time poke must fail shut rather than queue against a clock that can falsely open the gate
-        MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
-        feed2.setUpdatedAt(block.timestamp);
-        _setOracleClock(address(new MockFeedClock(address(feed2))));
-        feed2.setUpdatedAt(block.timestamp + 1 days);
+    function test_request_rejectsFutureReportingOracle() public {
+        // The oracle turns future-reporting after the gate is enabled (e.g. a migration to a broken feed): the
+        // request-time poke must fail shut rather than queue against an oracle that can falsely open the gate
+        _setOracleGate(true);
+        collateralAssetOracle.setUpdatedAt(block.timestamp + 1 days);
 
-        vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_IN_THE_FUTURE.selector);
+        vm.expectRevert(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE.selector);
         vm.prank(USER_A);
         entryPoint.requestDeposit(address(juniorTranche), toTrancheUnits(10 * stUnit), USER_A, 0);
     }
 
-    function test_deadClock_queuesFine_executionWaitsForRevival() public {
-        // The clock's feed dies after configuration (a zero update timestamp): queueing stays open, a zero reading
-        // cannot weaken the gate, it conservatively holds execution shut until the feed revives with a genuine update
-        MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
-        feed2.setUpdatedAt(block.timestamp);
-        _setOracleClock(address(new MockFeedClock(address(feed2))));
-        feed2.setUpdatedAt(0);
-
+    function test_deadOracle_executionWaitsForRevival() public {
+        // The oracle dies after the request (a zero update timestamp): a zero reading cannot weaken the gate, it
+        // conservatively holds execution shut until the oracle revives with a genuine update
+        _setOracleGate(true);
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
+        collateralAssetOracle.setUpdatedAt(0);
+
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
 
-        feed2.setUpdatedAt(block.timestamp);
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
-        assertGt(sharesMinted, 0, "the feed's revival must reopen execution");
+        assertGt(sharesMinted, 0, "the oracle's revival must reopen execution");
     }
 
     function test_cancellation_isUngatedWhileExecutionIsBlocked() public {
-        _setOracleClock(address(chainlinkClock));
+        _setOracleGate(true);
         uint256 amount = 10 * stUnit;
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, 0);
 
@@ -262,68 +216,61 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
     }
 
     function test_updateBeforeDelay_delayFloorStillBinds_redemption() public {
-        _setOracleClock(address(chainlinkClock));
+        _setOracleGate(true);
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
 
         // The oracle updates immediately: the gate opens but the redemption delay floor must still hold
         vm.warp(block.timestamp + 10);
-        priceFeed.setUpdatedAt(block.timestamp);
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.INVALID_REQUEST.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
     }
 
-    function test_requestRedemption_rejectsFutureReportingClock() public {
+    function test_requestRedemption_rejectsFutureReportingOracle() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
-        MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
-        feed2.setUpdatedAt(block.timestamp);
-        _setOracleClock(address(new MockFeedClock(address(feed2))));
-        feed2.setUpdatedAt(block.timestamp + 1 days);
+        _setOracleGate(true);
+        collateralAssetOracle.setUpdatedAt(block.timestamp + 1 days);
 
-        vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_IN_THE_FUTURE.selector);
+        vm.expectRevert(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE.selector);
         vm.prank(USER_A);
         entryPoint.requestRedemption(address(juniorTranche), shares, USER_A, 0);
     }
 
     // ---------------------------------------------------------------------
-    // The permissionless poke surface and its tick event
+    // The permissionless poke surface and its event
     // ---------------------------------------------------------------------
 
-    function test_pokeOracleClock_isPermissionlessAndDrivesTheGate() public {
-        // A checkpoint clock over a pull source: nobody pokes it organically, so a matured request stays blocked
-        MockValueSource source = new MockValueSource(1e18);
-        MockCheckpointClock checkpointClock = _deployCheckpointClock(address(source), 0);
-        _setOracleClock(address(checkpointClock));
+    function test_pokeCollateralAssetOracle_isPermissionlessAndDrivesTheGate() public {
+        _setOracleGate(true);
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
 
-        // A post-request change lands and ANYONE drives the clock through the entry point, emitting the tick
+        // A post-request update lands and ANYONE observes it through the entry point, emitting the poke event
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
-        source.setValue(1.1e18);
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         vm.expectEmit(address(entryPoint));
-        emit IRoycoDayEntryPoint.OracleClockTick(address(juniorTranche), uint32(block.timestamp));
+        emit IRoycoDayEntryPoint.CollateralAssetOraclePoked(address(juniorTranche), uint32(block.timestamp));
         vm.prank(makeAddr("ANYONE"));
-        uint32 lastUpdatedAt = entryPoint.pokeOracleClock(address(juniorTranche));
-        assertEq(lastUpdatedAt, uint32(block.timestamp), "the poke must report the freshly checkpointed update");
+        uint32 lastUpdatedAt = entryPoint.pokeCollateralAssetOracle(address(juniorTranche));
+        assertEq(lastUpdatedAt, uint32(block.timestamp), "the poke must report the fresh update");
 
-        // The externally driven checkpoint satisfies the gate: execution opens without any further source change
+        // The observed post-request update satisfies the gate: execution opens
         uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
-        assertGt(sharesMinted, 0, "an externally poked checkpoint must open the gate");
+        assertGt(sharesMinted, 0, "an observed post-request update must open the gate");
     }
 
-    function test_pokeOracleClock_clocklessTranche_isANoOpReportingZero() public {
-        // Default configs carry no clock: the poke must not revert, must move nothing, and must emit nothing
+    function test_pokeCollateralAssetOracle_ungatedTranche_isANoOpReportingZero() public {
+        // Default configs leave the gate disabled: the poke must not revert, must consult nothing, and must emit nothing
         vm.recordLogs();
-        assertEq(entryPoint.pokeOracleClock(address(juniorTranche)), 0, "a clockless tranche must report a zero timestamp");
-        assertEq(vm.getRecordedLogs().length, 0, "a clockless poke must emit nothing");
+        assertEq(entryPoint.pokeCollateralAssetOracle(address(juniorTranche)), 0, "an ungated tranche must report a zero timestamp");
+        assertEq(vm.getRecordedLogs().length, 0, "an ungated poke must emit nothing");
     }
 
-    function test_request_emitsOracleClockTickWithFoldedTimestamp() public {
-        // The request-time poke folds a pending unobserved change and announces the tick it lands on
-        MockValueSource source = new MockValueSource(1e18);
-        MockCheckpointClock checkpointClock = _deployCheckpointClock(address(source), 0);
-        _setOracleClock(address(checkpointClock));
-        source.setValue(1.1e18);
+    function test_request_emitsCollateralAssetOraclePoked() public {
+        // The request-time poke refreshes the oracle and announces the reading it lands on
+        _setOracleGate(true);
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
 
         // Fund and approve first: the emit expectation must bind to the request call itself
         uint256 amount = 10 * stUnit;
@@ -331,144 +278,145 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         vm.startPrank(USER_A);
         stJtVault.approve(address(entryPoint), amount);
         vm.expectEmit(address(entryPoint));
-        emit IRoycoDayEntryPoint.OracleClockTick(address(juniorTranche), uint32(block.timestamp));
+        emit IRoycoDayEntryPoint.CollateralAssetOraclePoked(address(juniorTranche), uint32(block.timestamp));
         entryPoint.requestDeposit(address(juniorTranche), toTrancheUnits(amount), USER_A, 0);
         vm.stopPrank();
     }
 
-    function test_execution_rejectsFutureReportingClock() public {
+    function test_execution_rejectsFutureReportingOracle() public {
         // The execution-gate poke is where the future check is load-bearing: a future timestamp trivially
         // satisfies the strictly-after comparison, so it must fail shut before the gate ever reads it
-        _setOracleClock(address(chainlinkClock));
+        _setOracleGate(true);
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
-        priceFeed.setUpdatedAt(block.timestamp + 1 days);
+        collateralAssetOracle.setUpdatedAt(block.timestamp + 1 days);
 
-        vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_IN_THE_FUTURE.selector);
+        vm.expectRevert(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE.selector);
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
 
-        // The standalone poke fails shut on the same clock
-        vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_IN_THE_FUTURE.selector);
-        entryPoint.pokeOracleClock(address(juniorTranche));
+        // The standalone poke fails shut on the same oracle
+        vm.expectRevert(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE.selector);
+        entryPoint.pokeCollateralAssetOracle(address(juniorTranche));
 
         // An honest update reopens execution
-        priceFeed.setUpdatedAt(block.timestamp);
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
         assertGt(sharesMinted, 0, "an honest update must reopen execution");
     }
 
-    function test_configAndExecutionPokes_emitOracleClockTick() public {
-        // The config-time poke announces the tick for each tranche it validates
+    function test_configAndExecutionPokes_emitCollateralAssetOraclePoked() public {
+        // Explicit timestamp locals: the emit templates must not read block.timestamp across the warp, the
+        // via-IR optimizer may reuse a pre-warp evaluation of the same expression within one test frame
+        uint256 configuredAt = block.timestamp;
+        collateralAssetOracle.setUpdatedAt(configuredAt);
+
+        // The config-time poke announces the reading for each tranche it validates
         (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
         for (uint256 i = 0; i < configs.length; ++i) {
-            configs[i].oracleClock = address(chainlinkClock);
+            configs[i].gateByOracleUpdate = true;
         }
-        uint32 feedUpdatedAt = chainlinkClock.poke();
         vm.expectEmit(address(entryPoint));
-        emit IRoycoDayEntryPoint.OracleClockTick(tranches[0], feedUpdatedAt);
+        emit IRoycoDayEntryPoint.CollateralAssetOraclePoked(tranches[0], uint32(configuredAt));
         vm.prank(ENTRY_POINT_ADMIN);
         entryPoint.modifyTrancheConfigs(tranches, configs);
 
-        // The execution-gate poke announces the tick it opened on
+        // The execution-gate poke announces the reading it opened on
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
-        vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
-        priceFeed.setUpdatedAt(block.timestamp);
+        uint256 executedAt = configuredAt + DEFAULT_DEPOSIT_DELAY + 1;
+        vm.warp(executedAt);
+        collateralAssetOracle.setUpdatedAt(executedAt);
         vm.expectEmit(address(entryPoint));
-        emit IRoycoDayEntryPoint.OracleClockTick(address(juniorTranche), uint32(block.timestamp));
+        emit IRoycoDayEntryPoint.CollateralAssetOraclePoked(address(juniorTranche), uint32(executedAt));
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
     }
 
     // ---------------------------------------------------------------------
-    // Clock rotation: no pending request may open without a genuine update
+    // Oracle rotation: no pending request may open without a genuine update
     // ---------------------------------------------------------------------
 
-    function test_rotationToVirginClock_cannotInstantOpenPendingQueue_thenAutoResumes() public {
-        // A queue pending under one clock, rotated to a freshly initialized checkpoint clock: the virgin clock's
-        // baseline recording carries no update timestamp, so the rotation cannot open a single pending request,
-        // the queue pauses, then auto-resumes on the new source's first genuine deviation
-        _setOracleClock(address(chainlinkClock));
+    function test_rotationToOracleWithoutPostRequestUpdate_cannotInstantOpenPendingQueue() public {
+        // A queue pending under one oracle, rotated to a replacement whose last update is not after the request:
+        // the rotation itself cannot open a single pending request, the queue holds until a genuine update lands
+        _setOracleGate(true);
+        uint256 queuedAt = block.timestamp;
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
 
-        MockValueSource source = new MockValueSource(1e18);
-        MockCheckpointClock virginClock = _deployCheckpointClock(address(source), 0);
-        assertEq(virginClock.getOracleCheckpointClockState().lastUpdatedAt, 0, "setup: the virgin clock must carry no update timestamp");
-        _setOracleClock(address(virginClock));
+        MockPriceOracle replacement = new MockPriceOracle(address(stJtVault), cell.collateralAsset.initialRateWAD);
+        replacement.setUpdatedAt(queuedAt);
+        _rotateOracle(address(replacement));
 
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
 
-        // The new source's first genuine deviation is a real post-request update: the queue resumes by itself
-        source.setValue(1.1e18);
+        // The replacement's first genuine post-request update is resolved live from the kernel: the queue resumes
+        replacement.setUpdatedAt(block.timestamp);
         uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
-        assertGt(sharesMinted, 0, "the first genuine deviation of the new source must reopen the queue");
+        assertGt(sharesMinted, 0, "the replacement oracle's first genuine update must reopen the queue");
     }
 
-    function test_rotationToWarmClock_opensOnPostRequestDeviation() public {
-        // The rotated-in clock already checkpointed a deviation AFTER the request was queued: that is a genuine
+    function test_rotationToOracleWithPostRequestUpdate_opensImmediately() public {
+        // The rotated-in oracle already carries an update stamped AFTER the request was queued: that is a genuine
         // post-request source update, so the pending request opens immediately, correct, not a hole
+        _setOracleGate(true);
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
 
-        MockValueSource source = new MockValueSource(1e18);
-        MockCheckpointClock warmClock = _deployCheckpointClock(address(source), 0);
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
-        source.setValue(1.1e18);
-        warmClock.poke();
-        assertGt(warmClock.getOracleCheckpointClockState().lastUpdatedAt, 0, "setup: the warm clock must carry a post-request checkpoint");
+        MockPriceOracle replacement = new MockPriceOracle(address(stJtVault), cell.collateralAsset.initialRateWAD);
+        _rotateOracle(address(replacement));
 
-        _setOracleClock(address(warmClock));
         uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
-        assertGt(sharesMinted, 0, "a genuine post-request deviation on the rotated-in clock must open the request");
+        assertGt(sharesMinted, 0, "a genuine post-request update on the rotated-in oracle must open the request");
     }
 
     function test_sameSecondUpdate_staysBlocked_strictInequality() public {
         // An update stamped in the very second the request queued is not provably after it: the strict inequality
         // holds the gate shut until an update lands in a strictly later second
-        _setOracleClock(address(chainlinkClock));
-        priceFeed.setUpdatedAt(block.timestamp);
+        _setOracleGate(true);
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
 
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
 
-        priceFeed.setUpdatedAt(block.timestamp);
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
         assertGt(sharesMinted, 0, "a strictly later update must open the gate");
     }
 
-    function test_adminZeroingClock_degradesInFlightRedemptionsToPureDelay() public {
-        _setOracleClock(address(chainlinkClock));
+    function test_adminDisablingGate_degradesInFlightRedemptionsToPureDelay() public {
+        _setOracleGate(true);
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
-        _setOracleClock(address(0));
+        _setOracleGate(false);
 
         vm.warp(block.timestamp + DEFAULT_REDEMPTION_DELAY + 1);
         AssetClaims memory claims = _executeRedemptionMax(USER_A, USER_A, nonce);
-        assertGt(toUint256(claims.nav), 0, "zeroing the clock must degrade in-flight redemptions to pure-delay gating");
+        assertGt(toUint256(claims.nav), 0, "disabling the gate must degrade in-flight redemptions to pure-delay gating");
     }
 
-    function test_adminEnablingClockMidFlight_gatesPriorRedemptions() public {
+    function test_adminEnablingGateMidFlight_gatesPriorRedemptions() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
-        _setOracleClock(address(chainlinkClock));
+        _setOracleGate(true);
 
         vm.warp(block.timestamp + DEFAULT_REDEMPTION_DELAY + 1);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
 
-        priceFeed.setUpdatedAt(block.timestamp);
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
         AssetClaims memory claims = _executeRedemptionMax(USER_A, USER_A, nonce);
-        assertGt(toUint256(claims.nav), 0, "a post-request update must open redemptions placed before the clock was set");
+        assertGt(toUint256(claims.nav), 0, "a post-request update must open redemptions placed before the gate was enabled");
     }
 
     function test_blockedRedemption_poisonsBatchLikeAnUnmaturedOne() public {
-        _setOracleClock(address(chainlinkClock));
+        _setOracleGate(true);
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
 
@@ -480,13 +428,13 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = type(uint256).max;
 
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeRedemptions(users, nonces, amounts);
     }
 
     function test_blockedRequest_poisonsBatchLikeAnUnmaturedOne() public {
-        _setOracleClock(address(chainlinkClock));
+        _setOracleGate(true);
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
 
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
@@ -497,7 +445,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         TRANCHE_UNIT[] memory amounts = new TRANCHE_UNIT[](1);
         amounts[0] = toTrancheUnits(type(uint256).max);
 
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeDeposits(users, nonces, amounts);
     }

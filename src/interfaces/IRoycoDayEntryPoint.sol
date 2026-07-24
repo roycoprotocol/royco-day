@@ -32,13 +32,13 @@ interface IRoycoDayEntryPoint {
      * @custom:field enabled - Whether the tranche is enabled for deposits and redemptions
      * @custom:field depositDelaySeconds - The delay in seconds between deposit request and execution
      * @custom:field redemptionDelaySeconds - The delay in seconds between redemption request and execution
-     * @custom:field collateralAssetOracleEnabled - Whether execution is gated on at least one collateral asset oracle update observed after the request
+     * @custom:field gateByOracleUpdate - Whether execution is gated on at least one collateral asset oracle update observed after the request
      */
     struct TrancheConfig {
         bool enabled;
         uint24 depositDelaySeconds;
         uint24 redemptionDelaySeconds;
-        bool collateralAssetOracleEnabled;
+        bool gateByOracleUpdate;
     }
 
     /**
@@ -157,7 +157,7 @@ interface IRoycoDayEntryPoint {
      * @param sharesRedeemed The shares redeemed for the user (the receiver's and the executor's portions combined)
      * @param protocolFeeShares The shares forfeited to the protocol equating to the yield accrued during the request lifecycle (zero if NAV decreased)
      * @param userClaims The asset claims withdrawn to the receiver
-     * @param quoteAssets The quote withdrawn to the receiver (zero unless a liquidity tranche redemption exits multi-asset)
+     * @param quoteAssets The quote withdrawn to the receiver (zero unless a liquidity provider tranche redemption exits multi-asset)
      * @param bonusClaims The asset claims paid to the executor as a bonus (zero if self-executed)
      * @param bonusQuoteAssets The quote paid to the executor as a bonus (zero if self-executed)
      */
@@ -313,13 +313,13 @@ interface IRoycoDayEntryPoint {
 
     /**
      * @notice Executes multiple pending redemption requests across the specified users
-     * @dev A maximal liquidity tranche redemption may fall back to the multi-asset exit when the in-kind bound
+     * @dev A maximal liquidity provider tranche redemption may fall back to the multi-asset exit when the in-kind bound
      *      cannot serve the entire remaining request (see executeRedemption)
      * @param _users The users whose redemption requests should be executed
      * @param _requestNonces The nonces of the redemption requests to execute
      * @param _sharesToRedeem The amount of shares to redeem for the redemption requests to execute (use type(uint256).max to redeem the maximum possible)
      * @return userClaims The assets withdrawn to the request-specific receiver upon executing each executed request
-     * @return quoteAssets The quote withdrawn to the request-specific receiver by each executed request (zero unless a liquidity tranche redemption exits multi-asset)
+     * @return quoteAssets The quote withdrawn to the request-specific receiver by each executed request (zero unless a liquidity provider tranche redemption exits multi-asset)
      */
     function executeRedemptions(
         address[] calldata _users,
@@ -332,7 +332,7 @@ interface IRoycoDayEntryPoint {
     /**
      * @notice Executes a pending redemption request for the specified user
      * @dev The request must exist and the configured delay period must have elapsed
-     *      A maximal liquidity tranche redemption exits in-kind whenever the in-kind bound serves the entire
+     *      A maximal liquidity provider tranche redemption exits in-kind whenever the in-kind bound serves the entire
      *      remaining request, and otherwise fills up to the dominant bound capped at the remaining request,
      *      exiting to the LP token's constituents only when the multi-asset bound is strictly wider (equal bounds
      *      stay in-kind), so a redemption the market can serve is never left behind by the in-kind gate. Explicit

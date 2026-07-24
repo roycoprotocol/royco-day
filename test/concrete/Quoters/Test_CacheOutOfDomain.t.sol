@@ -36,15 +36,15 @@ contract Test_CacheOutOfDomain is Test {
     function test_writeValueAtOrAboveDomain_RevertsInsteadOfCorrupting() public {
         // Exactly the marker bit would be indistinguishable from caching zero, so the write reverts
         vm.expectRevert(Cache.CACHE_VALUE_OUT_OF_DOMAIN.selector);
-        this.writeExternal(CacheKey.ST_SHARE_TO_NAV_RATE, TOP_BIT);
+        this.writeExternal(CacheKey.ST_SHARE_PRICE, TOP_BIT);
 
         // Marker bit plus a payload would read back off by exactly 2^255, so the write reverts
         vm.expectRevert(Cache.CACHE_VALUE_OUT_OF_DOMAIN.selector);
-        this.writeExternal(CacheKey.ST_SHARE_TO_NAV_RATE, TOP_BIT + 7);
+        this.writeExternal(CacheKey.ST_SHARE_PRICE, TOP_BIT + 7);
 
         // The largest in-domain value (2^255 - 1) is accepted and round-trips exactly
-        Cache._write(CacheKey.ST_SHARE_TO_NAV_RATE, TOP_BIT - 1);
-        (bool hit, uint256 value) = Cache._read(CacheKey.ST_SHARE_TO_NAV_RATE);
+        Cache._write(CacheKey.ST_SHARE_PRICE, TOP_BIT - 1);
+        (bool hit, uint256 value) = Cache._read(CacheKey.ST_SHARE_PRICE);
         assertTrue(hit, "an in-domain write marks the slot populated");
         assertEq(value, TOP_BIT - 1, "the largest in-domain value round-trips exactly");
     }

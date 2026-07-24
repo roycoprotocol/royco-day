@@ -5,7 +5,7 @@ import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -16,7 +16,7 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
  * @title Test_OracleGuardAndConversions_BPTOracleQuoter
- * @notice The LT quoter's runtime surface: the setBPTOracle pool-attestation guard, the reinvestment slippage
+ * @notice The LPT quoter's runtime surface: the setBPTOracle pool-attestation guard, the reinvestment slippage
  *         bound setter, BPT<->NAV conversion exactness against a pinned oracle TVL, the resolved quote asset,
  *         and the senior-share rate provider's unseeded floor
  * @dev setUp only deploys (18-dec vault share against a 6-dec quote, default params); each test seeds the exact
@@ -31,12 +31,12 @@ contract Test_OracleGuardAndConversions_BPTOracleQuoter is DayMarketTestBase {
     // setBPTOracle pool-attestation guard
     // =============================
 
-    /// @notice An oracle pricing a DIFFERENT pool is rejected: the guard requires LPOracleBase(oracle).pool() to equal this market's LT asset
+    /// @notice An oracle pricing a DIFFERENT pool is rejected: the guard requires LPOracleBase(oracle).pool() to equal this market's LPT asset
     function test_RevertIf_BPTOraclePricesForeignPool() public {
         MockBPTOracle foreignOracle = new MockBPTOracle(balancerVault, makeAddr("FOREIGN_POOL"));
 
         vm.prank(ORACLE_QUOTER_ADMIN);
-        vm.expectRevert(BalancerV3_LT_BPTOracle_Quoter.BPT_ORACLE_POOL_MISMATCH.selector);
+        vm.expectRevert(BalancerV3LiquidityVenue.BPT_ORACLE_POOL_MISMATCH.selector);
         kernel.setBPTOracle(address(foreignOracle), false);
     }
 
@@ -47,50 +47,50 @@ contract Test_OracleGuardAndConversions_BPTOracleQuoter is DayMarketTestBase {
         strictOracle.setShouldRevertIfVaultUnlocked(true);
 
         vm.prank(ORACLE_QUOTER_ADMIN);
-        vm.expectRevert(BalancerV3_LT_BPTOracle_Quoter.BPT_ORACLE_CANNOT_REVERT_WHILE_VAULT_UNLOCKED.selector);
+        vm.expectRevert(BalancerV3LiquidityVenue.BPT_ORACLE_CANNOT_REVERT_WHILE_VAULT_UNLOCKED.selector);
         kernel.setBPTOracle(address(strictOracle), false);
     }
 
     /**
      * @notice A right-pool oracle lands in storage with its event, and on BOTH sync-flag paths the trailing sync
-     *         re-commits the LT raw NAV against the INCOMING oracle's mark
+     *         re-commits the LPT raw NAV against the INCOMING oracle's mark
      * @dev Both paths end with a sync against the incoming oracle; the flag only controls whether the outgoing
      *      oracle gets a final sync first. Expected committed marks are hand-pinned MANUAL-mode TVLs
      */
-    function test_SetBPTOracle_RecommitsLTRawNAVAgainstIncomingOracle_OnBothSyncFlagPaths() public {
-        _seedMarket(100e18, 50e18); // JT then ST (auto-seeds minimal quote-only LT depth for the liquidity requirement)
+    function test_SetBPTOracle_RecommitsLPTRawNAVAgainstIncomingOracle_OnBothSyncFlagPaths() public {
+        _seedMarket(100e18, 50e18); // JT then ST (auto-seeds minimal quote-only LPT depth for the liquidity requirement)
 
-        uint256 ownedBpt = toUint256(kernel.getState().totalLTAssets);
+        uint256 ownedBpt = toUint256(kernel.getState().totalLPTAssets);
         uint256 bptSupply = balancerVault.totalSupply(address(bpt));
 
         // Path 1 (sync against the outgoing oracle first): a replacement pinned to a 3e18 TVL
         MockBPTOracle replacement = new MockBPTOracle(balancerVault, address(bpt));
         replacement.setTVL(3e18);
         replacement.setMode(MockBPTOracle.Mode.MANUAL);
-        // Expected committed LT raw NAV under the incoming oracle: floor(TVL x ownedBPT / bptSupply)
-        uint256 expectedLtRawNAV = Math.mulDiv(3e18, ownedBpt, bptSupply, Math.Rounding.Floor);
+        // Expected committed LPT raw NAV under the incoming oracle: floor(TVL x ownedBPT / bptSupply)
+        uint256 expectedLptRawNAV = Math.mulDiv(3e18, ownedBpt, bptSupply, Math.Rounding.Floor);
 
         vm.prank(ORACLE_QUOTER_ADMIN);
         vm.expectEmit(true, false, false, true, address(kernel));
-        emit BalancerV3_LT_BPTOracle_Quoter.BPTOracleUpdated(address(replacement));
+        emit BalancerV3LiquidityVenue.BPTOracleUpdated(address(replacement));
         kernel.setBPTOracle(address(replacement), true);
 
-        assertEq(kernel.getBalancerV3QuoterState().bptOracle, address(replacement), "the replacement oracle must land in quoter storage");
-        assertEq(toUint256(accountant.getState().lastLTRawNAV), expectedLtRawNAV, "the committed LT raw NAV must be re-marked against the incoming oracle");
+        assertEq(kernel.getBalancerV3LiquidityVenueState().bptOracle, address(replacement), "the replacement oracle must land in quoter storage");
+        assertEq(toUint256(accountant.getState().lastLPTRawNAV), expectedLptRawNAV, "the committed LPT raw NAV must be re-marked against the incoming oracle");
 
         // Path 2 (no pre-sync against the outgoing oracle): a second replacement pinned to a 5e18 TVL
         MockBPTOracle secondReplacement = new MockBPTOracle(balancerVault, address(bpt));
         secondReplacement.setTVL(5e18);
         secondReplacement.setMode(MockBPTOracle.Mode.MANUAL);
-        uint256 expectedSecondLtRawNAV = Math.mulDiv(5e18, ownedBpt, bptSupply, Math.Rounding.Floor);
+        uint256 expectedSecondLptRawNAV = Math.mulDiv(5e18, ownedBpt, bptSupply, Math.Rounding.Floor);
 
         vm.prank(ORACLE_QUOTER_ADMIN);
         vm.expectEmit(true, false, false, true, address(kernel));
-        emit BalancerV3_LT_BPTOracle_Quoter.BPTOracleUpdated(address(secondReplacement));
+        emit BalancerV3LiquidityVenue.BPTOracleUpdated(address(secondReplacement));
         kernel.setBPTOracle(address(secondReplacement), false);
 
-        assertEq(kernel.getBalancerV3QuoterState().bptOracle, address(secondReplacement), "the no-pre-sync path must also land the oracle in storage");
-        assertEq(toUint256(accountant.getState().lastLTRawNAV), expectedSecondLtRawNAV, "the no-pre-sync path must also re-commit against the incoming oracle");
+        assertEq(kernel.getBalancerV3LiquidityVenueState().bptOracle, address(secondReplacement), "the no-pre-sync path must also land the oracle in storage");
+        assertEq(toUint256(accountant.getState().lastLPTRawNAV), expectedSecondLptRawNAV, "the no-pre-sync path must also re-commit against the incoming oracle");
     }
 
     /**
@@ -111,30 +111,30 @@ contract Test_OracleGuardAndConversions_BPTOracleQuoter is DayMarketTestBase {
     function test_SetMaxReinvestmentSlippage_UpdatesStateAndEmits() public {
         uint64 newSlippageWAD = 0.005e18;
         vm.expectEmit(address(kernel));
-        emit BalancerV3_LT_BPTOracle_Quoter.MaxReinvestmentSlippageUpdated(newSlippageWAD);
+        emit BalancerV3LiquidityVenue.MaxReinvestmentSlippageUpdated(newSlippageWAD);
         vm.prank(ORACLE_QUOTER_ADMIN);
         kernel.setMaxReinvestmentSlippage(newSlippageWAD);
-        assertEq(kernel.getBalancerV3QuoterState().maxReinvestmentSlippageWAD, newSlippageWAD, "the slippage bound must land in quoter storage");
+        assertEq(kernel.getBalancerV3LiquidityVenueState().maxReinvestmentSlippageWAD, newSlippageWAD, "the slippage bound must land in quoter storage");
     }
 
     /// @notice A 100 percent slippage bound is rejected, it would let the single-sided add accept an arbitrarily bad fill
     function test_RevertIf_MaxReinvestmentSlippageIsFullWAD() public {
         vm.prank(ORACLE_QUOTER_ADMIN);
-        vm.expectRevert(BalancerV3_LT_BPTOracle_Quoter.INVALID_MAX_REINVESTMENT_SLIPPAGE.selector);
+        vm.expectRevert(BalancerV3LiquidityVenue.INVALID_MAX_REINVESTMENT_SLIPPAGE.selector);
         kernel.setMaxReinvestmentSlippage(uint64(WAD));
     }
 
     /**
      * @notice An unprivileged attacker can neither swap the BPT oracle nor loosen the reinvestment slippage bound,
      *         and the failed attempts leave the quoter state untouched
-     * @dev Either setter is a full price-integrity takeover: a hostile oracle mismarks ltRawNAV at will, and a
+     * @dev Either setter is a full price-integrity takeover: a hostile oracle mismarks lptRawNAV at will, and a
      *      loosened slippage bound lets a sandwiched reinvestment donate the whole premium to the attacker
      */
-    function test_RevertIf_LTQuoterSettersCalledByNonAdmin() public {
+    function test_RevertIf_LPTQuoterSettersCalledByNonAdmin() public {
         address attacker = makeAddr("ATTACKER");
         MockBPTOracle hostileOracle = new MockBPTOracle(balancerVault, address(bpt));
-        address oracleBefore = kernel.getBalancerV3QuoterState().bptOracle;
-        uint64 slippageBefore = kernel.getBalancerV3QuoterState().maxReinvestmentSlippageWAD;
+        address oracleBefore = kernel.getBalancerV3LiquidityVenueState().bptOracle;
+        uint64 slippageBefore = kernel.getBalancerV3LiquidityVenueState().maxReinvestmentSlippageWAD;
 
         vm.startPrank(attacker);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, attacker));
@@ -143,19 +143,19 @@ contract Test_OracleGuardAndConversions_BPTOracleQuoter is DayMarketTestBase {
         kernel.setMaxReinvestmentSlippage(uint64(WAD) - 1);
         vm.stopPrank();
 
-        assertEq(kernel.getBalancerV3QuoterState().bptOracle, oracleBefore, "the BPT oracle must be untouched by the failed attempts");
-        assertEq(kernel.getBalancerV3QuoterState().maxReinvestmentSlippageWAD, slippageBefore, "the slippage bound must be untouched by the failed attempts");
+        assertEq(kernel.getBalancerV3LiquidityVenueState().bptOracle, oracleBefore, "the BPT oracle must be untouched by the failed attempts");
+        assertEq(kernel.getBalancerV3LiquidityVenueState().maxReinvestmentSlippageWAD, slippageBefore, "the slippage bound must be untouched by the failed attempts");
     }
 
     // =============================
-    // ltRawNAV conversion exactness
+    // lptRawNAV conversion exactness
     // =============================
 
     /**
      * @notice BPT -> NAV is floor(TVL x bptAmount / bptSupply), pinned against a MANUAL-mode oracle TVL with the
      *         expected value recomputed independently, plus the floor-direction identity value x supply <= TVL x amount
      */
-    function test_LTConvertTrancheUnitsToNAVUnits_ExactFloorAgainstPinnedTVL() public {
+    function test_LPTConvertTrancheUnitsToNAVUnits_ExactFloorAgainstPinnedTVL() public {
         bptOracle.setTVL(7e18);
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
 
@@ -166,14 +166,14 @@ contract Test_OracleGuardAndConversions_BPTOracleQuoter is DayMarketTestBase {
         uint256 amount = (bptSupply / 3) + 1;
         uint256 expected = Math.mulDiv(7e18, amount, bptSupply, Math.Rounding.Floor);
 
-        uint256 got = toUint256(kernel.convertLTAssetsToValue(toTrancheUnits(amount)));
+        uint256 got = toUint256(kernel.convertLPTAssetsToValue(toTrancheUnits(amount)));
         assertEq(got, expected, "the conversion must be floor(TVL x amount / supply)");
-        // Floor direction: the conversion never overstates the LT's NAV
+        // Floor direction: the conversion never overstates the LPT's NAV
         assertLe(got * bptSupply, 7e18 * amount, "the floor bias must never overstate NAV");
     }
 
     /// @notice NAV -> BPT is the inverse floor: floor(supply x value / TVL)
-    function test_LTConvertNAVUnitsToTrancheUnits_ExactFloorAgainstPinnedTVL() public {
+    function test_LPTConvertNAVUnitsToTrancheUnits_ExactFloorAgainstPinnedTVL() public {
         bptOracle.setTVL(7e18);
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
 
@@ -181,7 +181,7 @@ contract Test_OracleGuardAndConversions_BPTOracleQuoter is DayMarketTestBase {
         uint256 value = 1e18 + 3; // deliberately non-divisible
         uint256 expected = Math.mulDiv(bptSupply, value, 7e18, Math.Rounding.Floor);
 
-        assertEq(toUint256(kernel.convertValueToLTAssets(toNAVUnits(value))), expected, "the conversion must be floor(supply x value / TVL)");
+        assertEq(toUint256(kernel.convertValueToLPTAssets(toNAVUnits(value))), expected, "the conversion must be floor(supply x value / TVL)");
     }
 
     /**
@@ -192,7 +192,7 @@ contract Test_OracleGuardAndConversions_BPTOracleQuoter is DayMarketTestBase {
      *      path's NAV -> tranche division (pinned in the sibling reinvest test file). This test pins the exact boundary
      *      between the tolerant and the panicking direction
      */
-    function test_LTConvertTrancheUnitsToNAVUnits_ZeroTVLWithSupply_MarksZeroWithoutRevert() public {
+    function test_LPTConvertTrancheUnitsToNAVUnits_ZeroTVLWithSupply_MarksZeroWithoutRevert() public {
         bptOracle.setTVL(0);
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
 
@@ -202,18 +202,18 @@ contract Test_OracleGuardAndConversions_BPTOracleQuoter is DayMarketTestBase {
 
         // BPT -> NAV: floor(TVL x amount / supply) = floor(0 x 1e18 / supply) = 0 for ANY positive supply, so a
         // worthless pool marks at exactly zero and never divides by zero
-        assertEq(toUint256(kernel.convertLTAssetsToValue(toTrancheUnits(1e18))), 0, "a zero TVL must mark the BPT at exactly zero NAV, not revert");
+        assertEq(toUint256(kernel.convertLPTAssetsToValue(toTrancheUnits(1e18))), 0, "a zero TVL must mark the BPT at exactly zero NAV, not revert");
 
         // NAV -> BPT: floor(supply x value / TVL) divides by TVL == 0, so the inverse direction panics (0x12)
         vm.expectRevert(stdError.divisionError);
-        kernel.convertValueToLTAssets(toNAVUnits(uint256(1e18)));
+        kernel.convertValueToLPTAssets(toNAVUnits(uint256(1e18)));
     }
 
-    /// @notice A reverting oracle bricks the LT mark: the conversion path surfaces the oracle failure rather than guessing
+    /// @notice A reverting oracle bricks the LPT mark: the conversion path surfaces the oracle failure rather than guessing
     function test_RevertIf_BPTOracleRevertsDuringConversion() public {
         bptOracle.setRevertMode(true);
         vm.expectRevert(MockBPTOracle.ORACLE_REVERT_MODE.selector);
-        kernel.convertLTAssetsToValue(toTrancheUnits(1e18));
+        kernel.convertLPTAssetsToValue(toTrancheUnits(1e18));
     }
 
     // =============================
@@ -248,11 +248,11 @@ contract Test_SeniorShareRateProvider_BPTOracleQuoter is DayMarketTestBase {
         p.stProtocolFeeWAD = 0;
         p.jtProtocolFeeWAD = 0;
         p.jtYieldShareProtocolFeeWAD = 0;
-        p.ltYieldShareProtocolFeeWAD = 0;
+        p.lptYieldShareProtocolFeeWAD = 0;
         p.maxJTYieldShareWAD = 0;
-        p.maxLTYieldShareWAD = 0;
+        p.maxLPTYieldShareWAD = 0;
         p.jtCurve = [uint64(0), uint64(0), uint64(0)];
-        p.ltCurve = [uint64(0), uint64(0), uint64(0)];
+        p.lptCurve = [uint64(0), uint64(0), uint64(0)];
         _deployMarket(cellA(), p);
         _seedMarket(100e18, 50e18);
     }
@@ -278,7 +278,7 @@ contract Test_SeniorShareRateProvider_BPTOracleQuoter is DayMarketTestBase {
     /**
      * @notice Once a sync has cached the senior-share rate, an inline senior-share mint (supply +100%) cannot move it
      *         for the rest of the transaction: the transaction-scoped cache pins the rate
-     * @dev This is the cache's purpose. Within a synced op (e.g. a multi-asset LT deposit/redemption that mints or burns
+     * @dev This is the cache's purpose. Within a synced op (e.g. a multi-asset LPT deposit/redemption that mints or burns
      *      ST shares inline) the senior-leg mark the pool prices against is fixed at the pre-op sync, so an inline supply
      *      move cannot shift it before the matching effective NAV commits. The cache is transient storage, which Foundry
      *      clears between the test contract's top-level calls, so the sync, the inline mint, and the reads must all run in
@@ -301,7 +301,7 @@ contract Test_SeniorShareRateProvider_BPTOracleQuoter is DayMarketTestBase {
      * @notice With no sync in the transaction the cache is unset, so getRate() previews the senior-share rate live off
      *         current supply: doubling the senior supply against unchanged backing NAV halves the previewed rate
      * @dev The miss path a standalone off-chain read or a pre-sync pool interaction takes. No sync runs in the body, so
-     *      the ST_SHARE_TO_NAV_RATE cache stays unset (Foundry clears transient storage at the setUp->test boundary) and both
+     *      the ST_SHARE_PRICE cache stays unset (Foundry clears transient storage at the setUp->test boundary) and both
      *      reads recompute live from committed state and the live supply
      */
     function test_GetRate_MissPathPreviewsLiveOffCurrentSeniorSupply() public {

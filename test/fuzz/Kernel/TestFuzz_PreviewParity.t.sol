@@ -45,7 +45,7 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
         uint256 vb = bound(_vaultBps, 0, 10_000); // up-only yield 0% to +100% so the market stays PERPETUAL and all six flows stay enabled
         uint256 elapsed = bound(_elapsed, 1 hours, 365 days); // premium accrual window from an hour to a year
         // Extra quote-only depth worth 15% of the senior seed keeps the liquidity gate clear after up to +100%
-        // senior appreciation, so the senior-deposit capacity and the LT-redemption capacity are both positive
+        // senior appreciation, so the senior-deposit capacity and the LPT-redemption capacity are both positive
         _seedFlatMarket(st, jt, st.mulDiv(3, 20) / QUOTE_TO_NAV_SCALE + 1);
 
         applySTPnL(int256(vb));
@@ -73,11 +73,11 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
         {
             uint256 quoteLeg = bound(_amountSeedC, 1, st / QUOTE_TO_NAV_SCALE); // 1 quote wei up to the senior NAV in depth
             uint256 bptIn = quoteLeg * QUOTE_TO_NAV_SCALE;
-            _mintQuoteBackedBPT(LT_PROVIDER, bptIn, quoteLeg);
-            uint256 previewed = liquidityTranche.previewDeposit(toTrancheUnits(bptIn));
-            vm.startPrank(LT_PROVIDER);
-            bpt.approve(address(liquidityTranche), bptIn);
-            uint256 minted = liquidityTranche.deposit(toTrancheUnits(bptIn), LT_PROVIDER);
+            _mintQuoteBackedBPT(LPT_PROVIDER, bptIn, quoteLeg);
+            uint256 previewed = liquidityProviderTranche.previewDeposit(toTrancheUnits(bptIn));
+            vm.startPrank(LPT_PROVIDER);
+            bpt.approve(address(liquidityProviderTranche), bptIn);
+            uint256 minted = liquidityProviderTranche.deposit(toTrancheUnits(bptIn), LPT_PROVIDER);
             vm.stopPrank();
             assertEq(minted, previewed, "liquidity deposit must mint exactly the previewed shares");
         }
@@ -104,10 +104,10 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
 
         // Flow 6 - in-kind liquidity redemption, bounded by the live liquidity-respecting max
         {
-            uint256 shares = bound(_sharesSeedC, 1e6, liquidityTranche.maxRedeem(LT_PROVIDER)); // dust floor as in flow 4, up to the reported max
-            AssetClaims memory previewed = liquidityTranche.previewRedeem(shares);
-            vm.prank(LT_PROVIDER);
-            AssetClaims memory claims = liquidityTranche.redeem(shares, LT_PROVIDER, LT_PROVIDER);
+            uint256 shares = bound(_sharesSeedC, 1e6, liquidityProviderTranche.maxRedeem(LPT_PROVIDER)); // dust floor as in flow 4, up to the reported max
+            AssetClaims memory previewed = liquidityProviderTranche.previewRedeem(shares);
+            vm.prank(LPT_PROVIDER);
+            AssetClaims memory claims = liquidityProviderTranche.redeem(shares, LPT_PROVIDER, LPT_PROVIDER);
             _assertClaimsParity(claims, previewed, "liquidity redemption");
         }
     }
@@ -120,7 +120,7 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
      * idle-inclusive effective NAV, the convert quote never exceeds the redemption quote (strictly below whenever
      * the pro-rata idle slice carries value), and the two surfaces coincide on every claim leg iff nothing is staged
      */
-    function testFuzz_LTConvertQuote_BptOnlyAndNeverExceedsRedemptionQuote(
+    function testFuzz_LPTConvertQuote_BptOnlyAndNeverExceedsRedemptionQuote(
         uint256 _stSeed,
         uint256 _jtSeed,
         uint256 _vaultBps,
@@ -143,24 +143,24 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
         syncVenuePrices();
         _sync();
 
-        uint256 idle = kernel.getState().ltOwnedSeniorTrancheShares;
+        uint256 idle = kernel.getState().lptOwnedSeniorTrancheShares;
         if (staged) assertGt(idle, 0, "arrange: the armed slippage gate must have left the premium staged");
         else assertEq(idle, 0, "arrange: the open gate must have deployed the premium inline");
 
         // Independent recompute of both NAV bases from the just-committed checkpoint (same block as the sync)
-        uint256 supply = liquidityTranche.totalSupply();
+        uint256 supply = liquidityProviderTranche.totalSupply();
         // previewRedeem simulates the real redemption and bubbles every execution gate, so the slice is bounded
         // by the live liquidity-respecting max, with the dust floor of flow 4 so the payout cannot floor to zero
-        uint256 shares = bound(_sharesSeed, 1e6, liquidityTranche.maxRedeem(LT_PROVIDER));
-        uint256 rawNAV = toUint256(accountant.getState().lastLTRawNAV);
+        uint256 shares = bound(_sharesSeed, 1e6, liquidityProviderTranche.maxRedeem(LPT_PROVIDER));
+        uint256 rawNAV = toUint256(accountant.getState().lastLPTRawNAV);
         // The idle senior-share leg is valued through the offset-aware _convertToValue: numerator gains VIRTUAL_VALUE = 1,
-        // denominator gains VIRTUAL_SHARES = 1e6, mirroring src _getLiquidityTrancheEffectiveNAV
+        // denominator gains VIRTUAL_SHARES = 1e6, mirroring src _getLiquidityProviderTrancheEffectiveNAV
         uint256 idleValue = Math.mulDiv(toUint256(accountant.getState().lastSTEffectiveNAV) + 1, idle, seniorTranche.totalSupply() + 1e6, Math.Rounding.Floor);
 
-        AssetClaims memory conv = liquidityTranche.convertToAssets(shares);
-        AssetClaims memory prev = liquidityTranche.previewRedeem(shares);
+        AssetClaims memory conv = liquidityProviderTranche.convertToAssets(shares);
+        AssetClaims memory prev = liquidityProviderTranche.previewRedeem(shares);
 
-        // Both surfaces floor-scale over the EFFECTIVE LT supply (supply + VIRTUAL_SHARES), mirroring src _scaleAssetClaims
+        // Both surfaces floor-scale over the EFFECTIVE LPT supply (supply + VIRTUAL_SHARES), mirroring src _scaleAssetClaims
         assertEq(conv.stShares, 0, "the convert surface must never report the idle senior-share leg");
         assertEq(
             toUint256(conv.nav), Math.mulDiv(rawNAV, shares, supply + 1e6, Math.Rounding.Floor), "convertToAssets must price the pro-rata BPT-only raw NAV"
@@ -185,7 +185,7 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
     /// @notice Asserts all four claim legs of an executed redemption equal the same-block preview byte-for-byte
     function _assertClaimsParity(AssetClaims memory _executed, AssetClaims memory _previewed, string memory _flow) internal pure {
         assertEq(_executed.collateralAssets, _previewed.collateralAssets, string.concat(_flow, ": collateral leg must match the preview"));
-        assertEq(_executed.ltAssets, _previewed.ltAssets, string.concat(_flow, ": LT-asset leg must match the preview"));
+        assertEq(_executed.lptAssets, _previewed.lptAssets, string.concat(_flow, ": LPT-asset leg must match the preview"));
         assertEq(_executed.stShares, _previewed.stShares, string.concat(_flow, ": senior-share leg must match the preview"));
         assertEq(_executed.nav, _previewed.nav, string.concat(_flow, ": claim NAV must match the preview"));
     }

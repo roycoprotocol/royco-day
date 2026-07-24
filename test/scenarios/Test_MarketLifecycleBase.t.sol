@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { LT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
+import { LPT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoSeniorTranche } from "../../src/interfaces/IRoycoSeniorTranche.sol";
@@ -16,7 +16,7 @@ import { defaultParams } from "../utils/MarketParams.sol";
  * @title Test_MarketLifecycleBase
  * @notice The full market lifecycle (deploy, seed, PnL, tranche accounting sync, deposit, redeem) run against
  *         every token/decimals shape the market supports
- * @dev One concrete per token shape supplies the shape config and the hand-derived quoter expectation. Every
+ * @dev One concrete per token shape supplies the shape config and the hand-derived pricing expectation. Every
  *      expected number is derived by hand BEFORE execution, never read back from the code: the collateral mark is
  *      one conversion `coinvestedShares x rateWAD x oraclePrice` scaled to WAD, conservation is the exact identity
  *      collateralNAV == stEff + jtEff, and the premium, fee, and redemption expectations are the floor-arithmetic
@@ -35,14 +35,14 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
     uint256 internal constant JT_SEED_WHOLE = 30;
 
     /**
-     * @dev Explicitly seeded LT depth: 20 BPT against a 20-whole-quote leg (NAV-per-BPT stays 1.0)
+     * @dev Explicitly seeded LPT depth: 20 BPT against a 20-whole-quote leg (NAV-per-BPT stays 1.0)
      * @dev The fixture's ST-deposit auto-seed already added ceil(100 x 0.05) + 1 = 6 whole quote = 6e18 NAV of
-     *      depth (DayMarketTestBase._ensureLiquidityCapacityForSTDeposit), so total seeded ltRawNAV = 26e18
+     *      depth (DayMarketTestBase._ensureLiquidityCapacityForSTDeposit), so total seeded lptRawNAV = 26e18
      */
-    uint256 internal constant LT_SEED_BPT = 20e18;
+    uint256 internal constant LPT_SEED_BPT = 20e18;
 
-    /// @dev Hand-derived total seeded LT raw NAV: 6e18 (auto-seed) + 20e18 (explicit) at 1.0 quote price
-    uint256 internal constant SEEDED_LT_RAW_NAV = 26e18;
+    /// @dev Hand-derived total seeded LPT raw NAV: 6e18 (auto-seed) + 20e18 (explicit) at 1.0 quote price
+    uint256 internal constant SEEDED_LPT_RAW_NAV = 26e18;
 
     /// @dev The virtual-shares/value offset (Constants.sol VIRTUAL_SHARES / VIRTUAL_VALUE, the OZ ERC4626
     ///      inflation-attack mitigation): every non-fresh share conversion prices against the effective supply
@@ -51,14 +51,14 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
     uint256 internal constant VIRTUAL_VALUE = 1;
 
     /**
-     * @dev Total seeded LT shares. The 6e18 auto-seed is the FIRST LT deposit (fresh tranche, supply == NAV == 0)
+     * @dev Total seeded LPT shares. The 6e18 auto-seed is the FIRST LPT deposit (fresh tranche, supply == NAV == 0)
      *      so it mints 1:1 -> 6e18 shares. The explicit 20e18 BPT then deposits into a live tranche (supply 6e18,
      *      raw NAV 6e18), so the offset applies: floor((6e18 + 1e6) x 20e18 / (6e18 + 1)) = 20000000000003333329
      *      shares. Total seeded = 6e18 + 20000000000003333329 = 26000000000003333329 (26e18 + 3333329 of
-     *      virtual-offset dust the fresh-1:1 pin used to hide). The seeded LT RAW NAV is still exactly 26e18 (BPT
+     *      virtual-offset dust the fresh-1:1 pin used to hide). The seeded LPT RAW NAV is still exactly 26e18 (BPT
      *      is minted 1:1 with NAV); only the SHARE count drifts
      */
-    uint256 internal constant SEEDED_LT_SHARES = 26_000_000_000_003_333_329;
+    uint256 internal constant SEEDED_LPT_SHARES = 26_000_000_000_003_333_329;
 
     // =============================
     // Canonical +100bps Sync Expectations (hand-derived BEFORE execution)
@@ -72,7 +72,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      *
      *      Checkpoint after _seedDefault (all seed ops share the deploy block, so no time-weighted yield share
      *      has accrued): collateralNAV = 130e18 (130 whole coinvested shares at rate 1.0 and price 1.0),
-     *      stEff = 100e18, jtEff = 30e18, ltRaw = 26e18, il = 0, PERPETUAL.
+     *      stEff = 100e18, jtEff = 30e18, lptRaw = 26e18, il = 0, PERPETUAL.
      *
      *      applySTPnL(100) moves the shared vault rate 1.0 -> 1.01, so the fresh collateral mark is one
      *      conversion of the 130 whole coinvested shares: 130 x 1.01 x 1.0 = 131.3e18 exactly.
@@ -82,41 +82,41 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      *      1. JT gain leg: jtGain = 0.3e18 > dustTolerance (1 wei), so jtFee books
      *         floor(0.3e18 x 0.1) = 0.03e18 and jtEff rises to 30.3e18
      *      2. Premiums over the 1-day window (MockYDM pins the shares at the defaultParams curve targets,
-     *         JT 0.2e18 and LT 0.1e18, both under their 0.5e18 / 0.3e18 caps). The time-weighted accrual is
+     *         JT 0.2e18 and LPT 0.1e18, both under their 0.5e18 / 0.3e18 caps). The time-weighted accrual is
      *         share x 86400 over an 86400-second premium window, so the day cancels exactly:
      *         jtRiskPremium = floor(1e18 x (0.2e18 x 86400) / (86400 x 1e18)) = 0.2e18
-     *         ltLiquidityPremium = floor(1e18 x (0.1e18 x 86400) / (86400 x 1e18)) = 0.1e18
+     *         lptLiquidityPremium = floor(1e18 x (0.1e18 x 86400) / (86400 x 1e18)) = 0.1e18
      *      3. Yield-share fees (premiumsPaid, stGain 1e18 > dust): jtFee += floor(0.2e18 x 0.1) = 0.02e18 for a
-     *         0.05e18 total, and ltFee = floor(0.1e18 x 0.1) = 0.01e18
+     *         0.05e18 total, and lptFee = floor(0.1e18 x 0.1) = 0.01e18
      *      4. Residual: stGain = 1e18 - 0.2e18 - 0.1e18 = 0.7e18, so stFee = floor(0.7e18 x 0.1) = 0.07e18
-     *      5. stEff = 100e18 + 0.7e18 + 0.1e18 = 100.8e18 (the LT premium stays a senior claim inside stEff)
+     *      5. stEff = 100e18 + 0.7e18 + 0.1e18 = 100.8e18 (the LPT premium stays a senior claim inside stEff)
      *         and jtEff = 30.3e18 + 0.2e18 = 30.5e18. Conservation: 131.3 == 100.8 + 30.5 exactly
      */
     uint256 internal constant POST_PNL_RATE_WAD = 1.01e18;
     uint256 internal constant POST_PNL_COLLATERAL_NAV = 131.3e18;
     uint256 internal constant POST_SYNC_ST_EFF_NAV = 100.8e18;
     uint256 internal constant POST_SYNC_JT_EFF_NAV = 30.5e18;
-    uint256 internal constant LT_LIQUIDITY_PREMIUM_NAV = 0.1e18;
+    uint256 internal constant LPT_LIQUIDITY_PREMIUM_NAV = 0.1e18;
     uint256 internal constant ST_PROTOCOL_FEE_NAV = 0.07e18;
     uint256 internal constant JT_PROTOCOL_FEE_NAV = 0.05e18;
-    uint256 internal constant LT_PROTOCOL_FEE_NAV = 0.01e18;
+    uint256 internal constant LPT_PROTOCOL_FEE_NAV = 0.01e18;
 
     /**
      * @dev The fee and liquidity premium share mint (_computeSTFeeAndLiquidityPremiumSharesToMint, jointly
      *      priced): both price against the pre-sync 100e18 supply over the retained NAV
-     *      100.8e18 - 0.1e18 - 0.07e18 = 100.63e18, each floored. The LT protocol fee is carved out of the
-     *      liquidity premium and remitted as SENIOR shares, so the LT receives the premium NET of its own fee
-     *      and the fee recipient receives senior shares worth the ST fee PLUS the LT fee:
+     *      100.8e18 - 0.1e18 - 0.07e18 = 100.63e18, each floored. The LPT protocol fee is carved out of the
+     *      liquidity premium and remitted as SENIOR shares, so the LPT receives the premium NET of its own fee
+     *      and the fee recipient receives senior shares worth the ST fee PLUS the LPT fee:
      *      Both legs are convertToShares against the pre-sync 100e18 supply, so the virtual-shares offset prices
      *      each against effective supply (100e18 + 1e6) over effective retained value (100.63e18 + 1):
-     *      LT_PREMIUM_SHARES = floor((100e18 + 1e6) x (0.1e18 - 0.01e18) / (100.63e18 + 1)) = 89436549736659942
+     *      LPT_PREMIUM_SHARES = floor((100e18 + 1e6) x (0.1e18 - 0.01e18) / (100.63e18 + 1)) = 89436549736659942
      *      ST_FEE_SHARES = floor((100e18 + 1e6) x (0.07e18 + 0.01e18) / (100.63e18 + 1)) = 79499155321475504
-     *      Total senior shares minted this sync stays (premium - ltFee) + (stFee + ltFee) == premium + stFee in
+     *      Total senior shares minted this sync stays (premium - lptFee) + (stFee + lptFee) == premium + stFee in
      *      NAV terms, but each floored share count ticks up by the offset numerator's +1e6
      */
-    uint256 internal constant LT_PREMIUM_SHARES = 89_436_549_736_659_942;
+    uint256 internal constant LPT_PREMIUM_SHARES = 89_436_549_736_659_942;
     uint256 internal constant ST_FEE_SHARES = 79_499_155_321_475_504;
-    uint256 internal constant POST_SYNC_ST_SUPPLY = 100e18 + LT_PREMIUM_SHARES + ST_FEE_SHARES;
+    uint256 internal constant POST_SYNC_ST_SUPPLY = 100e18 + LPT_PREMIUM_SHARES + ST_FEE_SHARES;
 
     /**
      * @dev The sync's inline single-sided add DEPLOYS the premium, and the reason is derivable: the venue prices
@@ -125,28 +125,28 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      *      seeded pool's NAV-per-BPT is exactly 1.0 (the genesis seed backs the dead minimum supply at 1.0), so
      *      the add mints fair value:
      *      the offset share rate floor((100.8e18 + 1) x 1e18 / (POST_SYNC_ST_SUPPLY + 1e6)) = 1006299999999989937,
-     *      REINVESTED_BPT = floor(LT_PREMIUM_SHARES x 1006299999999989937 / 1e18) = 89999999999999999
+     *      REINVESTED_BPT = floor(LPT_PREMIUM_SHARES x 1006299999999989937 / 1e18) = 89999999999999999
      *      against the gate's minimum of
-     *      ceil(floor(LT_PREMIUM_SHARES x (100.8e18 + 1) / (POST_SYNC_ST_SUPPLY + 1e6)) x 0.999) = 89910000000000000,
+     *      ceil(floor(LPT_PREMIUM_SHARES x (100.8e18 + 1) / (POST_SYNC_ST_SUPPLY + 1e6)) x 0.999) = 89910000000000000,
      *      leaving only wei-level flooring as slippage, far inside the 10bps defaultParams gate. The deployed
      *      senior leg marks the oracle TVL up by the identical amount (same price, same floor), so the committed
-     *      post-sync ltRawNAV is exactly SEEDED_LT_RAW_NAV + REINVESTED_BPT and no idle liquidity premium senior
-     *      shares remain with the kernel. Only the NET premium (premium - ltFee) deploys, so the depth grows by
+     *      post-sync lptRawNAV is exactly SEEDED_LPT_RAW_NAV + REINVESTED_BPT and no idle liquidity premium senior
+     *      shares remain with the kernel. Only the NET premium (premium - lptFee) deploys, so the depth grows by
      *      less than the old full-premium split
      */
     uint256 internal constant REINVESTED_BPT = 89_999_999_999_999_999;
-    uint256 internal constant POST_DEPLOY_LT_RAW_NAV = SEEDED_LT_RAW_NAV + REINVESTED_BPT;
+    uint256 internal constant POST_DEPLOY_LPT_RAW_NAV = SEEDED_LPT_RAW_NAV + REINVESTED_BPT;
 
     /**
      * @dev JT protocol fee share mint, priced against the post-fee NAV over the pre-mint supply:
      *      Priced through the offset over the pre-mint 30e18 supply:
      *      JT_FEE_SHARES = floor((30e18 + 1e6) x 0.05e18 / ((30.5e18 - 0.05e18) + 1)) = 49261083743844006
-     *      The LT protocol fee no longer mints liquidity-tranche shares: it is remitted as senior shares folded
-     *      into ST_FEE_SHARES, so a sync leaves the LT total supply unchanged at the seeded SEEDED_LT_SHARES
+     *      The LPT protocol fee no longer mints liquidity-provider-tranche shares: it is remitted as senior shares folded
+     *      into ST_FEE_SHARES, so a sync leaves the LPT total supply unchanged at the seeded SEEDED_LPT_SHARES
      */
     uint256 internal constant JT_FEE_SHARES = 49_261_083_743_844_006;
     uint256 internal constant POST_SYNC_JT_SUPPLY = 30e18 + JT_FEE_SHARES;
-    uint256 internal constant POST_SYNC_LT_SUPPLY = SEEDED_LT_SHARES;
+    uint256 internal constant POST_SYNC_LPT_SUPPLY = SEEDED_LPT_SHARES;
 
     /**
      * @dev Exact redemption NAV expectations (shape-independent, all inputs above):
@@ -154,7 +154,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      *      which divides by the effective supply (totalShares + 1e6), leaving a virtual-share sliver behind:
      *      ST nav, 10e18 of POST_SYNC_ST_SUPPLY: floor(100.8e18 x 10e18 / (100168935705058135446 + 1e6)) = 10062999999999899370
      *      JT nav, 3e18 of POST_SYNC_JT_SUPPLY: floor(30.5e18 x 3e18 / (30049261083743844006 + 1e6)) = 3044999999999898500
-     *      The LT redemption expectations re-mark the pool's senior leg at the live post-redemption share rate,
+     *      The LPT redemption expectations re-mark the pool's senior leg at the live post-redemption share rate,
      *      which carries the shape's ST-withdrawal truncation, so they are derived inline in the test
      */
     uint256 internal constant ST_REDEEM_EXPECTED_NAV = 10_062_999_999_999_899_370;
@@ -197,7 +197,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
     /// @dev Seeds the canonical lifecycle market: 30 whole JT, 100 whole ST (plus the 6e18 auto-seed), 20e18 quote-only BPT
     function _seedDefault() internal {
         _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
-        _seedLT(LT_SEED_BPT, 0, 20 * quoteUnit);
+        _seedLPT(LPT_SEED_BPT, 0, 20 * quoteUnit);
     }
 
     // =============================
@@ -213,24 +213,24 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         // The five-contract wiring must be closed under the kernel's immutables
         assertEq(kernel.SENIOR_TRANCHE(), address(seniorTranche), "kernel ST wiring");
         assertEq(kernel.JUNIOR_TRANCHE(), address(juniorTranche), "kernel JT wiring");
-        assertEq(kernel.LIQUIDITY_TRANCHE(), address(liquidityTranche), "kernel LT wiring");
+        assertEq(kernel.LIQUIDITY_PROVIDER_TRANCHE(), address(liquidityProviderTranche), "kernel LPT wiring");
         assertEq(kernel.ACCOUNTANT(), address(accountant), "kernel accountant wiring");
         assertEq(kernel.COLLATERAL_ASSET(), address(stJtVault), "kernel collateral asset wiring");
-        assertEq(kernel.LT_ASSET(), address(bpt), "kernel LT asset wiring");
+        assertEq(kernel.LPT_ASSET(), address(bpt), "kernel LPT asset wiring");
         assertEq(kernel.QUOTE_ASSET(), address(quoteToken), "kernel quote asset wiring");
     }
 
     // =============================
-    // Quoter Unit Identity
+    // Pricing Unit Identity
     // =============================
 
     /**
      * @notice One whole collateral asset must quote to the shape's hand-derived NAV at the initial rate and a 1.0 oracle price
-     * @dev Derivation: NAV_UNIT is always WAD-scaled, so 10^collateralDecimals share-wei x initialRateWAD (1.0)
-     *      x oracle price (1.0) == exactly 1e18 NAV wei, independent of share or underlying decimals. ST and JT
+     * @dev Derivation: NAV_UNIT is always WAD-scaled, so 10^collateralDecimals share-wei x the WAD oracle
+     *      price (initialRateWAD, 1.0) == exactly 1e18 NAV wei, independent of share or underlying decimals. ST and JT
      *      coinvest the one collateral asset, so a single converter pair carries both tranches by construction
      */
-    function test_Quoter_oneWholeCollateralAssetQuotesToHandDerivedNAV() public view {
+    function test_Pricing_oneWholeCollateralAssetQuotesToHandDerivedNAV() public view {
         assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(collateralUnit))), _expectedSTUnitNAV(), "collateral unit -> NAV identity");
         // And the inverse conversion must return exactly one whole collateral asset
         assertEq(toUint256(kernel.convertValueToCollateralAssets(toNAVUnits(_expectedSTUnitNAV()))), collateralUnit, "NAV -> collateral unit inverse identity");
@@ -244,7 +244,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      * @notice The canonical lifecycle: seed, +100bps senior PnL, sync, wei-exact conservation, exact premium flow
      * @dev Hand-derived mark: 130 whole coinvested shares at rate 1.01 and price 1.0 -> collateralNAV = 131.3e18
      *      exactly in one conversion. Conservation collateralNAV == stEff + jtEff holds at wei precision on both
-     *      the returned state and the persisted checkpoint. The LT premium pipeline is asserted end to end
+     *      the returned state and the persisted checkpoint. The LPT premium pipeline is asserted end to end
      *      against the derivation at the constants, with every value-moving mint pinned by its event: with the
      *      venue's senior leg priced live through the production rate provider and slippage mode off, the inline
      *      add MUST take the DEPLOYED branch (fair value clears the 10bps gate with only wei-level flooring), so
@@ -252,27 +252,27 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      */
     function test_Lifecycle_pnlSyncConservesNAVAndKernelStaysSolvent() public {
         _seedDefault();
-        assertEq(_liveLTRawNAV(), SEEDED_LT_RAW_NAV, "seeded ltRawNAV must be 6e18 auto-seed + 20e18 explicit");
+        assertEq(_liveLPTRawNAV(), SEEDED_LPT_RAW_NAV, "seeded lptRawNAV must be 6e18 auto-seed + 20e18 explicit");
 
         applySTPnL(100);
         _warpAndRefreshFeed(1 days);
         syncVenuePrices();
 
         // Every value-moving mint in the sync is pinned with exact args, in emission order: the ST and JT
-        // protocol fee share mints (the LT fee is folded into the senior fee mint as senior shares, and no
-        // liquidity-tranche shares are minted on a sync), the NET premium share mint to the LT (supply is the
+        // protocol fee share mints (the LPT fee is folded into the senior fee mint as senior shares, and no
+        // liquidity-provider-tranche shares are minted on a sync), the NET premium share mint to the LPT (supply is the
         // full post-sync senior supply at that instant since the fee mint precedes it), the inline
-        // reinvestment, and the final committed LT raw NAV
+        // reinvestment, and the final committed LPT raw NAV
         vm.expectEmit(address(seniorTranche));
         emit IRoycoVaultTranche.ProtocolFeeSharesMinted(PROTOCOL_FEE_RECIPIENT, ST_FEE_SHARES, 100e18 + ST_FEE_SHARES);
         vm.expectEmit(address(juniorTranche));
         emit IRoycoVaultTranche.ProtocolFeeSharesMinted(PROTOCOL_FEE_RECIPIENT, JT_FEE_SHARES, POST_SYNC_JT_SUPPLY);
         vm.expectEmit(address(seniorTranche));
-        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), LT_PREMIUM_SHARES, POST_SYNC_ST_SUPPLY);
+        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), LPT_PREMIUM_SHARES, POST_SYNC_ST_SUPPLY);
         vm.expectEmit(address(kernel));
-        emit IRoycoDayKernel.LiquidityPremiumReinvested(LT_PREMIUM_SHARES, toTrancheUnits(REINVESTED_BPT));
+        emit IRoycoDayKernel.LiquidityPremiumReinvested(LPT_PREMIUM_SHARES, toTrancheUnits(REINVESTED_BPT));
         vm.expectEmit(address(accountant));
-        emit IRoycoDayAccountant.LiquidityTrancheRawNAVCommitted(toNAVUnits(POST_DEPLOY_LT_RAW_NAV));
+        emit IRoycoDayAccountant.LiquidityProviderTrancheRawNAVCommitted(toNAVUnits(POST_DEPLOY_LPT_RAW_NAV));
         SyncedAccountingState memory state = _sync();
 
         // The collateral mark is hand-derived exactly from the rate and oracle price in one conversion
@@ -282,12 +282,12 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         assertEq(toUint256(state.jtImpermanentLoss), 0, "a PERPETUAL commit must carry zero JT impermanent loss");
 
         // The full yield split lands exactly per the derivation at the constants
-        assertEq(toUint256(state.stEffectiveNAV), POST_SYNC_ST_EFF_NAV, "stEff must be 100e18 + 0.7e18 residual + 0.1e18 LT premium");
+        assertEq(toUint256(state.stEffectiveNAV), POST_SYNC_ST_EFF_NAV, "stEff must be 100e18 + 0.7e18 residual + 0.1e18 LPT premium");
         assertEq(toUint256(state.jtEffectiveNAV), POST_SYNC_JT_EFF_NAV, "jtEff must be 30e18 + 0.3e18 gain + 0.2e18 risk premium");
-        assertEq(toUint256(state.ltLiquidityPremium), LT_LIQUIDITY_PREMIUM_NAV, "liqShare must be floor(1e18 x 0.1e18 x 1d / (1d x WAD)) = 0.1e18");
+        assertEq(toUint256(state.lptLiquidityPremium), LPT_LIQUIDITY_PREMIUM_NAV, "liqShare must be floor(1e18 x 0.1e18 x 1d / (1d x WAD)) = 0.1e18");
         assertEq(toUint256(state.stProtocolFee), ST_PROTOCOL_FEE_NAV, "stFee must be floor(0.7e18 x 0.1) = 0.07e18");
         assertEq(toUint256(state.jtProtocolFee), JT_PROTOCOL_FEE_NAV, "jtFee must be floor(0.3e18 x 0.1) + floor(0.2e18 x 0.1) = 0.05e18");
-        assertEq(toUint256(state.ltProtocolFee), LT_PROTOCOL_FEE_NAV, "ltFee must be floor(0.1e18 x 0.1) = 0.01e18");
+        assertEq(toUint256(state.lptProtocolFee), LPT_PROTOCOL_FEE_NAV, "lptFee must be floor(0.1e18 x 0.1) = 0.01e18");
 
         // Wei-exact conservation on the returned state and the persisted checkpoint
         assertNAVConservation(state.collateralNAV, state.stEffectiveNAV, state.jtEffectiveNAV, "sync return");
@@ -299,17 +299,17 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
 
         // Branch pin: the sync's inline add must DEPLOY (live fair-value pricing, see REINVESTED_BPT): the idle
         // premium senior shares drain to zero, the pool's senior leg holds exactly the minted premium shares, and
-        // the BPT depth and committed ltRawNAV both grow by exactly the fair-value mint
+        // the BPT depth and committed lptRawNAV both grow by exactly the fair-value mint
         IRoycoDayKernel.RoycoDayKernelState memory ks = kernel.getState();
-        assertEq(ks.ltOwnedSeniorTrancheShares, 0, "deployed branch: no idle premium senior shares may remain with live venue pricing");
+        assertEq(ks.lptOwnedSeniorTrancheShares, 0, "deployed branch: no idle premium senior shares may remain with live venue pricing");
         assertEq(seniorTranche.balanceOf(address(kernel)), 0, "deployed branch: the premium shares must sit in the pool, not the kernel");
-        assertEq(toUint256(ks.totalLTAssets), POST_DEPLOY_LT_RAW_NAV, "deployed branch: the BPT ledger must grow by exactly REINVESTED_BPT");
-        assertEq(bpt.balanceOf(address(kernel)), POST_DEPLOY_LT_RAW_NAV, "deployed branch: the kernel BPT balance must equal the owned ledger");
+        assertEq(toUint256(ks.totalLPTAssets), POST_DEPLOY_LPT_RAW_NAV, "deployed branch: the BPT ledger must grow by exactly REINVESTED_BPT");
+        assertEq(bpt.balanceOf(address(kernel)), POST_DEPLOY_LPT_RAW_NAV, "deployed branch: the kernel BPT balance must equal the owned ledger");
         assertEq(
-            balancerVault.getPoolBalances(address(bpt))[stPoolTokenIndex], LT_PREMIUM_SHARES, "deployed branch: the pool's senior leg must hold the premium"
+            balancerVault.getPoolBalances(address(bpt))[stPoolTokenIndex], LPT_PREMIUM_SHARES, "deployed branch: the pool's senior leg must hold the premium"
         );
-        assertEq(toUint256(state.ltRawNAV), POST_DEPLOY_LT_RAW_NAV, "deployed branch: committed ltRawNAV must include the deployed depth");
-        assertEq(_liveLTRawNAV(), POST_DEPLOY_LT_RAW_NAV, "deployed branch: the live ltRawNAV read must match the committed mark");
+        assertEq(toUint256(state.lptRawNAV), POST_DEPLOY_LPT_RAW_NAV, "deployed branch: committed lptRawNAV must include the deployed depth");
+        assertEq(_liveLPTRawNAV(), POST_DEPLOY_LPT_RAW_NAV, "deployed branch: the live lptRawNAV read must match the committed mark");
 
         // Solvency: the kernel's custodied balance must exactly equal the single coinvested collateral ledger
         assertEq(toUint256(ks.totalCollateralAssets), (ST_SEED_WHOLE + JT_SEED_WHOLE) * collateralUnit, "collateral ledger must equal the seeded shares");
@@ -329,9 +329,9 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      * @dev Preview parity is the property (claims == preview byte-for-byte), every previewed leg is pinned to
      *      its floor-arithmetic expectation from the constants' derivation, and every Redeem event carries the
      *      exact derived claims. The NAV expectations are exact and shape-independent, the collateral legs go
-     *      through the quoter identity (floor(nav x collateralUnit / 1.01e18)) and so carry the shape's decimals,
+     *      through the pricing identity (floor(nav x collateralUnit / 1.01e18)) and so carry the shape's decimals,
      *      computed inline. Gate sanity at the chosen sizes: ST 10e18 shares is ungated, JT 3e18 shares leaves
-     *      coverageUtilization ~= 118.2 x 0.2 / 27.5 = 0.86 <= 1, and LT 5.2e18 shares leaves
+     *      coverageUtilization ~= 118.2 x 0.2 / 27.5 = 0.86 <= 1, and LPT 5.2e18 shares leaves
      *      liquidityUtilization ~= 90.7 x 0.05 / 20.9 = 0.22 <= 1, so every redemption must clear
      */
     function test_Redemptions_eachTranchePaysExactPreviewedClaims() public {
@@ -347,7 +347,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         // The providers hold exactly their seeded share counts (the premium and fee mints landed elsewhere)
         assertEq(seniorTranche.balanceOf(ST_PROVIDER), 100e18, "ST provider must hold the seeded 100e18 shares");
         assertEq(juniorTranche.balanceOf(JT_PROVIDER), 30e18, "JT provider must hold the seeded 30e18 shares");
-        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), SEEDED_LT_SHARES, "LT provider must hold the seeded SEEDED_LT_SHARES");
+        assertEq(liquidityProviderTranche.balanceOf(LPT_PROVIDER), SEEDED_LPT_SHARES, "LPT provider must hold the seeded SEEDED_LPT_SHARES");
 
         // Senior: redeem a tenth (10e18 shares). Claim derivation: ST's claim IS its effective NAV 100.8e18
         // converted ONCE to the collateral asset, then sliced proportionally and floored:
@@ -364,14 +364,14 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
             ST_PROVIDER,
             ST_PROVIDER,
             AssetClaims({
-                collateralAssets: toTrancheUnits(expectedStAssetsWithdrawn), ltAssets: toTrancheUnits(0), stShares: 0, nav: toNAVUnits(ST_REDEEM_EXPECTED_NAV)
+                collateralAssets: toTrancheUnits(expectedStAssetsWithdrawn), lptAssets: toTrancheUnits(0), stShares: 0, nav: toNAVUnits(ST_REDEEM_EXPECTED_NAV)
             }),
             stShares
         );
         vm.prank(ST_PROVIDER);
         AssetClaims memory stClaims = seniorTranche.redeem(stShares, ST_PROVIDER, ST_PROVIDER);
         assertEq(stClaims.collateralAssets, stPreviewed.collateralAssets, "ST redeem: collateralAssets preview parity");
-        assertEq(stClaims.ltAssets, stPreviewed.ltAssets, "ST redeem: ltAssets preview parity");
+        assertEq(stClaims.lptAssets, stPreviewed.lptAssets, "ST redeem: lptAssets preview parity");
         assertEq(stClaims.nav, stPreviewed.nav, "ST redeem: nav preview parity");
         assertEq(toUint256(stClaims.nav), ST_REDEEM_EXPECTED_NAV, "ST redeem: nav must equal the hand-derived expectation exactly");
         assertEq(toUint256(stClaims.collateralAssets), expectedStAssetsWithdrawn, "ST redeem: collateralAssets must equal the derived effective-NAV slice");
@@ -393,14 +393,14 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
             JT_PROVIDER,
             JT_PROVIDER,
             AssetClaims({
-                collateralAssets: toTrancheUnits(expectedJtAssetsWithdrawn), ltAssets: toTrancheUnits(0), stShares: 0, nav: toNAVUnits(JT_REDEEM_EXPECTED_NAV)
+                collateralAssets: toTrancheUnits(expectedJtAssetsWithdrawn), lptAssets: toTrancheUnits(0), stShares: 0, nav: toNAVUnits(JT_REDEEM_EXPECTED_NAV)
             }),
             jtShares
         );
         vm.prank(JT_PROVIDER);
         AssetClaims memory jtClaims = juniorTranche.redeem(jtShares, JT_PROVIDER, JT_PROVIDER);
         assertEq(jtClaims.collateralAssets, jtPreviewed.collateralAssets, "JT redeem: collateralAssets preview parity");
-        assertEq(jtClaims.ltAssets, jtPreviewed.ltAssets, "JT redeem: ltAssets preview parity");
+        assertEq(jtClaims.lptAssets, jtPreviewed.lptAssets, "JT redeem: lptAssets preview parity");
         assertEq(jtClaims.nav, jtPreviewed.nav, "JT redeem: nav preview parity");
         assertEq(toUint256(jtClaims.nav), JT_REDEEM_EXPECTED_NAV, "JT redeem: nav must equal the hand-derived expectation exactly");
         assertEq(toUint256(jtClaims.collateralAssets), expectedJtAssetsWithdrawn, "JT redeem: collateralAssets must equal the derived effective-NAV slice");
@@ -415,11 +415,11 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         // stEffAfter = 100.8e18 - (131.3e18 - collateralAfterStRedeem) (the JT redemption reduces only jtEff),
         // the senior supply is 10e18 lower after the burn, so the live share rate is
         // rateAfter = floor(1e18 x stEffAfter / (POST_SYNC_ST_SUPPLY - 10e18)), the oracle TVL is the seeded
-        // quote depth plus floor(LT_PREMIUM_SHARES x rateAfter / 1e18), and the kernel's 26e18 + REINVESTED_BPT
-        // of the BPT supply marks to nav = floor(floor(TVL x ltOwned / bptSupply) x 5.2e18 / POST_SYNC_LT_SUPPLY)
-        uint256 ltShares = liquidityTranche.balanceOf(LT_PROVIDER) / 5;
-        uint256 expectedLtNav;
-        uint256 expectedLtAssets;
+        // quote depth plus floor(LPT_PREMIUM_SHARES x rateAfter / 1e18), and the kernel's 26e18 + REINVESTED_BPT
+        // of the BPT supply marks to nav = floor(floor(TVL x lptOwned / bptSupply) x 5.2e18 / POST_SYNC_LPT_SUPPLY)
+        uint256 lptShares = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 5;
+        uint256 expectedLptNav;
+        uint256 expectedLptAssets;
         {
             uint256 collateralAfterStRedeem =
                 Math.mulDiv((ST_SEED_WHOLE + JT_SEED_WHOLE) * collateralUnit - expectedStAssetsWithdrawn, POST_PNL_RATE_WAD, collateralUnit);
@@ -428,33 +428,33 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
             // carries the offset: (effNAV + 1) x WAD / (supply + 1e6)
             uint256 rateAfter = Math.mulDiv(stEffAfter + VIRTUAL_VALUE, 1e18, (POST_SYNC_ST_SUPPLY - 10e18) + VIRTUAL_SHARES);
             // bptSupplySeeded is the whole seeded supply including the genesis backing, captured above at 1.0 NAV-per-BPT
-            uint256 poolTVL = bptSupplySeeded + Math.mulDiv(LT_PREMIUM_SHARES, rateAfter, 1e18);
-            uint256 ltRawAtRedeem = Math.mulDiv(poolTVL, POST_DEPLOY_LT_RAW_NAV, bptSupplySeeded + REINVESTED_BPT);
+            uint256 poolTVL = bptSupplySeeded + Math.mulDiv(LPT_PREMIUM_SHARES, rateAfter, 1e18);
+            uint256 lptRawAtRedeem = Math.mulDiv(poolTVL, POST_DEPLOY_LPT_RAW_NAV, bptSupplySeeded + REINVESTED_BPT);
             // The redeemer's slice scales through _scaleAssetClaims, dividing by the effective supply (+ 1e6)
-            expectedLtNav = Math.mulDiv(ltRawAtRedeem, ltShares, POST_SYNC_LT_SUPPLY + VIRTUAL_SHARES);
-            expectedLtAssets =
-                Math.mulDiv(Math.mulDiv(bptSupplySeeded + REINVESTED_BPT, ltRawAtRedeem, poolTVL), ltShares, POST_SYNC_LT_SUPPLY + VIRTUAL_SHARES);
+            expectedLptNav = Math.mulDiv(lptRawAtRedeem, lptShares, POST_SYNC_LPT_SUPPLY + VIRTUAL_SHARES);
+            expectedLptAssets =
+                Math.mulDiv(Math.mulDiv(bptSupplySeeded + REINVESTED_BPT, lptRawAtRedeem, poolTVL), lptShares, POST_SYNC_LPT_SUPPLY + VIRTUAL_SHARES);
         }
-        AssetClaims memory ltPreviewed = liquidityTranche.previewRedeem(ltShares);
-        uint256 ltBptBefore = bpt.balanceOf(LT_PROVIDER);
-        uint256 ltStSharesBefore = seniorTranche.balanceOf(LT_PROVIDER);
-        vm.expectEmit(address(liquidityTranche));
+        AssetClaims memory lptPreviewed = liquidityProviderTranche.previewRedeem(lptShares);
+        uint256 lptBptBefore = bpt.balanceOf(LPT_PROVIDER);
+        uint256 lptStSharesBefore = seniorTranche.balanceOf(LPT_PROVIDER);
+        vm.expectEmit(address(liquidityProviderTranche));
         emit IRoycoVaultTranche.Redeem(
-            LT_PROVIDER,
-            LT_PROVIDER,
-            AssetClaims({ collateralAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(expectedLtAssets), stShares: 0, nav: toNAVUnits(expectedLtNav) }),
-            ltShares
+            LPT_PROVIDER,
+            LPT_PROVIDER,
+            AssetClaims({ collateralAssets: toTrancheUnits(0), lptAssets: toTrancheUnits(expectedLptAssets), stShares: 0, nav: toNAVUnits(expectedLptNav) }),
+            lptShares
         );
-        vm.prank(LT_PROVIDER);
-        AssetClaims memory ltClaims = liquidityTranche.redeem(ltShares, LT_PROVIDER, LT_PROVIDER);
-        assertEq(ltClaims.ltAssets, ltPreviewed.ltAssets, "LT redeem: ltAssets preview parity");
-        assertEq(ltClaims.stShares, ltPreviewed.stShares, "LT redeem: stShares preview parity");
-        assertEq(ltClaims.nav, ltPreviewed.nav, "LT redeem: nav preview parity");
-        assertEq(toUint256(ltClaims.nav), expectedLtNav, "LT redeem: nav must equal the derived re-marked BPT slice exactly");
-        assertEq(toUint256(ltClaims.ltAssets), expectedLtAssets, "LT redeem: the BPT slice must equal the derived expectation exactly");
-        assertEq(ltClaims.stShares, 0, "LT redeem: no idle premium senior shares exist after the deployed reinvestment");
-        assertEq(bpt.balanceOf(LT_PROVIDER) - ltBptBefore, toUint256(ltClaims.ltAssets), "LT redeem: BPT payout must equal the claim");
-        assertEq(seniorTranche.balanceOf(LT_PROVIDER) - ltStSharesBefore, ltClaims.stShares, "LT redeem: idle premium ST share payout must equal the claim");
+        vm.prank(LPT_PROVIDER);
+        AssetClaims memory lptClaims = liquidityProviderTranche.redeem(lptShares, LPT_PROVIDER, LPT_PROVIDER);
+        assertEq(lptClaims.lptAssets, lptPreviewed.lptAssets, "LPT redeem: lptAssets preview parity");
+        assertEq(lptClaims.stShares, lptPreviewed.stShares, "LPT redeem: stShares preview parity");
+        assertEq(lptClaims.nav, lptPreviewed.nav, "LPT redeem: nav preview parity");
+        assertEq(toUint256(lptClaims.nav), expectedLptNav, "LPT redeem: nav must equal the derived re-marked BPT slice exactly");
+        assertEq(toUint256(lptClaims.lptAssets), expectedLptAssets, "LPT redeem: the BPT slice must equal the derived expectation exactly");
+        assertEq(lptClaims.stShares, 0, "LPT redeem: no idle premium senior shares exist after the deployed reinvestment");
+        assertEq(bpt.balanceOf(LPT_PROVIDER) - lptBptBefore, toUint256(lptClaims.lptAssets), "LPT redeem: BPT payout must equal the claim");
+        assertEq(seniorTranche.balanceOf(LPT_PROVIDER) - lptStSharesBefore, lptClaims.stShares, "LPT redeem: idle premium ST share payout must equal the claim");
     }
 
     // =============================
@@ -499,11 +499,11 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      * @notice Depositing into the senior tranche right before a gain sync captures none of the pending gain or premium
      * @dev Attacker intent: +100bps of senior gain has accrued but no sync has booked it, so the attacker
      *      deposits 5 whole vault shares hoping to be priced at the stale 1.0 share rate and skim the gain plus
-     *      the LT liquidity premium. The deposit's own pre-op tranche accounting sync books the entire gain to
+     *      the LPT liquidity premium. The deposit's own pre-op tranche accounting sync books the entire gain to
      *      the pre-existing holders first (the premium shares mint against the pre-deposit supply), so the
      *      attacker's shares price at the fresh rate: minted = floor(5.05e18 x POST_SYNC_ST_SUPPLY / 100.8e18).
      *      The immediate same-block round-trip redemption then returns at most the deposited value (two floors),
-     *      proving the sandwich nets zero and the NET premium (premium - ltFee) still lands with the LT
+     *      proving the sandwich nets zero and the NET premium (premium - lptFee) still lands with the LPT
      */
     function test_STDeposit_frontRunningGainSync_capturesNoYieldOrPremium() public {
         _seedDefault();
@@ -526,7 +526,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         // The premium mint must precede the attacker's share pricing inside the very same deposit call
         // The fee mint lands first, so the premium mint's post-mint supply is the full post-sync senior supply
         vm.expectEmit(address(seniorTranche));
-        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), LT_PREMIUM_SHARES, POST_SYNC_ST_SUPPLY);
+        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), LPT_PREMIUM_SHARES, POST_SYNC_ST_SUPPLY);
         vm.expectEmit(address(seniorTranche));
         emit IRoycoVaultTranche.Deposit(attacker, attacker, toTrancheUnits(depositAssets), expectedMintedShares);
         uint256 mintedShares = seniorTranche.deposit(toTrancheUnits(depositAssets), attacker);
@@ -537,10 +537,10 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         assertEq(seniorTranche.totalSupply(), POST_SYNC_ST_SUPPLY + expectedMintedShares, "sandwich deposit: supply must be post-sync supply + attacker mint");
 
         // The premium and fee flows are untouched by the sandwich: the net premium deployed to the pool in full
-        // and the fee recipient holds exactly the derived senior fee shares (ST fee plus the LT fee)
+        // and the fee recipient holds exactly the derived senior fee shares (ST fee plus the LPT fee)
         IRoycoDayKernel.RoycoDayKernelState memory ks = kernel.getState();
-        assertEq(ks.ltOwnedSeniorTrancheShares, 0, "sandwich deposit: the premium must still deploy, leaving no idle senior shares");
-        assertEq(balancerVault.getPoolBalances(address(bpt))[stPoolTokenIndex], LT_PREMIUM_SHARES, "sandwich deposit: the pool must hold the net premium");
+        assertEq(ks.lptOwnedSeniorTrancheShares, 0, "sandwich deposit: the premium must still deploy, leaving no idle senior shares");
+        assertEq(balancerVault.getPoolBalances(address(bpt))[stPoolTokenIndex], LPT_PREMIUM_SHARES, "sandwich deposit: the pool must hold the net premium");
         assertEq(seniorTranche.balanceOf(PROTOCOL_FEE_RECIPIENT), ST_FEE_SHARES, "sandwich deposit: the senior fee mint must be undiluted by the attacker");
 
         // Round-trip: redeem every minted share in the same block. Post-deposit state is exact: stEff rose by
@@ -558,7 +558,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         emit IRoycoVaultTranche.Redeem(
             attacker,
             attacker,
-            AssetClaims({ collateralAssets: toTrancheUnits(expectedAssetsOut), ltAssets: toTrancheUnits(0), stShares: 0, nav: toNAVUnits(expectedNavOut) }),
+            AssetClaims({ collateralAssets: toTrancheUnits(expectedAssetsOut), lptAssets: toTrancheUnits(0), stShares: 0, nav: toNAVUnits(expectedNavOut) }),
             mintedShares
         );
         vm.prank(attacker);
@@ -584,48 +584,48 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice An LT redemption that parks liquidityUtilization at exactly 100% succeeds, and one more BPT wei of
+     * @notice An LPT redemption that parks liquidityUtilization at exactly 100% succeeds, and one more BPT wei of
      *         depth removed reverts
      * @dev Attacker intent: drain the market-making depth to the last wei the liquidity requirement allows,
      *      then probe whether rounding lets one more redemption slip under the senior liquidity floor.
      *      Derivation at rate 1.0: stEff = 100e18 and minLiquidity = 0.05e18, so the floor depth is exactly 5e18.
-     *      The gate is purely on ltRawNAV (depth), independent of the offset: liquidityUtilization =
+     *      The gate is purely on lptRawNAV (depth), independent of the offset: liquidityUtilization =
      *      ceil(100e18 x 0.05e18 / depth), so depth == 5e18 reads exactly 100% and depth == 5e18 - 1 reads
      *      1e18 + 1 > WAD. Under the virtual-shares offset a BPT slice is floor(26e18 x shares /
-     *      (SEEDED_LT_SHARES + 1e6)), so parking depth at exactly 5e18 needs PARK_SHARES =
-     *      ceil(21e18 x (SEEDED_LT_SHARES + 1e6) / 26e18) = 21000000000003499997 (the smallest share count whose
+     *      (SEEDED_LPT_SHARES + 1e6)), so parking depth at exactly 5e18 needs PARK_SHARES =
+     *      ceil(21e18 x (SEEDED_LPT_SHARES + 1e6) / 26e18) = 21000000000003499997 (the smallest share count whose
      *      slice floors to a full 21e18 BPT). The offset also means a single-wei-share redemption now claims
      *      floor(5e18 x 1 / (residual + 1e6)) == 0 BPT, the virtual-share sliver, so it removes no depth and can
      *      never breach the floor. The minimal depth-reducing probe is therefore 2 shares, which claims exactly
-     *      1 BPT wei, leaves ltRawNAV = 5e18 - 1, and must revert with LIQUIDITY_REQUIREMENT_VIOLATED
+     *      1 BPT wei, leaves lptRawNAV = 5e18 - 1, and must revert with LIQUIDITY_REQUIREMENT_VIOLATED
      */
-    function test_LTRedeem_parkedAtExactlyFullLiquidityUtilization_succeedsAndNextWeiReverts() public {
+    function test_LPTRedeem_parkedAtExactlyFullLiquidityUtilization_succeedsAndNextWeiReverts() public {
         _seedDefault();
 
         // Park depth at exactly the 5e18 floor: PARK_SHARES claims a full 21e18 BPT slice (see the derivation
-        // above) and leaves the residual SEEDED_LT_SHARES - PARK_SHARES shares against the 5e18 depth
+        // above) and leaves the residual SEEDED_LPT_SHARES - PARK_SHARES shares against the 5e18 depth
         uint256 parkShares = 21_000_000_000_003_499_997;
-        uint256 residualShares = SEEDED_LT_SHARES - parkShares;
-        vm.expectEmit(address(liquidityTranche));
+        uint256 residualShares = SEEDED_LPT_SHARES - parkShares;
+        vm.expectEmit(address(liquidityProviderTranche));
         emit IRoycoVaultTranche.Redeem(
-            LT_PROVIDER,
-            LT_PROVIDER,
-            AssetClaims({ collateralAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(21e18), stShares: 0, nav: toNAVUnits(uint256(21e18)) }),
+            LPT_PROVIDER,
+            LPT_PROVIDER,
+            AssetClaims({ collateralAssets: toTrancheUnits(0), lptAssets: toTrancheUnits(21e18), stShares: 0, nav: toNAVUnits(uint256(21e18)) }),
             parkShares
         );
-        vm.prank(LT_PROVIDER);
-        AssetClaims memory parkClaims = liquidityTranche.redeem(parkShares, LT_PROVIDER, LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
+        AssetClaims memory parkClaims = liquidityProviderTranche.redeem(parkShares, LPT_PROVIDER, LPT_PROVIDER);
 
         // Full observable post-state at the boundary: exact claims, exact depth, exact committed mark
-        assertEq(toUint256(parkClaims.ltAssets), 21e18, "boundary redeem: the BPT slice must be exactly 21e18");
+        assertEq(toUint256(parkClaims.lptAssets), 21e18, "boundary redeem: the BPT slice must be exactly 21e18");
         assertEq(toUint256(parkClaims.nav), 21e18, "boundary redeem: the NAV slice must be exactly 21e18 at 1.0 NAV-per-BPT");
         assertEq(parkClaims.stShares, 0, "boundary redeem: no idle premium senior shares exist before any gain sync");
-        assertEq(bpt.balanceOf(LT_PROVIDER), 21e18, "boundary redeem: the redeemer must hold the full BPT slice");
-        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), residualShares, "boundary redeem: the redeemer keeps the residual LT shares");
-        assertEq(liquidityTranche.totalSupply(), residualShares, "boundary redeem: the LT supply must burn down to the residual shares");
-        assertEq(toUint256(kernel.getState().totalLTAssets), 5e18, "boundary redeem: the owned BPT ledger must be exactly the 5e18 floor");
+        assertEq(bpt.balanceOf(LPT_PROVIDER), 21e18, "boundary redeem: the redeemer must hold the full BPT slice");
+        assertEq(liquidityProviderTranche.balanceOf(LPT_PROVIDER), residualShares, "boundary redeem: the redeemer keeps the residual LPT shares");
+        assertEq(liquidityProviderTranche.totalSupply(), residualShares, "boundary redeem: the LPT supply must burn down to the residual shares");
+        assertEq(toUint256(kernel.getState().totalLPTAssets), 5e18, "boundary redeem: the owned BPT ledger must be exactly the 5e18 floor");
         assertEq(bpt.balanceOf(address(kernel)), 5e18, "boundary redeem: the kernel BPT balance must equal the owned ledger");
-        assertEq(toUint256(accountant.getState().lastLTRawNAV), 5e18, "boundary redeem: the committed ltRawNAV must be exactly the floor depth");
+        assertEq(toUint256(accountant.getState().lastLPTRawNAV), 5e18, "boundary redeem: the committed lptRawNAV must be exactly the floor depth");
 
         // The market reads exactly 100% utilized and stays PERPETUAL: ceil(100e18 x 0.05e18 / 5e18) = 1e18
         SyncedAccountingState memory state = _sync();
@@ -636,16 +636,16 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         assertNAVConservation(state.collateralNAV, state.stEffectiveNAV, state.jtEffectiveNAV, "boundary sync");
 
         // The minimal depth-reducing probe (2 shares claims exactly 1 BPT wei under the offset) would leave
-        // ltRawNAV = 5e18 - 1, and ceil(5e36 / (5e18 - 1)) = 1e18 + 1 > 100% (a single share claims 0 BPT and is
+        // lptRawNAV = 5e18 - 1, and ceil(5e36 / (5e18 - 1)) = 1e18 + 1 > 100% (a single share claims 0 BPT and is
         // inert). ceil rounding favors the senior floor, so it must revert
-        vm.prank(LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        liquidityTranche.redeem(2, LT_PROVIDER, LT_PROVIDER);
+        liquidityProviderTranche.redeem(2, LPT_PROVIDER, LPT_PROVIDER);
 
         // The failed probe must have moved nothing
-        assertEq(bpt.balanceOf(LT_PROVIDER), 21e18, "failed probe: the redeemer BPT balance must be unchanged");
-        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), residualShares, "failed probe: the redeemer LT shares must be unchanged");
-        assertEq(toUint256(kernel.getState().totalLTAssets), 5e18, "failed probe: the owned BPT ledger must be unchanged");
+        assertEq(bpt.balanceOf(LPT_PROVIDER), 21e18, "failed probe: the redeemer BPT balance must be unchanged");
+        assertEq(liquidityProviderTranche.balanceOf(LPT_PROVIDER), residualShares, "failed probe: the redeemer LPT shares must be unchanged");
+        assertEq(toUint256(kernel.getState().totalLPTAssets), 5e18, "failed probe: the owned BPT ledger must be unchanged");
     }
 
     // =============================
@@ -653,19 +653,19 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice An in-kind LT deposit is never liquidity-gated, even into an under-provisioned market
-     *         (deposits are enabled at all times by design: an LT deposit only raises ltRawNAV)
+     * @notice An in-kind LPT deposit is never liquidity-gated, even into an under-provisioned market
+     *         (deposits are enabled at all times by design: an LPT deposit only raises lptRawNAV)
      * @dev Production conforms: DepositLogic.sol:148 passes enforce=false for the in-kind path, so the accountant's
-     *      Operation.LT_DEPOSIT gate never runs for it.
+     *      Operation.LPT_DEPOSIT gate never runs for it.
      *      Breach derivation: +100% shared PnL doubles the collateral mark 130e18 -> 260e18, so
      *      deltaST = floor(130e18 x 100e18 / 130e18) = 100e18 and deltaJT = 30e18. The senior gain splits per the
      *      canonical waterfall scaled x100: risk premium 20e18, liquidity premium 10e18, residual 70e18, so
      *      stEff = 100e18 + 70e18 + 10e18 = 180e18 exactly, while depth stays at the 6e18 auto-seed (the idle
-     *      premium senior shares are excluded from ltRawNAV and slippage mode blocks their reinvestment):
+     *      premium senior shares are excluded from lptRawNAV and slippage mode blocks their reinvestment):
      *      liquidityUtilization = ceil(180e18 x 0.05e18 / 6e18) = 1.5e18 > WAD. The 1e18-BPT deposit does not
      *      heal the breach and must still succeed
      */
-    function test_LTDeposit_neverLiquidityGated_evenWhileUnderProvisioned() public {
+    function test_LPTDeposit_neverLiquidityGated_evenWhileUnderProvisioned() public {
         _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
         setVenueSlippageMode(true);
         applySTPnL(10_000);
@@ -680,8 +680,8 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         assertEq(uint8(pre.marketState), uint8(MarketState.PERPETUAL), "a liquidity breach alone must not leave PERPETUAL");
         assertEq(toUint256(pre.jtImpermanentLoss), 0, "a PERPETUAL commit must carry zero JT impermanent loss");
 
-        address depositor = makeAddr("UNDER_PROVISIONED_LT_DEPOSITOR");
-        accessManager.grantRole(LT_LP_ROLE, depositor, 0);
+        address depositor = makeAddr("UNDER_PROVISIONED_LPT_DEPOSITOR");
+        accessManager.grantRole(LPT_LP_ROLE, depositor, 0);
         quoteToken.mint(address(this), quoteUnit);
         quoteToken.approve(address(balancerVault), quoteUnit);
         // The pool's token amounts follow the sorted registration order, so map the quote leg through the index
@@ -689,25 +689,25 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         quoteOnlyLegs[1 - stPoolTokenIndex] = quoteUnit;
         balancerVault.mintPoolTokensTo(address(bpt), depositor, 1e18, quoteOnlyLegs);
 
-        uint256 previewedShares = liquidityTranche.previewDeposit(toTrancheUnits(1e18));
+        uint256 previewedShares = liquidityProviderTranche.previewDeposit(toTrancheUnits(1e18));
         vm.startPrank(depositor);
-        bpt.approve(address(liquidityTranche), 1e18);
-        vm.expectEmit(address(liquidityTranche));
+        bpt.approve(address(liquidityProviderTranche), 1e18);
+        vm.expectEmit(address(liquidityProviderTranche));
         emit IRoycoVaultTranche.Deposit(depositor, depositor, toTrancheUnits(1e18), previewedShares);
-        uint256 mintedShares = liquidityTranche.deposit(toTrancheUnits(1e18), depositor);
+        uint256 mintedShares = liquidityProviderTranche.deposit(toTrancheUnits(1e18), depositor);
         vm.stopPrank();
 
-        assertEq(mintedShares, previewedShares, "under-provisioned LT deposit: preview/execute share parity");
-        assertEq(liquidityTranche.balanceOf(depositor), mintedShares, "under-provisioned LT deposit: shares must land on the receiver");
-        // The LT owned ledger is the 6e18 auto-seed plus this deposit (slippage mode precludes reinvested BPT)
-        assertEq(toUint256(kernel.getState().totalLTAssets), 6e18 + 1e18, "under-provisioned LT deposit: totalLTAssets must be credited exactly");
+        assertEq(mintedShares, previewedShares, "under-provisioned LPT deposit: preview/execute share parity");
+        assertEq(liquidityProviderTranche.balanceOf(depositor), mintedShares, "under-provisioned LPT deposit: shares must land on the receiver");
+        // The LPT owned ledger is the 6e18 auto-seed plus this deposit (slippage mode precludes reinvested BPT)
+        assertEq(toUint256(kernel.getState().totalLPTAssets), 6e18 + 1e18, "under-provisioned LPT deposit: totalLPTAssets must be credited exactly");
     }
 
     /**
-     * @notice An in-kind LT deposit is never coverage-gated, even into a coverage-breached FIXED_TERM market
+     * @notice An in-kind LPT deposit is never coverage-gated, even into a coverage-breached FIXED_TERM market
      *         (it adds no senior exposure, so it cannot consume coverage capacity)
      * @dev Production conforms: DepositLogic.sol:148 passes enforce=false for the in-kind path, and only the
-     *      multi-asset LT deposit with a collateral leg enforces the gates (DepositLogic.sol:214), which is
+     *      multi-asset LPT deposit with a collateral leg enforces the gates (DepositLogic.sol:214), which is
      *      consistent because that path mints senior shares.
      *      Breach derivation: -20% shared PnL drops the collateral mark 130e18 -> 104e18, so
      *      deltaST = -floor(26e18 x 100e18 / 130e18) = -20e18 and deltaJT = -6e18 as the residual. JT absorbs its
@@ -715,11 +715,11 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      *      6e18 + 20e18 = 26e18. coverageUtilization = 104e18 x 0.2 / 4e18 = 5.2e18 exactly (> WAD, below the
      *      6.4667e18 liquidation threshold, so no PERPETUAL arm of the resolution predicate fires: il = 26e18 is
      *      neither zero nor dust, the term has not elapsed, and JT is not wiped, so the covered drawdown enters
-     *      FIXED_TERM carrying the full 26e18 IL, and in-kind LT deposits stay enabled). A FIXED_TERM commit
+     *      FIXED_TERM carrying the full 26e18 IL, and in-kind LPT deposits stay enabled). A FIXED_TERM commit
      *      structurally carries zero fee and premium fields (any nonzero fee needs the IL fully recovered, which
      *      resolves PERPETUAL instead)
      */
-    function test_LTDeposit_inKind_neverCoverageGated_evenWhileCoverageBreached() public {
+    function test_LPTDeposit_inKind_neverCoverageGated_evenWhileCoverageBreached() public {
         _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
         applySTPnL(-2000);
 
@@ -733,13 +733,13 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         // ledger books the 6e18 JT loss plus the 20e18 coverage applied to the senior loss
         assertEq(toUint256(pre.jtImpermanentLoss), 26e18, "the FIXED_TERM commit must carry the full 6e18 + 20e18 = 26e18 IL");
         // A FIXED_TERM commit structurally takes no fees and pays no premium (a loss sync has no gain to split)
-        assertEq(toUint256(pre.ltLiquidityPremium), 0, "a FIXED_TERM commit must pay zero liquidity premium");
+        assertEq(toUint256(pre.lptLiquidityPremium), 0, "a FIXED_TERM commit must pay zero liquidity premium");
         assertEq(toUint256(pre.stProtocolFee), 0, "a FIXED_TERM commit must take zero ST fee");
         assertEq(toUint256(pre.jtProtocolFee), 0, "a FIXED_TERM commit must take zero JT fee");
-        assertEq(toUint256(pre.ltProtocolFee), 0, "a FIXED_TERM commit must take zero LT fee");
+        assertEq(toUint256(pre.lptProtocolFee), 0, "a FIXED_TERM commit must take zero LPT fee");
 
-        address depositor = makeAddr("COVERAGE_BREACHED_LT_DEPOSITOR");
-        accessManager.grantRole(LT_LP_ROLE, depositor, 0);
+        address depositor = makeAddr("COVERAGE_BREACHED_LPT_DEPOSITOR");
+        accessManager.grantRole(LPT_LP_ROLE, depositor, 0);
         quoteToken.mint(address(this), quoteUnit);
         quoteToken.approve(address(balancerVault), quoteUnit);
         // The pool's token amounts follow the sorted registration order, so map the quote leg through the index
@@ -747,17 +747,17 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         quoteOnlyLegs[1 - stPoolTokenIndex] = quoteUnit;
         balancerVault.mintPoolTokensTo(address(bpt), depositor, 1e18, quoteOnlyLegs);
 
-        uint256 previewedShares = liquidityTranche.previewDeposit(toTrancheUnits(1e18));
+        uint256 previewedShares = liquidityProviderTranche.previewDeposit(toTrancheUnits(1e18));
         vm.startPrank(depositor);
-        bpt.approve(address(liquidityTranche), 1e18);
-        vm.expectEmit(address(liquidityTranche));
+        bpt.approve(address(liquidityProviderTranche), 1e18);
+        vm.expectEmit(address(liquidityProviderTranche));
         emit IRoycoVaultTranche.Deposit(depositor, depositor, toTrancheUnits(1e18), previewedShares);
-        uint256 mintedShares = liquidityTranche.deposit(toTrancheUnits(1e18), depositor);
+        uint256 mintedShares = liquidityProviderTranche.deposit(toTrancheUnits(1e18), depositor);
         vm.stopPrank();
 
-        assertEq(mintedShares, previewedShares, "coverage-breached LT deposit: preview/execute share parity");
-        assertEq(liquidityTranche.balanceOf(depositor), mintedShares, "coverage-breached LT deposit: shares must land on the receiver");
-        assertEq(toUint256(kernel.getState().totalLTAssets), 6e18 + 1e18, "coverage-breached LT deposit: totalLTAssets must be credited exactly");
+        assertEq(mintedShares, previewedShares, "coverage-breached LPT deposit: preview/execute share parity");
+        assertEq(liquidityProviderTranche.balanceOf(depositor), mintedShares, "coverage-breached LPT deposit: shares must land on the receiver");
+        assertEq(toUint256(kernel.getState().totalLPTAssets), 6e18 + 1e18, "coverage-breached LPT deposit: totalLPTAssets must be credited exactly");
         // The FIXED_TERM transition must still be committed after the deposit settles
         assertEq(uint8(accountant.getState().lastMarketState), uint8(MarketState.FIXED_TERM), "market must remain FIXED_TERM after the deposit");
     }

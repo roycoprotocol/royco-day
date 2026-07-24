@@ -12,46 +12,39 @@ import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/acc
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import {
-    DeploymentResult,
-    IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams,
-    KernelType,
-    MarketConfig
-} from "../../../script/config/DeploymentTypes.sol";
-import { Create2DeployUtils } from "../../../script/utils/Create2DeployUtils.sol";
+import { MarketConfig } from "../../../script/config/DeploymentTypes.sol";
 import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_QUOTER_ROLE, ADMIN_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE, ADMIN_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
+import { TAG_KERNEL_PROXY } from "../../../src/factory/templates/base/Constants.sol";
 import {
-    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
-} from "../../../src/factory/templates/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
-import { TAG_ST_PROXY } from "../../../src/factory/templates/base/Constants.sol";
-import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../../../src/factory/templates/liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
+    RoycoDayBalancerV3MarketDeploymentTemplate
+} from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
+import { AggregatorV3Interface } from "../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { IMachine } from "../../../src/interfaces/external/makina/IMachine.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
-import {
-    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
-} from "../../../src/kernels/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
-import {
-    IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../../../src/kernels/base/quoter/identical-st-jt/IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
+import { NAV_UNIT } from "../../../src/libraries/Units.sol";
+import { MakinaSharePriceOracle } from "../../../src/oracle/MakinaSharePriceOracle.sol";
 
 /// @title Test_MakinaMarketDeployment
-/// @notice Fork test for the REAL Makina Day template
-///         (`Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate`), modeled on
-///         Test_RoycoFactory's direct-template pattern. Covers the deltas the golden ERC4626 suite cannot: the
-///         machine address threading from `kernelSpecificParams` into the kernel constructor, the BPT oracle
-///         injection on this kernel family, the ST/JT quoter selector role bindings, the senior pool leg's kernel
-///         rate provider, and the atomic unwind when the machine's share token mismatches the ST asset.
+/// @notice Fork test for the single Day template (`RoycoDayBalancerV3MarketDeploymentTemplate`) deployed against a
+///         market whose collateral is a REAL Makina machine share priced by the `MakinaSharePriceOracle` adapter,
+///         modeled on Test_RoycoFactory's direct-template pattern. Covers the deltas the golden ERC4626 suite cannot:
+///         the machine share resolved as the adapter's collateral, the live share-price composition against the real
+///         machine + feed, the BPT oracle injection, the pricing-admin selector role bindings, the senior pool leg's
+///         kernel rate provider, and the atomic unwind when the machine's share token mismatches the market collateral.
 /// @dev Requires a mainnet fork (real Balancer V3 + Gyro E-CLP + the REAL DUSD Makina machine). FAILS (env not
 ///      found) when `MAINNET_RPC_URL` is unset, instead of silently passing.
 contract Test_MakinaMarketDeployment is Test {
+    using Math for uint256;
+
     uint256 internal constant FORK_BLOCK = 25_400_000;
     address internal constant GYRO_ECLP_POOL_FACTORY = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
     address internal constant ECLP_LP_ORACLE_FACTORY = 0x301EDe5Fd4f9d7266B09c3A2E38F97776447154B;
@@ -62,12 +55,15 @@ contract Test_MakinaMarketDeployment is Test {
     /// @notice Makina machine for DUSD
     address internal constant MAKINA_MACHINE = 0x6b006870C83b1Cd49E766Ac9209f8d68763Df721;
 
-    address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // mismatched ST/JT asset for the revert test
+    /// @notice Chainlink USDC / USD feed, the accounting-asset->NAV leg of the composed oracle
+    address internal constant USDC_USD_FEED = 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6;
+
+    address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // mismatched collateral for the revert test
 
     AccessManager internal am;
     RoycoFactory internal factory;
     DeployScript internal deployScript;
-    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate internal template;
+    RoycoDayBalancerV3MarketDeploymentTemplate internal template;
     IRoycoDayEntryPoint internal entryPoint;
     RoycoMarketSyncer internal syncer;
 
@@ -127,13 +123,13 @@ contract Test_MakinaMarketDeployment is Test {
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
-        // The real Makina Day template, bound to this factory. `deployScript` externally deploys each market's
-        // impls/YDMs/pool and pre-deploys its ST + hook proxies (`deployMarketContractsForTest`), then builds the
-        // template params (`buildDayParams`). Its nested `deployDeterministicProxy` calls run with `msg.sender == address(deployScript)`,
+        // The real Day template, bound to this factory. `deployScript` externally deploys each market's impls/YDMs/pool
+        // and pre-deploys its ST + hook proxies (`deployMarketContractsForTest`), then builds the template params
+        // (`buildMarketParams`). Its nested `deployDeterministicProxy` calls run with `msg.sender == address(deployScript)`,
         // so the deployScript must hold DEPLOYER_ROLE.
         deployScript = new DeployScript();
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
-        template = new Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
+        template = new RoycoDayBalancerV3MarketDeploymentTemplate(
             IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(entryPoint), address(syncer)
         );
     }
@@ -145,96 +141,75 @@ contract Test_MakinaMarketDeployment is Test {
         factory.registerTemplate(address(template));
     }
 
-    /// @dev Clones the snUSD market config in memory and swaps in the collateral asset plus the Makina kernel type +
-    ///      params blob. No config file entry exists for this kernel yet, so the test IS the params source
-    ///      (MarketDeploymentConfig untouched).
-    function _marketConfig(address _machine, address _stJtAsset) internal view returns (MarketConfig memory cfg) {
+    /// @dev Clones the snUSD market config in memory and swaps in the Makina collateral + its share-price oracle.
+    ///      The direct-template path must supply the deployed oracle itself (the `deploy()` flow resolves it).
+    function _marketConfig(address _machine, address _collateralAsset) internal returns (MarketConfig memory cfg) {
         cfg = deployScript.getMarketConfig("snUSD");
-        cfg.collateralAsset = _stJtAsset;
-        cfg.kernelType = KernelType.Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel;
-        cfg.kernelSpecificParams = abi.encode(
-            IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
-                makinaMachine: _machine,
-                stAndJTQuoterParams: IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
-                    // Admin-primary configuration: hardcode the accounting asset to NAV rate to WAD via the admin
-                    // override (a nonzero stored rate with a null oracle passes the oracle-presence invariant)
-                    initialConversionRateWAD: 1e18,
-                    accountingAssetToNavAssetOracle: address(0),
-                    stalenessThresholdSeconds: 0,
-                    sequencerUptimeFeed: address(0),
-                    gracePeriodSeconds: 0
-                }),
-                ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
-                    bptOracle: address(0), // deployed by the template after the pool is created, overwritten by it
-                    maxReinvestmentSlippageWAD: 0.001e18
-                })
-            })
-        );
+        cfg.collateralAsset = _collateralAsset;
+        cfg.collateralAssetOracle = address(new MakinaSharePriceOracle(_machine, USDC_USD_FEED));
     }
 
-    function _encodedParams(bytes32 _marketId, address _machine, address _stJtAsset) internal returns (bytes memory) {
-        MarketConfig memory cfg = _marketConfig(_machine, _stJtAsset);
-        BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc =
+    function _encodedParams(bytes32 _marketId, address _machine, address _collateralAsset) internal returns (bytes memory) {
+        MarketConfig memory cfg = _marketConfig(_machine, _collateralAsset);
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
             deployScript.deployMarketContractsForTest(cfg, _marketId, factory, address(template), address(am));
-        return abi.encode(deployScript.buildDayParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
-    }
-
-    function _deploy(bytes32 _marketId) internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
-        // Precompute the params first: `_encodedParams` externally deploys the market contracts as `deployScript`,
-        // which would otherwise consume the `vm.prank(DEPLOYER)` intended for `executeMarketDeployment`.
-        bytes memory p = _encodedParams(_marketId, MAKINA_MACHINE, DUSD);
-        vm.prank(DEPLOYER);
-        return factory.executeMarketDeployment(address(template), p);
+        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT WIRING (the Makina-specific deltas)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice The template threads the REAL machine address from `kernelSpecificParams` into the kernel constructor,
-    ///         quotes a live composed rate off the machine's real share price, injects its template-deployed BPT
-    ///         oracle into the kernel quoter, binds the ST/JT quoter admin selectors to ADMIN_ORACLE_QUOTER_ROLE, and
-    ///         prices the senior pool leg via the kernel
-    function test_ExecuteMarketDeployment_MakinaKernelWiring() external {
+    /// @notice The adapter resolves the REAL machine's share token as its collateral, the kernel initializes against
+    ///         it (the COLLATERAL_ASSET identity check passes), the composed price is live against the real machine
+    ///         and feed, the template-deployed BPT oracle is injected into the kernel's liquidity venue, the
+    ///         pricing-admin selectors bind to ADMIN_ORACLE_ROLE, and the senior pool leg is priced via the kernel
+    function test_ExecuteMarketDeployment_MakinaOracleKernelWiring() external {
         _register();
-        IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(MARKET_ID);
+        MarketConfig memory cfg = _marketConfig(MAKINA_MACHINE, DUSD);
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
+            deployScript.deployMarketContractsForTest(cfg, MARKET_ID, factory, address(template), address(am));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
-        // The kernel proxy pinned the REAL machine as its constructor immutable.
-        assertEq(
-            Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel(r.kernel).MAKINA_MACHINE(),
-            MAKINA_MACHINE,
-            "kernel MAKINA_MACHINE != configured machine"
-        );
+        // The kernel initialized with the configured adapter, whose collateral is the machine's real share token.
+        assertEq(IRoycoDayKernel(r.kernel).getCollateralAssetOracle(), cfg.collateralAssetOracle, "kernel oracle != configured adapter");
+        MakinaSharePriceOracle oracle = MakinaSharePriceOracle(cfg.collateralAssetOracle);
+        assertEq(oracle.MAKINA_MACHINE(), MAKINA_MACHINE, "adapter machine != configured machine");
+        assertEq(oracle.COLLATERAL_ASSET(), DUSD, "adapter collateral != machine share token");
 
-        // The composed quoter rate is live against the real machine. The stored accounting asset to NAV rate is WAD,
-        // so the composed rate collapses to the machine's real share price scaled to WAD by the decimals probe
-        // (the quoter's mulDiv by the stored WAD rate is the identity).
+        // The composed price is live against the real machine: the machine's share price scaled to WAD by the
+        // decimals probe, times the real feed's answer lifted from feed decimals, floored in one mulDiv.
         uint256 probe = 10 ** (18 + IERC20Metadata(DUSD).decimals() - IERC20Metadata(IMachine(MAKINA_MACHINE).accountingToken()).decimals());
-        uint256 rate = IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter(r.kernel).getTrancheUnitToNAVUnitConversionRateWAD();
-        assertEq(rate, IMachine(MAKINA_MACHINE).convertToAssets(probe), "composed rate != machine share price");
-        assertGt(rate, 0.01e18, "composed rate implausibly low");
-        assertLt(rate, 100e18, "composed rate implausibly high");
+        (, int256 answer,, uint256 feedUpdatedAt,) = AggregatorV3Interface(USDC_USD_FEED).latestRoundData();
+        (NAV_UNIT price, uint256 updatedAt) = oracle.getPrice();
+        assertEq(
+            NAV_UNIT.unwrap(price),
+            IMachine(MAKINA_MACHINE).convertToAssets(probe).mulDiv(uint256(answer), 10 ** AggregatorV3Interface(USDC_USD_FEED).decimals()),
+            "composed price != machine share price x feed"
+        );
+        assertEq(updatedAt, feedUpdatedAt, "feed timestamp must pass through");
+        assertGt(NAV_UNIT.unwrap(price), 0.01e18, "composed price implausibly low");
+        assertLt(NAV_UNIT.unwrap(price), 100e18, "composed price implausibly high");
 
         // The template deployed the BPT oracle through Balancer's E-CLP LP oracle factory and injected it into the
-        // kernel quoter, overwriting the null placeholder in the params blob.
-        address pool = IRoycoDayKernel(r.kernel).LT_ASSET();
-        address bptOracle = BalancerV3_LT_BPTOracle_Quoter(r.kernel).getBalancerV3QuoterState().bptOracle;
+        // kernel's liquidity venue, overwriting the null placeholder in the params blob.
+        address pool = IRoycoDayKernel(r.kernel).LPT_ASSET();
+        address bptOracle = BalancerV3LiquidityVenue(r.kernel).getBalancerV3LiquidityVenueState().bptOracle;
         assertTrue(bptOracle != address(0), "bptOracle unset");
         assertGt(bptOracle.code.length, 0, "bptOracle has no code");
         assertTrue(ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY).isOracleFromFactory(ILPOracleBase(bptOracle)), "not from oracle factory");
         assertEq(address(LPOracleBase(bptOracle).pool()), pool, "oracle.pool() != market pool");
 
-        // The three ST/JT quoter admin selectors resolve to ADMIN_ORACLE_QUOTER_ROLE on the market AM.
-        assertEq(am.getTargetFunctionRole(r.kernel, bytes4(keccak256("setConversionRate(uint256,bool)"))), ADMIN_ORACLE_QUOTER_ROLE, "setConversionRate role");
+        // The four pricing-admin selectors resolve to ADMIN_ORACLE_ROLE on the market AM.
+        assertEq(am.getTargetFunctionRole(r.kernel, IRoycoDayKernel.setCollateralAssetOracle.selector), ADMIN_ORACLE_ROLE, "setCollateralAssetOracle role");
+        assertEq(am.getTargetFunctionRole(r.kernel, IRoycoDayKernel.setSequencerUptimeFeed.selector), ADMIN_ORACLE_ROLE, "setSequencerUptimeFeed role");
+        assertEq(am.getTargetFunctionRole(r.kernel, BalancerV3LiquidityVenue.setBPTOracle.selector), ADMIN_ORACLE_ROLE, "setBPTOracle role");
         assertEq(
-            am.getTargetFunctionRole(r.kernel, bytes4(keccak256("setChainlinkOracle(address,uint48,bool)"))),
-            ADMIN_ORACLE_QUOTER_ROLE,
-            "setChainlinkOracle role"
-        );
-        assertEq(
-            am.getTargetFunctionRole(r.kernel, bytes4(keccak256("setSequencerUptimeFeed(address,uint48)"))),
-            ADMIN_ORACLE_QUOTER_ROLE,
-            "setSequencerUptimeFeed role"
+            am.getTargetFunctionRole(r.kernel, BalancerV3LiquidityVenue.setMaxReinvestmentSlippage.selector),
+            ADMIN_ORACLE_ROLE,
+            "setMaxReinvestmentSlippage role"
         );
 
         // The senior pool leg is WITH_RATE priced by the kernel and the quote leg is STANDARD.
@@ -253,29 +228,27 @@ contract Test_MakinaMarketDeployment is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // REVERT UNWIND (the kernel constructor guard fails the whole deployment atomically)
+    // REVERT UNWIND (the kernel init oracle-identity guard fails the whole deployment atomically)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice The REAL machine's share token (DUSD) mismatches a market whose ST asset is the snUSD vault, failing
-    ///         the kernel constructor's TRANCHE_ASSET_MUST_BE_MACHINE_SHARE guard. Under the split deployment flow the
-    ///         kernel implementation is deployed EXTERNALLY (in `deployMarketContractsForTest`) before the wiring
-    ///         transaction, so the mismatch now aborts there: the CREATE2 factory surfaces the constructor revert as a
-    ///         failed deployment, and the whole external call unwinds atomically — no market contracts, no registry entries
-    function test_RevertIf_MachineShareTokenMismatchesSTAsset_DeploymentUnwindsAtomically() external {
+    /// @notice The REAL machine's share token (DUSD) mismatches a market whose collateral is the snUSD vault, failing
+    ///         the kernel init's COLLATERAL_ASSET_ORACLE_MISMATCH guard inside the wiring transaction: the kernel
+    ///         proxy's CREATE3 deployment fails and the whole `executeMarketDeployment` unwinds atomically — no kernel
+    ///         proxy, no registry entries
+    function test_RevertIf_MachineShareTokenMismatchesCollateral_DeploymentUnwindsAtomically() external {
         _register();
 
-        bytes32 marketId = MARKET_ID;
-        // The REAL machine against the WRONG ST asset (the snUSD vault, not the machine's DUSD share token).
-        MarketConfig memory cfg = _marketConfig(MAKINA_MACHINE, SNUSD_VAULT);
-        address predictedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", marketId, TAG_ST_PROXY)));
+        // The REAL machine's adapter (collateral DUSD) against the WRONG market collateral (the snUSD vault).
+        bytes memory p = _encodedParams(MARKET_ID, MAKINA_MACHINE, SNUSD_VAULT);
+        address predictedKernel = factory.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", MARKET_ID, TAG_KERNEL_PROXY)));
 
-        // The canonical CREATE2 deployer swallows the kernel quoter's constructor revert reason, so the failure
-        // surfaces as `DeploymentFailed` with empty return data
-        vm.expectRevert(abi.encodeWithSelector(Create2DeployUtils.DeploymentFailed.selector, bytes("")));
-        deployScript.deployMarketContractsForTest(cfg, marketId, factory, address(template), address(am));
+        // The CREATE3 deployer surfaces the kernel init's revert as a failed deterministic deployment.
+        vm.prank(DEPLOYER);
+        vm.expectRevert(bytes4(keccak256("DeploymentFailed()")));
+        factory.executeMarketDeployment(address(template), p);
 
-        // Atomic unwind: nothing was deployed or registered.
-        assertEq(predictedST.code.length, 0, "no tranche deployed");
-        assertEq(factory.trancheToKernel(predictedST), address(0), "no registry entry");
+        // Atomic unwind: the wiring transaction's kernel proxy and registry entries are gone.
+        assertEq(predictedKernel.code.length, 0, "no kernel deployed");
+        assertEq(factory.trancheToKernel(predictedKernel), address(0), "no registry entry");
     }
 }

@@ -130,14 +130,14 @@ contract Test_RoycoTestMath is Test {
     }
 
     /// Positive requirement against zero pool depth is infinite utilization.
-    function test_ComputeLiquidityUtilization_ZeroLtRaw_ReturnsMax() public pure {
+    function test_ComputeLiquidityUtilization_ZeroLptRaw_ReturnsMax() public pure {
         assertEq(RoycoTestMath.computeLiquidityUtilization(1e18, 1e17, 0), type(uint256).max, "zero depth");
     }
 
     /// Zero edges take precedence over the infinite edge.
     function test_ComputeLiquidityUtilization_ZeroEdgePrecedence_OverInfiniteEdge() public pure {
-        assertEq(RoycoTestMath.computeLiquidityUtilization(0, 1e17, 0), 0, "zero stEffectiveNAV wins over zero ltRawNAV");
-        assertEq(RoycoTestMath.computeLiquidityUtilization(5, 0, 0), 0, "zero minLiq wins over zero ltRawNAV");
+        assertEq(RoycoTestMath.computeLiquidityUtilization(0, 1e17, 0), 0, "zero stEffectiveNAV wins over zero lptRawNAV");
+        assertEq(RoycoTestMath.computeLiquidityUtilization(5, 0, 0), 0, "zero minLiq wins over zero lptRawNAV");
     }
 
     /// Exact WAD threshold, clean division: ⌈1000e18·5e16 / 50e18⌉ = ⌈5e37/5e19⌉ = 1e18 exactly.
@@ -378,10 +378,10 @@ contract Test_RoycoTestMath is Test {
     ///   ⌊3·2e18/(3e18+1e6)⌋ = 1 (the exact 6/3 = 2 is dropped to 1 by the virtual-share sliver),
     ///   ⌊11·2e18/(3e18+1e6)⌋ = 7.
     function test_ScaleClaims_AllFourFieldsFloored() public pure {
-        RoycoTestMath.Claims memory total = RoycoTestMath.Claims({ collateralAssets: 10, ltAssets: 7, stShares: 3, nav: 11 });
+        RoycoTestMath.Claims memory total = RoycoTestMath.Claims({ collateralAssets: 10, lptAssets: 7, stShares: 3, nav: 11 });
         RoycoTestMath.Claims memory scaled = RoycoTestMath.scaleClaims(total, 2e18, 3e18);
         assertEq(scaled.collateralAssets, 6, "floor(10*2e18/(3e18+1e6)) = 6");
-        assertEq(scaled.ltAssets, 4, "floor(7*2e18/(3e18+1e6)) = 4");
+        assertEq(scaled.lptAssets, 4, "floor(7*2e18/(3e18+1e6)) = 4");
         assertEq(scaled.stShares, 1, "floor(3*2e18/(3e18+1e6)) = 1");
         assertEq(scaled.nav, 7, "floor(11*2e18/(3e18+1e6)) = 7");
     }
@@ -391,20 +391,20 @@ contract Test_RoycoTestMath is Test {
     /// scaled = ⌊field·1e18/(1e18 + 1e6)⌋ = field − field/1e12, so each field drops exactly field/1e12 wei
     /// (1e6, 2e6, 3e6, 4e6 respectively).
     function test_ScaleClaims_FullShares_Identity() public pure {
-        RoycoTestMath.Claims memory total = RoycoTestMath.Claims({ collateralAssets: 1e18, ltAssets: 2e18, stShares: 3e18, nav: 4e18 });
+        RoycoTestMath.Claims memory total = RoycoTestMath.Claims({ collateralAssets: 1e18, lptAssets: 2e18, stShares: 3e18, nav: 4e18 });
         RoycoTestMath.Claims memory scaled = RoycoTestMath.scaleClaims(total, 1e18, 1e18);
         assertEq(scaled.collateralAssets, 999_999_999_999_000_000, "floor(1e18*1e18/(1e18+1e6)) = 1e18 - 1e6");
-        assertEq(scaled.ltAssets, 1_999_999_999_998_000_000, "floor(2e18*1e18/(1e18+1e6)) = 2e18 - 2e6");
+        assertEq(scaled.lptAssets, 1_999_999_999_998_000_000, "floor(2e18*1e18/(1e18+1e6)) = 2e18 - 2e6");
         assertEq(scaled.stShares, 2_999_999_999_997_000_000, "floor(3e18*1e18/(1e18+1e6)) = 3e18 - 3e6");
         assertEq(scaled.nav, 3_999_999_999_996_000_000, "floor(4e18*1e18/(1e18+1e6)) = 4e18 - 4e6");
     }
 
     /// Zero shares scale every field to zero.
     function test_ScaleClaims_ZeroShares_AllZero() public pure {
-        RoycoTestMath.Claims memory total = RoycoTestMath.Claims({ collateralAssets: 1e30, ltAssets: 1e30, stShares: 1e30, nav: 1e30 });
+        RoycoTestMath.Claims memory total = RoycoTestMath.Claims({ collateralAssets: 1e30, lptAssets: 1e30, stShares: 1e30, nav: 1e30 });
         RoycoTestMath.Claims memory scaled = RoycoTestMath.scaleClaims(total, 0, 1e30);
         assertEq(scaled.collateralAssets, 0, "zero slice collateralAssets");
-        assertEq(scaled.ltAssets, 0, "zero slice ltAssets");
+        assertEq(scaled.lptAssets, 0, "zero slice lptAssets");
         assertEq(scaled.stShares, 0, "zero slice stShares");
         assertEq(scaled.nav, 0, "zero slice nav");
     }
@@ -413,52 +413,52 @@ contract Test_RoycoTestMath is Test {
     /// sliver), so the minimal slice that still recovers 1 wei per field is 2 shares:
     /// ⌊1e30·2/(1e30 + 1e6)⌋ = 1 (the offset raises the minimal value-recovering slice from 1 to 2).
     function test_ScaleClaims_MaxRealistic_OneWeiSlice() public pure {
-        RoycoTestMath.Claims memory total = RoycoTestMath.Claims({ collateralAssets: 1e30, ltAssets: 1e30, stShares: 1e30, nav: 1e30 });
+        RoycoTestMath.Claims memory total = RoycoTestMath.Claims({ collateralAssets: 1e30, lptAssets: 1e30, stShares: 1e30, nav: 1e30 });
         RoycoTestMath.Claims memory scaled = RoycoTestMath.scaleClaims(total, 2, 1e30);
         assertEq(scaled.collateralAssets, 1, "floor(1e30*2/(1e30+1e6)) = 1");
-        assertEq(scaled.ltAssets, 1, "floor(1e30*2/(1e30+1e6)) = 1");
+        assertEq(scaled.lptAssets, 1, "floor(1e30*2/(1e30+1e6)) = 1");
         assertEq(scaled.stShares, 1, "floor(1e30*2/(1e30+1e6)) = 1");
         assertEq(scaled.nav, 1, "floor(1e30*2/(1e30+1e6)) = 1");
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                        getLiquidityTrancheEffectiveNAV
+                        getLiquidityProviderTrancheEffectiveNAV
     //////////////////////////////////////////////////////////////////////////*/
 
     /// No idle shares: effective NAV is the pool leg alone.
-    function test_GetLiquidityTrancheEffectiveNAV_NoIdleShares_EqualsLtRaw() public pure {
-        assertEq(RoycoTestMath.getLiquidityTrancheEffectiveNAV(100e18, 0, 500e18, 1000e18), 100e18, "pure BPT state");
+    function test_GetLiquidityProviderTrancheEffectiveNAV_NoIdleShares_EqualsLptRaw() public pure {
+        assertEq(RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(100e18, 0, 500e18, 1000e18), 100e18, "pure BPT state");
     }
 
     /// Idle valuation over the offset: the idle leg is a convertToValue mint priced against effective supply
     /// 1000e18 + 1e6, so 100e18 + ⌊(2000e18 + 1)·10e18/(1000e18 + 1e6)⌋ = 100e18 + 19999999999999980000
     /// = 119999999999999980000 (just under the pre-offset 120e18).
-    function test_GetLiquidityTrancheEffectiveNAV_CleanIdleValuation() public pure {
+    function test_GetLiquidityProviderTrancheEffectiveNAV_CleanIdleValuation() public pure {
         assertEq(
-            RoycoTestMath.getLiquidityTrancheEffectiveNAV(100e18, 10e18, 2000e18, 1000e18),
+            RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(100e18, 10e18, 2000e18, 1000e18),
             119_999_999_999_999_980_000,
-            "ltRawNAV + floor((2000e18+1)*10e18/(1000e18+1e6))"
+            "lptRawNAV + floor((2000e18+1)*10e18/(1000e18+1e6))"
         );
     }
 
     /// Floor on the idle leg (inputs rescaled to 1e18 magnitude so the offset is negligible and the floor still
     /// favors the pool leg): 5e18 + ⌊(7e18 + 1)·3e18/(2e18 + 1e6)⌋ = 5e18 + 10499999999994750001
     /// = 15499999999994750001.
-    function test_GetLiquidityTrancheEffectiveNAV_FloorRounding_FavorsPoolLeg() public pure {
-        assertEq(RoycoTestMath.getLiquidityTrancheEffectiveNAV(5e18, 3e18, 7e18, 2e18), 15_499_999_999_994_750_001, "5e18 + floor((7e18+1)*3e18/(2e18+1e6))");
+    function test_GetLiquidityProviderTrancheEffectiveNAV_FloorRounding_FavorsPoolLeg() public pure {
+        assertEq(RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(5e18, 3e18, 7e18, 2e18), 15_499_999_999_994_750_001, "5e18 + floor((7e18+1)*3e18/(2e18+1e6))");
     }
 
     /// A genuinely fresh ST tranche (stSupply == 0 AND stEffectiveNAV == 0) values the idle leg at 0, so effective
-    /// NAV falls back to ltRawNAV. (Under the offset a live stEffectiveNAV with zero supply is empty-with-backing
+    /// NAV falls back to lptRawNAV. (Under the offset a live stEffectiveNAV with zero supply is empty-with-backing
     /// and would instead be priced, so the fresh case now requires stEffectiveNAV == 0.)
-    function test_GetLiquidityTrancheEffectiveNAV_ZeroStSupply_IdleLegIsZero() public pure {
-        assertEq(RoycoTestMath.getLiquidityTrancheEffectiveNAV(42, 999, 0, 0), 42, "idle leg zero at genuinely fresh ST tranche");
+    function test_GetLiquidityProviderTrancheEffectiveNAV_ZeroStSupply_IdleLegIsZero() public pure {
+        assertEq(RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(42, 999, 0, 0), 42, "idle leg zero at genuinely fresh ST tranche");
     }
 
     /// Zero pool leg with staged premium only (inputs rescaled to 1e18 magnitude so the offset is negligible):
     /// 0 + ⌊(7e18 + 1)·3e18/(2e18 + 1e6)⌋ = 10499999999994750001.
-    function test_GetLiquidityTrancheEffectiveNAV_ZeroLtRaw_IdleLegOnly() public pure {
-        assertEq(RoycoTestMath.getLiquidityTrancheEffectiveNAV(0, 3e18, 7e18, 2e18), 10_499_999_999_994_750_001, "floor((7e18+1)*3e18/(2e18+1e6))");
+    function test_GetLiquidityProviderTrancheEffectiveNAV_ZeroLptRaw_IdleLegOnly() public pure {
+        assertEq(RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(0, 3e18, 7e18, 2e18), 10_499_999_999_994_750_001, "floor((7e18+1)*3e18/(2e18+1e6))");
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -545,7 +545,7 @@ contract Test_RoycoTestMath is Test {
     /**
      * Builds a SyncInputs under the shared scenario conventions: minCoverage 0.1e18, liquidation
      * threshold 1.1e18, minLiquidity 0.05e18, all four fee rates 0.1e18, fixed-term duration 7 days,
-     * ltRawNAVNew 100e18, sync at T0 on the instantaneous branch (elapsed 0) with pinned preview
+     * lptRawNAVNew 100e18, sync at T0 on the instantaneous branch (elapsed 0) with pinned preview
      * rates jt 0.1e18 / lt 0.05e18 and caps jt 0.2e18 / lt 0.1e18.
      * The last collateral NAV is derived as stEffectiveNAVLast + jtEffectiveNAVLast, the conservation
      * precondition every reachable checkpoint satisfies.
@@ -570,18 +570,18 @@ contract Test_RoycoTestMath is Test {
         in_.marketStateLast = stateLast;
         in_.fixedTermEndTimestampLast = endLast;
         in_.collateralNAVDelta = collateralNAVDelta;
-        in_.ltRawNAVNew = 100e18;
+        in_.lptRawNAVNew = 100e18;
         in_.jtTwYieldShareAccrual = 0;
-        in_.ltTwYieldShareAccrual = 0;
+        in_.lptTwYieldShareAccrual = 0;
         in_.elapsedSincePremiumPayment = 0;
         in_.jtInstYieldShareWAD = 0.1e18;
-        in_.ltInstYieldShareWAD = 0.05e18;
+        in_.lptInstYieldShareWAD = 0.05e18;
         in_.maxJTYieldShareWAD = 0.2e18;
-        in_.maxLTYieldShareWAD = 0.1e18;
+        in_.maxLPTYieldShareWAD = 0.1e18;
         in_.stProtocolFeeWAD = 0.1e18;
         in_.jtProtocolFeeWAD = 0.1e18;
         in_.jtYieldShareProtocolFeeWAD = 0.1e18;
-        in_.ltYieldShareProtocolFeeWAD = 0.1e18;
+        in_.lptYieldShareProtocolFeeWAD = 0.1e18;
         in_.nowTimestamp = T0;
         in_.fixedTermDuration = DURATION;
         in_.minCoverageWAD = 0.1e18;
@@ -597,15 +597,15 @@ contract Test_RoycoTestMath is Test {
             actual.marketState == RoycoTestMath.MarketState.PERPETUAL, actual.jtImpermanentLoss == 0, "standing invariant: PERPETUAL iff zero jtImpermanentLoss"
         );
         assertEq(actual.collateralNAV, expected.collateralNAV, "collateralNAV");
-        assertEq(actual.ltRawNAV, expected.ltRawNAV, "ltRawNAV");
+        assertEq(actual.lptRawNAV, expected.lptRawNAV, "lptRawNAV");
         assertEq(actual.stEffectiveNAV, expected.stEffectiveNAV, "stEffectiveNAV");
         assertEq(actual.jtEffectiveNAV, expected.jtEffectiveNAV, "jtEffectiveNAV");
         assertEq(actual.jtImpermanentLoss, expected.jtImpermanentLoss, "jtImpermanentLoss");
         assertEq(actual.jtRiskPremium, expected.jtRiskPremium, "jtRiskPremium");
-        assertEq(actual.ltLiquidityPremium, expected.ltLiquidityPremium, "ltLiquidityPremium");
+        assertEq(actual.lptLiquidityPremium, expected.lptLiquidityPremium, "lptLiquidityPremium");
         assertEq(actual.stProtocolFee, expected.stProtocolFee, "stProtocolFee");
         assertEq(actual.jtProtocolFee, expected.jtProtocolFee, "jtProtocolFee");
-        assertEq(actual.ltProtocolFee, expected.ltProtocolFee, "ltProtocolFee");
+        assertEq(actual.lptProtocolFee, expected.lptProtocolFee, "lptProtocolFee");
         assertEq(actual.coverageUtilizationWAD, expected.coverageUtilizationWAD, "coverageUtilizationWAD");
         assertEq(actual.liquidityUtilizationWAD, expected.liquidityUtilizationWAD, "liquidityUtilizationWAD");
         assertEq(uint256(actual.marketState), uint256(expected.marketState), "marketState");
@@ -627,8 +627,8 @@ contract Test_RoycoTestMath is Test {
      *   Attribution: deltaSTEff = ⌊60e18·1000e18/1200e18⌋ = 50e18 exact, deltaJTEff = 60e18 − 50e18 = 10e18.
      *   JT leg: jtGain 10e18 > dust 0 ⇒ jtFee = ⌊10e18·0.1⌋ = 1e18, jtEffectiveNAV = 210e18.
      *   ST gain leg: stGain 50e18, no IL. premiumsPaid (50e18 > 0). Instantaneous (elapsed forced 1):
-     *     jtPrem = ⌊50e18·0.1e18/(1·1e18)⌋ = 5e18, ltPrem = ⌊50e18·0.05e18/1e18⌋ = 2.5e18 (7.5e18 <= 50e18 ok).
-     *     jtFee += ⌊5e18·0.1⌋ = 0.5e18 ⇒ 1.5e18 total, jtEffectiveNAV = 215e18, ltFee = ⌊2.5e18·0.1⌋ = 0.25e18.
+     *     jtPrem = ⌊50e18·0.1e18/(1·1e18)⌋ = 5e18, lptPrem = ⌊50e18·0.05e18/1e18⌋ = 2.5e18 (7.5e18 <= 50e18 ok).
+     *     jtFee += ⌊5e18·0.1⌋ = 0.5e18 ⇒ 1.5e18 total, jtEffectiveNAV = 215e18, lptFee = ⌊2.5e18·0.1⌋ = 0.25e18.
      *     Residual 50e18 − 5e18 − 2.5e18 = 42.5e18 ⇒ stFee = 4.25e18, stEffectiveNAV = 1000e18 + 42.5e18 + 2.5e18 = 1045e18.
      *   Conservation 1260 = 1045 + 215 (e18). IL 0 ⇒ PERPETUAL.
      *   coverageUtilizationWAD = ⌈1260e18·0.1e18/215e18⌉ = ⌈586046511627906976.74⌉ = 586046511627906977.
@@ -638,15 +638,15 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 60e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1260e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1045e18;
         expected.jtEffectiveNAV = 215e18;
         expected.jtImpermanentLoss = 0;
         expected.jtRiskPremium = 5e18;
-        expected.ltLiquidityPremium = 2.5e18;
+        expected.lptLiquidityPremium = 2.5e18;
         expected.stProtocolFee = 4.25e18;
         expected.jtProtocolFee = 1.5e18;
-        expected.ltProtocolFee = 0.25e18;
+        expected.lptProtocolFee = 0.25e18;
         expected.coverageUtilizationWAD = 586_046_511_627_906_977;
         expected.liquidityUtilizationWAD = 522_500_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
@@ -676,7 +676,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, -60e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1140e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 140e18;
         expected.jtImpermanentLoss = 60e18;
@@ -701,7 +701,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(0, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 20e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 220e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 0;
         expected.jtEffectiveNAV = 220e18;
         expected.jtProtocolFee = 2e18;
@@ -726,7 +726,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, -300e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 900e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 900e18;
         expected.jtEffectiveNAV = 0;
         expected.jtImpermanentLoss = 0;
@@ -756,7 +756,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, -200e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1000e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 0;
         expected.coverageUtilizationWAD = type(uint256).max;
@@ -779,7 +779,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18 - 1, 0, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 0);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1200e18 - 1;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 200e18 - 1;
         expected.coverageUtilizationWAD = 600_000_000_000_000_001;
@@ -797,8 +797,8 @@ contract Test_RoycoTestMath is Test {
      *   Repayment = min(59e18, 20e18) = 20e18 ⇒ IL 0, jtEffectiveNAV 200e18, residual 39e18, basis 1200e18.
      *   Attribution: stGain = ⌊39e18·1000e18/1200e18⌋ = 32.5e18 exact, jtGain = 6.5e18.
      *   JT leg: jtFee = ⌊6.5e18·0.1⌋ = 0.65e18, jtEffectiveNAV 206.5e18.
-     *   jtPrem = ⌊32.5e18·0.1⌋ = 3.25e18, ltPrem = ⌊32.5e18·0.05⌋ = 1.625e18,
-     *   jtFee += 0.325e18 ⇒ 0.975e18 total, ltFee = 0.1625e18,
+     *   jtPrem = ⌊32.5e18·0.1⌋ = 3.25e18, lptPrem = ⌊32.5e18·0.05⌋ = 1.625e18,
+     *   jtFee += 0.325e18 ⇒ 0.975e18 total, lptFee = 0.1625e18,
      *   residual 32.5e18 − 3.25e18 − 1.625e18 = 27.625e18 ⇒ stFee = 2.7625e18,
      *   stEffectiveNAV = 1000e18 + 27.625e18 + 1.625e18 = 1029.25e18, jtEffectiveNAV = 206.5e18 + 3.25e18 = 209.75e18.
      *   Conservation 1239 = 1029.25 + 209.75 (e18). IL 0 ⇒ PERPETUAL exit (premiums imply PERPETUAL), end 0.
@@ -809,14 +809,14 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 180e18, 20e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 59e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1239e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1029.25e18;
         expected.jtEffectiveNAV = 209.75e18;
         expected.jtRiskPremium = 3.25e18;
-        expected.ltLiquidityPremium = 1.625e18;
+        expected.lptLiquidityPremium = 1.625e18;
         expected.stProtocolFee = 2.7625e18;
         expected.jtProtocolFee = 0.975e18;
-        expected.ltProtocolFee = 0.1625e18;
+        expected.lptProtocolFee = 0.1625e18;
         expected.coverageUtilizationWAD = 590_703_218_116_805_722;
         expected.liquidityUtilizationWAD = 514_625_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
@@ -833,9 +833,9 @@ contract Test_RoycoTestMath is Test {
      *   Attribution: stGain = ⌊(60e18−12)·(1000e18+5)/(1200e18+5)⌋ = 50e18−10, jtGain = 10e18−2 > dust 7
      *   ⇒ jtFee = ⌊(10e18−2)·0.1⌋ = 1e18−1, jtEffectiveNAV = 210e18−2.
      *   ST leg: stGain 50e18−10. premiumsPaid (> 7).
-     *   jtPrem = ⌊(50e18−10)·0.1⌋ = 5e18−1, ltPrem = ⌊(50e18−10)·0.05⌋ = 2.5e18−1,
+     *   jtPrem = ⌊(50e18−10)·0.1⌋ = 5e18−1, lptPrem = ⌊(50e18−10)·0.05⌋ = 2.5e18−1,
      *   jtFee += ⌊(5e18−1)·0.1⌋ = 0.5e18−1 ⇒ 1.5e18−2 total, jtEffectiveNAV = 215e18−3,
-     *   ltFee = ⌊(2.5e18−1)·0.1⌋ = 0.25e18−1, residual (50e18−10)−(5e18−1)−(2.5e18−1) = 42.5e18−8,
+     *   lptFee = ⌊(2.5e18−1)·0.1⌋ = 0.25e18−1, residual (50e18−10)−(5e18−1)−(2.5e18−1) = 42.5e18−8,
      *   stFee = ⌊(42.5e18−8)·0.1⌋ = 4.25e18−1, stEffectiveNAV = (1000e18+5) + (42.5e18−8) + (2.5e18−1) = 1045e18−4.
      *   Conservation 1260e18−7 = (1045e18−4) + (215e18−3). IL 0 ⇒ PERPETUAL.
      *   coverageUtilizationWAD = ⌈(1260e18−7)·0.1e18/(215e18−3)⌉ = 586046511627906977.
@@ -845,14 +845,14 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 7, 60e18 - 7);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1260e18 - 7;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1045e18 - 4;
         expected.jtEffectiveNAV = 215e18 - 3;
         expected.jtRiskPremium = 5e18 - 1;
-        expected.ltLiquidityPremium = 2.5e18 - 1;
+        expected.lptLiquidityPremium = 2.5e18 - 1;
         expected.stProtocolFee = 4.25e18 - 1;
         expected.jtProtocolFee = 1.5e18 - 2;
-        expected.ltProtocolFee = 0.25e18 - 1;
+        expected.lptProtocolFee = 0.25e18 - 1;
         expected.coverageUtilizationWAD = 586_046_511_627_906_977;
         expected.liquidityUtilizationWAD = 522_500_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
@@ -872,7 +872,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18 - 5, 5, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 7, 0);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1200e18 - 5;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 200e18 - 5;
         expected.jtImpermanentLoss = 0;
@@ -893,8 +893,8 @@ contract Test_RoycoTestMath is Test {
      *   Attribution: stGain = ⌊(24e18−5)·1000e18/1200e18⌋ = 20e18−5, jtGain = 4e18 > dust 7
      *   ⇒ jtFee = ⌊4e18·0.1⌋ = 0.4e18, jtEffectiveNAV = 204e18.
      *   ST leg: stGain 20e18−5. premiumsPaid (> 7). jtPrem = ⌊(20e18−5)·0.1⌋ = 2e18−1,
-     *   ltPrem = ⌊(20e18−5)·0.05⌋ = 1e18−1, jtFee += ⌊(2e18−1)·0.1⌋ = 0.2e18−1 ⇒ 0.6e18−1 total,
-     *   jtEffectiveNAV = 206e18−1, ltFee = ⌊(1e18−1)·0.1⌋ = 0.1e18−1,
+     *   lptPrem = ⌊(20e18−5)·0.05⌋ = 1e18−1, jtFee += ⌊(2e18−1)·0.1⌋ = 0.2e18−1 ⇒ 0.6e18−1 total,
+     *   jtEffectiveNAV = 206e18−1, lptFee = ⌊(1e18−1)·0.1⌋ = 0.1e18−1,
      *   residual (20e18−5)−(2e18−1)−(1e18−1) = 17e18−3 ⇒ stFee = 1.7e18−1,
      *   stEffectiveNAV = 1000e18 + (17e18−3) + (1e18−1) = 1018e18−4.
      *   Conservation 1224e18−5 = (1018e18−4) + (206e18−1). IL 0 ⇒ PERPETUAL exit keeping the fees, end deleted.
@@ -905,15 +905,15 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18 - 5, 5, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 7, 24e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1224e18 - 5;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1018e18 - 4;
         expected.jtEffectiveNAV = 206e18 - 1;
         expected.jtImpermanentLoss = 0;
         expected.jtRiskPremium = 2e18 - 1;
-        expected.ltLiquidityPremium = 1e18 - 1;
+        expected.lptLiquidityPremium = 1e18 - 1;
         expected.stProtocolFee = 1.7e18 - 1;
         expected.jtProtocolFee = 0.6e18 - 1;
-        expected.ltProtocolFee = 0.1e18 - 1;
+        expected.lptProtocolFee = 0.1e18 - 1;
         expected.coverageUtilizationWAD = 594_174_757_281_553_399;
         expected.liquidityUtilizationWAD = 509_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
@@ -935,7 +935,7 @@ contract Test_RoycoTestMath is Test {
      * Stage 2, from the erased checkpoint (stEff 1000e18, jtEff 200e18−6, IL 0), delta +24e18:
      * deltaSTEff = ⌊24e18·1000e18/(1200e18−6)⌋ = 20e18 exact, deltaJTEff = 4e18. No recovery leg runs, so
      * jtFee = ⌊4e18·0.1⌋ = 0.4e18 EXACT on the full residual (a retained-recoverable IL would have shaved it),
-     * plus the premium part 0.2e18 ⇒ 0.6e18. jtPrem 2e18, ltPrem 1e18, ltFee 0.1e18, stFee 1.7e18,
+     * plus the premium part 0.2e18 ⇒ 0.6e18. jtPrem 2e18, lptPrem 1e18, lptFee 0.1e18, stFee 1.7e18,
      * stEffectiveNAV 1018e18, jtEffectiveNAV 206e18−6, PERPETUAL, ilErased 0.
      * coverageUtilizationWAD = ⌈(1224e18−6)·0.1e18/(206e18−6)⌉ = 594174757281553399.
      */
@@ -943,7 +943,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 7, -6);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1200e18 - 6;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 200e18 - 6;
         expected.jtImpermanentLoss = 0;
@@ -958,14 +958,14 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory next = _syncInputs(1000e18, 200e18 - 6, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 7, 24e18);
         RoycoTestMath.SyncOutputs memory expectedNext;
         expectedNext.collateralNAV = 1224e18 - 6;
-        expectedNext.ltRawNAV = 100e18;
+        expectedNext.lptRawNAV = 100e18;
         expectedNext.stEffectiveNAV = 1018e18;
         expectedNext.jtEffectiveNAV = 206e18 - 6;
         expectedNext.jtRiskPremium = 2e18;
-        expectedNext.ltLiquidityPremium = 1e18;
+        expectedNext.lptLiquidityPremium = 1e18;
         expectedNext.stProtocolFee = 1.7e18;
         expectedNext.jtProtocolFee = 0.6e18;
-        expectedNext.ltProtocolFee = 0.1e18;
+        expectedNext.lptProtocolFee = 0.1e18;
         expectedNext.coverageUtilizationWAD = 594_174_757_281_553_399;
         expectedNext.liquidityUtilizationWAD = 509_000_000_000_000_000;
         expectedNext.marketState = RoycoTestMath.MarketState.PERPETUAL;
@@ -990,7 +990,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 100e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, -24e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1176e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 176e18;
         expected.jtImpermanentLoss = 124e18;
@@ -1017,7 +1017,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 100e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 24e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1224e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 224e18;
         expected.jtImpermanentLoss = 76e18;
@@ -1042,7 +1042,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 24e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 24e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1224e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 224e18;
         expected.coverageUtilizationWAD = 546_428_571_428_571_429;
@@ -1058,7 +1058,7 @@ contract Test_RoycoTestMath is Test {
      * FIXED_TERM, end T0+D. Delta +24e18:
      * Repayment = 24e18−2 ⇒ IL 0, jtEffectiveNAV 224e18−2, residual 2, basis 1224e18−2.
      * Attribution: stGain = ⌊2·1000e18/(1224e18−2)⌋ = 1, jtGain = 1 (fee floors to 0), jtEffectiveNAV 224e18−1.
-     * stGain = 1 > dust 0 ⇒ premiumsPaid. jtPrem = ⌊1·0.1⌋ = 0, ltPrem = 0, stFee = ⌊1·0.1⌋ = 0.
+     * stGain = 1 > dust 0 ⇒ premiumsPaid. jtPrem = ⌊1·0.1⌋ = 0, lptPrem = 0, stFee = ⌊1·0.1⌋ = 0.
      * stEffectiveNAV = 1000e18+1, PERPETUAL, end 0. Conservation 1224e18 = (1000e18+1) + (224e18−1).
      * coverageUtilizationWAD = ⌈1224e18·0.1e18/(224e18−1)⌉ = 546428571428571429.
      * liquidityUtilizationWAD = ⌈(1000e18+1)/2000⌉ = 500000000000000001.
@@ -1067,7 +1067,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 24e18 - 2, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 24e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1224e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18 + 1;
         expected.jtEffectiveNAV = 224e18 - 1;
         expected.coverageUtilizationWAD = 546_428_571_428_571_429;
@@ -1094,7 +1094,7 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 24e18 - 1, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 24e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1224e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 224e18;
         expected.coverageUtilizationWAD = 546_428_571_428_571_429;
@@ -1109,30 +1109,30 @@ contract Test_RoycoTestMath is Test {
      * SharedGain instantaneous vector, and the instantaneous inputs are set hostile (uint256 max) to pin that
      * the time-weighted path ignores them.
      * Checkpoint (stEffectiveNAV/jtEffectiveNAV): 1000e18/200e18 (collateral 1200e18), IL 0, dust 0, PERPETUAL.
-     * Warp 1 day: elapsed = 86400, twJT = 0.1e18·86400 = 8640e18, twLT = 0.05e18·86400 = 4320e18.
+     * Warp 1 day: elapsed = 86400, twJT = 0.1e18·86400 = 8640e18, twLPT = 0.05e18·86400 = 4320e18.
      * Delta +60e18: deltaSTEff = 50e18, deltaJTEff = 10e18 ⇒ jtFee 1e18 (JT leg),
-     * jtPrem = ⌊50e18·8640e18/(86400·1e18)⌋ = 5e18, ltPrem = 2.5e18, jtFee += 0.5e18 ⇒ 1.5e18,
-     * ltFee 0.25e18, residual 42.5e18 ⇒ stFee 4.25e18, stEffectiveNAV 1045e18, jtEffectiveNAV 215e18, PERPETUAL.
+     * jtPrem = ⌊50e18·8640e18/(86400·1e18)⌋ = 5e18, lptPrem = 2.5e18, jtFee += 0.5e18 ⇒ 1.5e18,
+     * lptFee 0.25e18, residual 42.5e18 ⇒ stFee 4.25e18, stEffectiveNAV 1045e18, jtEffectiveNAV 215e18, PERPETUAL.
      * coverageUtilizationWAD = ⌈1260e18·0.1e18/215e18⌉ = 586046511627906977.
      */
     function test_SyncTrancheAccounting_TimeWeightedMatchesInstantaneous_InstantInputsIgnored() public pure {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 60e18);
         in_.elapsedSincePremiumPayment = 86_400;
         in_.jtTwYieldShareAccrual = 8640e18;
-        in_.ltTwYieldShareAccrual = 4320e18;
+        in_.lptTwYieldShareAccrual = 4320e18;
         in_.jtInstYieldShareWAD = type(uint256).max;
-        in_.ltInstYieldShareWAD = type(uint256).max;
+        in_.lptInstYieldShareWAD = type(uint256).max;
         in_.nowTimestamp = T0 + 86_400;
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1260e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1045e18;
         expected.jtEffectiveNAV = 215e18;
         expected.jtRiskPremium = 5e18;
-        expected.ltLiquidityPremium = 2.5e18;
+        expected.lptLiquidityPremium = 2.5e18;
         expected.stProtocolFee = 4.25e18;
         expected.jtProtocolFee = 1.5e18;
-        expected.ltProtocolFee = 0.25e18;
+        expected.lptProtocolFee = 0.25e18;
         expected.coverageUtilizationWAD = 586_046_511_627_906_977;
         expected.liquidityUtilizationWAD = 522_500_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
@@ -1145,10 +1145,10 @@ contract Test_RoycoTestMath is Test {
      * windows at different JT rates must average to the exact blended premium over the FULL window.
      * Checkpoint (stEffectiveNAV/jtEffectiveNAV): 1000e18/200e18 (collateral 1200e18), IL 0, dust 0, PERPETUAL.
      * Accruals 0.1e18·43200 + 0.2e18·43200 = 12960e18 (the second window's 0.5e18 rate was capped to 0.2e18
-     * at accrual, so the input already carries the cap), twLT = 0.05e18·86400 = 4320e18, elapsed = 86400.
+     * at accrual, so the input already carries the cap), twLPT = 0.05e18·86400 = 4320e18, elapsed = 86400.
      * Delta +60e18: deltaSTEff = 50e18, deltaJTEff = 10e18 ⇒ jtFee 1e18 (JT leg).
-     * jtPrem = ⌊50e18·12960e18/(86400·1e18)⌋ = ⌊50e18·0.15⌋ = 7.5e18, ltPrem = 2.5e18,
-     * jtFee += 0.75e18 ⇒ 1.75e18, ltFee 0.25e18, residual 40e18 ⇒ stFee 4e18,
+     * jtPrem = ⌊50e18·12960e18/(86400·1e18)⌋ = ⌊50e18·0.15⌋ = 7.5e18, lptPrem = 2.5e18,
+     * jtFee += 0.75e18 ⇒ 1.75e18, lptFee 0.25e18, residual 40e18 ⇒ stFee 4e18,
      * stEffectiveNAV = 1000e18 + 40e18 + 2.5e18 = 1042.5e18, jtEffectiveNAV = 210e18 + 7.5e18 = 217.5e18.
      * Conservation 1260 = 1042.5 + 217.5. PERPETUAL.
      * coverageUtilizationWAD = ⌈1260e18·0.1e18/217.5e18⌉ = ⌈579310344827586206.90⌉ = 579310344827586207.
@@ -1158,18 +1158,18 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 60e18);
         in_.elapsedSincePremiumPayment = 86_400;
         in_.jtTwYieldShareAccrual = 12_960e18;
-        in_.ltTwYieldShareAccrual = 4320e18;
+        in_.lptTwYieldShareAccrual = 4320e18;
         in_.nowTimestamp = T0 + 86_400;
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1260e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1042.5e18;
         expected.jtEffectiveNAV = 217.5e18;
         expected.jtRiskPremium = 7.5e18;
-        expected.ltLiquidityPremium = 2.5e18;
+        expected.lptLiquidityPremium = 2.5e18;
         expected.stProtocolFee = 4e18;
         expected.jtProtocolFee = 1.75e18;
-        expected.ltProtocolFee = 0.25e18;
+        expected.lptProtocolFee = 0.25e18;
         expected.coverageUtilizationWAD = 579_310_344_827_586_207;
         expected.liquidityUtilizationWAD = 521_250_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
@@ -1183,8 +1183,8 @@ contract Test_RoycoTestMath is Test {
      * Checkpoint (stEffectiveNAV/jtEffectiveNAV): 1000e18/200e18 (collateral 1200e18), IL 0, dust 0, PERPETUAL.
      * Delta +60e18 with jtInst = uint256 max, maxJT = 0.2e18: deltaSTEff = 50e18, deltaJTEff = 10e18
      * ⇒ jtFee 1e18 (JT leg).
-     * jtPrem = ⌊50e18·0.2e18/1e18⌋ = 10e18, ltPrem = 2.5e18 (lt preview 0.05e18 below its cap),
-     * jtFee += 1e18 ⇒ 2e18, ltFee 0.25e18, residual 37.5e18 ⇒ stFee 3.75e18,
+     * jtPrem = ⌊50e18·0.2e18/1e18⌋ = 10e18, lptPrem = 2.5e18 (lt preview 0.05e18 below its cap),
+     * jtFee += 1e18 ⇒ 2e18, lptFee 0.25e18, residual 37.5e18 ⇒ stFee 3.75e18,
      * stEffectiveNAV = 1000e18 + 37.5e18 + 2.5e18 = 1040e18, jtEffectiveNAV = 210e18 + 10e18 = 220e18.
      * Conservation 1260 = 1040 + 220.
      * coverageUtilizationWAD = ⌈1260e18·0.1e18/220e18⌉ = ⌈572727272727272727.27⌉ = 572727272727272728.
@@ -1194,14 +1194,14 @@ contract Test_RoycoTestMath is Test {
         in_.jtInstYieldShareWAD = type(uint256).max;
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1260e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 1040e18;
         expected.jtEffectiveNAV = 220e18;
         expected.jtRiskPremium = 10e18;
-        expected.ltLiquidityPremium = 2.5e18;
+        expected.lptLiquidityPremium = 2.5e18;
         expected.stProtocolFee = 3.75e18;
         expected.jtProtocolFee = 2e18;
-        expected.ltProtocolFee = 0.25e18;
+        expected.lptProtocolFee = 0.25e18;
         expected.coverageUtilizationWAD = 572_727_272_727_272_728;
         expected.liquidityUtilizationWAD = 520_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
@@ -1215,7 +1215,7 @@ contract Test_RoycoTestMath is Test {
      * Checkpoint: stEffectiveNAV 0, jtEffectiveNAV 0 (collateral 0), IL 0, dust 0, PERPETUAL.
      * Delta +10e18: deltaSTEff = +10e18 (tie-break), deltaJTEff = 0. ST gain 10e18 > dust ⇒ premiumsPaid.
      * Instantaneous premiums: jtRiskPremium = ⌊10e18·0.1e18/1e18⌋ = 1e18 (jtFee ⌊1e18·0.1⌋ = 1e17),
-     * ltLiquidityPremium = ⌊10e18·0.05e18/1e18⌋ = 0.5e18 (ltFee 5e16), residual 8.5e18 ⇒ stFee 85e16.
+     * lptLiquidityPremium = ⌊10e18·0.05e18/1e18⌋ = 0.5e18 (lptFee 5e16), residual 8.5e18 ⇒ stFee 85e16.
      * stEffectiveNAV = 8.5e18 + 0.5e18 = 9e18, jtEffectiveNAV = 1e18. Conservation 10 = 9 + 1 (e18).
      * coverageUtilizationWAD = ⌈10e18·0.1e18/1e18⌉ = 1e18 exact.
      * liquidityUtilizationWAD = ⌈9e18·0.05e18/100e18⌉ = 4.5e15 exact.
@@ -1224,14 +1224,14 @@ contract Test_RoycoTestMath is Test {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(0, 0, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 10e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 10e18;
-        expected.ltRawNAV = 100e18;
+        expected.lptRawNAV = 100e18;
         expected.stEffectiveNAV = 9e18;
         expected.jtEffectiveNAV = 1e18;
         expected.jtRiskPremium = 1e18;
-        expected.ltLiquidityPremium = 0.5e18;
+        expected.lptLiquidityPremium = 0.5e18;
         expected.stProtocolFee = 0.85e18;
         expected.jtProtocolFee = 0.1e18;
-        expected.ltProtocolFee = 0.05e18;
+        expected.lptProtocolFee = 0.05e18;
         expected.coverageUtilizationWAD = 1e18;
         expected.liquidityUtilizationWAD = 4_500_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
@@ -1250,10 +1250,10 @@ contract Test_RoycoTestMath is Test {
     function test_SyncTrancheAccounting_FeeTheorem_NonzeroFeesImplyPerpetual() public pure {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 180e18, 20e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 59e18);
         RoycoTestMath.SyncOutputs memory out = RoycoTestMath.syncTrancheAccounting(in_);
-        assertGt(out.ltLiquidityPremium, 0, "the vector must book a liquidity premium");
+        assertGt(out.lptLiquidityPremium, 0, "the vector must book a liquidity premium");
         assertGt(out.stProtocolFee, 0, "the vector must book an ST fee");
         assertGt(out.jtProtocolFee, 0, "the vector must book a JT fee");
-        assertGt(out.ltProtocolFee, 0, "the vector must book an LT fee");
+        assertGt(out.lptProtocolFee, 0, "the vector must book an LPT fee");
         assertEq(uint256(out.marketState), uint256(RoycoTestMath.MarketState.PERPETUAL), "a fee-carrying sync must resolve PERPETUAL");
         assertEq(out.jtImpermanentLoss, 0, "the fee-carrying sync must have fully recovered the drawdown");
     }
@@ -1370,32 +1370,32 @@ contract Test_RoycoTestMath is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                maxLTWithdrawal
+                                maxLPTWithdrawal
     //////////////////////////////////////////////////////////////////////////*/
 
     /// Nominal: required = ⌈1000e18·5e16/1e18⌉ = 50e18 exact, withdrawable = 100e18 − 50e18 = 50e18.
-    function test_MaxLTWithdrawal_Nominal() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 0), 50e18, "half the pool is surplus");
+    function test_MaxLPTWithdrawal_Nominal() public pure {
+        assertEq(RoycoTestMath.maxLPTWithdrawal(100e18, 1000e18, 5e16, 0), 50e18, "half the pool is surplus");
     }
 
     /// Ceil on the required depth: stEffectiveNAV 1000e18+1 ⇒ required = ⌈50e18 + 0.05⌉ = 50e18 + 1 ⇒ 50e18 − 1.
-    function test_MaxLTWithdrawal_CeilInnerRounding() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18 + 1, 5e16, 0), 50e18 - 1, "ceil bites one wei");
+    function test_MaxLPTWithdrawal_CeilInnerRounding() public pure {
+        assertEq(RoycoTestMath.maxLPTWithdrawal(100e18, 1000e18 + 1, 5e16, 0), 50e18 - 1, "ceil bites one wei");
     }
 
     /// The stDust folds into the senior NAV before μ-scaling: required = ⌈(1000e18 + 3)·0.05⌉ = 50e18 + 1 ⇒ 50e18 − 1.
-    function test_MaxLTWithdrawal_StDustSlack() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 3), 50e18 - 1, "dust slack");
+    function test_MaxLPTWithdrawal_StDustSlack() public pure {
+        assertEq(RoycoTestMath.maxLPTWithdrawal(100e18, 1000e18, 5e16, 3), 50e18 - 1, "dust slack");
     }
 
-    /// minLiq == 0 bypasses the gate entirely: the whole ltRawNAV is withdrawable.
-    function test_MaxLTWithdrawal_ZeroMinLiquidity_FullLtRaw() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 0, 0), 100e18, "no liquidity requirement");
+    /// minLiq == 0 bypasses the gate entirely: the whole lptRawNAV is withdrawable.
+    function test_MaxLPTWithdrawal_ZeroMinLiquidity_FullLptRaw() public pure {
+        assertEq(RoycoTestMath.maxLPTWithdrawal(100e18, 1000e18, 0, 0), 100e18, "no liquidity requirement");
     }
 
     /// Saturation: required 50e18 above the pool depth 40e18 saturates to 0.
-    function test_MaxLTWithdrawal_SaturatesToZero() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(40e18, 1000e18, 5e16, 0), 0, "under-provisioned pool");
+    function test_MaxLPTWithdrawal_SaturatesToZero() public pure {
+        assertEq(RoycoTestMath.maxLPTWithdrawal(40e18, 1000e18, 5e16, 0), 0, "under-provisioned pool");
     }
 
     /*//////////////////////////////////////////////////////////////////////////

@@ -39,20 +39,27 @@ abstract contract OracleClockBase is RoycoBase {
     /// @notice Emitted when an admin force-checkpoints the source's current value and update timestamp
     event ClockTicked(uint256 value);
 
+    /// @notice Thrown when the initial checkpoint timestamp is in the future
+    error INVALID_LAST_UPDATE_TIMESTAMP();
+
     /// @notice Thrown when the minimum deviation threshold is not strictly less than 100% (WAD)
     error INVALID_MIN_DEVIATION_WAD();
 
     /**
-     * @notice Initializes the oracle checkpoint clock state and records the source's current value as the baseline
+     * @notice Initializes the oracle clock state, recording the source's current value as the baseline and the admin-attested initial checkpoint
      * @dev Must be called after the concrete clock's read wiring is set so the baseline read observes the live source
-     * @dev The baseline is recorded WITHOUT an update timestamp: an initialization read carries no new pricing information, so recording it would be incorrect
+     * @dev The admin is responsible for the accuracy of the initial checkpoint: it must be the source's genuine last update time, and a zero conservatively reports no update yet (holding the entry point's execution gate shut)
+     * @param _lastUpdate The admin-attested timestamp of the source's last update (zero if unknown)
      * @param _minDeviationWAD The minimum relative deviation from the checkpointed value that counts as an update, scaled to WAD precision (zero counts any change)
      */
-    function __OracleClockBase_init_unchained(uint256 _minDeviationWAD) internal onlyInitializing {
+    function __OracleClockBase_init_unchained(uint32 _lastUpdate, uint256 _minDeviationWAD) internal onlyInitializing {
+        // The checkpoint must never start in the future: it would satisfy the execution gate without a genuine update
+        require(_lastUpdate <= block.timestamp, INVALID_LAST_UPDATE_TIMESTAMP());
         // Initialize the minimum deviation
         _setMinDeviationWAD(_minDeviationWAD);
-        // Record the baseline value so the first deviation is measured against the source's state at initialization
-        _getOracleClockBaseStorage().lastValue = _getSourcePrice().toUint160();
+        // Record the baseline value and the attested checkpoint so the first deviation is measured against the source's state at initialization
+        OracleClockBaseState storage $ = _getOracleClockBaseStorage();
+        ($.lastValue, $.lastUpdatedAt) = (_getSourcePrice().toUint160(), _lastUpdate);
     }
 
     /**
@@ -63,7 +70,7 @@ abstract contract OracleClockBase is RoycoBase {
     function poke() public virtual returns (uint256 lastUpdatedAt) {
         OracleClockBaseState storage $ = _getOracleClockBaseStorage();
         // Observe the source, and update the checkpoint and clock if it deviated
-        (uint256 value, bool deviated) = _observe();
+        (uint256 value, bool deviated) = _observeDeviation();
         if (deviated) ($.lastValue, $.lastUpdatedAt) = (value.toUint160(), uint32(block.timestamp));
         return $.lastUpdatedAt;
     }
@@ -77,7 +84,7 @@ abstract contract OracleClockBase is RoycoBase {
      */
     function previewPoke() public view virtual returns (uint256 lastUpdatedAt) {
         // Observe the source, and report the current timestamp if it deviated
-        (, bool deviated) = _observe();
+        (, bool deviated) = _observeDeviation();
         return deviated ? block.timestamp : _getOracleClockBaseStorage().lastUpdatedAt;
     }
 
@@ -99,9 +106,9 @@ abstract contract OracleClockBase is RoycoBase {
         _setMinDeviationWAD(_minDeviationWAD);
     }
 
-    /// @notice Returns the oracle checkpoint clock state
-    /// @return state The oracle checkpoint clock state
-    function getOracleCheckpointClockState() external view returns (OracleClockBaseState memory state) {
+    /// @notice Returns the oracle clock state
+    /// @return state The oracle clock state
+    function getOracleClockState() external view returns (OracleClockBaseState memory state) {
         return _getOracleClockBaseStorage();
     }
 
@@ -136,7 +143,7 @@ abstract contract OracleClockBase is RoycoBase {
      * @return value The source's current price
      * @return deviated Whether the observation deviated from the checkpointed value beyond the configured threshold
      */
-    function _observe() internal view returns (uint256 value, bool deviated) {
+    function _observeDeviation() internal view returns (uint256 value, bool deviated) {
         OracleClockBaseState storage $ = _getOracleClockBaseStorage();
         value = _getSourcePrice();
         deviated = _hasDeviated(value, $.lastValue, $.minDeviationWAD);

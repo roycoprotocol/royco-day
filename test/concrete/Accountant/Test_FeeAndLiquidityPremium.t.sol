@@ -15,7 +15,7 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  * @title Test_FeeAndLiquidityPremium_Accountant
  * @notice Hand-derived scenarios for the sync-time share mint: the premium/fee share mints priced over the retained
  *         senior NAV, the coverage-neutral premium mint through the orchestrator, the two-sided mint-value
- *         bound, and the LT effective NAV edges
+ *         bound, and the LPT effective NAV edges
  * @dev Every vector hand-derives its expected values in a comment and cross-asserts the matching independent
  *      RoycoTestMath function, so production, mirror, and hand literal must all three agree
  */
@@ -32,7 +32,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     /// @dev Builds the minimal synced state the pure share mint computation reads
     function _mintState(uint256 _stEff, uint256 _premium, uint256 _fee) internal pure returns (SyncedAccountingState memory s) {
         s.stEffectiveNAV = toNAVUnits(_stEff);
-        s.ltLiquidityPremium = toNAVUnits(_premium);
+        s.lptLiquidityPremium = toNAVUnits(_premium);
         s.stProtocolFee = toNAVUnits(_fee);
     }
 
@@ -134,7 +134,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      */
     function test_ProcessFeesAndLiquidityPremium_ZeroPremiumAndFees_NoMintCalls() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
-        flp.setLTOwnedSeniorTrancheShares(5e18);
+        flp.setLPTOwnedSeniorTrancheShares(5e18);
         SyncedAccountingState memory s = _mintState(1045e18, 0, 0);
 
         flp.processFeesAndLiquidityPremium(s);
@@ -142,9 +142,9 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
         assertEq(flp.ST_LEDGER().premiumMintCallCount(), 0, "no premium mint");
         assertEq(flp.ST_LEDGER().feeMintCallCount(), 0, "no senior fee mint");
         assertEq(flp.JT_LEDGER().feeMintCallCount(), 0, "no junior fee mint");
-        assertEq(flp.LT_LEDGER().feeMintCallCount(), 0, "no liquidity fee mint");
+        assertEq(flp.LPT_LEDGER().feeMintCallCount(), 0, "no liquidity fee mint");
         assertEq(flp.ST_LEDGER().totalSupply(), 1000e18, "senior supply unchanged");
-        assertEq(flp.ltOwnedSeniorTrancheShares(), 5e18, "idle liquidity premium senior shares unchanged");
+        assertEq(flp.lptOwnedSeniorTrancheShares(), 5e18, "idle liquidity premium senior shares unchanged");
         assertEq(flp.reinvestCallCount(), 0, "no reinvestment attempt on a zero premium");
     }
 
@@ -164,7 +164,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     function test_ProcessFeesAndLiquidityPremium_CoverageNeutralMint_IdlesWhenReinvestmentDefers() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
         flp.setTotalCollateralAssets(1000e18);
-        flp.setLTOwnedSeniorTrancheShares(5e18);
+        flp.setLPTOwnedSeniorTrancheShares(5e18);
         flp.setReinvestSharesToDrain(0);
         SyncedAccountingState memory s = _mintState(1045e18, 2.5e18, 4.25e18);
 
@@ -181,7 +181,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
         assertEq(flp.ST_LEDGER().lastFeeSharesMinted(), 4_093_426_438_719_002_407, "fee share count");
         assertEq(flp.ST_LEDGER().lastFeeMintTo(), flp.PROTOCOL_FEE_RECIPIENT(), "fee shares mint to the recipient");
         // Idle pile delta == premShares - reinvested (reinvested == 0 on the deferred path)
-        assertEq(flp.ltOwnedSeniorTrancheShares(), 5e18 + 2_407_897_905_128_824_945, "idle premium share balance grows by exactly the premium shares");
+        assertEq(flp.lptOwnedSeniorTrancheShares(), 5e18 + 2_407_897_905_128_824_945, "idle premium share balance grows by exactly the premium shares");
         // Reinvestment attempt args pin the post-mint valuation basis
         assertEq(flp.reinvestCallCount(), 1, "one reinvestment attempt");
         assertEq(flp.lastReinvestSharesArg(), type(uint256).max, "attempts to deploy the entire idle premium share balance");
@@ -201,13 +201,13 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      */
     function test_ProcessFeesAndLiquidityPremium_PartialReinvestmentDrainsIdlePremiumShares() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
-        flp.setLTOwnedSeniorTrancheShares(5e18);
+        flp.setLPTOwnedSeniorTrancheShares(5e18);
         flp.setReinvestSharesToDrain(1e18);
         SyncedAccountingState memory s = _mintState(1045e18, 2.5e18, 4.25e18);
 
         flp.processFeesAndLiquidityPremium(s);
 
-        assertEq(flp.ltOwnedSeniorTrancheShares(), 5e18 + 2_407_897_905_128_824_945 - 1e18, "idle delta == premShares - reinvested");
+        assertEq(flp.lptOwnedSeniorTrancheShares(), 5e18 + 2_407_897_905_128_824_945 - 1e18, "idle delta == premShares - reinvested");
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -291,99 +291,99 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                        LT EFFECTIVE NAV EDGES
+                        LPT EFFECTIVE NAV EDGES
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * The LT effective NAV (ValuationLogic.sol:74-92) is the raw pool depth plus the idle premium shares
+     * The LPT effective NAV (ValuationLogic.sol:74-92) is the raw pool depth plus the idle premium shares
      * valued at the senior share price, flooring on the idle leg — the claimable leg a redeemer is owed.
-     * ltEff = 100e18 + floor((1045e18+1) * 3e18 / (1004e18+1e6)) = 100e18 + 3_122_509_960_159_359_439
+     * lptEff = 100e18 + floor((1045e18+1) * 3e18 / (1004e18+1e6)) = 100e18 + 3_122_509_960_159_359_439
      * Edges: idleShares == 0 returns the raw NAV exactly, and stSupply == 0 returns the raw NAV exactly
      */
-    function test_LTEffectiveNAV_IdleLegAndEdges() public {
-        flp.setTotalLTAssets(100e18);
-        flp.setLTOwnedSeniorTrancheShares(3e18);
+    function test_LPTEffectiveNAV_IdleLegAndEdges() public {
+        flp.setTotalLPTAssets(100e18);
+        flp.setLPTOwnedSeniorTrancheShares(3e18);
         assertEq(
-            toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)), 100e18 + 3_122_509_960_159_359_439, "raw depth plus the floored idle leg"
+            toUint256(flp.lptEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)), 100e18 + 3_122_509_960_159_359_439, "raw depth plus the floored idle leg"
         );
         assertEq(
-            toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)),
-            RoycoTestMath.getLiquidityTrancheEffectiveNAV(100e18, 3e18, 1045e18, 1004e18),
-            "RTM ltEffNav cross-assert"
+            toUint256(flp.lptEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)),
+            RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(100e18, 3e18, 1045e18, 1004e18),
+            "RTM lptEffNav cross-assert"
         );
 
         // stSupply == 0 edge: the idle shares value to nothing against an empty senior supply
-        assertEq(toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 0)), 100e18, "zero senior supply values the idle leg at zero");
-        assertEq(RoycoTestMath.getLiquidityTrancheEffectiveNAV(100e18, 3e18, 1045e18, 0), 100e18, "RTM zero-supply edge");
+        assertEq(toUint256(flp.lptEffectiveNAV(toNAVUnits(uint256(1045e18)), 0)), 100e18, "zero senior supply values the idle leg at zero");
+        assertEq(RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(100e18, 3e18, 1045e18, 0), 100e18, "RTM zero-supply edge");
 
         // idleShares == 0 edge: pure deployed inventory, the steady state
-        flp.setLTOwnedSeniorTrancheShares(0);
-        assertEq(toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)), 100e18, "no idle leg leaves the raw NAV exactly");
-        assertEq(RoycoTestMath.getLiquidityTrancheEffectiveNAV(100e18, 0, 1045e18, 1004e18), 100e18, "RTM zero-idle edge");
+        flp.setLPTOwnedSeniorTrancheShares(0);
+        assertEq(toUint256(flp.lptEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)), 100e18, "no idle leg leaves the raw NAV exactly");
+        assertEq(RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(100e18, 0, 1045e18, 1004e18), 100e18, "RTM zero-idle edge");
     }
 
     /**
-     * The LT protocol fee is carved out of the liquidity premium and remitted as senior shares to the protocol
-     * (FeeAndLiquidityPremiumLogic.sol:92-97): it mints NO liquidity tranche shares. The premium leg mints the
-     * premium net of the LT fee to the kernel's idle pile, and the senior fee leg mints the ST fee PLUS the carved
-     * LT fee to the protocol fee recipient, both priced over the same retained senior NAV.
-     * stEff 1045e18, gross premium 2.5e18, ST fee 4.25e18, LT fee 0.5e18, pre-sync supply 1000e18:
-     *   retained = 1045e18 - 2.5e18 - 4.25e18 = 1038.25e18 (the LT fee is inside the premium, so retained is unchanged)
+     * The LPT protocol fee is carved out of the liquidity premium and remitted as senior shares to the protocol
+     * (FeeAndLiquidityPremiumLogic.sol:92-97): it mints NO liquidity provider tranche shares. The premium leg mints the
+     * premium net of the LPT fee to the kernel's idle pile, and the senior fee leg mints the ST fee PLUS the carved
+     * LPT fee to the protocol fee recipient, both priced over the same retained senior NAV.
+     * stEff 1045e18, gross premium 2.5e18, ST fee 4.25e18, LPT fee 0.5e18, pre-sync supply 1000e18:
+     *   retained = 1045e18 - 2.5e18 - 4.25e18 = 1038.25e18 (the LPT fee is inside the premium, so retained is unchanged)
      *   premShares = floor((1000e18+1e6) * (2.5e18 - 0.5e18) / (1038.25e18+1)) = 1_926_318_324_103_059_956
      *   feeShares  = floor((1000e18+1e6) * (4.25e18 + 0.5e18) / (1038.25e18+1)) = 4_575_006_019_744_767_397
      *   supplyAfter = 1000e18 + premShares + feeShares = 1_006_501_324_343_847_827_353
      */
-    function test_LTProtocolFeeMint_CarvedFromPremiumAsSeniorSharesNoLTShares() public {
+    function test_LPTProtocolFeeMint_CarvedFromPremiumAsSeniorSharesNoLPTShares() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
         flp.setTotalCollateralAssets(1000e18);
-        flp.setLTOwnedSeniorTrancheShares(5e18);
+        flp.setLPTOwnedSeniorTrancheShares(5e18);
         flp.setReinvestSharesToDrain(0);
         SyncedAccountingState memory s = _mintState(1045e18, 2.5e18, 4.25e18);
-        s.ltProtocolFee = toNAVUnits(uint256(0.5e18));
+        s.lptProtocolFee = toNAVUnits(uint256(0.5e18));
 
         flp.processFeesAndLiquidityPremium(s);
 
-        // The premium leg mints the premium NET of the LT fee, to the kernel's idle pile
+        // The premium leg mints the premium NET of the LPT fee, to the kernel's idle pile
         assertEq(flp.ST_LEDGER().premiumMintCallCount(), 1, "one premium mint");
-        assertEq(flp.ST_LEDGER().lastPremiumSharesMinted(), 1_926_318_324_103_059_956, "premium shares are net of the LT fee");
+        assertEq(flp.ST_LEDGER().lastPremiumSharesMinted(), 1_926_318_324_103_059_956, "premium shares are net of the LPT fee");
         assertEq(flp.ST_LEDGER().lastPremiumMintTo(), address(flp), "premium shares mint to the kernel");
-        assertEq(flp.ltOwnedSeniorTrancheShares(), 5e18 + 1_926_318_324_103_059_956, "idle pile grows by exactly the net premium shares");
+        assertEq(flp.lptOwnedSeniorTrancheShares(), 5e18 + 1_926_318_324_103_059_956, "idle pile grows by exactly the net premium shares");
 
-        // The senior fee leg mints the ST fee PLUS the carved LT fee, to the protocol fee recipient
+        // The senior fee leg mints the ST fee PLUS the carved LPT fee, to the protocol fee recipient
         assertEq(flp.ST_LEDGER().feeMintCallCount(), 1, "one senior fee mint");
-        assertEq(flp.ST_LEDGER().lastFeeSharesMinted(), 4_575_006_019_744_767_397, "fee shares pool the ST fee and the carved LT fee");
+        assertEq(flp.ST_LEDGER().lastFeeSharesMinted(), 4_575_006_019_744_767_397, "fee shares pool the ST fee and the carved LPT fee");
         assertEq(flp.ST_LEDGER().lastFeeMintTo(), flp.PROTOCOL_FEE_RECIPIENT(), "fee shares mint to the recipient");
 
-        // The liquidity tranche mints no shares for the LT protocol fee
-        assertEq(flp.LT_LEDGER().feeMintCallCount(), 0, "the LT protocol fee mints no liquidity shares");
+        // The liquidity provider tranche mints no shares for the LPT protocol fee
+        assertEq(flp.LPT_LEDGER().feeMintCallCount(), 0, "the LPT protocol fee mints no liquidity shares");
 
-        // RTM cross-assert of the carve-out split (the five-argument mirror models the LT fee)
+        // RTM cross-assert of the carve-out split (the five-argument mirror models the LPT fee)
         (uint256 rtmPrem, uint256 rtmFee, uint256 rtmSupply) =
             RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(1045e18, 2.5e18, 4.25e18, 0.5e18, 1000e18);
-        assertEq(flp.ST_LEDGER().lastPremiumSharesMinted(), rtmPrem, "RTM premium shares net of the LT fee");
+        assertEq(flp.ST_LEDGER().lastPremiumSharesMinted(), rtmPrem, "RTM premium shares net of the LPT fee");
         assertEq(flp.ST_LEDGER().lastFeeSharesMinted(), rtmFee, "RTM pooled fee shares");
         assertEq(flp.ST_LEDGER().totalSupply(), rtmSupply, "RTM supply after both mints");
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                ZERO-LT-ASSET-SLICE LT REDEMPTION
+                ZERO-LPT-ASSET-SLICE LPT REDEMPTION
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * An in-kind LT redemption whose proportional slice of the deployed inventory floors to zero NAV while the
+     * An in-kind LPT redemption whose proportional slice of the deployed inventory floors to zero NAV while the
      * idle premium ST-share slice is positive commits as a NAV-neutral redemption. Handing idle ST shares to the
      * redeemer moves no raw NAV, only share ownership shifts and no assets leave the vault, so the accountant sees
-     * deltaLTRawNAV == 0 AND totalSTAndJTRedemptionNAV == 0. The LT_REDEEM op-shape require enforces only that a
-     * redemption never grows the LT's deployed raw NAV (deltaLTRawNAV <= 0), which this satisfies, so the operation
+     * deltaLPTRawNAV == 0 AND totalSTAndJTRedemptionNAV == 0. The LPT_REDEEM op-shape require enforces only that a
+     * redemption never grows the LPT's deployed raw NAV (deltaLPTRawNAV <= 0), which this satisfies, so the operation
      * commits with the collateral and every effective NAV untouched and conservation intact. The redeemer's
      * rightful idle-premium claim is delivered, not stranded on the shape check.
      */
-    function test_LTRedeem_ZeroLTSliceWithIdleSharesOnly_CommitsNavNeutral() public {
+    function test_LPTRedeem_ZeroLPTSliceWithIdleSharesOnly_CommitsNavNeutral() public {
         _seedSymmetric(1000e18, 200e18, 100e18);
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, false);
+            kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, false);
         // No tranche NAV moved: the idle senior shares only changed hands, so every raw and effective NAV is untouched
-        assertEq(toUint256(state.ltRawNAV), 100e18, "the LT deployed raw NAV must be untouched (a redemption never grows it)");
+        assertEq(toUint256(state.lptRawNAV), 100e18, "the LPT deployed raw NAV must be untouched (a redemption never grows it)");
         assertEq(toUint256(state.stEffectiveNAV), 1000e18, "senior effective NAV must be untouched (the shares stay in supply)");
         assertEq(toUint256(state.jtEffectiveNAV), 200e18, "junior effective NAV must be untouched");
         // Conservation holds across the commit

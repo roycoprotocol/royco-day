@@ -23,23 +23,23 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     /// @dev The fuzzed constant yield share each mock YDM pins for the whole run
     uint256 internal pinnedJTRate;
-    uint256 internal pinnedLTRate;
+    uint256 internal pinnedLPTRate;
 
     /// @dev The expected accrual bookkeeping, carried across the fuzzed steps
     uint256 internal modelTwJT;
-    uint256 internal modelTwLT;
+    uint256 internal modelTwLPT;
     uint256 internal modelLastAccrual;
     uint256 internal modelLastPayment;
 
     /// @dev The running marks the next step moves from
     uint256 internal collateralNAV;
-    uint256 internal ltRawNAV;
+    uint256 internal lptRawNAV;
 
     /**
      * Scenario: a seeded market lives through eight fuzzed steps, each an arbitrary warp followed by one of
      * a flat sync, a gain sync, a loss sync, or a senior/junior deposit. The premium a gain sync pays is the
      * senior gain weighted by accumulator / window, so the accounting is only fair if the accumulator covers
-     * exactly the window it is divided by: a skipped stretch under-pays the junior and liquidity tranches, a
+     * exactly the window it is divided by: a skipped stretch under-pays the junior and liquidity provider tranches, a
      * double-counted one over-pays them out of the senior gain, and a reset without a payment silently
      * forfeits accrued premium. After every step the accountant's accumulators and both timestamps must match
      * a step-by-step model, and the accumulator must equal the capped constant share integrated over exactly
@@ -48,16 +48,16 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     function testFuzz_AccrualWindows_ContiguousAndResetOnlyWhenPremiumsPay(
         uint256 _stEff0,
         uint256 _jtEff0,
-        uint256 _ltRaw0,
+        uint256 _lptRaw0,
         uint256 _jtRate,
-        uint256 _ltRate,
+        uint256 _lptRate,
         uint256[8] memory _warps,
         uint256[8] memory _actions,
         uint256[8] memory _moves
     )
         public
     {
-        _prepareMarket(_stEff0, _jtEff0, _ltRaw0, _jtRate, _ltRate);
+        _prepareMarket(_stEff0, _jtEff0, _lptRaw0, _jtRate, _lptRate);
         for (uint256 i = 0; i < 8; ++i) {
             _step(_warps[i], _actions[i], _moves[i]);
         }
@@ -65,7 +65,7 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
 
     /**
      * Scenario: an attacker lands a second gain sync in the very same block as the one that just paid the
-     * premiums, hoping the spent accrual window is read twice and the junior and liquidity tranches are paid
+     * premiums, hoping the spent accrual window is read twice and the junior and liquidity provider tranches are paid
      * twice out of one senior gain. Zero elapsed time means zero fresh accrual, so the accumulators must not
      * grow between the two syncs and the second sync's premium must be derived from an empty (or unchanged)
      * window - never from re-reading the accrual the first sync already consumed.
@@ -73,16 +73,16 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     function testFuzz_AccrualWindows_SameBlockRepeatGainSyncCannotReuseTheSpentWindow(
         uint256 _stEff0,
         uint256 _jtEff0,
-        uint256 _ltRaw0,
+        uint256 _lptRaw0,
         uint256 _jtRate,
-        uint256 _ltRate,
+        uint256 _lptRate,
         uint256 _window,
         uint256 _gain1,
         uint256 _gain2
     )
         public
     {
-        _prepareMarket(_stEff0, _jtEff0, _ltRaw0, _jtRate, _ltRate);
+        _prepareMarket(_stEff0, _jtEff0, _lptRaw0, _jtRate, _lptRate);
 
         // A real accrual window from one second to the ten-year suite ceiling, then the first gain sync
         vm.warp(block.timestamp + bound(_window, 1, MAX_ELAPSED));
@@ -103,8 +103,8 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
             "a same-block repeat sync must not grow the junior accumulator"
         );
         assertLe(
-            uint256(afterSecond.twLTYieldShareAccruedWAD),
-            uint256(afterFirst.twLTYieldShareAccruedWAD),
+            uint256(afterSecond.twLPTYieldShareAccruedWAD),
+            uint256(afterFirst.twLPTYieldShareAccruedWAD),
             "a same-block repeat sync must not grow the liquidity accumulator"
         );
         assertEq(
@@ -123,14 +123,14 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     function testFuzz_AccrualWindows_MaxElapsedWindowAccruesExactlyThenSettles(
         uint256 _stEff0,
         uint256 _jtEff0,
-        uint256 _ltRaw0,
+        uint256 _lptRaw0,
         uint256 _jtRate,
-        uint256 _ltRate,
+        uint256 _lptRate,
         uint256 _gain
     )
         public
     {
-        _prepareMarket(_stEff0, _jtEff0, _ltRaw0, _jtRate, _ltRate);
+        _prepareMarket(_stEff0, _jtEff0, _lptRaw0, _jtRate, _lptRate);
 
         // The first-ever sync only initializes the accrual clock (it accrues nothing by construction)
         _stepSync(0);
@@ -140,9 +140,9 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
         vm.warp(block.timestamp + MAX_ELAPSED);
 
         // Pin the window the next sync will read: capped share x the full ten-year stretch, exact arithmetic
-        (uint256 twJT, uint256 twLT, uint256 elapsedSincePayment) = _premiumWindow(pinnedJTRate, pinnedLTRate);
+        (uint256 twJT, uint256 twLPT, uint256 elapsedSincePayment) = _premiumWindow(pinnedJTRate, pinnedLPTRate);
         assertEq(twJT, Math.min(pinnedJTRate, DEFAULT_MAX_JT_YIELD_SHARE_WAD) * MAX_ELAPSED, "the junior accumulator must cover the entire idle decade");
-        assertEq(twLT, Math.min(pinnedLTRate, DEFAULT_MAX_LT_YIELD_SHARE_WAD) * MAX_ELAPSED, "the liquidity accumulator must cover the entire idle decade");
+        assertEq(twLPT, Math.min(pinnedLPTRate, DEFAULT_MAX_LPT_YIELD_SHARE_WAD) * MAX_ELAPSED, "the liquidity accumulator must cover the entire idle decade");
         assertEq(elapsedSincePayment, MAX_ELAPSED, "the premium window must span the entire idle decade");
 
         // The gain sync settles against that maximal window; _stepSync asserts the payout via the mirror
@@ -151,17 +151,17 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     }
 
     /// @dev Bounds the seed inputs, deploys the market with the pinned YDM rates, seeds it, and starts the model
-    function _prepareMarket(uint256 _stEff0, uint256 _jtEff0, uint256 _ltRaw0, uint256 _jtRate, uint256 _ltRate) internal {
+    function _prepareMarket(uint256 _stEff0, uint256 _jtEff0, uint256 _lptRaw0, uint256 _jtRate, uint256 _lptRate) internal {
         uint256 stEff0 = bound(_stEff0, 0, MAX_NAV); // full NAV range incl. the empty-tranche edge
         uint256 jtEff0 = bound(_jtEff0, 0, MAX_NAV); // full NAV range incl. the uncovered-market edge
-        ltRawNAV = bound(_ltRaw0, 0, MAX_NAV); // full NAV range incl. the no-depth edge
+        lptRawNAV = bound(_lptRaw0, 0, MAX_NAV); // full NAV range incl. the no-depth edge
         pinnedJTRate = bound(_jtRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
-        pinnedLTRate = bound(_ltRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
+        pinnedLPTRate = bound(_lptRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
 
         _deploy(_defaultParams());
         jtYDM.setRates(pinnedJTRate);
-        ltYDM.setRates(pinnedLTRate);
-        _seedSymmetric(stEff0, jtEff0, ltRawNAV);
+        lptYDM.setRates(pinnedLPTRate);
+        _seedSymmetric(stEff0, jtEff0, lptRawNAV);
         collateralNAV = stEff0 + jtEff0;
     }
 
@@ -198,7 +198,7 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
         // The reset rule: paid premiums close the window, anything else leaves it accruing
         if (_syncAndAssertPayout(collateralNew)) {
             modelTwJT = 0;
-            modelTwLT = 0;
+            modelTwLPT = 0;
             modelLastPayment = block.timestamp;
         }
         collateralNAV = collateralNew;
@@ -211,16 +211,16 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
      */
     function _syncAndAssertPayout(uint256 _collateralNew) internal returns (bool premiumsPaid) {
         RoycoTestMath.SyncOutputs memory out = RoycoTestMath.syncTrancheAccounting(
-            _mirrorInput(_collateralNew, ltRawNAV, modelTwJT, modelTwLT, block.timestamp - modelLastPayment, pinnedJTRate, pinnedLTRate)
+            _mirrorInput(_collateralNew, lptRawNAV, modelTwJT, modelTwLPT, block.timestamp - modelLastPayment, pinnedJTRate, pinnedLPTRate)
         );
 
         SyncedAccountingState memory st = kernel.doPreOp(toNAVUnits(_collateralNew));
-        kernel.doCommit(toNAVUnits(ltRawNAV));
+        kernel.doCommit(toNAVUnits(lptRawNAV));
 
         // The premiums folded into the effective NAVs tie the accrued window to the sync's actual payout
         assertEq(toUint256(st.stEffectiveNAV), out.stEffectiveNAV, "sync step: senior effective NAV must fold in exactly the modeled premium");
         assertEq(toUint256(st.jtEffectiveNAV), out.jtEffectiveNAV, "sync step: junior effective NAV must fold in exactly the modeled premium");
-        assertEq(toUint256(st.ltLiquidityPremium), out.ltLiquidityPremium, "sync step: liquidity premium must come from the modeled window");
+        assertEq(toUint256(st.lptLiquidityPremium), out.lptLiquidityPremium, "sync step: liquidity premium must come from the modeled window");
         premiumsPaid = out.premiumsPaid;
     }
 
@@ -235,7 +235,7 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
             modelLastPayment = block.timestamp;
         } else if (block.timestamp > modelLastAccrual) {
             modelTwJT += Math.min(pinnedJTRate, DEFAULT_MAX_JT_YIELD_SHARE_WAD) * (block.timestamp - modelLastAccrual);
-            modelTwLT += Math.min(pinnedLTRate, DEFAULT_MAX_LT_YIELD_SHARE_WAD) * (block.timestamp - modelLastAccrual);
+            modelTwLPT += Math.min(pinnedLPTRate, DEFAULT_MAX_LPT_YIELD_SHARE_WAD) * (block.timestamp - modelLastAccrual);
             modelLastAccrual = block.timestamp;
         }
     }
@@ -244,14 +244,14 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     function _stepDeposit(bool _seniorSide, uint256 _add) internal {
         Operation op = _seniorSide ? Operation.ST_DEPOSIT : Operation.JT_DEPOSIT;
         collateralNAV += _add;
-        kernel.doPostOp(op, toNAVUnits(collateralNAV), toNAVUnits(ltRawNAV), ZERO_NAV_UNITS, false);
+        kernel.doPostOp(op, toNAVUnits(collateralNAV), toNAVUnits(lptRawNAV), ZERO_NAV_UNITS, false);
     }
 
     /// @dev Asserts the accountant's window bookkeeping equals the model and satisfies the contiguity closed form
     function _assertWindowBookkeeping() internal view {
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         assertEq(uint256(s.twJTYieldShareAccruedWAD), modelTwJT, "window: junior accumulator diverged from the step model");
-        assertEq(uint256(s.twLTYieldShareAccruedWAD), modelTwLT, "window: liquidity accumulator diverged from the step model");
+        assertEq(uint256(s.twLPTYieldShareAccruedWAD), modelTwLPT, "window: liquidity accumulator diverged from the step model");
         assertEq(uint256(s.lastYieldShareAccrualTimestamp), modelLastAccrual, "window: last accrual timestamp diverged from the step model");
         assertEq(uint256(s.lastPremiumPaymentTimestamp), modelLastPayment, "window: last premium payment timestamp diverged from the step model");
 
@@ -265,8 +265,8 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
             "window: junior accumulator != capped share x contiguous window"
         );
         assertEq(
-            uint256(s.twLTYieldShareAccruedWAD),
-            Math.min(pinnedLTRate, DEFAULT_MAX_LT_YIELD_SHARE_WAD) * window,
+            uint256(s.twLPTYieldShareAccruedWAD),
+            Math.min(pinnedLPTRate, DEFAULT_MAX_LPT_YIELD_SHARE_WAD) * window,
             "window: liquidity accumulator != capped share x contiguous window"
         );
     }

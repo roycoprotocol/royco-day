@@ -64,7 +64,7 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         applySTPnL(-int256(drawdownBps));
         SyncedAccountingState memory state = _sync();
 
-        // Committed drawdown marks, pinned against the hand-derived quoter output: the collateral mark is ONE
+        // Committed drawdown marks, pinned against the hand-derived oracle price: the collateral mark is ONE
         // conversion of the coinvested vault shares at the drawn-down rate, the loss is fully covered, so the
         // senior tranche keeps its full effective NAV and the junior buffer absorbs the entire hit
         uint256 rate = 1e18 - drawdownBps * 1e14;

@@ -111,18 +111,18 @@ library DepositLogic {
     }
 
     /**
-     * @notice Processes the deposit of a specified amount of assets into the liquidity tranche
-     * @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state (including fixed-term)
+     * @notice Processes the deposit of a specified amount of assets into the liquidity provider tranche
+     * @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state (including fixed-term)
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
-     * @param _assets The amount of assets (the liquidity venue's position token) to deposit, denominated in the liquidity tranche's tranche units
+     * @param _assets The amount of assets (the liquidity venue's position token) to deposit, denominated in the liquidity provider tranche's tranche units
      * @return depositNAV The value of the assets deposited, denominated in the kernel's NAV units
      * @return effectiveNAV The NAV at which the shares will be minted, exclusive of depositNAV
      * @return totalTrancheShares The tranche's total share supply after the sync's premium and protocol fee mints, the supply the shares price against
-     * @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and enforces no requirements
+     * @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and enforces no requirements
      */
-    function ltDeposit(
+    function lptDeposit(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         bool _isPreview,
@@ -134,27 +134,27 @@ library DepositLogic {
         // Execute an accounting sync to reconcile underlying PNL
         SyncedAccountingState memory state = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables);
         // Read the post-mint supply in this frame, a preview's sync mints unwind with the flow so the caller cannot read it
-        totalTrancheShares = IERC20(_immutables.liquidityTranche).totalSupply();
-        // The NAV to mint tranche shares at is the pre-deposit liquidity tranche effective NAV (its MM depth in addition to its idle liquidity-premium senior shares the kernel holds)
-        effectiveNAV = ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, IERC20(_immutables.seniorTranche).totalSupply());
+        totalTrancheShares = IERC20(_immutables.liquidityProviderTranche).totalSupply();
+        // The NAV to mint tranche shares at is the pre-deposit liquidity provider tranche effective NAV (its MM depth in addition to its idle liquidity-premium senior shares the kernel holds)
+        effectiveNAV = ValuationLogic._getLiquidityProviderTrancheEffectiveNAV($, state.stEffectiveNAV, IERC20(_immutables.seniorTranche).totalSupply());
         // The deposit NAV is the value of the deposited assets
-        depositNAV = IRoycoDayKernel(address(this)).convertLTAssetsToValue(_assets);
+        depositNAV = IRoycoDayKernel(address(this)).convertLPTAssetsToValue(_assets);
 
-        // Credit the deposited assets to the liquidity tranche
-        $.totalLTAssets = $.totalLTAssets + _assets;
+        // Credit the deposited assets to the liquidity provider tranche
+        $.totalLPTAssets = $.totalLPTAssets + _assets;
 
         // Execute a post-deposit sync on accounting
-        // An in-kind LT deposit only adds market-making depth and improves liquidity, so no requirements are enforced
-        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LT_DEPOSIT, ZERO_NAV_UNITS, false);
+        // An in-kind LPT deposit only adds market-making depth and improves liquidity, so no requirements are enforced
+        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LPT_DEPOSIT, ZERO_NAV_UNITS, false);
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
         if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(depositNAV, effectiveNAV, totalTrancheShares));
     }
 
     /**
-     * @notice Atomically enters the liquidity tranche with the LT assets' constituent assets: deposits collateral (minting senior
-     *         shares), adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
-     * @dev Assumes the collateral and quote have been transferred to the kernel before this call (by the LT tranche)
+     * @notice Atomically enters the liquidity provider tranche with the LPT assets' constituent assets: deposits collateral (minting senior
+     *         shares), adds (senior shares + quote) into the liquidity venue to mint the LPT tranche assets, then deposits them into the LPT
+     * @dev Assumes the collateral and quote have been transferred to the kernel before this call (by the LPT tranche)
      * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit that mints no senior shares
      * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements, reverts if either is unsatisfied
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
@@ -162,31 +162,31 @@ library DepositLogic {
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _collateralAssets The amount of collateral to deposit for the senior leg, denominated in tranche units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
-     * @param _minLTAssetsOut The minimum LT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
-     * @return depositNAV The value of the minted LT tranche assets, denominated in the kernel's NAV units
-     * @return effectiveNAV The LT effective NAV at which the LT shares will be minted (pre-deposit)
-     * @return ltAssetsOut The amount of LT tranche assets minted and credited to the liquidity tranche
+     * @param _minLPTAssetsOut The minimum LPT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
+     * @return depositNAV The value of the minted LPT tranche assets, denominated in the kernel's NAV units
+     * @return effectiveNAV The LPT effective NAV at which the LPT shares will be minted (pre-deposit)
+     * @return lptAssetsOut The amount of LPT tranche assets minted and credited to the liquidity provider tranche
      */
-    function ltDepositMultiAsset(
+    function lptDepositMultiAsset(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         bool _isPreview,
         TRANCHE_UNIT _collateralAssets,
         uint256 _quoteAssets,
-        TRANCHE_UNIT _minLTAssetsOut
+        TRANCHE_UNIT _minLPTAssetsOut
     )
         external
-        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut)
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT lptAssetsOut)
     {
         // At least one constituent leg (collateral or quote) must be supplied
         require(_collateralAssets != ZERO_TRANCHE_UNITS || _quoteAssets != 0, IRoycoDayKernel.MUST_DEPOSIT_NON_ZERO_ASSETS());
 
         // Execute an accounting sync to reconcile underlying PNL
         (SyncedAccountingState memory state,, uint256 totalSTShares) = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.SENIOR);
-        // ST deposits are disabled during a fixed-term market state, so the market only accepts quote-only LT deposits
+        // ST deposits are disabled during a fixed-term market state, so the market only accepts quote-only LPT deposits
         require(state.marketState == MarketState.PERPETUAL || _collateralAssets == ZERO_TRANCHE_UNITS, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
-        // The NAV to mint tranche shares at is the pre-deposit liquidity tranche effective NAV (its MM depth plus the idle liquidity-premium senior shares the kernel holds), read before the add moves the venue mark
-        effectiveNAV = ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, totalSTShares);
+        // The NAV to mint tranche shares at is the pre-deposit liquidity provider tranche effective NAV (its MM depth plus the idle liquidity-premium senior shares the kernel holds), read before the add moves the venue mark
+        effectiveNAV = ValuationLogic._getLiquidityProviderTrancheEffectiveNAV($, state.stEffectiveNAV, totalSTShares);
 
         // If the collateral leg is supplied, mint the corresponding non-diluting senior shares (priced at the pre-deposit senior effective NAV and pre-mint supply) to seed the add's senior leg
         uint256 stSharesMinted;
@@ -196,27 +196,27 @@ library DepositLogic {
                 IRoycoDayKernel(address(this)).convertCollateralAssetsToValue(_collateralAssets), state.stEffectiveNAV, totalSTShares, Math.Rounding.Floor
             );
             // Credit the deposited collateral to the ledger and mint the corresponding senior shares to the kernel (raises supply only)
-            // NOTE: The final post-op accounts for this ST deposit in addition to the subsequent LT deposit in one batch call
+            // NOTE: The final post-op accounts for this ST deposit in addition to the subsequent LPT deposit in one batch call
             $.totalCollateralAssets = $.totalCollateralAssets + _collateralAssets;
             IRoycoVaultTranche(_immutables.seniorTranche).mint(address(this), stSharesMinted);
         }
 
         // Add the minted ST shares and supplied quote assets into the liquidity venue with the specified slippage check
-        // The venue values the minted LT assets and marks the post-op LT raw NAV against the post-add pool state in both modes
-        NAV_UNIT postOpLTRawNAV;
-        (ltAssetsOut, depositNAV, postOpLTRawNAV) = IRoycoDayKernel(address(this)).addLiquidity(_isPreview, stSharesMinted, _quoteAssets, _minLTAssetsOut);
+        // The venue values the minted LPT assets and marks the post-op LPT raw NAV against the post-add pool state in both modes
+        NAV_UNIT postOpLPTRawNAV;
+        (lptAssetsOut, depositNAV, postOpLPTRawNAV) = IRoycoDayKernel(address(this)).addLiquidity(_isPreview, stSharesMinted, _quoteAssets, _minLPTAssetsOut);
 
-        // Credit the minted LT tranche assets to the liquidity tranche
-        $.totalLTAssets = $.totalLTAssets + ltAssetsOut;
+        // Credit the minted LPT tranche assets to the liquidity provider tranche
+        $.totalLPTAssets = $.totalLPTAssets + lptAssetsOut;
 
-        // Execute a post-deposit sync on accounting at the venue-marked LT raw NAV: it commits both the collateral-leg deposit (deltaCollateralNAV >= 0) and the new venue depth (deltaLTRawNAV > 0), enforcing the market's coverage and liquidity requirements only when senior exposure was added
+        // Execute a post-deposit sync on accounting at the venue-marked LPT raw NAV: it commits both the collateral-leg deposit (deltaCollateralNAV >= 0) and the new venue depth (deltaLPTRawNAV > 0), enforcing the market's coverage and liquidity requirements only when senior exposure was added
         // A quote-only deposit mints no senior shares: it cannot worsen coverage and only deepens liquidity, so it is guaranteed to be at least coverage and liquidity neutral
         AccountingSyncLogic._postOpSyncTrancheAccounting(
-            $, _immutables, Operation.LT_MULTI_ASSET_DEPOSIT, postOpLTRawNAV, ZERO_NAV_UNITS, (_collateralAssets != ZERO_TRANCHE_UNITS)
+            $, _immutables, Operation.LPT_MULTI_ASSET_DEPOSIT, postOpLPTRawNAV, ZERO_NAV_UNITS, (_collateralAssets != ZERO_TRANCHE_UNITS)
         );
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
-        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(depositNAV, effectiveNAV, ltAssetsOut));
+        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(depositNAV, effectiveNAV, lptAssetsOut));
     }
 
     // =============================
@@ -277,16 +277,16 @@ library DepositLogic {
     }
 
     /**
-     * @notice Returns the maximum amount of assets that can be deposited into the liquidity tranche
+     * @notice Returns the maximum amount of assets that can be deposited into the liquidity provider tranche
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _receiver The address that will receive the LT shares equating to the deposited assets
-     * @return assets The maximum amount of assets that can be deposited into the liquidity tranche, denominated in the liquidity tranche's tranche units
-     * @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and unbounded
+     * @param _receiver The address that will receive the LPT shares equating to the deposited assets
+     * @return assets The maximum amount of assets that can be deposited into the liquidity provider tranche, denominated in the liquidity provider tranche's tranche units
+     * @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and unbounded
      */
-    function ltMaxDeposit(IRoycoDayKernel.RoycoDayKernelState storage $, address _receiver) external view returns (TRANCHE_UNIT assets) {
+    function lptMaxDeposit(IRoycoDayKernel.RoycoDayKernelState storage $, address _receiver) external view returns (TRANCHE_UNIT assets) {
         // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
         if (BlacklistLogic._isBlacklisted($, _receiver) || PausableUpgradeable(address(this)).paused()) return ZERO_TRANCHE_UNITS;
-        // In-kind LT deposits are never gated, so the deposit is unbounded
+        // In-kind LPT deposits are never gated, so the deposit is unbounded
         return MAX_TRANCHE_UNITS;
     }
 }

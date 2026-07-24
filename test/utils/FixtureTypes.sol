@@ -29,12 +29,12 @@ struct MarketParamsConfig {
     uint64 minLiquidityWAD;
     // premiums
     uint64 maxJTYieldShareWAD;
-    uint64 maxLTYieldShareWAD;
+    uint64 maxLPTYieldShareWAD;
     // fees
     uint64 stProtocolFeeWAD;
     uint64 jtProtocolFeeWAD;
     uint64 jtYieldShareProtocolFeeWAD;
-    uint64 ltYieldShareProtocolFeeWAD;
+    uint64 lptYieldShareProtocolFeeWAD;
     // state machine / dust
     uint24 fixedTermDurationSeconds;
     uint256 dustTolerance;
@@ -44,9 +44,9 @@ struct MarketParamsConfig {
     bool enforceWhitelistOnTransfer;
     // ydm wiring
     uint8 jtYdmKind;
-    uint8 ltYdmKind;
+    uint8 lptYdmKind;
     uint64[3] jtCurve;
-    uint64[3] ltCurve;
+    uint64[3] lptCurve;
     uint64 targetUtilizationWAD;
 }
 

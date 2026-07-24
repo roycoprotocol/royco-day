@@ -14,7 +14,7 @@ import { cellA } from "../utils/TokenConfigs.sol";
 /**
  * @title SeniorJuniorMarketDriver
  * @notice One fully deployed Day market wrapped in senior/junior-only op entrypoints that never touch the
- *         liquidity tranche, so two instances can be driven through byte-identical op sequences and compared
+ *         liquidity provider tranche, so two instances can be driven through byte-identical op sequences and compared
  * @dev Every op returns (succeeded, revertSelector) instead of reverting, so the caller can assert that both
  *      markets accept and reject the exact same operations for the exact same reasons
  */
@@ -54,19 +54,19 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
 
     /**
      * @notice Every observable trace the liquidity overlay could leave on the market
-     * @custom:field ltSupply - The liquidity tranche share supply
-     * @custom:field ltOwnedSeniorTrancheShares - The kernel's idle liquidity premium senior share ledger
+     * @custom:field lptSupply - The liquidity provider tranche share supply
+     * @custom:field lptOwnedSeniorTrancheShares - The kernel's idle liquidity premium senior share ledger
      * @custom:field kernelSeniorShareBalance - Senior tranche shares actually held by the kernel
-     * @custom:field twLTYieldShareAccrued - The accrued time-weighted liquidity yield share weight
-     * @custom:field committedLTRawNAV - The committed liquidity pool mark
+     * @custom:field twLPTYieldShareAccrued - The accrued time-weighted liquidity yield share weight
+     * @custom:field committedLPTRawNAV - The committed liquidity pool mark
      * @custom:field liquidityUtilizationWAD - The liquidity utilization recomputed from the committed marks
      */
     struct LiquidityOverlayTrace {
-        uint256 ltSupply;
-        uint256 ltOwnedSeniorTrancheShares;
+        uint256 lptSupply;
+        uint256 lptOwnedSeniorTrancheShares;
         uint256 kernelSeniorShareBalance;
-        uint256 twLTYieldShareAccrued;
-        uint256 committedLTRawNAV;
+        uint256 twLPTYieldShareAccrued;
+        uint256 committedLPTRawNAV;
         uint256 liquidityUtilizationWAD;
     }
 
@@ -74,7 +74,7 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
      * @notice Deploys and seeds the market for the given parameterization, callable once
      * @dev Seeds 30,000 junior vault shares first (senior deposits are coverage-gated on junior NAV), then
      *      100,000 senior vault shares. With no minimum liquidity configured the market base seeds no pool
-     *      depth, so the liquidity tranche starts unfunded and must remain so for the whole run
+     *      depth, so the liquidity provider tranche starts unfunded and must remain so for the whole run
      * @param _params The market parameterization to deploy against the 18-decimal-vault, 6-decimal-quote token shape
      */
     function setUpMarket(MarketParamsConfig memory _params) external {
@@ -173,12 +173,12 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
     function overlayTrace() external view returns (LiquidityOverlayTrace memory o) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
         IRoycoDayKernel.RoycoDayKernelState memory k = kernel.getState();
-        o.ltSupply = liquidityTranche.totalSupply();
-        o.ltOwnedSeniorTrancheShares = k.ltOwnedSeniorTrancheShares;
+        o.lptSupply = liquidityProviderTranche.totalSupply();
+        o.lptOwnedSeniorTrancheShares = k.lptOwnedSeniorTrancheShares;
         o.kernelSeniorShareBalance = seniorTranche.balanceOf(address(kernel));
-        o.twLTYieldShareAccrued = uint256(a.twLTYieldShareAccruedWAD);
-        o.committedLTRawNAV = toUint256(a.lastLTRawNAV);
-        o.liquidityUtilizationWAD = RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLTRawNAV));
+        o.twLPTYieldShareAccrued = uint256(a.twLPTYieldShareAccruedWAD);
+        o.committedLPTRawNAV = toUint256(a.lastLPTRawNAV);
+        o.liquidityUtilizationWAD = RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLPTRawNAV));
     }
 }
 
@@ -193,10 +193,10 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
  *      still answers a 10% yield share on every query, and silences it purely through the two liquidity
  *      knobs: a zero minimum liquidity (so the redemption and deposit gates have nothing to enforce) and a
  *      zero maximum liquidity yield share (so the model's answer is capped away before it can accrue).
- *      Neither market ever funds its liquidity tranche. If the overlay leaked into the engine anywhere,
+ *      Neither market ever funds its liquidity provider tranche. If the overlay leaked into the engine anywhere,
  *      through the gate, the premium accrual, the pool mark, or the sync checkpoint, the step-by-step
  *      trajectories would diverge
- * @dev A default market that keeps its knobs armed does NOT reduce even with an unfunded liquidity tranche:
+ * @dev A default market that keeps its knobs armed does NOT reduce even with an unfunded liquidity provider tranche:
  *      a positive minimum liquidity against zero pool depth reads infinite utilization and blocks every
  *      senior deposit, and a positive yield-share cap accrues a premium off the live curve regardless of
  *      pool depth. The knobs, not the missing deposits, are what switch the overlay off, and this suite
@@ -220,7 +220,7 @@ contract Invariant_ReductionEquivalence is Test {
         // Zero the requirement so the liquidity gate has nothing to enforce against the unfunded tranche
         p.minLiquidityWAD = 0;
         // Zero the cap so the live model's 10% curve answer is capped away before it accrues any premium
-        p.maxLTYieldShareWAD = 0;
+        p.maxLPTYieldShareWAD = 0;
         disarmedMarket = new SeniorJuniorMarketDriver();
         disarmedMarket.setUpMarket(p);
     }
@@ -322,11 +322,11 @@ contract Invariant_ReductionEquivalence is Test {
     /// @dev Asserts every observable trace of the liquidity overlay is zero in the given market
     function _assertOverlayLeftNoTrace(SeniorJuniorMarketDriver _market, string memory _label) internal view {
         SeniorJuniorMarketDriver.LiquidityOverlayTrace memory o = _market.overlayTrace();
-        assertEq(o.ltSupply, 0, string.concat(_label, ": the never-funded liquidity tranche minted shares"));
-        assertEq(o.ltOwnedSeniorTrancheShares, 0, string.concat(_label, ": idle liquidity premium senior shares appeared in the kernel ledger"));
+        assertEq(o.lptSupply, 0, string.concat(_label, ": the never-funded liquidity provider tranche minted shares"));
+        assertEq(o.lptOwnedSeniorTrancheShares, 0, string.concat(_label, ": idle liquidity premium senior shares appeared in the kernel ledger"));
         assertEq(o.kernelSeniorShareBalance, 0, string.concat(_label, ": the kernel holds senior shares only a premium mint could give it"));
-        assertEq(o.twLTYieldShareAccrued, 0, string.concat(_label, ": liquidity yield-share weight accrued despite the zero cap"));
-        assertEq(o.committedLTRawNAV, 0, string.concat(_label, ": a pool mark was committed for the unfunded liquidity tranche"));
+        assertEq(o.twLPTYieldShareAccrued, 0, string.concat(_label, ": liquidity yield-share weight accrued despite the zero cap"));
+        assertEq(o.committedLPTRawNAV, 0, string.concat(_label, ": a pool mark was committed for the unfunded liquidity provider tranche"));
         assertEq(o.liquidityUtilizationWAD, 0, string.concat(_label, ": liquidity utilization must read zero with no requirement configured"));
     }
 }

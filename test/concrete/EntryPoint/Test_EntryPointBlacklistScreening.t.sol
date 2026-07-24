@@ -143,17 +143,24 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
     // requestRedemption
     // ---------------------------------------------------------------------
 
-    /// @notice A flagged receiver cannot be designated on a redemption request
-    function test_requestRedemption_revertsOnFlaggedReceiver() public {
+    /// @notice A flagged receiver may still be designated at request time, the screen sits where the value settles
+    /// so the redemption's kernel receiver screen stops the execution instead
+    function test_requestRedemption_flaggedReceiverQueuesButSettlementScreens() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
         _wireBlacklist();
         _flag(RECEIVER);
 
+        // The queue accepts the request, no value reaches the flagged receiver at request time
         vm.startPrank(USER_A);
         IERC20Like(address(seniorTranche)).approve(address(entryPoint), shares);
-        vm.expectRevert(_blacklistedError(RECEIVER));
-        entryPoint.requestRedemption(address(seniorTranche), shares, RECEIVER, 0);
+        (uint256 nonce,) = entryPoint.requestRedemption(address(seniorTranche), shares, RECEIVER, 0);
         vm.stopPrank();
+
+        // The settlement to the flagged receiver is stopped by the tranche redemption's kernel screen
+        _warpPastRedemptionDelay();
+        vm.expectRevert(_blacklistedError(RECEIVER));
+        vm.prank(USER_A);
+        entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
     }
 
     /// @notice A flagged requester is stopped by the share escrow transfer's kernel screen, no entry point screen needed
@@ -354,16 +361,24 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
     // cancelRedemptionRequest
     // ---------------------------------------------------------------------
 
-    /// @notice A flagged canceller cannot pull its escrowed shares, the canceller is not a party to the return transfer's kernel screen
-    function test_cancelRedemptionRequest_revertsOnFlaggedCanceller() public {
+    /// @notice A flagged canceller self-cancelling is stopped by the return transfer's kernel screen on the
+    /// flagged destination, while a clean receiver leg settles because only the transfer parties are screened
+    function test_cancelRedemptionRequest_flaggedCancellerScreenedOnlyAsReturnDestination() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(seniorTranche), shares, USER_A, 0);
         _wireBlacklist();
         _flag(USER_A);
 
+        // The self-cancel routes the escrow back to the flagged canceller, the kernel screen stops that leg
         vm.expectRevert(_blacklistedError(USER_A));
         vm.prank(USER_A);
+        entryPoint.cancelRedemptionRequest(nonce, USER_A);
+
+        // A clean receiver leg settles, the entry point screens only the parties to the return transfer
+        uint256 receiverSharesBefore = seniorTranche.balanceOf(RECEIVER);
+        vm.prank(USER_A);
         entryPoint.cancelRedemptionRequest(nonce, RECEIVER);
+        assertEq(seniorTranche.balanceOf(RECEIVER), receiverSharesBefore + shares, "the cancelled escrow must land on the clean receiver");
     }
 
     /// @notice A flagged receiver is stopped by the share escrow return's kernel screen, no entry point screen needed

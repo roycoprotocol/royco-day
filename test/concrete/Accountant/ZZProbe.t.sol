@@ -50,12 +50,12 @@ contract ZZProbe is AccountantTestBase {
 
         // 6 FudgeExact
         _deploy(_defaultParams());
-        _seedFlatWithLT(SEED_LT_RAW);
+        _seedFlatWithLPT(SEED_LPT_RAW);
         _p("fudgeExact", accountant.maxJTWithdrawal(_checkpointState()), RoycoTestMath.maxJTWithdrawal(1200e18, 200e18, 0.1e18, 0));
 
         // 7 shifted-claims gate boundary at a committed checkpoint (stEff 980e18, jtEff 220e18)
         _deploy(_defaultParams());
-        _seedState(980e18, 220e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        _seedState(980e18, 220e18, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
         SyncedAccountingState memory cp = _checkpointState();
         emit log_named_uint("scGate collateral", toUint256(cp.collateralNAV));
         emit log_named_uint("scGate jtEff", toUint256(cp.jtEffectiveNAV));

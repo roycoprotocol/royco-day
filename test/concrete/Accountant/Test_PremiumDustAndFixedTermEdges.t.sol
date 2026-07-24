@@ -22,18 +22,18 @@ contract Test_PremiumDustAndFixedTermEdges is AccountantTestBase {
     // =============================
 
     /**
-     * @notice When the attributed senior gain is at or below the dust tolerance, the JT risk premium and LT
+     * @notice When the attributed senior gain is at or below the dust tolerance, the JT risk premium and LPT
      *         liquidity premium are still paid, but all protocol fees are suppressed, because the fee gate keys
      *         on `stGain > dustTolerance` rather than on the premium being nonzero. A premium is distributed
      *         with no protocol fee taken on it
-     * @dev The premium is paid (ltLiquidityPremium > 0) while stProtocolFee/jtProtocolFee/ltProtocolFee are all
+     * @dev The premium is paid (lptLiquidityPremium > 0) while stProtocolFee/jtProtocolFee/lptProtocolFee are all
      *      zero
      * @dev Derivation (single dustTolerance 1e12, previewYieldShare 0.1e18 for both YDMs, both below the
      *      deployed max yield shares): a same-block collateral gain of 5e11 on the flat 1200e18 checkpoint
      *      attributes deltaST = floor(5e11 x 1000e18 / 1200e18) = 416666666666 to ST with the JT residual
      *      83333333334. The JT residual (83333333334 <= 1e12 dust) books no jt fee. The senior gain
      *      416666666666 <= 1e12 dust keeps premiumsPaid false, yet the instantaneous premiums still pay:
-     *      jtRiskPremium = ltLiquidityPremium = floor(416666666666 x 0.1e18 / 1e18) = 41666666666. Every fee
+     *      jtRiskPremium = lptLiquidityPremium = floor(416666666666 x 0.1e18 / 1e18) = 41666666666. Every fee
      *      is gated on premiumsPaid, so all three protocol fees are zero
      */
     function test_dustSizedGain_paysPremiumsWithZeroProtocolFee() public {
@@ -44,7 +44,7 @@ contract Test_PremiumDustAndFixedTermEdges is AccountantTestBase {
 
         // Pin the instantaneous yield shares both YDMs report so the premium is a fixed constant
         jtYDM.setPreviewYieldShareReturn(0.1e18);
-        ltYDM.setPreviewYieldShareReturn(0.1e18);
+        lptYDM.setPreviewYieldShareReturn(0.1e18);
 
         // Seed a flat committed checkpoint, then a same-block flat sync to initialize the premium accrual clock
         _seedSymmetric(1000e18, 200e18, 100e18);
@@ -54,9 +54,9 @@ contract Test_PremiumDustAndFixedTermEdges is AccountantTestBase {
         SyncedAccountingState memory s = kernel.doPreOp(toNAVUnits(uint256(1200e18 + 5e11)));
 
         // The liquidity premium (and JT risk premium) are paid on the dust gain
-        assertEq(toUint256(s.ltLiquidityPremium), 41_666_666_666, "ltLiquidityPremium must be floor(416666666666 x 0.1e18 / 1e18) = 41666666666");
+        assertEq(toUint256(s.lptLiquidityPremium), 41_666_666_666, "lptLiquidityPremium must be floor(416666666666 x 0.1e18 / 1e18) = 41666666666");
         // Every protocol fee is suppressed because premiumsPaid stayed false
-        assertEq(toUint256(s.ltProtocolFee), 0, "ltProtocolFee is skipped for a dust gain despite the premium being paid");
+        assertEq(toUint256(s.lptProtocolFee), 0, "lptProtocolFee is skipped for a dust gain despite the premium being paid");
         assertEq(toUint256(s.stProtocolFee), 0, "stProtocolFee is skipped for a dust gain");
         assertEq(toUint256(s.jtProtocolFee), 0, "jtProtocolFee is skipped for a dust gain");
     }

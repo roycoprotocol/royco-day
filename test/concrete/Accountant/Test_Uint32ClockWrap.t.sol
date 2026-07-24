@@ -150,11 +150,11 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantState memory s0 = accountant.getState();
         assertEq(s0.lastYieldShareAccrualTimestamp, 5000, "the stored accrual stamp truncates 4294972296 to its low 32 bits");
         assertEq(uint256(s0.twJTYieldShareAccruedWAD), 0, "clock initialization accrues no jt yield share");
-        assertEq(uint256(s0.twLTYieldShareAccruedWAD), 0, "clock initialization accrues no lt yield share");
+        assertEq(uint256(s0.twLPTYieldShareAccruedWAD), 0, "clock initialization accrues no lt yield share");
 
         // Pin both instantaneous yield shares at 0.1e18 (jt below its 0.2e18 cap, lt exactly at its 0.1e18 cap)
         jtYDM.setRates(0.1e18);
-        ltYDM.setRates(0.1e18);
+        lptYDM.setRates(0.1e18);
 
         // Re-sync flat in the SAME block. Zero real time has passed, so this must be a no-op: no service
         // seconds were rendered, so no premium entitlement should accrue and the YDMs should not be consulted
@@ -164,12 +164,12 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // are consulted, and each accumulator jumps by 0.1e18 x 4294967296 in a zero-second window
         IRoycoDayAccountant.RoycoDayAccountantState memory s1 = accountant.getState();
         assertEq(jtYDM.yieldShareCallCount(), 1, "the jt YDM is wrongly consulted for a zero-second window");
-        assertEq(ltYDM.yieldShareCallCount(), 1, "the lt YDM is wrongly consulted for a zero-second window");
+        assertEq(lptYDM.yieldShareCallCount(), 1, "the lt YDM is wrongly consulted for a zero-second window");
         assertEq(
             uint256(s1.twJTYieldShareAccruedWAD), 429_496_729_600_000_000_000_000_000, "jt accumulator jumps by rate x 2^32 despite zero real elapsed time"
         );
         assertEq(
-            uint256(s1.twLTYieldShareAccruedWAD), 429_496_729_600_000_000_000_000_000, "lt accumulator jumps by rate x 2^32 despite zero real elapsed time"
+            uint256(s1.twLPTYieldShareAccruedWAD), 429_496_729_600_000_000_000_000_000, "lt accumulator jumps by rate x 2^32 despite zero real elapsed time"
         );
         assertEq(s1.lastYieldShareAccrualTimestamp, 5000, "the re-stamp truncates back to the same low 32 bits, re-arming the wrap");
     }
@@ -190,7 +190,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // never exceed 20% of a senior gain, which is what makes the revert below a pure clock artifact
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = 0.1e18;
-        p.maxLTYieldShareWAD = 0.1e18;
+        p.maxLPTYieldShareWAD = 0.1e18;
         _deploy(p);
 
         // Initialize both clocks past the uint32 horizon: each stamps as uint32(2^32 + 5000) = 5000
@@ -198,7 +198,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         vm.warp(t0);
         _seedAndInitAccrual();
         jtYDM.setRates(0.1e18);
-        ltYDM.setRates(0.1e18);
+        lptYDM.setRates(0.1e18);
 
         // Six flat syncs spaced one real second apart. Each should accrue rate x 1s = 0.1e18 per leg (0.6e18
         // total), but every fresh stamp keeps losing its 2^32 bit, so each sync reads elapsed = 2^32 + 1 and
@@ -209,13 +209,13 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         }
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         assertEq(uint256(s.twJTYieldShareAccruedWAD), 2_576_980_378_200_000_000_000_000_000, "jt accumulator holds six phantom 2^32-second accruals");
-        assertEq(uint256(s.twLTYieldShareAccruedWAD), 2_576_980_378_200_000_000_000_000_000, "lt accumulator holds six phantom 2^32-second accruals");
+        assertEq(uint256(s.twLPTYieldShareAccruedWAD), 2_576_980_378_200_000_000_000_000_000, "lt accumulator holds six phantom 2^32-second accruals");
         assertEq(s.lastPremiumPaymentTimestamp, 5000, "no premium was paid on the flat syncs so the payment window still opens at the truncated init stamp");
 
         // Zero the forward rates: even if the YDMs never award another basis point of yield share from here
         // on, the poison already banked in the accumulators is enough to brick the market
         jtYDM.setRates(0);
-        ltYDM.setRates(0);
+        lptYDM.setRates(0);
 
         // A modest +12e18 collateral gain one second later attributes deltaST = floor(12e18 * 1000e18 / 1200e18)
         // = 10e18 of senior gain. With a correctly sized clock the accumulators would hold six 1-second accruals

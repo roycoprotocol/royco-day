@@ -36,16 +36,16 @@ contract Test_OracleClocks is Test {
     function _deployCheckpointClock(uint256 _minDeviationWAD) internal returns (MockCheckpointClock) {
         address implementation = address(new MockCheckpointClock(address(source)));
         return MockCheckpointClock(
-            address(new ERC1967Proxy(implementation, abi.encodeCall(MockCheckpointClock.initialize, (address(accessManager), _minDeviationWAD))))
+            address(new ERC1967Proxy(implementation, abi.encodeCall(MockCheckpointClock.initialize, (address(accessManager), _minDeviationWAD, 0))))
         );
     }
 
     function _lastValue(MockCheckpointClock _clock) internal view returns (uint256) {
-        return _clock.getOracleCheckpointClockState().lastValue;
+        return _clock.getOracleClockState().lastValue;
     }
 
     function _lastUpdatedAt(MockCheckpointClock _clock) internal view returns (uint32) {
-        return _clock.getOracleCheckpointClockState().lastUpdatedAt;
+        return _clock.getOracleClockState().lastUpdatedAt;
     }
 
     // ---------------------------------------------------------------------
@@ -84,14 +84,34 @@ contract Test_OracleClocks is Test {
         source.setRevertMode(true);
         address implementation = address(new MockCheckpointClock(address(source)));
         vm.expectRevert("MockValueSource: revert mode");
-        new ERC1967Proxy(implementation, abi.encodeCall(MockCheckpointClock.initialize, (address(accessManager), 0)));
+        new ERC1967Proxy(implementation, abi.encodeCall(MockCheckpointClock.initialize, (address(accessManager), 0, 0)));
     }
 
     function test_checkpointClock_initializeRejectsFullDeviationThreshold() public {
         // A threshold at or above 100% would mute all downward updates (a downward deviation caps at exactly WAD)
         address implementation = address(new MockCheckpointClock(address(source)));
         vm.expectRevert(OracleClockBase.INVALID_MIN_DEVIATION_WAD.selector);
-        new ERC1967Proxy(implementation, abi.encodeCall(MockCheckpointClock.initialize, (address(accessManager), WAD)));
+        new ERC1967Proxy(implementation, abi.encodeCall(MockCheckpointClock.initialize, (address(accessManager), WAD, 0)));
+    }
+
+    function test_checkpointClock_initializeWithAttestedCheckpointStampsIt() public {
+        // An attested past update seeds the clock at initialization: rotation to a fresh clock need not re-block
+        // a queue when the operator can attest to the source's true last update
+        address implementation = address(new MockCheckpointClock(address(source)));
+        MockCheckpointClock clock = MockCheckpointClock(
+            address(
+                new ERC1967Proxy(implementation, abi.encodeCall(MockCheckpointClock.initialize, (address(accessManager), 0, uint32(block.timestamp - 100))))
+            )
+        );
+        assertEq(clock.poke(), block.timestamp - 100, "the attested checkpoint must seed the clock");
+        assertEq(_lastValue(clock), 1e18, "the baseline value must still be the source's current reading");
+    }
+
+    function test_checkpointClock_initializeRejectsFutureCheckpoint() public {
+        // A future checkpoint would satisfy the execution gate without a genuine update: fail shut at initialization
+        address implementation = address(new MockCheckpointClock(address(source)));
+        vm.expectRevert(OracleClockBase.INVALID_LAST_UPDATE_TIMESTAMP.selector);
+        new ERC1967Proxy(implementation, abi.encodeCall(MockCheckpointClock.initialize, (address(accessManager), 0, uint32(block.timestamp + 1))));
     }
 
     function test_checkpointClock_acceptsMaximalThreshold() public {
@@ -183,7 +203,7 @@ contract Test_OracleClocks is Test {
         vm.expectEmit(address(clock));
         emit OracleClockBase.MinDeviationUpdated(0.01e18);
         clock.setMinDeviationWAD(0.01e18);
-        assertEq(clock.getOracleCheckpointClockState().minDeviationWAD, 0.01e18, "the threshold must be updated in storage");
+        assertEq(clock.getOracleClockState().minDeviationWAD, 0.01e18, "the threshold must be updated in storage");
         assertEq(clock.poke(), uint32(block.timestamp), "the same deviation must checkpoint under the tightened threshold");
     }
 
@@ -197,7 +217,7 @@ contract Test_OracleClocks is Test {
         // Establish a live checkpoint, then hold the value still
         vm.warp(block.timestamp + 1 hours);
         source.setValue(2e18);
-        uint32 checkpointedAt = clock.poke();
+        uint256 checkpointedAt = clock.poke();
         assertEq(checkpointedAt, uint32(block.timestamp), "the fixture must establish a live checkpoint");
 
         vm.warp(block.timestamp + 30 days);
@@ -243,7 +263,7 @@ contract Test_OracleClocks is Test {
         // timestamp, the tranche's queue reverts loudly until the clock is rotated
         source.setValue(0);
         MockCheckpointClock clock = _deployCheckpointClock(0.01e18);
-        assertEq(clock.getOracleCheckpointClockState().lastUpdatedAt, 0, "a zero baseline must not stamp at initialization");
+        assertEq(clock.getOracleClockState().lastUpdatedAt, 0, "a zero baseline must not stamp at initialization");
 
         vm.warp(block.timestamp + 1 hours);
         source.setValue(1e18);

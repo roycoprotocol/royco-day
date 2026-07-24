@@ -16,8 +16,8 @@ import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { SYNC_ROLE } from "../../../src/factory/Roles.sol";
-import { RoycoDayBalancerV3Hooks } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
-import { RoycoDayBalancerV3HooksStandIn } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/hooks/RoycoDayBalancerV3HooksStandIn.sol";
+import { RoycoDayBalancerV3Hooks } from "../../../src/kernels/base/liquidity-venue/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
+import { RoycoDayBalancerV3HooksStandIn } from "../../../src/kernels/base/liquidity-venue/balancer-v3/hooks/RoycoDayBalancerV3HooksStandIn.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
@@ -61,10 +61,10 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
     // Construction wiring
     // =============================
 
-    /// @notice Constructor wiring: the hook pins the kernel and derives the guarded pool from the kernel's LT asset
+    /// @notice Constructor wiring: the hook pins the kernel and derives the guarded pool from the kernel's LPT asset
     function test_Construction_DerivesPoolFromKernel() public view {
         assertEq(hooks.ROYCO_DAY_KERNEL(), address(kernel), "the hook must pin the kernel it bridges into");
-        assertEq(hooks.LIQUIDITY_TRANCHE_BALANCER_V3_POOL(), address(bpt), "the hook must guard the kernel's LT pool");
+        assertEq(hooks.LIQUIDITY_PROVIDER_TRANCHE_BALANCER_V3_POOL(), address(bpt), "the hook must guard the kernel's LPT pool");
     }
 
     // =============================
@@ -139,7 +139,7 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
     }
 
     /**
-     * @notice Kernel-routed add and remove liquidity SKIP the hook sync: the outer LT flow already brackets the
+     * @notice Kernel-routed add and remove liquidity SKIP the hook sync: the outer LPT flow already brackets the
      *         operation with its own pre/post syncs, so uncommitted PnL must remain uncommitted across both callbacks
      */
     function test_OnBeforeAddAndRemoveLiquidity_KernelRouterSkipsSync() public {
@@ -165,10 +165,10 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
     // Caller gates
     // =============================
 
-    /// @notice A hook invocation for any pool other than this market's LT pool is rejected
+    /// @notice A hook invocation for any pool other than this market's LPT pool is rejected
     function test_RevertIf_HookInvokedForForeignPool() public {
         vm.prank(address(balancerVault));
-        vm.expectRevert(RoycoDayBalancerV3Hooks.ONLY_LIQUIDITY_TRANCHE_BALANCER_V3_POOL.selector);
+        vm.expectRevert(RoycoDayBalancerV3Hooks.ONLY_LIQUIDITY_PROVIDER_TRANCHE_BALANCER_V3_POOL.selector);
         hooks.onBeforeSwap(_swapParams(EXTERNAL_ROUTER), makeAddr("FOREIGN_POOL"));
     }
 

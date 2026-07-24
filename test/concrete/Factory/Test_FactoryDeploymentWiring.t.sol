@@ -47,11 +47,11 @@ contract Test_FactoryDeploymentWiring is Test {
             IRoycoProtocolTemplate.DeploymentResult({
                 seniorTranche: makeAddr("ST"),
                 juniorTranche: makeAddr("JT"),
-                liquidityTranche: makeAddr("LT"),
+                liquidityProviderTranche: makeAddr("LPT"),
                 kernel: makeAddr("KERNEL"),
                 accountant: makeAddr("ACCOUNTANT"),
                 ydm: makeAddr("YDM"),
-                ltYdm: makeAddr("LTYDM"),
+                lptYdm: makeAddr("LPTYDM"),
                 extras: ""
             })
         );
@@ -116,7 +116,7 @@ contract Test_FactoryDeploymentWiring is Test {
 
         // The registry write landed for all three tranches.
         assertEq(factory.trancheToKernel(makeAddr("ST")), makeAddr("KERNEL"), "ST -> kernel registry write");
-        assertEq(factory.trancheToKernel(makeAddr("LT")), makeAddr("KERNEL"), "LT -> kernel registry write");
+        assertEq(factory.trancheToKernel(makeAddr("LPT")), makeAddr("KERNEL"), "LPT -> kernel registry write");
     }
 
     // ---------------------------------------------------------------------

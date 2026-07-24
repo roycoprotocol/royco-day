@@ -16,17 +16,17 @@ import { MarketParamsConfig } from "./FixtureTypes.sol";
  *      coverageLiquidationUtilizationWAD  | {WAD+1, 1.0009e18, 5e18}
  *      minLiquidityWAD                    | {0, 0.05e18, WAD-1}          (0 = the zero minimum-liquidity market)
  *      maxJTYieldShareWAD                 | {0, sum == WAD exactly}
- *      maxLTYieldShareWAD                 | {0, sum == WAD exactly}
+ *      maxLPTYieldShareWAD                 | {0, sum == WAD exactly}
  *      stProtocolFeeWAD                   | {0, 0.1e18, MAX_PROTOCOL_FEE_WAD}
  *      jtProtocolFeeWAD                   | {0, 0.1e18, MAX_PROTOCOL_FEE_WAD}
  *      jtYieldShareProtocolFeeWAD         | {0, 0.1e18, MAX_PROTOCOL_FEE_WAD}
- *      ltYieldShareProtocolFeeWAD         | {0, 0.1e18, MAX_PROTOCOL_FEE_WAD}
+ *      lptYieldShareProtocolFeeWAD         | {0, 0.1e18, MAX_PROTOCOL_FEE_WAD}
  *      fixedTermDurationSeconds           | {0, 1 hours, 2 weeks}
  *      dustTolerance                      | {0, 1, 1e12}
  *      stSelfLiquidationBonusWAD          | {0, 0.01e18}
  *      maxReinvestmentSlippageWAD         | {0, 0.001e18, WAD-1}
  *      enforceWhitelistOnTransfer         | {false, true}
- *      jtYdmKind / ltYdmKind              | {0 Mock, 1 Static, 2 AdaptiveV2}
+ *      jtYdmKind / lptYdmKind              | {0 Mock, 1 Static, 2 AdaptiveV2}
  *      targetUtilizationWAD               | {0.5e18, 0.9e18}
  */
 
@@ -43,12 +43,12 @@ function defaultParams() pure returns (MarketParamsConfig memory) {
         minLiquidityWAD: 0.05e18,
         // premiums
         maxJTYieldShareWAD: 0.5e18,
-        maxLTYieldShareWAD: 0.3e18,
+        maxLPTYieldShareWAD: 0.3e18,
         // fees
         stProtocolFeeWAD: 0.1e18,
         jtProtocolFeeWAD: 0.1e18,
         jtYieldShareProtocolFeeWAD: 0.1e18,
-        ltYieldShareProtocolFeeWAD: 0.1e18,
+        lptYieldShareProtocolFeeWAD: 0.1e18,
         // state machine / dust
         fixedTermDurationSeconds: 2 weeks,
         dustTolerance: 1,
@@ -58,23 +58,23 @@ function defaultParams() pure returns (MarketParamsConfig memory) {
         enforceWhitelistOnTransfer: false,
         // ydm wiring
         jtYdmKind: 0,
-        ltYdmKind: 0,
+        lptYdmKind: 0,
         jtCurve: [uint64(0.05e18), uint64(0.2e18), uint64(0.5e18)],
-        ltCurve: [uint64(0.02e18), uint64(0.1e18), uint64(0.3e18)],
+        lptCurve: [uint64(0.02e18), uint64(0.1e18), uint64(0.3e18)],
         targetUtilizationWAD: 0.9e18
     });
 }
 
 /**
- * @notice The zero minimum-liquidity market (minLiquidityWAD == 0), with zero LT yield share
+ * @notice The zero minimum-liquidity market (minLiquidityWAD == 0), with zero LPT yield share
  * @dev A Day market at zero minimum liquidity must behave exactly like a plain ST/JT market, the core
- *      property the LT overlay promises, so this preset backs Invariant_ReductionEquivalence
+ *      property the LPT overlay promises, so this preset backs Invariant_ReductionEquivalence
  */
 function zeroLiquidityParams() pure returns (MarketParamsConfig memory) {
     MarketParamsConfig memory p = defaultParams();
     p.minLiquidityWAD = 0;
-    p.maxLTYieldShareWAD = 0;
-    p.ltCurve = [uint64(0), uint64(0), uint64(0)];
+    p.maxLPTYieldShareWAD = 0;
+    p.lptCurve = [uint64(0), uint64(0), uint64(0)];
     return p;
 }
 
@@ -84,7 +84,7 @@ function maxFeeParams() pure returns (MarketParamsConfig memory) {
     p.stProtocolFeeWAD = uint64(MAX_PROTOCOL_FEE_WAD);
     p.jtProtocolFeeWAD = uint64(MAX_PROTOCOL_FEE_WAD);
     p.jtYieldShareProtocolFeeWAD = uint64(MAX_PROTOCOL_FEE_WAD);
-    p.ltYieldShareProtocolFeeWAD = uint64(MAX_PROTOCOL_FEE_WAD);
+    p.lptYieldShareProtocolFeeWAD = uint64(MAX_PROTOCOL_FEE_WAD);
     return p;
 }
 

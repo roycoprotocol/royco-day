@@ -14,7 +14,7 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  *         the independent RoycoTestMath mirror, wei-exact NAV conservation, junior-buffer-first loss
  *         priority with an independently recomputed coverage amount, the premium-inside-the-gain bound,
  *         independent fee-cap and carve-out-fit bounds on all three protocol fees, and the isolation of
- *         senior/junior accounting from the liquidity tranche's mark
+ *         senior/junior accounting from the liquidity provider tranche's mark
  * @dev Every run drives a reachable market: a deposit-seeded checkpoint, a preparatory sync that can book
  *      impermanent loss or enter a fixed term, then the measured sync from there. The single collateral
  *      asset means each sync's input is one signed collateral-NAV move, so the attributed senior and junior
@@ -35,59 +35,59 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
     function testFuzz_Sync_MatchesIndependentMirrorFieldForField(
         uint256 _stEff0,
         uint256 _jtEff0,
-        uint256 _ltRaw0,
+        uint256 _lptRaw0,
         int256 _bps1,
         uint256 _warp1,
         int256 _bps2,
-        uint256 _ltRaw2,
+        uint256 _lptRaw2,
         uint256 _warp2,
         uint256 _jtRate,
-        uint256 _ltRate
+        uint256 _lptRate
     )
         public
     {
         _stEff0 = bound(_stEff0, 0, MAX_NAV); // full NAV range incl. the empty-tranche edge
         _jtEff0 = bound(_jtEff0, 0, MAX_NAV); // full NAV range incl. the uncovered-market edge
-        _ltRaw0 = bound(_ltRaw0, 0, MAX_NAV); // full NAV range incl. the no-depth edge
-        _ltRaw2 = bound(_ltRaw2, 0, MAX_NAV); // fresh liquidity mark, fully independent of the collateral move
+        _lptRaw0 = bound(_lptRaw0, 0, MAX_NAV); // full NAV range incl. the no-depth edge
+        _lptRaw2 = bound(_lptRaw2, 0, MAX_NAV); // fresh liquidity mark, fully independent of the collateral move
         _bps1 = bound(_bps1, -10_000, 10_000); // -100% to +100% preparatory collateral move
         _bps2 = bound(_bps2, -10_000, 10_000); // -100% to +100% measured collateral move
         _warp1 = bound(_warp1, 0, MAX_ELAPSED); // same-block to ten years before the preparatory sync
         _warp2 = bound(_warp2, 0, MAX_ELAPSED); // same-block (instantaneous premium branch) to ten years before the measured sync
         _jtRate = bound(_jtRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
-        _ltRate = bound(_ltRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
+        _lptRate = bound(_lptRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
 
         _deploy(_defaultParams());
         jtYDM.setRates(_jtRate);
-        ltYDM.setRates(_ltRate);
-        _seedSymmetric(_stEff0, _jtEff0, _ltRaw0);
+        lptYDM.setRates(_lptRate);
+        _seedSymmetric(_stEff0, _jtEff0, _lptRaw0);
 
         // Preparatory sync: move the collateral so the measured sync starts from an asymmetric checkpoint
         // that can carry IL or a fixed-term state, not just the pristine flat seed
         vm.warp(block.timestamp + _warp1);
         uint256 collateral1 = _afterMove(_stEff0 + _jtEff0, _bps1);
         kernel.doPreOp(toNAVUnits(collateral1));
-        kernel.doCommit(toNAVUnits(_ltRaw0));
+        kernel.doCommit(toNAVUnits(_lptRaw0));
 
         // Derive the complete expected post-sync state from the committed checkpoint BEFORE production runs
         vm.warp(block.timestamp + _warp2);
         uint256 collateral2 = _afterMove(collateral1, _bps2);
-        (uint256 twJT, uint256 twLT, uint256 elapsedSincePayment) = _premiumWindow(_jtRate, _ltRate);
-        RoycoTestMath.SyncInputs memory in_ = _mirrorInput(collateral2, _ltRaw2, twJT, twLT, elapsedSincePayment, _jtRate, _ltRate);
+        (uint256 twJT, uint256 twLPT, uint256 elapsedSincePayment) = _premiumWindow(_jtRate, _lptRate);
+        RoycoTestMath.SyncInputs memory in_ = _mirrorInput(collateral2, _lptRaw2, twJT, twLPT, elapsedSincePayment, _jtRate, _lptRate);
         RoycoTestMath.SyncOutputs memory out = RoycoTestMath.syncTrancheAccounting(in_);
 
         SyncedAccountingState memory st = kernel.doPreOp(toNAVUnits(collateral2));
-        kernel.doCommit(toNAVUnits(_ltRaw2));
+        kernel.doCommit(toNAVUnits(_lptRaw2));
 
         // Field-for-field equality with the independent mirror
         assertEq(toUint256(st.collateralNAV), out.collateralNAV, "sync: collateral NAV");
         assertEq(toUint256(st.stEffectiveNAV), out.stEffectiveNAV, "sync: senior effective NAV");
         assertEq(toUint256(st.jtEffectiveNAV), out.jtEffectiveNAV, "sync: junior effective NAV");
         assertEq(toUint256(st.jtImpermanentLoss), out.jtImpermanentLoss, "sync: junior impermanent loss");
-        assertEq(toUint256(st.ltLiquidityPremium), out.ltLiquidityPremium, "sync: liquidity premium");
+        assertEq(toUint256(st.lptLiquidityPremium), out.lptLiquidityPremium, "sync: liquidity premium");
         assertEq(toUint256(st.stProtocolFee), out.stProtocolFee, "sync: senior protocol fee");
         assertEq(toUint256(st.jtProtocolFee), out.jtProtocolFee, "sync: junior protocol fee");
-        assertEq(toUint256(st.ltProtocolFee), out.ltProtocolFee, "sync: liquidity protocol fee");
+        assertEq(toUint256(st.lptProtocolFee), out.lptProtocolFee, "sync: liquidity protocol fee");
         assertEq(st.coverageUtilizationWAD, out.coverageUtilizationWAD, "sync: coverage utilization");
         assertEq(uint8(st.marketState), uint8(out.marketState), "sync: market state");
         assertEq(uint256(st.fixedTermEndTimestamp), out.fixedTermEndTimestamp, "sync: fixed-term end");
@@ -108,10 +108,10 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         // The fee/premium theorem on production's own outputs: a FIXED_TERM resolution means the gain residual
         // never fully recovered the IL, and under same-sign attribution no fee or premium source survives that
         if (uint8(st.marketState) == uint8(RoycoTestMath.MarketState.FIXED_TERM)) {
-            assertEq(toUint256(st.ltLiquidityPremium), 0, "sync: no liquidity premium on a FIXED_TERM resolution");
+            assertEq(toUint256(st.lptLiquidityPremium), 0, "sync: no liquidity premium on a FIXED_TERM resolution");
             assertEq(toUint256(st.stProtocolFee), 0, "sync: no senior fee on a FIXED_TERM resolution");
             assertEq(toUint256(st.jtProtocolFee), 0, "sync: no junior fee on a FIXED_TERM resolution");
-            assertEq(toUint256(st.ltProtocolFee), 0, "sync: no liquidity fee on a FIXED_TERM resolution");
+            assertEq(toUint256(st.lptProtocolFee), 0, "sync: no liquidity fee on a FIXED_TERM resolution");
         }
 
         // Independent fee bounds sharing nothing with the mirror pipeline. Every gain a sync can book is
@@ -126,23 +126,23 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         // junior fee is the sum of two 10% legs (the junior tranche's own net gain and the risk premium,
         // each <= grossUpside), so five times it must fit inside grossUpside
         assertLe(toUint256(st.stProtocolFee) * 10, grossUpside, "fee bound: the senior fee exceeds 10% of the gross upside");
-        assertLe(toUint256(st.ltProtocolFee) * 10, grossUpside, "fee bound: the liquidity fee exceeds 10% of the gross upside");
+        assertLe(toUint256(st.lptProtocolFee) * 10, grossUpside, "fee bound: the liquidity fee exceeds 10% of the gross upside");
         assertLe(toUint256(st.jtProtocolFee) * 5, grossUpside, "fee bound: the junior fee exceeds its two 10% legs of the gross upside");
-        assertLe(toUint256(st.ltLiquidityPremium), grossUpside, "fee bound: the liquidity premium exceeds the gross upside");
+        assertLe(toUint256(st.lptLiquidityPremium), grossUpside, "fee bound: the liquidity premium exceeds the gross upside");
         // Fees are charged on gains only, never on principal: a sync with no collateral upside has no gain
         // anywhere in the waterfall (this fixture's dust tolerance is zero, so any nonzero gain is
         // fee-eligible and, conversely, zero gain admits zero fees and zero premium)
         if (grossUpside == 0) {
             assertEq(toUint256(st.stProtocolFee), 0, "fee bound: a senior fee was charged with no gain booked");
             assertEq(toUint256(st.jtProtocolFee), 0, "fee bound: a junior fee was charged with no gain booked");
-            assertEq(toUint256(st.ltProtocolFee), 0, "fee bound: a liquidity fee was charged with no gain booked");
-            assertEq(toUint256(st.ltLiquidityPremium), 0, "fee bound: a liquidity premium was paid with no gain booked");
+            assertEq(toUint256(st.lptProtocolFee), 0, "fee bound: a liquidity fee was charged with no gain booked");
+            assertEq(toUint256(st.lptLiquidityPremium), 0, "fee bound: a liquidity premium was paid with no gain booked");
         }
         // Conservation including the fee carve-outs: fees and the premium are dilution claims inside the
         // conserved NAV, never additions to it, so each carve-out must fit inside the effective NAV it will
         // be minted against -- otherwise the post-sync share mints would price against NAV that does not exist
         assertLe(
-            toUint256(st.ltLiquidityPremium) + toUint256(st.stProtocolFee),
+            toUint256(st.lptLiquidityPremium) + toUint256(st.stProtocolFee),
             toUint256(st.stEffectiveNAV),
             "fee bound: the senior carve-outs exceed the senior effective NAV"
         );
@@ -158,7 +158,7 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         assertEq(toUint256(sAfter.lastSTEffectiveNAV), out.stEffectiveNAV, "checkpoint: senior effective NAV");
         assertEq(toUint256(sAfter.lastJTEffectiveNAV), out.jtEffectiveNAV, "checkpoint: junior effective NAV");
         assertEq(toUint256(sAfter.lastJTImpermanentLoss), out.jtImpermanentLoss, "checkpoint: junior impermanent loss");
-        assertEq(toUint256(sAfter.lastLTRawNAV), _ltRaw2, "checkpoint: committed liquidity mark");
+        assertEq(toUint256(sAfter.lastLPTRawNAV), _lptRaw2, "checkpoint: committed liquidity mark");
         assertEq(uint8(sAfter.lastMarketState), uint8(out.marketState), "checkpoint: market state");
         assertEq(uint256(sAfter.fixedTermEndTimestamp), out.fixedTermEndTimestamp, "checkpoint: fixed-term end");
 
@@ -212,19 +212,19 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
                 assertEq(toUint256(st.jtImpermanentLoss), 0, "loss priority: a forced wind-down erases the impermanent loss");
                 assertEq(out.ilErased, ilAfterJTLeg + coverageApplied, "loss priority: exactly the pre-erasure balance is erased");
             }
-            assertEq(toUint256(st.ltLiquidityPremium), 0, "loss priority: no liquidity premium on a senior loss");
+            assertEq(toUint256(st.lptLiquidityPremium), 0, "loss priority: no liquidity premium on a senior loss");
         } else if (deltaSTEff > 0) {
             // Premium bound: after recovering the junior tranche's impermanent loss (the first claim on senior
             // appreciation), the risk and liquidity premiums together can never exceed the residual gain
             uint256 recovery = Math.min(uint256(deltaSTEff), ilAfterJTLeg);
             uint256 residualGain = uint256(deltaSTEff) - recovery;
-            assertLe(out.jtRiskPremium + out.ltLiquidityPremium, residualGain, "premium bound: both premiums fit inside the residual senior gain");
+            assertLe(out.jtRiskPremium + out.lptLiquidityPremium, residualGain, "premium bound: both premiums fit inside the residual senior gain");
         }
     }
 
     /**
      * Scenario: two copies of the same market state at the same instant, differing ONLY in the liquidity
-     * tranche's committed mark, are put through the identical collateral sync. The liquidity tranche is an
+     * tranche's committed mark, are put through the identical collateral sync. The liquidity provider tranche is an
      * overlay: its mark prices the liquidity premium's driver but must never leak into the senior/junior
      * tranche accounting sync, so every senior/junior output - effective NAVs, impermanent loss, coverage utilization,
      * market state, premium, and fees - must be identical across the two copies. If perturbing the pool mark
@@ -233,28 +233,28 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
     function testFuzz_Sync_LiquidityMarkNeverMovesSeniorOrJuniorAccounting(
         uint256 _stEff0,
         uint256 _jtEff0,
-        uint256 _ltRawA,
-        uint256 _ltRawB,
+        uint256 _lptRawA,
+        uint256 _lptRawB,
         int256 _bps,
         uint256 _warp,
         uint256 _jtRate,
-        uint256 _ltRate
+        uint256 _lptRate
     )
         public
     {
         _stEff0 = bound(_stEff0, 0, MAX_NAV); // full NAV range incl. the empty-tranche edge
         _jtEff0 = bound(_jtEff0, 0, MAX_NAV); // full NAV range incl. the uncovered-market edge
-        _ltRawA = bound(_ltRawA, 0, MAX_NAV); // first liquidity mark incl. the no-depth edge
-        _ltRawB = bound(_ltRawB, 0, MAX_NAV); // perturbed liquidity mark, unconstrained relative to the first
+        _lptRawA = bound(_lptRawA, 0, MAX_NAV); // first liquidity mark incl. the no-depth edge
+        _lptRawB = bound(_lptRawB, 0, MAX_NAV); // perturbed liquidity mark, unconstrained relative to the first
         _bps = bound(_bps, -10_000, 10_000); // -100% to +100% collateral move
         _warp = bound(_warp, 0, MAX_ELAPSED); // same-block to ten years before the measured sync
         _jtRate = bound(_jtRate, 0, WAD); // full YDM output range
-        _ltRate = bound(_ltRate, 0, WAD); // full YDM output range
+        _lptRate = bound(_lptRate, 0, WAD); // full YDM output range
 
         _deploy(_defaultParams());
         jtYDM.setRates(_jtRate);
-        ltYDM.setRates(_ltRate);
-        _seedSymmetric(_stEff0, _jtEff0, _ltRawA);
+        lptYDM.setRates(_lptRate);
+        _seedSymmetric(_stEff0, _jtEff0, _lptRawA);
 
         vm.warp(block.timestamp + _warp);
         uint256 collateral1 = _afterMove(_stEff0 + _jtEff0, _bps);
@@ -265,7 +265,7 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
 
         // Copy B: identical state and instant, but the liquidity mark is re-committed to the perturbed value first
         vm.revertToState(snapshotId);
-        kernel.doCommit(toNAVUnits(_ltRawB));
+        kernel.doCommit(toNAVUnits(_lptRawB));
         SyncedAccountingState memory stB = kernel.doPreOp(toNAVUnits(collateral1));
 
         assertEq(toUint256(stA.stEffectiveNAV), toUint256(stB.stEffectiveNAV), "isolation: senior effective NAV moved with the liquidity mark");
@@ -274,10 +274,10 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         assertEq(stA.coverageUtilizationWAD, stB.coverageUtilizationWAD, "isolation: coverage utilization moved with the liquidity mark");
         assertEq(uint8(stA.marketState), uint8(stB.marketState), "isolation: market state moved with the liquidity mark");
         assertEq(uint256(stA.fixedTermEndTimestamp), uint256(stB.fixedTermEndTimestamp), "isolation: fixed-term end moved with the liquidity mark");
-        assertEq(toUint256(stA.ltLiquidityPremium), toUint256(stB.ltLiquidityPremium), "isolation: liquidity premium moved with the liquidity mark");
+        assertEq(toUint256(stA.lptLiquidityPremium), toUint256(stB.lptLiquidityPremium), "isolation: liquidity premium moved with the liquidity mark");
         assertEq(toUint256(stA.stProtocolFee), toUint256(stB.stProtocolFee), "isolation: senior fee moved with the liquidity mark");
         assertEq(toUint256(stA.jtProtocolFee), toUint256(stB.jtProtocolFee), "isolation: junior fee moved with the liquidity mark");
-        assertEq(toUint256(stA.ltProtocolFee), toUint256(stB.ltProtocolFee), "isolation: liquidity fee moved with the liquidity mark");
+        assertEq(toUint256(stA.lptProtocolFee), toUint256(stB.lptProtocolFee), "isolation: liquidity fee moved with the liquidity mark");
 
         // The state-machine biconditional holds on this sync surface too (the copies are asserted identical above)
         assertEq(
@@ -310,8 +310,8 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         _final = bound(_final, _dip, MAX_NAV);
         _deploy(_defaultParams());
         jtYDM.setPreviewYieldShareReturn(0);
-        ltYDM.setPreviewYieldShareReturn(0);
-        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        lptYDM.setPreviewYieldShareReturn(0);
+        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
         uint256 snapshotId = vm.snapshotState();
 
         // Path A: dip then mark to the final collateral NAV

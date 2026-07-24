@@ -32,7 +32,7 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.fixedTermDurationSeconds = 0;
         _deploy(p);
-        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
         vm.recordLogs();
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(toNAVUnits(uint256(50e18)));
@@ -134,7 +134,7 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
      *   so jtEffectiveNAV = 0 with il = 300e18, the (100e18 - 1) st loss is uncovered leaving stEffectiveNAV = 1 wei
      */
     function test_StateMachine_juniorWipeoutForcesPerpetual() public {
-        _seedState(100e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
+        _seedState(100e18, 200e18, 100e18, SEED_LPT_RAW, MarketState.FIXED_TERM);
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermEnded();
         vm.expectEmit(true, true, true, true, address(accountant));
@@ -156,7 +156,7 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
      * later zero-checkpoint recovery is a clean senior gain under the seniority tie-break
      */
     function test_StateMachine_emptyMarketWipeForcesPerpetualAndErases() public {
-        _seedState(100e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
+        _seedState(100e18, 200e18, 100e18, SEED_LPT_RAW, MarketState.FIXED_TERM);
         vm.expectEmit(false, false, false, true, address(accountant));
         emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(toNAVUnits(uint256(300e18)));
         SyncedAccountingState memory state = kernel.doPreOp(ZERO_NAV_UNITS);
@@ -180,7 +180,7 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.dustTolerance = toNAVUnits(uint256(70));
         _deploy(p);
-        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
         // Covered loss of 50 wei: the perpetual commit erases the dust drawdown with its exact reset event
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(toNAVUnits(uint256(50)));
@@ -218,7 +218,7 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         // liquidation threshold clear of it so this test exercises the IL / dust-tolerance path rather than a liquidation breach
         p.coverageLiquidationUtilizationWAD = 1.5e18;
         _deploy(p);
-        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
         // Enter the fixed term on a covered 100e18 loss
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1100e18)));
         assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM), "loss above dust enters the term");
@@ -286,8 +286,8 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         assertEq(toUint256(state.stEffectiveNAV), 1000e18, "st books none of the recovery");
         assertEq(toUint256(state.jtProtocolFee), 0, "no jt protocol fee in the term");
         assertEq(toUint256(state.stProtocolFee), 0, "no st protocol fee in the term");
-        assertEq(toUint256(state.ltProtocolFee), 0, "no lt protocol fee in the term");
-        assertEq(toUint256(state.ltLiquidityPremium), 0, "no lt premium in the term");
+        assertEq(toUint256(state.lptProtocolFee), 0, "no lt protocol fee in the term");
+        assertEq(toUint256(state.lptLiquidityPremium), 0, "no lt premium in the term");
         assertEq(toUint256(state.jtImpermanentLoss), 60e18, "il repaid by exactly the gain");
     }
 
@@ -330,27 +330,27 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
      * A +150e18 gain repays the 100e18 il off the top (jtEffectiveNAV 300e18, residual 50e18, basis 1300e18):
      * stGain = floor(50e18 * 1000e18 / 1300e18) = 38461538461538461538, jtGain = 11538461538461538462 books
      * jtFee 1153846153846153846. jtPrem = floor(stGain * 25e18 / (500 * 1e18)) = 1923076923076923076,
-     * ltPrem = 769230769230769230, fees kept in the resulting PERPETUAL: jtFee += 192307692307692307
-     * (total 1346153846153846153), ltFee 76923076923076923, st residual 35769230769230769232,
+     * lptPrem = 769230769230769230, fees kept in the resulting PERPETUAL: jtFee += 192307692307692307
+     * (total 1346153846153846153), lptFee 76923076923076923, st residual 35769230769230769232,
      * stFee 3576923076923076923, jtEff = 313461538461538461538, stEff = 1036538461538461538462
      */
     function test_StateMachine_premiumWindowResetOnFixedTermExit() public {
         _seedLargeIL();
         uint32 windowStart = uint32(block.timestamp);
         jtYDM.setYieldShareReturn(0.05e18);
-        ltYDM.setYieldShareReturn(0.02e18);
+        lptYDM.setYieldShareReturn(0.02e18);
         vm.warp(block.timestamp + 500);
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1350e18)));
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "recovered market exits the term");
         assertEq(toUint256(state.jtEffectiveNAV), 313_461_538_461_538_461_538, "repayment plus the junior residual and time-weighted risk premium");
-        assertEq(toUint256(state.ltLiquidityPremium), 769_230_769_230_769_230, "time-weighted liquidity premium");
+        assertEq(toUint256(state.lptLiquidityPremium), 769_230_769_230_769_230, "time-weighted liquidity premium");
         assertEq(toUint256(state.stEffectiveNAV), 1_036_538_461_538_461_538_462, "st residual plus the premium value retained senior");
         assertEq(toUint256(state.jtProtocolFee), 1_346_153_846_153_846_153, "jt residual and yield-share fees kept");
-        assertEq(toUint256(state.ltProtocolFee), 76_923_076_923_076_923, "lt fee kept");
+        assertEq(toUint256(state.lptProtocolFee), 76_923_076_923_076_923, "lt fee kept");
         assertEq(toUint256(state.stProtocolFee), 3_576_923_076_923_076_923, "st fee kept");
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         assertEq(s.twJTYieldShareAccruedWAD, 0, "jt accumulator reset on payment");
-        assertEq(s.twLTYieldShareAccruedWAD, 0, "lt accumulator reset on payment");
+        assertEq(s.twLPTYieldShareAccruedWAD, 0, "lt accumulator reset on payment");
         // The expected clock is derived from windowStart rather than read from block.timestamp: the identical
         // pre-warp uint32(block.timestamp) read above gets CSE'd with a post-warp read under via-ir (TIMESTAMP is
         // frame-constant in the real EVM, so the optimizer may legally merge the reads across a vm.warp)

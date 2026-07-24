@@ -7,9 +7,7 @@ import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts/contracts/p
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
 import { RoycoBase } from "../../../src/base/RoycoBase.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as DayKernel
-} from "../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+import { RoycoDayBalancerV3Kernel as DayKernel } from "../../../src/kernels/RoycoDayBalancerV3Kernel.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
@@ -24,8 +22,8 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *         the proxy storage survives byte-for-byte, and the three rejection tiers (unauthorized caller, codeless
  *         implementation, non-UUPS target) must each leave the pointer untouched
  * @dev Seeded once in setUp: ST 100e18 and JT 30e18 vault shares at the 1.0 seed rate (coverage
- *      (100 + 30) x 0.2 / 30 = 0.8667 <= 1), plus the market base's auto-seeded quote-only LT depth of 6 whole
- *      quote (required ceil(100e18 x 0.05) = 5e18 plus one whole-token cushion), so LT_PROVIDER holds 6e18 LT shares
+ *      (100 + 30) x 0.2 / 30 = 0.8667 <= 1), plus the market base's auto-seeded quote-only LPT depth of 6 whole
+ *      quote (required ceil(100e18 x 0.05) = 5e18 plus one whole-token cushion), so LPT_PROVIDER holds 6e18 LPT shares
  */
 contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
     /// @dev The ERC1967 implementation slot, bytes32(uint256(keccak256("eip1967.proxy.implementation")) - 1)
@@ -59,8 +57,8 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
                 juniorTranche: address(juniorTranche),
                 collateralAsset: address(stJtVault),
                 accountant: address(accountant),
-                liquidityTranche: address(liquidityTranche),
-                ltAsset: address(bpt),
+                liquidityProviderTranche: address(liquidityProviderTranche),
+                lptAsset: address(bpt),
                 enforceVaultSharesTransferWhitelist: params.enforceWhitelistOnTransfer
             })
         );
@@ -128,10 +126,10 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
         // Share ledgers survive: the seeded 100e18 / 30e18 / 6e18 positions and supplies are proxy storage
         assertEq(seniorTranche.balanceOf(ST_PROVIDER), 100e18, "the senior LP's 100e18 shares must survive the upgrade");
         assertEq(juniorTranche.balanceOf(JT_PROVIDER), 30e18, "the junior LP's 30e18 shares must survive the upgrade");
-        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 6e18, "the liquidity LP's 6e18 shares must survive the upgrade");
+        assertEq(liquidityProviderTranche.balanceOf(LPT_PROVIDER), 6e18, "the liquidity LP's 6e18 shares must survive the upgrade");
         assertEq(seniorTranche.totalSupply(), 100e18, "the senior supply must survive the upgrade");
         assertEq(juniorTranche.totalSupply(), 30e18, "the junior supply must survive the upgrade");
-        assertEq(liquidityTranche.totalSupply(), 6e18, "the liquidity supply must survive the upgrade");
+        assertEq(liquidityProviderTranche.totalSupply(), 6e18, "the liquidity supply must survive the upgrade");
 
         // The last committed checkpoint and the kernel's owned-asset ledgers are byte-identical: the next sync's
         // waterfall reads this checkpoint as its reference, so any drift here would misattribute PnL

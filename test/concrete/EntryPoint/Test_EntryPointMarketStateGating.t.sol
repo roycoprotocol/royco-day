@@ -12,7 +12,7 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  * @title Test_EntryPointMarketStateGating
  * @notice How queued requests interact with the market's state machine: in FIXED_TERM the MAX sentinel gracefully
  *         skips gated executions (maxDeposit/maxRedeem read 0) while explicit amounts revert in the kernel, the
- *         in-kind LT deposit stays executable mid-term, requests survive the term and execute after recovery, and
+ *         in-kind LPT deposit stays executable mid-term, requests survive the term and execute after recovery, and
  *         a liquidation-breached market pays the senior self-liquidation bonus through the entry point
  * @dev Seeded 100/30 to reuse the kernel suite's liquidation derivation: a -21% shared drawdown pushes
  *      coverageUtilizationWAD to ~7.6e18 >= the 6.4667e18 liquidation threshold (forced PERPETUAL)
@@ -56,13 +56,13 @@ contract Test_EntryPointMarketStateGating is EntryPointTestBase {
         entryPoint.executeRedemption(USER_A, redemptionNonce, shares);
     }
 
-    function test_fixedTerm_inKindLtDepositStaysExecutable() public {
-        (uint256 nonce,) = _requestDeposit(USER_A, address(liquidityTranche), 10e18, USER_A, 0);
+    function test_fixedTerm_inKindLptDepositStaysExecutable() public {
+        (uint256 nonce,) = _requestDeposit(USER_A, address(liquidityProviderTranche), 10e18, USER_A, 0);
         _warpPastDepositDelay();
         _enterFixedTerm();
 
         uint256 shares = _executeDepositMax(USER_A, USER_A, nonce);
-        assertGt(shares, 0, "the in-kind LT deposit must stay executable mid-term (liquidity-only deepening)");
+        assertGt(shares, 0, "the in-kind LPT deposit must stay executable mid-term (liquidity-only deepening)");
     }
 
     function test_fixedTerm_requestsCanBeCreatedMidTerm() public {

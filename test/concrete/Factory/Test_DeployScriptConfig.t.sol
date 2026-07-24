@@ -13,7 +13,7 @@ import {
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
     ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
-    ADMIN_ORACLE_QUOTER_ROLE,
+    ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_ROLE,
@@ -24,8 +24,8 @@ import {
     DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
+    LPT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
-    LT_LP_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
@@ -65,7 +65,7 @@ contract Test_DeployScriptConfig is Test {
      */
     function test_GetRoleConfig_ResolvesEveryGeneratedRoleAssignment() public view {
         // 18 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
-        // The fee recipient deliberately carries three LP roles (ST/JT/LT) and market ops carries the blacklist
+        // The fee recipient deliberately carries three LP roles (ST/JT/LPT) and market ops carries the blacklist
         // admin role alongside its own, which is how 18 addresses fan out to 21 assignments.
         RoleAssignmentAddresses memory addresses = RoleAssignmentAddresses({
             pauserAddress: address(0x1001),
@@ -75,7 +75,7 @@ contract Test_DeployScriptConfig is Test {
             adminKernelAddress: address(0x1005),
             adminAccountantAddress: address(0x1006),
             adminProtocolFeeSetterAddress: address(0x1007),
-            adminOracleQuoterAddress: address(0x1008),
+            adminOracleAddress: address(0x1008),
             lpRoleAdminAddress: address(0x1009),
             guardianAddress: address(0x100A),
             deployerAddress: address(0x100B),
@@ -121,7 +121,7 @@ contract Test_DeployScriptConfig is Test {
             // Hand-derived admin per role: the three LP roles sit under LP_ROLE_ADMIN_ROLE, DEPLOYER_ROLE sits
             // under DEPLOYER_ROLE_ADMIN_ROLE, and every other role is administered by ADMIN_ROLE directly.
             uint64 expectedAdmin = ADMIN_ROLE;
-            if (role == ST_LP_ROLE || role == JT_LP_ROLE || role == LT_LP_ROLE) expectedAdmin = LP_ROLE_ADMIN_ROLE;
+            if (role == ST_LP_ROLE || role == JT_LP_ROLE || role == LPT_LP_ROLE) expectedAdmin = LP_ROLE_ADMIN_ROLE;
             if (role == DEPLOYER_ROLE) expectedAdmin = DEPLOYER_ROLE_ADMIN_ROLE;
             assertEq(cfg.adminRole, expectedAdmin, "admin does not match the hand-derived role graph");
 
@@ -141,7 +141,7 @@ contract Test_DeployScriptConfig is Test {
             ADMIN_KERNEL_ROLE,
             ADMIN_ACCOUNTANT_ROLE,
             ADMIN_PROTOCOL_FEE_SETTER_ROLE,
-            ADMIN_ORACLE_QUOTER_ROLE,
+            ADMIN_ORACLE_ROLE,
             LP_ROLE_ADMIN_ROLE,
             ST_LP_ROLE,
             JT_LP_ROLE,
@@ -149,7 +149,7 @@ contract Test_DeployScriptConfig is Test {
             DEPLOYER_ROLE,
             DEPLOYER_ROLE_ADMIN_ROLE,
             ADMIN_UNPAUSER_ROLE,
-            LT_LP_ROLE,
+            LPT_LP_ROLE,
             ADMIN_BALANCER_POOL_MANAGER_ROLE,
             ADMIN_MARKET_OPS_ROLE,
             ADMIN_BLACKLIST_ROLE,
@@ -174,5 +174,4 @@ contract Test_DeployScriptConfig is Test {
         vm.expectRevert(abi.encodeWithSelector(DeployScript.UnknownRole.selector, BURNER_ROLE));
         deployScript.getRoleConfig(BURNER_ROLE);
     }
-
 }

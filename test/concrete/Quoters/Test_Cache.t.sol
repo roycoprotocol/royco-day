@@ -56,7 +56,7 @@ contract Test_Cache is Test {
      */
     function test_WriteZeroThenRead_ReturnsHitWithZero_AndUntouchedKeyReadsMiss() public {
         (bool hit, uint256 value, bool siblingHit, uint256 siblingValue) =
-            this.driveWriteThenReadBothKeys(CacheKey.ST_SHARE_TO_NAV_RATE, 0, CacheKey.COLLATERAL_ASSET_TO_NAV_RATE);
+            this.driveWriteThenReadBothKeys(CacheKey.ST_SHARE_PRICE, 0, CacheKey.COLLATERAL_ASSET_PRICE);
 
         // The written key: a hit whose payload is exactly the zero that was stored
         assertTrue(hit, "a cached zero must read as a hit, the marker bit keeps the slot nonzero");
@@ -75,7 +75,7 @@ contract Test_Cache is Test {
      *      get the same rate back, or the cache would silently re-price whatever consumed it downstream
      */
     function test_WriteMaxRepresentableValue_RoundTripsExactly() public {
-        (bool hit, uint256 value,,) = this.driveWriteThenReadBothKeys(CacheKey.ST_SHARE_TO_NAV_RATE, MAX_CACHEABLE_VALUE, CacheKey.COLLATERAL_ASSET_TO_NAV_RATE);
+        (bool hit, uint256 value,,) = this.driveWriteThenReadBothKeys(CacheKey.ST_SHARE_PRICE, MAX_CACHEABLE_VALUE, CacheKey.COLLATERAL_ASSET_PRICE);
 
         assertTrue(hit, "a written slot must read as a hit");
         assertEq(value, MAX_CACHEABLE_VALUE, "the max payload (2^255 - 1) must round-trip bit-exact");

@@ -161,10 +161,10 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
 
         assertEq(toUint256(seniorTranche.maxDeposit(FLAGGED)), 0, "senior deposit capacity must be zero for a flagged account");
         assertEq(toUint256(juniorTranche.maxDeposit(FLAGGED)), 0, "junior deposit capacity must be zero for a flagged account");
-        assertEq(toUint256(liquidityTranche.maxDeposit(FLAGGED)), 0, "liquidity deposit capacity must be zero for a flagged account");
+        assertEq(toUint256(liquidityProviderTranche.maxDeposit(FLAGGED)), 0, "liquidity deposit capacity must be zero for a flagged account");
         assertEq(seniorTranche.maxRedeem(FLAGGED), 0, "senior redemption capacity must be zero for a flagged account");
         assertEq(juniorTranche.maxRedeem(FLAGGED), 0, "junior redemption capacity must be zero for a flagged account");
-        assertEq(liquidityTranche.maxRedeem(FLAGGED), 0, "liquidity redemption capacity must be zero for a flagged account");
+        assertEq(liquidityProviderTranche.maxRedeem(FLAGGED), 0, "liquidity redemption capacity must be zero for a flagged account");
 
         // The same views stay live for a clean account: the senior provider still holds its 100e18 seeded shares
         assertEq(seniorTranche.maxRedeem(ST_PROVIDER), 100e18, "a clean account's redemption capacity must be unaffected by screening");
@@ -230,7 +230,7 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         uint256 quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
         // Coverage after seed: (100 + 30) x 0.2 / 30 = 0.8667 <= 1, then pool depth of 2e18 senior legs against 8 quote
         _seedMarket(100e18, 30e18);
-        _seedLT(10e18, 2e18, 8 * quoteUnit);
+        _seedLPT(10e18, 2e18, 8 * quoteUnit);
         _sync();
 
         vm.prank(MARKET_OPS_ADMIN);
@@ -250,14 +250,14 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         juniorTranche.redeem(1e18, FLAGGED, JT_PROVIDER);
 
         // Liquidity in-kind: the BPT payout receiver is screened
-        vm.prank(LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
         vm.expectRevert(receiverBlacklisted);
-        liquidityTranche.redeem(1e18, FLAGGED, LT_PROVIDER);
+        liquidityProviderTranche.redeem(1e18, FLAGGED, LPT_PROVIDER);
 
         // Liquidity multi-asset: the quote and senior-unwind receiver is screened before the venue removal runs
-        vm.prank(LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
         vm.expectRevert(receiverBlacklisted);
-        liquidityTranche.redeemMultiAsset(1e18, 0, 0, FLAGGED, LT_PROVIDER);
+        liquidityProviderTranche.redeemMultiAsset(1e18, 0, 0, FLAGGED, LPT_PROVIDER);
 
         // The clean receiver still settles: a senior redemption to CLEAN pays out its vault shares
         uint256 cleanBefore = stJtVault.balanceOf(CLEAN);
@@ -333,13 +333,13 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
         juniorTranche.maxDeposit(CLEAN);
         vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
-        liquidityTranche.maxDeposit(CLEAN);
+        liquidityProviderTranche.maxDeposit(CLEAN);
         vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
         seniorTranche.maxRedeem(ST_PROVIDER);
         vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
         juniorTranche.maxRedeem(JT_PROVIDER);
         vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
-        liquidityTranche.maxRedeem(LT_PROVIDER);
+        liquidityProviderTranche.maxRedeem(LPT_PROVIDER);
     }
 
     /**
