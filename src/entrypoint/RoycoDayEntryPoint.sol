@@ -132,8 +132,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     )
         external
         override(IRoycoDayEntryPoint)
-        whenNotPaused
-        restricted
         returns (uint256[] memory trancheSharesMinted)
     {
         // Execute the user specified deposit requests
@@ -141,7 +139,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         require(numRequestsToExecute == _users.length && numRequestsToExecute == _assetsToDeposit.length, ARRAY_LENGTH_MISMATCH());
         trancheSharesMinted = new uint256[](numRequestsToExecute);
         for (uint256 i = 0; i < numRequestsToExecute; ++i) {
-            trancheSharesMinted[i] = _executeDeposit(_users[i], _requestNonces[i], _assetsToDeposit[i]);
+            // Route each request through a self-delegatecall so a reverting request doesn't revert the batch
+            // NOTE: The delegatecall preserves this call context for execution
+            (bool executed, bytes memory result) =
+                address(this).delegatecall(abi.encodeCall(IRoycoDayEntryPoint.executeDeposit, (_users[i], _requestNonces[i], _assetsToDeposit[i])));
+            if (executed) trancheSharesMinted[i] = abi.decode(result, (uint256));
         }
     }
 
@@ -157,7 +159,62 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         restricted
         returns (uint256 trancheSharesMinted)
     {
-        return _executeDeposit(_user, _requestNonce, _assetsToDeposit);
+        require(_assetsToDeposit != ZERO_TRANCHE_UNITS, MUST_EXECUTE_NON_ZERO_AMOUNT());
+
+        // Retrieve the user's specified deposit request and its tranche's config
+        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
+        DepositRequest memory request = $.userToNonceToDepositRequest[_user][_requestNonce];
+        address tranche = request.baseRequest.tranche;
+        EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
+
+        // Assert the validity of the request
+        _validateRequestExecution(_requestNonce, request.baseRequest, config);
+        require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
+
+        // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request (the tranche deposit below screens the receiver)
+        _enforceNotBlacklisted(config.kernel, msg.sender, _user);
+
+        // Resolve the actual amount of assets to deposit
+        _assetsToDeposit = (_assetsToDeposit == MAX_TRANCHE_UNITS)
+            ? toTrancheUnits(Math.min(toUint256(IRoycoVaultTranche(tranche).maxDeposit(request.baseRequest.receiver)), toUint256(request.assets)))
+            : _assetsToDeposit;
+        // Return early without reverting if maxDeposit is 0 due to market conditions
+        if (_assetsToDeposit == ZERO_TRANCHE_UNITS) return 0;
+
+        // Ensure the resolved amount is not greater than the request's assets
+        require(request.assets >= _assetsToDeposit, INVALID_REQUEST(_requestNonce));
+        TRANCHE_UNIT assetsLeftToDeposit = request.assets - _assetsToDeposit;
+
+        // Mark the assets as deposited
+        if (assetsLeftToDeposit == ZERO_TRANCHE_UNITS) {
+            delete $.userToNonceToDepositRequest[_user][_requestNonce];
+        } else {
+            $.userToNonceToDepositRequest[_user][_requestNonce].assets = assetsLeftToDeposit;
+            // Scale the request-time share reference by the assets left to deposit
+            $.userToNonceToDepositRequest[_user][_requestNonce].equivalentSharesAtRequestTime =
+                request.equivalentSharesAtRequestTime.mulDiv(assetsLeftToDeposit, request.assets, Math.Rounding.Floor);
+            request.equivalentSharesAtRequestTime = request.equivalentSharesAtRequestTime.mulDiv(_assetsToDeposit, request.assets, Math.Rounding.Floor);
+        }
+
+        // A third party execution requires the user to have opted in (checked before the deposit mutates anything)
+        bool remitExecutorBonus = (_user != msg.sender && request.baseRequest.executorBonusWAD != 0);
+        require(!remitExecutorBonus || request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
+
+        // Deposit the full asset amount, forfeiting the shares minted in excess of the request-time reference as protocol fees
+        uint256 protocolFeeShares;
+        (trancheSharesMinted, protocolFeeShares) = _depositWithShareForfeiture(tranche, config, _assetsToDeposit, request.equivalentSharesAtRequestTime);
+
+        // Pay the executor bonus in freshly minted tranche shares
+        uint256 bonusShares;
+        if (remitExecutorBonus) {
+            bonusShares = Math.mulDiv(trancheSharesMinted, request.baseRequest.executorBonusWAD, WAD, Math.Rounding.Floor);
+            if (bonusShares != 0) IERC20(tranche).safeTransfer(msg.sender, bonusShares);
+        }
+        // The receiver keeps the remainder of the user's minted shares
+        uint256 receiverShares = trancheSharesMinted - bonusShares;
+        if (receiverShares != 0) IERC20(tranche).safeTransfer(request.baseRequest.receiver, receiverShares);
+
+        emit DepositExecuted(_user, _requestNonce, msg.sender, _assetsToDeposit, trancheSharesMinted, protocolFeeShares, bonusShares);
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
@@ -246,8 +303,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     )
         external
         override(IRoycoDayEntryPoint)
-        whenNotPaused
-        restricted
         returns (AssetClaims[] memory userClaims, uint256[] memory quoteAssets)
     {
         // Execute the user specified redemption requests
@@ -256,7 +311,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         userClaims = new AssetClaims[](numRequestsToExecute);
         quoteAssets = new uint256[](numRequestsToExecute);
         for (uint256 i = 0; i < numRequestsToExecute; ++i) {
-            (userClaims[i], quoteAssets[i]) = _executeRedemption(_users[i], _requestNonces[i], _sharesToRedeem[i]);
+            // Route each request through a self-delegatecall so a reverting request doesn't revert the batch
+            // NOTE: The delegatecall preserves this call context for execution
+            (bool executed, bytes memory result) =
+                address(this).delegatecall(abi.encodeCall(IRoycoDayEntryPoint.executeRedemption, (_users[i], _requestNonces[i], _sharesToRedeem[i])));
+            if (executed) (userClaims[i], quoteAssets[i]) = abi.decode(result, (AssetClaims, uint256));
         }
     }
 
@@ -272,7 +331,79 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         restricted
         returns (AssetClaims memory userClaims, uint256 quoteAssets)
     {
-        return _executeRedemption(_user, _requestNonce, _sharesToRedeem);
+        require(_sharesToRedeem != 0, MUST_EXECUTE_NON_ZERO_AMOUNT());
+
+        // Retrieve the user's specified redemption request and its tranche's config
+        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
+        RedemptionRequest memory request = $.userToNonceToRedemptionRequest[_user][_requestNonce];
+        address tranche = request.baseRequest.tranche;
+        EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
+
+        // Assert the validity of the request
+        _validateRequestExecution(_requestNonce, request.baseRequest, config);
+        require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
+
+        // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request
+        _enforceNotBlacklisted(config.kernel, msg.sender, _user);
+
+        // Resolve the actual amount of shares to redeem and the exit route from the request's redemption mode
+        bool isMultiAssetRedemption;
+        if (request.mode == RedemptionMode.OPTIMIZED) {
+            (_sharesToRedeem, isMultiAssetRedemption) =
+                _resolveOptimizedRedemption(tranche, (_sharesToRedeem == type(uint256).max) ? request.shares : _sharesToRedeem);
+        } else {
+            isMultiAssetRedemption = (request.mode == RedemptionMode.MULTIASSET);
+            if (_sharesToRedeem == type(uint256).max) {
+                _sharesToRedeem =
+                    Math.min((isMultiAssetRedemption ? _maxRedeemMultiAsset(tranche) : IRoycoVaultTranche(tranche).maxRedeem(address(this))), request.shares);
+            }
+        }
+        // Return early without reverting if the resolved amount is 0 due to market conditions
+        if (_sharesToRedeem == 0) return (AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS), 0);
+
+        // Ensure the resolved amount is not greater than the request's shares
+        require(request.shares >= _sharesToRedeem, INVALID_REQUEST(_requestNonce));
+        uint256 sharesLeftToRedeem = request.shares - _sharesToRedeem;
+
+        // Mark the shares as redeemed
+        if (sharesLeftToRedeem == 0) {
+            delete $.userToNonceToRedemptionRequest[_user][_requestNonce];
+        } else {
+            $.userToNonceToRedemptionRequest[_user][_requestNonce].shares = sharesLeftToRedeem;
+            // Scale the request-time value reference by the shares left to redeem
+            $.userToNonceToRedemptionRequest[_user][_requestNonce].valueAtRequestTime =
+                request.valueAtRequestTime.mulDiv(sharesLeftToRedeem, request.shares, Math.Rounding.Floor);
+            request.valueAtRequestTime = request.valueAtRequestTime.mulDiv(_sharesToRedeem, request.shares, Math.Rounding.Floor);
+        }
+
+        // If this is a self-redemption or there is no executor bonus configured, withdraw assets directly to the specified recipient
+        uint256 userSharesRedeemed;
+        uint256 protocolFeeShares;
+        AssetClaims memory bonusClaims;
+        uint256 bonusQuoteAssets;
+        if (_user == msg.sender || request.baseRequest.executorBonusWAD == 0) {
+            // Redeem shares directly to the receiver, forfeiting the value accrued during the queue as protocol fees
+            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) =
+                _redeemWithValueForfeiture(tranche, _sharesToRedeem, request.valueAtRequestTime, request.baseRequest.receiver, isMultiAssetRedemption);
+        }
+        // Else, if this is a third party execution, withdraw the assets, forfeit the value accrued during the queue as protocol fees, and remit the executor bonus
+        else {
+            // Ensure that the user has opted into third party execution
+            require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
+            // Screen the receiver against the market's blacklist, the asset and quote remittance legs below settle outside the kernel's screened flows (the self path's redemption screens the receiver)
+            IRoycoDayKernel(config.kernel).enforceNotBlacklisted(request.baseRequest.receiver);
+
+            // Redeem shares to this contract for bonus calculation, forfeiting the value accrued during the queue as protocol fees
+            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) =
+                _redeemWithValueForfeiture(tranche, _sharesToRedeem, request.valueAtRequestTime, address(this), isMultiAssetRedemption);
+
+            // Split the redeemed claims and quote into the executor's bonus and the receiver's portion, then remit both
+            (bonusClaims, bonusQuoteAssets) =
+                _remitRedemptionAndBonusClaims(config.kernel, userClaims, quoteAssets, request.baseRequest.executorBonusWAD, request.baseRequest.receiver);
+            quoteAssets -= bonusQuoteAssets;
+        }
+
+        emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets, bonusClaims, bonusQuoteAssets);
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
@@ -370,76 +501,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      */
 
     /**
-     * @notice Executes a pending deposit request for the specified user
-     * @dev The request must exist and the configured delay period must have elapsed
-     *      If executed by a third party, the executor bonus is paid in freshly minted tranche shares: the full asset
-     *      amount is deposited and the executor takes a share slice of the user's post-forfeiture mint, mirroring how
-     *      redemptions pay their bonus out of the redeemed output
-     * @param _user The user whose deposit request should be executed
-     * @param _requestNonce The nonce of the deposit request to execute
-     * @param _assetsToDeposit The amount of assets to deposit (use MAX_TRANCHE_UNITS to deposit the maximum possible)
-     * @return trancheSharesMinted The tranche shares minted for the user (the receiver's and the executor's portions combined)
-     */
-    function _executeDeposit(address _user, uint256 _requestNonce, TRANCHE_UNIT _assetsToDeposit) internal returns (uint256 trancheSharesMinted) {
-        require(_assetsToDeposit != ZERO_TRANCHE_UNITS, MUST_EXECUTE_NON_ZERO_AMOUNT());
-
-        // Retrieve the user's specified deposit request and its tranche's config
-        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
-        DepositRequest memory request = $.userToNonceToDepositRequest[_user][_requestNonce];
-        address tranche = request.baseRequest.tranche;
-        EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
-
-        // Assert the validity of the request
-        _validateRequestExecution(_requestNonce, request.baseRequest, config);
-        require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
-
-        // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request (the tranche deposit below screens the receiver)
-        _enforceNotBlacklisted(config.kernel, msg.sender, _user);
-
-        // Resolve the actual amount of assets to deposit
-        _assetsToDeposit = (_assetsToDeposit == MAX_TRANCHE_UNITS)
-            ? toTrancheUnits(Math.min(toUint256(IRoycoVaultTranche(tranche).maxDeposit(request.baseRequest.receiver)), toUint256(request.assets)))
-            : _assetsToDeposit;
-        // Return early without reverting if maxDeposit is 0 due to market conditions
-        if (_assetsToDeposit == ZERO_TRANCHE_UNITS) return 0;
-
-        // Ensure the resolved amount is not greater than the request's assets
-        require(request.assets >= _assetsToDeposit, INVALID_REQUEST(_requestNonce));
-        TRANCHE_UNIT assetsLeftToDeposit = request.assets - _assetsToDeposit;
-
-        // Mark the assets as deposited
-        if (assetsLeftToDeposit == ZERO_TRANCHE_UNITS) {
-            delete $.userToNonceToDepositRequest[_user][_requestNonce];
-        } else {
-            $.userToNonceToDepositRequest[_user][_requestNonce].assets = assetsLeftToDeposit;
-            // Scale the request-time share reference by the assets left to deposit
-            $.userToNonceToDepositRequest[_user][_requestNonce].equivalentSharesAtRequestTime =
-                request.equivalentSharesAtRequestTime.mulDiv(assetsLeftToDeposit, request.assets, Math.Rounding.Floor);
-            request.equivalentSharesAtRequestTime = request.equivalentSharesAtRequestTime.mulDiv(_assetsToDeposit, request.assets, Math.Rounding.Floor);
-        }
-
-        // A third party execution requires the user to have opted in (checked before the deposit mutates anything)
-        bool remitExecutorBonus = (_user != msg.sender && request.baseRequest.executorBonusWAD != 0);
-        require(!remitExecutorBonus || request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
-
-        // Deposit the full asset amount, forfeiting the shares minted in excess of the request-time reference as protocol fees
-        uint256 protocolFeeShares;
-        (trancheSharesMinted, protocolFeeShares) = _depositWithShareForfeiture(tranche, config, _assetsToDeposit, request.equivalentSharesAtRequestTime);
-
-        // Pay the executor bonus in freshly minted tranche shares
-        uint256 bonusShares;
-        if (remitExecutorBonus) {
-            bonusShares = Math.mulDiv(trancheSharesMinted, request.baseRequest.executorBonusWAD, WAD, Math.Rounding.Floor);
-            if (bonusShares != 0) IERC20(tranche).safeTransfer(msg.sender, bonusShares);
-        }
-        // The receiver keeps the remainder of the user's minted shares
-        uint256 receiverShares = trancheSharesMinted - bonusShares;
-        if (receiverShares != 0) IERC20(tranche).safeTransfer(request.baseRequest.receiver, receiverShares);
-
-        emit DepositExecuted(_user, _requestNonce, msg.sender, _assetsToDeposit, trancheSharesMinted, protocolFeeShares, bonusShares);
-    }
-
-    /**
      * @dev Cancels the caller's specified deposit request and returns its assets to the specified receiver
      * @param _requestNonce The nonce of the deposit request to cancel
      * @param _receiver The receiver of the cancelled request's assets
@@ -462,103 +523,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         IERC20(asset).safeTransfer(_receiver, toUint256(request.assets));
 
         emit DepositRequestCancelled(msg.sender, _requestNonce, _receiver, request.assets);
-    }
-
-    /**
-     * @notice Executes a pending redemption request for the specified user
-     * @dev The request must exist and the configured delay period must have elapsed
-     *      A maximal liquidity provider tranche redemption exits in-kind whenever the in-kind bound serves the entire
-     *      remaining request, and otherwise fills up to the dominant bound capped at the remaining request,
-     *      exiting to the LP token's constituents only when the multi-asset bound is strictly wider (equal bounds
-     *      stay in-kind), so a redemption the market can serve is never left behind by the in-kind gate. Explicit
-     *      amounts always exit in-kind
-     * @param _user The user whose redemption request should be executed
-     * @param _requestNonce The nonce of the redemption request to execute
-     * @param _sharesToRedeem The amount of shares to redeem (use type(uint256).max to redeem the maximum possible)
-     * @return userClaims The assets withdrawn to the request-specific receiver upon executing this redemption request
-     * @return quoteAssets The quote withdrawn to the request-specific receiver (zero unless the redemption exits multi-asset)
-     */
-    function _executeRedemption(
-        address _user,
-        uint256 _requestNonce,
-        uint256 _sharesToRedeem
-    )
-        internal
-        returns (AssetClaims memory userClaims, uint256 quoteAssets)
-    {
-        require(_sharesToRedeem != 0, MUST_EXECUTE_NON_ZERO_AMOUNT());
-
-        // Retrieve the user's specified redemption request and its tranche's config
-        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
-        RedemptionRequest memory request = $.userToNonceToRedemptionRequest[_user][_requestNonce];
-        address tranche = request.baseRequest.tranche;
-        EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
-
-        // Assert the validity of the request
-        _validateRequestExecution(_requestNonce, request.baseRequest, config);
-        require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
-
-        // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request
-        _enforceNotBlacklisted(config.kernel, msg.sender, _user);
-
-        // Resolve the actual amount of shares to redeem and the exit route from the request's redemption mode
-        bool isMultiAssetRedemption;
-        if (request.mode == RedemptionMode.OPTIMIZED) {
-            (_sharesToRedeem, isMultiAssetRedemption) =
-                _resolveOptimizedRedemption(tranche, (_sharesToRedeem == type(uint256).max) ? request.shares : _sharesToRedeem);
-        } else {
-            isMultiAssetRedemption = (request.mode == RedemptionMode.MULTIASSET);
-            if (_sharesToRedeem == type(uint256).max) {
-                _sharesToRedeem =
-                    Math.min((isMultiAssetRedemption ? _maxRedeemMultiAsset(tranche) : IRoycoVaultTranche(tranche).maxRedeem(address(this))), request.shares);
-            }
-        }
-        // Return early without reverting if the resolved amount is 0 due to market conditions
-        if (_sharesToRedeem == 0) return (AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS), 0);
-
-        // Ensure the resolved amount is not greater than the request's shares
-        require(request.shares >= _sharesToRedeem, INVALID_REQUEST(_requestNonce));
-        uint256 sharesLeftToRedeem = request.shares - _sharesToRedeem;
-
-        // Mark the shares as redeemed
-        if (sharesLeftToRedeem == 0) {
-            delete $.userToNonceToRedemptionRequest[_user][_requestNonce];
-        } else {
-            $.userToNonceToRedemptionRequest[_user][_requestNonce].shares = sharesLeftToRedeem;
-            // Scale the request-time value reference by the shares left to redeem
-            $.userToNonceToRedemptionRequest[_user][_requestNonce].valueAtRequestTime =
-                request.valueAtRequestTime.mulDiv(sharesLeftToRedeem, request.shares, Math.Rounding.Floor);
-            request.valueAtRequestTime = request.valueAtRequestTime.mulDiv(_sharesToRedeem, request.shares, Math.Rounding.Floor);
-        }
-
-        // If this is a self-redemption or there is no executor bonus configured, withdraw assets directly to the specified recipient
-        uint256 userSharesRedeemed;
-        uint256 protocolFeeShares;
-        AssetClaims memory bonusClaims;
-        uint256 bonusQuoteAssets;
-        if (_user == msg.sender || request.baseRequest.executorBonusWAD == 0) {
-            // Redeem shares directly to the receiver, forfeiting the value accrued during the queue as protocol fees
-            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) =
-                _redeemWithValueForfeiture(tranche, _sharesToRedeem, request.valueAtRequestTime, request.baseRequest.receiver, isMultiAssetRedemption);
-        }
-        // Else, if this is a third party execution, withdraw the assets, forfeit the value accrued during the queue as protocol fees, and remit the executor bonus
-        else {
-            // Ensure that the user has opted into third party execution
-            require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
-            // Screen the receiver against the market's blacklist, the asset and quote remittance legs below settle outside the kernel's screened flows (the self path's redemption screens the receiver)
-            IRoycoDayKernel(config.kernel).enforceNotBlacklisted(request.baseRequest.receiver);
-
-            // Redeem shares to this contract for bonus calculation, forfeiting the value accrued during the queue as protocol fees
-            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) =
-                _redeemWithValueForfeiture(tranche, _sharesToRedeem, request.valueAtRequestTime, address(this), isMultiAssetRedemption);
-
-            // Split the redeemed claims and quote into the executor's bonus and the receiver's portion, then remit both
-            (bonusClaims, bonusQuoteAssets) =
-                _remitRedemptionAndBonusClaims(config.kernel, userClaims, quoteAssets, request.baseRequest.executorBonusWAD, request.baseRequest.receiver);
-            quoteAssets -= bonusQuoteAssets;
-        }
-
-        emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets, bonusClaims, bonusQuoteAssets);
     }
 
     /**

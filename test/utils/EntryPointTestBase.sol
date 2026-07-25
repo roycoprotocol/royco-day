@@ -109,13 +109,14 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         vm.label(address(entryPoint), "EntryPoint");
 
         // Wire the production-shaped role bindings on the entry point itself
+        // The array executors are deliberately left unbound: they carry no `restricted` and self-delegatecall into the
+        // single-request selectors, so those bindings govern every batched request against the real caller
         address ep = address(entryPoint);
         accessManager.setTargetFunctionRole(
             ep,
             _sels(
                 IRoycoDayEntryPoint.requestDeposit.selector,
                 IRoycoDayEntryPoint.executeDeposit.selector,
-                IRoycoDayEntryPoint.executeDeposits.selector,
                 IRoycoDayEntryPoint.cancelDepositRequest.selector,
                 IRoycoDayEntryPoint.cancelDepositRequests.selector
             ),
@@ -126,7 +127,6 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
             _sels(
                 IRoycoDayEntryPoint.requestRedemption.selector,
                 IRoycoDayEntryPoint.executeRedemption.selector,
-                IRoycoDayEntryPoint.executeRedemptions.selector,
                 IRoycoDayEntryPoint.cancelRedemptionRequest.selector,
                 IRoycoDayEntryPoint.cancelRedemptionRequests.selector
             ),

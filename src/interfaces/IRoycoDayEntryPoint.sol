@@ -304,10 +304,11 @@ interface IRoycoDayEntryPoint {
 
     /**
      * @notice Executes multiple pending deposit requests across the specified users
+     * @dev Revert tolerant: a reverting request doesn't revert the entire batch
      * @param _users The users whose deposit requests should be executed
      * @param _requestNonces The nonces of the deposit requests to execute
      * @param _assetsToDeposit The amounts of assets to deposit for each request (use MAX_TRANCHE_UNITS to deposit min(requestedAssets, maxDeposit))
-     * @return trancheSharesMinted The amounts of tranche shares minted for each executed request
+     * @return trancheSharesMinted The amounts of tranche shares minted for each executed request (zero for a skipped request)
      */
     function executeDeposits(
         address[] calldata _users,
@@ -370,10 +371,11 @@ interface IRoycoDayEntryPoint {
     /**
      * @notice Executes multiple pending redemption requests across the specified users
      * @dev Each request's exit route is fixed by its own RedemptionMode chosen at request time (see executeRedemption)
+     * @dev Revert tolerant: a reverting request doesn't revert the entire batch
      * @param _users The users whose redemption requests should be executed
      * @param _requestNonces The nonces of the redemption requests to execute
      * @param _sharesToRedeem The amount of shares to redeem for the redemption requests to execute (use type(uint256).max to redeem the maximum possible)
-     * @return userClaims The assets withdrawn to the request-specific receiver upon executing each executed request
+     * @return userClaims The assets withdrawn to the request-specific receiver upon executing each executed request (zero claims for a skipped request)
      * @return quoteAssets The quote withdrawn to the request-specific receiver by each executed request (zero unless a liquidity provider tranche redemption exits multi-asset)
      */
     function executeRedemptions(

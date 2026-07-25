@@ -341,9 +341,10 @@ contract Test_EntryPointRequestExpiration is EntryPointTestBase {
     // Expiry x batches
     // ---------------------------------------------------------------------
 
-    /// @notice One expired request poisons a whole execution batch (mirroring the unmatured/oracle-blocked poisoning):
-    ///         the batch loop reverts REQUEST_EXPIRED rather than skipping the terminal entry
-    function test_batchExecution_oneExpiredRequestPoisonsTheBatch() public {
+    /// @notice One expired request never poisons a whole execution batch: the batch loop isolates the terminal entry's
+    ///         REQUEST_EXPIRED revert, zeroes its return slot, leaves its escrow intact for cancellation, and still
+    ///         executes every live request alongside it
+    function test_batchExecution_oneExpiredRequestIsSkipped() public {
         _setTrancheExpiry(address(juniorTranche), DEP_EXPIRY, RED_EXPIRY);
         // Request A first; request B mid-window so A expires while B is live and executable
         (uint256 nonceA,) = _requestDeposit(USER_A, address(juniorTranche), 2 * stUnit, USER_A, 0);
@@ -365,11 +366,20 @@ contract Test_EntryPointRequestExpiration is EntryPointTestBase {
         amounts[1] = toTrancheUnits(type(uint256).max);
 
         vm.prank(USER_A);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.REQUEST_EXPIRED.selector, nonceA));
-        entryPoint.executeDeposits(users, nonces, amounts);
+        uint256[] memory minted = entryPoint.executeDeposits(users, nonces, amounts);
 
-        // The live request alone still executes
-        assertGt(_executeDepositMax(USER_B, USER_B, nonceB), 0, "the live request must execute once the poisoned batch is split");
+        // The live request executed in the same batch that skipped the expired one
+        assertGt(minted[0], 0, "the live request must execute despite the expired entry sharing its batch");
+        assertEq(juniorTranche.balanceOf(USER_B), minted[0], "the live request's mint must land on its receiver");
+        assertEq(toUint256(entryPoint.getDepositRequest(USER_B, nonceB).assets), 0, "the live request must be fully consumed");
+
+        // The expired request was isolated: a zeroed slot and an untouched escrow that stays cancellable
+        assertEq(minted[1], 0, "the expired request's return slot must be zeroed");
+        assertEq(toUint256(entryPoint.getDepositRequest(USER_A, nonceA).assets), 2 * stUnit, "the expired request's escrow must survive the batch intact");
+        address asset = entryPoint.getTrancheConfig(address(juniorTranche)).asset;
+        uint256 balBefore = IERC20Like(asset).balanceOf(USER_A);
+        _cancelDeposit(USER_A, nonceA, USER_A);
+        assertEq(IERC20Like(asset).balanceOf(USER_A) - balBefore, 2 * stUnit, "the skipped request must still cancel whole");
     }
 
     // ---------------------------------------------------------------------

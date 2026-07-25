@@ -415,7 +415,9 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
         assertGt(toUint256(claims.nav), 0, "a post-request update must open redemptions placed before the gate was enabled");
     }
 
-    function test_blockedRedemption_poisonsBatchLikeAnUnmaturedOne() public {
+    /// @notice A gate-blocked redemption is skipped by the batch rather than reverting it, leaving the escrowed shares
+    ///         untouched so the request still executes once the oracle advances
+    function test_blockedRedemption_isSkippedByTheBatch() public {
         _setOracleGate(true);
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
@@ -428,12 +430,21 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = type(uint256).max;
 
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
-        entryPoint.executeRedemptions(users, nonces, amounts);
+        (AssetClaims[] memory claims, uint256[] memory quoteAssets) = entryPoint.executeRedemptions(users, nonces, amounts);
+
+        assertEq(toUint256(claims[0].nav), 0, "the gated request's claims slot must be zeroed");
+        assertEq(quoteAssets[0], 0, "the gated request's quote slot must be zeroed");
+        assertEq(entryPoint.getRedemptionRequest(USER_A, nonce).shares, shares, "the gated request's escrowed shares must survive the batch intact");
+
+        // The skip consumed nothing: the request still executes once the oracle advances past the queue
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
+        assertGt(toUint256(_executeRedemptionMax(USER_A, USER_A, nonce).nav), 0, "the skipped request must execute once the gate opens");
     }
 
-    function test_blockedRequest_poisonsBatchLikeAnUnmaturedOne() public {
+    /// @notice A gate-blocked deposit is skipped by the batch rather than reverting it, leaving the escrow untouched so
+    ///         the request still executes once the oracle advances
+    function test_blockedRequest_isSkippedByTheBatch() public {
         _setOracleGate(true);
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
 
@@ -445,9 +456,15 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
         TRANCHE_UNIT[] memory amounts = new TRANCHE_UNIT[](1);
         amounts[0] = toTrancheUnits(type(uint256).max);
 
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
-        entryPoint.executeDeposits(users, nonces, amounts);
+        uint256[] memory minted = entryPoint.executeDeposits(users, nonces, amounts);
+
+        assertEq(minted[0], 0, "the gated request's return slot must be zeroed");
+        assertEq(toUint256(entryPoint.getDepositRequest(USER_A, nonce).assets), 10 * stUnit, "the gated request's escrow must survive the batch intact");
+
+        // The skip consumed nothing: the request still executes once the oracle advances past the queue
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
+        assertGt(_executeDepositMax(USER_A, USER_A, nonce), 0, "the skipped request must execute once the gate opens");
     }
 
     // ---------------------------------------------------------------------

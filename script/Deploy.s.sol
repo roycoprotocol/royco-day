@@ -1052,19 +1052,20 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @dev Mirrors the production access model: LP request/execute/cancel selectors are public (user compliance is
     ///      enforced by the tranches), config is ADMIN_ENTRY_POINT_ROLE-gated (held by the factory + admin multisig),
     ///      fee collection has its own role, and pause/unpause/upgrade follow the protocol-wide roles.
+    /// @dev The array executors carry no `restricted` of their own: they self-delegatecall into `executeDeposit` and
+    ///      `executeRedemption`, so the bindings on those two selectors govern every batched request against the real
+    ///      caller. Binding the array selectors here would gate nothing.
     function _wireEntryPointRoles(AccessManager _accessManager, address _entryPoint) internal {
-        bytes4[] memory lpSelectors = new bytes4[](11);
+        bytes4[] memory lpSelectors = new bytes4[](9);
         lpSelectors[0] = IRoycoDayEntryPoint.requestDeposit.selector;
         lpSelectors[1] = IRoycoDayEntryPoint.executeDeposit.selector;
-        lpSelectors[2] = IRoycoDayEntryPoint.executeDeposits.selector;
-        lpSelectors[3] = IRoycoDayEntryPoint.cancelDepositRequest.selector;
-        lpSelectors[4] = IRoycoDayEntryPoint.cancelDepositRequests.selector;
-        lpSelectors[5] = IRoycoDayEntryPoint.requestRedemption.selector;
-        lpSelectors[6] = IRoycoDayEntryPoint.executeRedemption.selector;
-        lpSelectors[7] = IRoycoDayEntryPoint.executeRedemptions.selector;
-        lpSelectors[8] = IRoycoDayEntryPoint.cancelRedemptionRequest.selector;
-        lpSelectors[9] = IRoycoDayEntryPoint.cancelRedemptionRequests.selector;
-        lpSelectors[10] = IRoycoDayEntryPoint.pokeCollateralAssetOracle.selector;
+        lpSelectors[2] = IRoycoDayEntryPoint.cancelDepositRequest.selector;
+        lpSelectors[3] = IRoycoDayEntryPoint.cancelDepositRequests.selector;
+        lpSelectors[4] = IRoycoDayEntryPoint.requestRedemption.selector;
+        lpSelectors[5] = IRoycoDayEntryPoint.executeRedemption.selector;
+        lpSelectors[6] = IRoycoDayEntryPoint.cancelRedemptionRequest.selector;
+        lpSelectors[7] = IRoycoDayEntryPoint.cancelRedemptionRequests.selector;
+        lpSelectors[8] = IRoycoDayEntryPoint.pokeCollateralAssetOracle.selector;
         _accessManager.setTargetFunctionRole(_entryPoint, lpSelectors, PUBLIC_ROLE);
 
         _accessManager.setTargetFunctionRole(_entryPoint, _sel(IRoycoDayEntryPoint.modifyTrancheConfigs.selector), ADMIN_ENTRY_POINT_ROLE);

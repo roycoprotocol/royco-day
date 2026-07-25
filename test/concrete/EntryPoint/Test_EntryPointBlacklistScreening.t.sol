@@ -426,8 +426,9 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
         _cancelDeposit(USER_A, nonce, USER_A);
     }
 
-    /// @notice The batch execution surface routes through the same per-request screening
-    function test_executeDeposits_batchRevertsOnFlaggedReceiver() public {
+    /// @notice The batch execution surface routes through the same per-request screening, and isolates it: the flagged
+    ///         request is skipped with its escrow intact while every unflagged request in the batch still executes
+    function test_executeDeposits_batchSkipsFlaggedReceiver() public {
         (uint256 nonceA,) = _requestDepositDefault(USER_A, address(seniorTranche), 10 * stUnit);
         (uint256 nonceB,) = _requestDeposit(USER_B, address(seniorTranche), 10 * stUnit, RECEIVER, DEFAULT_EXECUTOR_BONUS);
         _warpPastDepositDelay();
@@ -444,9 +445,19 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
         assets[0] = toTrancheUnits(10 * stUnit);
         assets[1] = toTrancheUnits(10 * stUnit);
 
-        // The flagged receiver on the second request gates the whole explicit-amount batch through the per-request kernel mint screen
-        vm.expectRevert(_blacklistedError(RECEIVER));
+        // The flagged receiver on the second request gates only that request through the per-request kernel mint screen
         vm.prank(EXECUTOR);
-        entryPoint.executeDeposits(users, nonces, assets);
+        uint256[] memory minted = entryPoint.executeDeposits(users, nonces, assets);
+
+        // The unflagged request settled and the flagged one was isolated, escrow intact and still cancellable
+        assertGt(minted[0], 0, "the unflagged request must execute alongside the flagged one");
+        assertEq(
+            seniorTranche.balanceOf(USER_A) + seniorTranche.balanceOf(EXECUTOR),
+            minted[0],
+            "the unflagged request's mint must split exactly between its receiver and the executor bonus"
+        );
+        assertEq(minted[1], 0, "the flagged request's return slot must be zeroed");
+        assertEq(seniorTranche.balanceOf(RECEIVER), 0, "the flagged receiver must never be minted to");
+        assertEq(toUint256(entryPoint.getDepositRequest(USER_B, nonceB).assets), 10 * stUnit, "the flagged request's escrow must survive the batch intact");
     }
 }
