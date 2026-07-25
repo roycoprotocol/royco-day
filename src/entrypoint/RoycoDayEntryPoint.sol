@@ -124,7 +124,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Transfer the requested amount of tranche assets into the entry point to queue the deposit
         IERC20(config.asset).safeTransferFrom(msg.sender, address(this), toUint256(_assets));
 
-        emit DepositRequested(msg.sender, requestNonce, _tranche, _assets, executableAtTimestamp, expiresAtTimestamp, _executorBonusWAD);
+        emit DepositRequested(msg.sender, requestNonce, _tranche, request);
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
@@ -298,7 +298,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Transfer the requested amount of tranche shares into the entry point to queue the redemption
         IERC20(_tranche).safeTransferFrom(msg.sender, address(this), _shares);
 
-        emit RedemptionRequested(msg.sender, requestNonce, _tranche, _shares, _mode, executableAtTimestamp, expiresAtTimestamp, _executorBonusWAD);
+        emit RedemptionRequested(msg.sender, requestNonce, _tranche, request);
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
@@ -367,6 +367,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
                     Math.min((isMultiAssetRedemption ? _maxRedeemMultiAsset(tranche) : IRoycoVaultTranche(tranche).maxRedeem(address(this))), request.shares);
             }
         }
+        RedemptionMode executedMode = isMultiAssetRedemption ? RedemptionMode.MULTIASSET : RedemptionMode.INKIND;
         // Return early without reverting if the resolved amount is 0 due to market conditions
         if (_sharesToRedeem == 0) return (AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS), 0);
 
@@ -412,7 +413,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             quoteAssets -= bonusQuoteAssets;
         }
 
-        emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets, bonusClaims, bonusQuoteAssets);
+        emit RedemptionExecuted(
+            _user, _requestNonce, msg.sender, userSharesRedeemed, executedMode, protocolFeeShares, userClaims, quoteAssets, bonusClaims, bonusQuoteAssets
+        );
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
