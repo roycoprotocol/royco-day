@@ -73,13 +73,15 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         // The Redeem event must carry exactly the derived claims (each leg floor-scaled independently over supply + 1e6)
         AssetClaims memory expectedClaims;
         expectedClaims.collateralAssets = toTrancheUnits(totalClaimAssets.mulDiv(shares, supply + 1e6));
-        expectedClaims.nav = toNAVUnits(stEffectiveNAV.mulDiv(shares, supply + 1e6));
+        expectedClaims.nav = toNAVUnits((stEffectiveNAV + 1).mulDiv(shares, supply + 1e6));
         vm.expectEmit(true, true, true, true, address(seniorTranche));
         emit IRoycoVaultTranche.Redeem(ST_PROVIDER, ST_PROVIDER, expectedClaims, shares);
         vm.prank(ST_PROVIDER);
         AssetClaims memory claims = seniorTranche.redeem(shares, ST_PROVIDER, ST_PROVIDER);
 
-        assertEq(toUint256(claims.nav), stEffectiveNAV.mulDiv(shares, supply + 1e6), "redeemed NAV must be the floor-scaled slice of the senior effective NAV");
+        assertEq(
+            toUint256(claims.nav), (stEffectiveNAV + 1).mulDiv(shares, supply + 1e6), "redeemed NAV must be the virtual-offset slice of the senior effective NAV"
+        );
         assertEq(
             toUint256(claims.collateralAssets),
             totalClaimAssets.mulDiv(shares, supply + 1e6),
@@ -139,13 +141,15 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         // The Redeem event must carry exactly the derived claims (the single collateral leg floor-scaled over supply + 1e6)
         AssetClaims memory expectedClaims;
         expectedClaims.collateralAssets = toTrancheUnits(totalClaimAssets.mulDiv(shares, supply + 1e6));
-        expectedClaims.nav = toNAVUnits(jtEffectiveNAV.mulDiv(shares, supply + 1e6));
+        expectedClaims.nav = toNAVUnits((jtEffectiveNAV + 1).mulDiv(shares, supply + 1e6));
         vm.expectEmit(true, true, true, true, address(juniorTranche));
         emit IRoycoVaultTranche.Redeem(JT_PROVIDER, JT_PROVIDER, expectedClaims, shares);
         vm.prank(JT_PROVIDER);
         AssetClaims memory claims = juniorTranche.redeem(shares, JT_PROVIDER, JT_PROVIDER);
 
-        assertEq(toUint256(claims.nav), jtEffectiveNAV.mulDiv(shares, supply + 1e6), "redeemed NAV must be the floor-scaled slice of the junior effective NAV");
+        assertEq(
+            toUint256(claims.nav), (jtEffectiveNAV + 1).mulDiv(shares, supply + 1e6), "redeemed NAV must be the virtual-offset slice of the junior effective NAV"
+        );
         assertEq(
             toUint256(claims.collateralAssets),
             totalClaimAssets.mulDiv(shares, supply + 1e6),
@@ -228,13 +232,15 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         AssetClaims memory expectedClaims;
         expectedClaims.lptAssets = toTrancheUnits(depth.mulDiv(shares, supply + 1e6));
         expectedClaims.stShares = idleShares.mulDiv(shares, supply + 1e6);
-        expectedClaims.nav = toNAVUnits(lptEff.mulDiv(shares, supply + 1e6));
+        expectedClaims.nav = toNAVUnits((lptEff + 1).mulDiv(shares, supply + 1e6));
         vm.expectEmit(true, true, true, true, address(liquidityProviderTranche));
         emit IRoycoVaultTranche.Redeem(LPT_PROVIDER, LPT_PROVIDER, expectedClaims, shares);
         vm.prank(LPT_PROVIDER);
         AssetClaims memory claims = liquidityProviderTranche.redeem(shares, LPT_PROVIDER, LPT_PROVIDER);
 
-        assertEq(toUint256(claims.nav), lptEff.mulDiv(shares, supply + 1e6), "redeemed NAV must be the floor-scaled slice of the two-leg LPT effective NAV");
+        assertEq(
+            toUint256(claims.nav), (lptEff + 1).mulDiv(shares, supply + 1e6), "redeemed NAV must be the virtual-offset slice of the two-leg LPT effective NAV"
+        );
         assertEq(toUint256(claims.lptAssets), depth.mulDiv(shares, supply + 1e6), "the BPT leg must be the floor-scaled slice of the pool depth");
         assertEq(
             claims.stShares,

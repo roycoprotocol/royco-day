@@ -429,11 +429,13 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice Claim scaling: every one of the four claim fields scales as ⌊claim · shares / (totalShares + VIRTUAL_SHARES)⌋.
-     * @dev Mirrors src TrancheClaimsLogic._scaleAssetClaims.
+     * @notice Claim scaling: the three asset fields scale as ⌊claim · shares / (totalShares + VIRTUAL_SHARES)⌋ and the
+     *         NAV field as ⌊(nav + VIRTUAL_VALUE) · shares / (totalShares + VIRTUAL_SHARES)⌋ (the full convertToValue shape).
+     * @dev Mirrors src TrancheClaimsLogic._scaleAssetClaims (the includeVirtualShares == true branch).
      *      Virtual shares: the redeemer's slice is priced against the effective supply (totalShares + VIRTUAL_SHARES),
      *      so a sole holder can never redeem the whole tranche 1:1 — the virtual-share sliver stays behind, closing the
-     *      donation/premium extraction vector on the redemption side.
+     *      donation/premium extraction vector on the redemption side. The NAV numerator carries the matching
+     *      VIRTUAL_VALUE offset so the scaled NAV is exactly the convertToValue of the shares.
      *      Rounding: Floor on all four fields. Favors: remaining LPs.
      *      Precondition: totalShares > 0 (production scales a redeemer's slice of a live tranche supply).
      * @param total The total claims being sliced
@@ -446,7 +448,7 @@ library RoycoTestMath {
         scaled.collateralAssets = Math.mulDiv(total.collateralAssets, shares, effectiveTotalShares);
         scaled.lptAssets = Math.mulDiv(total.lptAssets, shares, effectiveTotalShares);
         scaled.stShares = Math.mulDiv(total.stShares, shares, effectiveTotalShares);
-        scaled.nav = Math.mulDiv(total.nav, shares, effectiveTotalShares);
+        scaled.nav = Math.mulDiv(total.nav + VIRTUAL_VALUE, shares, effectiveTotalShares);
     }
 
     /**

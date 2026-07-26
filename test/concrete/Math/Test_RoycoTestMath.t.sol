@@ -396,7 +396,8 @@ contract Test_RoycoTestMath is Test {
         assertEq(scaled.collateralAssets, 999_999_999_999_000_000, "floor(1e18*1e18/(1e18+1e6)) = 1e18 - 1e6");
         assertEq(scaled.lptAssets, 1_999_999_999_998_000_000, "floor(2e18*1e18/(1e18+1e6)) = 2e18 - 2e6");
         assertEq(scaled.stShares, 2_999_999_999_997_000_000, "floor(3e18*1e18/(1e18+1e6)) = 3e18 - 3e6");
-        assertEq(scaled.nav, 3_999_999_999_996_000_000, "floor(4e18*1e18/(1e18+1e6)) = 4e18 - 4e6");
+        // The NAV leg carries the VIRTUAL_VALUE numerator offset (the convertToValue shape): floor((4e18+1)*1e18/(1e18+1e6))
+        assertEq(scaled.nav, 3_999_999_999_996_000_001, "floor((4e18+1)*1e18/(1e18+1e6)) = 4e18 - 4e6 + 1");
     }
 
     /// Zero shares scale every field to zero.

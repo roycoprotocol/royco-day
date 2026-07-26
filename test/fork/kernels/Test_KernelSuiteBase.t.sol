@@ -1963,10 +1963,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /// @notice Floor-scales every claims field by `_shares / (_totalShares + VIRTUAL_SHARES)`, mirroring
     ///         `TrancheClaimsLogic._scaleAssetClaims`, which now divides by the effective supply so a sole holder
-    ///         can never redeem the whole tranche 1:1 (the virtual-share sliver stays behind).
+    ///         can never redeem the whole tranche 1:1 (the virtual-share sliver stays behind). The NAV numerator
+    ///         carries the matching VIRTUAL_VALUE offset (the convertToValue shape).
     function _scaleExpectedClaims(AssetClaims memory _claims, uint256 _shares, uint256 _totalShares) internal pure returns (AssetClaims memory scaled) {
         uint256 effectiveTotalShares = _totalShares + VIRTUAL_SHARES;
-        scaled.nav = toNAVUnits(Math.mulDiv(toUint256(_claims.nav), _shares, effectiveTotalShares));
+        scaled.nav = toNAVUnits(Math.mulDiv(toUint256(_claims.nav) + VIRTUAL_VALUE, _shares, effectiveTotalShares));
         scaled.collateralAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.collateralAssets), _shares, effectiveTotalShares));
         scaled.lptAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.lptAssets), _shares, effectiveTotalShares));
         scaled.stShares = Math.mulDiv(_claims.stShares, _shares, effectiveTotalShares);

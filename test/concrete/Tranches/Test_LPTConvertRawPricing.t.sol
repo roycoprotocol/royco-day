@@ -67,8 +67,8 @@ contract Test_LPTConvertRawPricing_Tranches is DayMarketTestBase {
         assertEq(conv.stShares, 0, "convertToAssets must report no senior-share claim (the idle leg is excluded)");
         assertEq(
             toUint256(conv.nav),
-            Math.mulDiv(rawNAV, shares, supply + 1e6, Math.Rounding.Floor),
-            "convertToAssets NAV must be the pro-rata slice of the BPT-only raw NAV"
+            Math.mulDiv(rawNAV + 1, shares, supply + 1e6, Math.Rounding.Floor),
+            "convertToAssets NAV must be the virtual-offset slice of the BPT-only raw NAV"
         );
         assertEq(
             toUint256(conv.lptAssets),
@@ -84,8 +84,8 @@ contract Test_LPTConvertRawPricing_Tranches is DayMarketTestBase {
         assertGt(prev.stShares, 0, "arrange: the previewed idle slice must be nonzero");
         assertEq(
             toUint256(prev.nav),
-            Math.mulDiv(effNAV, shares, supply + 1e6, Math.Rounding.Floor),
-            "previewRedeem NAV must be the pro-rata slice of the idle-inclusive effective NAV"
+            Math.mulDiv(effNAV + 1, shares, supply + 1e6, Math.Rounding.Floor),
+            "previewRedeem NAV must be the virtual-offset slice of the idle-inclusive effective NAV"
         );
         assertGt(
             toUint256(prev.nav), toUint256(conv.nav), "the redemption quote must be strictly richer than the BPT-only exchange rate while premium is staged"

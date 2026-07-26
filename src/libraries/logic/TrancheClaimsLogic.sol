@@ -5,7 +5,7 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { VIRTUAL_SHARES, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
+import { VIRTUAL_SHARES, VIRTUAL_VALUE, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../Units.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
@@ -112,9 +112,11 @@ library TrancheClaimsLogic {
 
         // Scale the claims by the redeemer's fraction of the EFFECTIVE supply
         uint256 effectiveTrancheShares = _totalTrancheShares + (_includeVirtualShares ? VIRTUAL_SHARES : 0);
+        NAV_UNIT effectiveTrancheValue = _claims.nav + (_includeVirtualShares ? VIRTUAL_VALUE : ZERO_NAV_UNITS);
+
         scaledClaims.collateralAssets = _claims.collateralAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
         scaledClaims.lptAssets = _claims.lptAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
         scaledClaims.stShares = _claims.stShares.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
-        scaledClaims.nav = _claims.nav.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
+        scaledClaims.nav = effectiveTrancheValue.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
     }
 }

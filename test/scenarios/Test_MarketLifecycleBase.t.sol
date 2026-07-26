@@ -610,7 +610,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         emit IRoycoVaultTranche.Redeem(
             LPT_PROVIDER,
             LPT_PROVIDER,
-            AssetClaims({ collateralAssets: toTrancheUnits(0), lptAssets: toTrancheUnits(21e18), stShares: 0, nav: toNAVUnits(uint256(21e18)) }),
+            AssetClaims({ collateralAssets: toTrancheUnits(0), lptAssets: toTrancheUnits(21e18), stShares: 0, nav: toNAVUnits(uint256(21e18 + 1)) }),
             parkShares
         );
         vm.prank(LPT_PROVIDER);
@@ -618,7 +618,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
 
         // Full observable post-state at the boundary: exact claims, exact depth, exact committed mark
         assertEq(toUint256(parkClaims.lptAssets), 21e18, "boundary redeem: the BPT slice must be exactly 21e18");
-        assertEq(toUint256(parkClaims.nav), 21e18, "boundary redeem: the NAV slice must be exactly 21e18 at 1.0 NAV-per-BPT");
+        assertEq(toUint256(parkClaims.nav), 21e18 + 1, "boundary redeem: the NAV slice is 21e18 plus the VIRTUAL_VALUE numerator wei the claims scale carries");
         assertEq(parkClaims.stShares, 0, "boundary redeem: no idle premium senior shares exist before any gain sync");
         assertEq(bpt.balanceOf(LPT_PROVIDER), 21e18, "boundary redeem: the redeemer must hold the full BPT slice");
         assertEq(liquidityProviderTranche.balanceOf(LPT_PROVIDER), residualShares, "boundary redeem: the redeemer keeps the residual LPT shares");

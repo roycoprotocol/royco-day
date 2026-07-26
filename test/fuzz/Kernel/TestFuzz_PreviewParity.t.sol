@@ -160,15 +160,18 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
         AssetClaims memory conv = liquidityProviderTranche.convertToAssets(shares);
         AssetClaims memory prev = liquidityProviderTranche.previewRedeem(shares);
 
-        // Both surfaces floor-scale over the EFFECTIVE LPT supply (supply + VIRTUAL_SHARES), mirroring src _scaleAssetClaims
+        // Both surfaces floor-scale over the EFFECTIVE LPT supply (supply + VIRTUAL_SHARES) with the NAV numerator
+        // carrying the matching VIRTUAL_VALUE offset, mirroring src _scaleAssetClaims' convertToValue-shaped NAV leg
         assertEq(conv.stShares, 0, "the convert surface must never report the idle senior-share leg");
         assertEq(
-            toUint256(conv.nav), Math.mulDiv(rawNAV, shares, supply + 1e6, Math.Rounding.Floor), "convertToAssets must price the pro-rata BPT-only raw NAV"
+            toUint256(conv.nav),
+            Math.mulDiv(rawNAV + 1, shares, supply + 1e6, Math.Rounding.Floor),
+            "convertToAssets must price the virtual-offset BPT-only raw NAV"
         );
         assertEq(
             toUint256(prev.nav),
-            Math.mulDiv(rawNAV + idleValue, shares, supply + 1e6, Math.Rounding.Floor),
-            "previewRedeem must price the pro-rata idle-inclusive effective NAV"
+            Math.mulDiv(rawNAV + idleValue + 1, shares, supply + 1e6, Math.Rounding.Floor),
+            "previewRedeem must price the virtual-offset idle-inclusive effective NAV"
         );
         assertLe(toUint256(conv.nav), toUint256(prev.nav), "the convert quote must never exceed the redemption quote");
 
