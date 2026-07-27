@@ -20,8 +20,6 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
-    MARKET_ROLE_GRANTOR_ROLE,
-    PUBLIC_ROLE,
     DEPLOYER_ROLE,
     DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
@@ -94,10 +92,8 @@ contract Test_DeployScriptConfig is Test {
 
         // Independently derived count: the address surface is 18 fields, of which the fee recipient maps to the
         // three LP roles, market ops maps to its own role plus the blacklist admin role, and the other 16 map
-        // one-to-one, so 16 + 3 + 2 = 21 assignee-carrying rows. Two further rows carry NO assignee and exist purely
-        // so pass 2 applies their admin/guardian config: MARKET_ROLE_GRANTOR_ROLE (granted directly to the factory and
-        // the root admin, not via a row) and BURNER_ROLE (granted per market by the template). 21 + 2 = 23.
-        assertEq(assignments.length, 23, "21 assignee-carrying rows plus the 2 config-only rows for the grantor and burner roles");
+        // one-to-one, so 16 + 3 + 2 = 21 assignments.
+        assertEq(assignments.length, 21, "one assignment per (role, assignee) pair: 16 one-to-one + 3 LP roles on the fee recipient + 2 on market ops");
 
         for (uint256 i; i < assignments.length; ++i) {
             uint64 role = assignments[i].role;
@@ -110,11 +106,7 @@ contract Test_DeployScriptConfig is Test {
             // graph: ADMIN_ROLE (held by the factory admin), or one of the two meta-admin roles that pass 1
             // granted to a concrete address (LP_ROLE_ADMIN_ROLE, DEPLOYER_ROLE_ADMIN_ROLE). Any other admin would
             // orphan the role: nobody could ever grant or revoke it after the deployer renounces.
-            // MARKET_ROLE_GRANTOR_ROLE joins the rooted set: `_applyRoleGraph` grants it to the factory admin and
-            // `_wireFactoryRoles` grants it to the factory, both outside the assignment rows, so the two roles it
-            // administers (SYNC_ROLE, BURNER_ROLE) remain grantable after the deployer renounces.
-            bool adminRooted = cfg.adminRole == ADMIN_ROLE || cfg.adminRole == LP_ROLE_ADMIN_ROLE || cfg.adminRole == DEPLOYER_ROLE_ADMIN_ROLE
-                || cfg.adminRole == MARKET_ROLE_GRANTOR_ROLE;
+            bool adminRooted = cfg.adminRole == ADMIN_ROLE || cfg.adminRole == LP_ROLE_ADMIN_ROLE || cfg.adminRole == DEPLOYER_ROLE_ADMIN_ROLE;
             assertTrue(adminRooted, "role admin must be ADMIN_ROLE or a granted meta-admin role");
 
             // Same closed-world requirement for guardians: GUARDIAN_ROLE for every role except GUARDIAN_ROLE
@@ -131,9 +123,6 @@ contract Test_DeployScriptConfig is Test {
             uint64 expectedAdmin = ADMIN_ROLE;
             if (role == ST_LP_ROLE || role == JT_LP_ROLE || role == LPT_LP_ROLE) expectedAdmin = LP_ROLE_ADMIN_ROLE;
             if (role == DEPLOYER_ROLE) expectedAdmin = DEPLOYER_ROLE_ADMIN_ROLE;
-            // The two roles a market deployment grants sit under the factory's grantor role, which is what lets the
-            // factory grant them without holding ADMIN_ROLE.
-            if (role == SYNC_ROLE || role == BURNER_ROLE) expectedAdmin = MARKET_ROLE_GRANTOR_ROLE;
             assertEq(cfg.adminRole, expectedAdmin, "admin does not match the hand-derived role graph");
 
             // Hand-derived guardian per role: ADMIN_ROLE guards GUARDIAN_ROLE, GUARDIAN_ROLE guards the rest.
@@ -144,9 +133,8 @@ contract Test_DeployScriptConfig is Test {
         // The emitted role set itself, hand-listed from the deployment's operational surface (pause/unpause,
         // upgrade, sync, kernel/accountant/fee/venue admin, LP admin + the three LP roles, guardian, deployer +
         // its admin, Balancer pool manager, market ops + blacklist admin, entry point config + fee collection,
-        // liquidity-premium reinvestment), followed by the two config-only rows. Order-pinned so a silent drop or
-        // reorder is loud.
-        uint64[23] memory expectedRoles = [
+        // liquidity-premium reinvestment). Order-pinned so a silent drop or reorder is loud.
+        uint64[21] memory expectedRoles = [
             ADMIN_PAUSER_ROLE,
             ADMIN_UPGRADER_ROLE,
             SYNC_ROLE,
@@ -167,9 +155,7 @@ contract Test_DeployScriptConfig is Test {
             ADMIN_BLACKLIST_ROLE,
             ADMIN_ENTRY_POINT_ROLE,
             ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
-            ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
-            MARKET_ROLE_GRANTOR_ROLE,
-            BURNER_ROLE
+            ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE
         ];
         for (uint256 i; i < expectedRoles.length; ++i) {
             assertEq(assignments[i].role, expectedRoles[i], "generated role set diverged from the deployment role surface");
@@ -178,13 +164,14 @@ contract Test_DeployScriptConfig is Test {
 
     /**
      * @notice getRoleConfig must revert UNKNOWN_ROLE, carrying the queried id, for protocol roles that exist as
-     *         constants but have no admin/guardian mapping. PUBLIC_ROLE is a real role id the script never
-     *         administers, so a config that accidentally references it must fail loudly at resolution time instead of
-     *         silently defaulting to some admin, which would hand role administration to an unintended party
+     *         constants but have no admin/guardian mapping. BURNER_ROLE is a real role id (granted to each market's
+     *         kernel by the gatekeeper, never by this script), so a config that accidentally references it must fail
+     *         loudly at resolution time instead of silently defaulting to some admin, which would hand role
+     *         administration to an unintended party
      */
     function test_RevertIf_GetRoleConfigQueriedWithUnmappedRole() public {
         // The revert must carry the exact queried id so the operator can see WHICH role the config mis-references.
-        vm.expectRevert(abi.encodeWithSelector(DeployScript.UnknownRole.selector, PUBLIC_ROLE));
-        deployScript.getRoleConfig(PUBLIC_ROLE);
+        vm.expectRevert(abi.encodeWithSelector(DeployScript.UnknownRole.selector, BURNER_ROLE));
+        deployScript.getRoleConfig(BURNER_ROLE);
     }
 }

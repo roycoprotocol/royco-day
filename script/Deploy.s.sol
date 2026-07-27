@@ -38,14 +38,12 @@ import {
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
-    BURNER_ROLE,
     DEPLOYER_ROLE,
     DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
-    MARKET_ROLE_GRANTOR_ROLE,
     PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
@@ -284,7 +282,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](23);
+        roleAssignments = new RoleAssignment[](21);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -306,8 +304,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         roleAssignments[18] = _assignment(ADMIN_ENTRY_POINT_ROLE, _addresses.adminEntryPointAddress);
         roleAssignments[19] = _assignment(ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, _addresses.entryPointFeeCollectorAddress);
         roleAssignments[20] = _assignment(ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE, _addresses.marketReinvestLiquidityPremiumAddress);
-        roleAssignments[21] = _assignment(MARKET_ROLE_GRANTOR_ROLE, address(0));
-        roleAssignments[22] = _assignment(BURNER_ROLE, address(0));
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -321,9 +317,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == ADMIN_UPGRADER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         if (role == ST_LP_ROLE || role == JT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == LP_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == SYNC_ROLE) return RoleConfig({ adminRole: MARKET_ROLE_GRANTOR_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == BURNER_ROLE) return RoleConfig({ adminRole: MARKET_ROLE_GRANTOR_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == MARKET_ROLE_GRANTOR_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == SYNC_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_KERNEL_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         if (role == ADMIN_ACCOUNTANT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
@@ -415,11 +409,11 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         _accessManager.setTargetFunctionRole(_factory, _sel(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         _accessManager.setTargetFunctionRole(_factory, _sel(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
 
-        // The two roles the factory forwards periphery configuration under, and the admin role over the only two roles
-        // a market deployment grants (SYNC_ROLE to the accountant/entry point, BURNER_ROLE to the kernel).
+        // The only two roles the factory retains, both solely so `executeAsFactory` can forward periphery
+        // configuration: `modifyTrancheConfigs` on the entry point and `addMarketKernels` on the syncer. It holds no
+        // authority to configure targets or to mint roles, both of which run through the gatekeeper.
         _accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, _factory, 0);
         _accessManager.grantRole(SYNC_ROLE, _factory, 0);
-        _accessManager.grantRole(MARKET_ROLE_GRANTOR_ROLE, _factory, 0);
     }
 
     /// @notice Deploys the market's off-factory contracts, executes the factory wiring transaction, and assembles the
@@ -482,11 +476,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     function _applyRoleGraph(AccessManager _am, address _factoryAdmin, address _deployer, RoleAssignment[] memory _roleAssignments) internal {
         // Ensure the factory admin holds ADMIN_ROLE (role 0).
         if (_factoryAdmin != _deployer) _am.grantRole(ADMIN_ROLE, _factoryAdmin, 0);
-
-        // The factory admin also needs MARKET_ROLE_GRANTOR_ROLE. Pass 2 below re-points SYNC_ROLE's and BURNER_ROLE's
-        // admin to it, and OZ checks `grantRole` against a role's CURRENT admin rather than ADMIN_ROLE, so without
-        // this the root admin could no longer grant either role without first re-pointing them back.
-        _am.grantRole(MARKET_ROLE_GRANTOR_ROLE, _factoryAdmin, 0);
 
         // The deployer needs DEPLOYER_ROLE (executeMarketDeployment) + ADMIN_FACTORY_ROLE (registerTemplate).
         _am.grantRole(DEPLOYER_ROLE, _deployer, 0);
@@ -1134,6 +1123,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         _accessManager.grantRole(ST_LP_ROLE, _entryPoint, 0);
         _accessManager.grantRole(JT_LP_ROLE, _entryPoint, 0);
         _accessManager.grantRole(LPT_LP_ROLE, _entryPoint, 0);
+
+        // The entry point syncs each market before it acts on it. Granted here rather than per market deployment: the
+        // role is market-agnostic and the entry point is an existing singleton, which a deployment may never touch.
+        _accessManager.grantRole(SYNC_ROLE, _entryPoint, 0);
     }
 
     /// @notice Binds the syncer's selectors to their roles and grants it SYNC_ROLE.

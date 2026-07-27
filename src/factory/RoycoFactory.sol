@@ -14,7 +14,6 @@ import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoFactoryGatekeeper } from "../interfaces/factory/IRoycoFactoryGatekeeper.sol";
 import { IRoycoProtocolTemplate } from "../interfaces/factory/IRoycoProtocolTemplate.sol";
 import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
-import { BURNER_ROLE, SYNC_ROLE } from "./Roles.sol";
 
 /**
  * @title RoycoFactory
@@ -225,13 +224,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         whenNotPaused
         onlyActiveTemplate
     {
-        require(_roleIds.length == _accounts.length && _accounts.length == _executionDelays.length, LENGTH_MISMATCH());
-
-        AccessManager am = AccessManager(authority());
-        for (uint256 i; i < _roleIds.length; ++i) {
-            require(_roleIds[i] == SYNC_ROLE || _roleIds[i] == BURNER_ROLE, FACTORY_GRANT_ROLE_FORBIDDEN());
-            am.grantRole(_roleIds[i], _accounts[i], _executionDelays[i]);
-        }
+        IRoycoFactoryGatekeeper(ROYCO_FACTORY_GATEKEEPER).grantMarketRoles(_roleIds, _accounts, _executionDelays);
     }
 
     /// @inheritdoc IRoycoFactory

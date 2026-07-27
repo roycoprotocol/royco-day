@@ -73,8 +73,6 @@ uint64 constant DEPLOYER_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("
 
 uint64 constant LP_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LP_ROLE_ADMIN_ROLE"))));
 
-uint64 constant MARKET_ROLE_GRANTOR_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_MARKET_ROLE_GRANTOR_ROLE"))));
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // BLACKLIST ROLE
 // ═══════════════════════════════════════════════════════════════════════════

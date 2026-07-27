@@ -16,6 +16,7 @@ import {
 } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
+import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { MockWiringTemplate } from "../../mocks/MockWiringTemplate.sol";
 import { UninitializedERC1967Proxy } from "../../mocks/UninitializedERC1967Proxy.sol";
@@ -151,16 +152,14 @@ contract Test_FactoryDeploymentWiring is Test {
 
     /**
      * @notice Every other role is refused, including ones the factory might otherwise be able to grant
-     * @dev The access manager independently blocks this by making the factory the admin of only `SYNC_ROLE` and
-     *      `BURNER_ROLE`, but that is a global, mutable property: a future `setRoleAdmin` pointing another role at
-     *      `MARKET_ROLE_GRANTOR_ROLE` would silently widen what a template can mint. The factory's constant allowlist
-     *      means widening requires a factory upgrade, behind the upgrader role's execution delay
+     * @dev The allowlist is a constant on the gatekeeper, which is non-upgradeable, so widening what a deployment can
+     *      mint requires deploying a new gatekeeper and moving `ADMIN_ROLE` to it
      */
     function test_RevertIf_grantMarketRoleGrantsAnythingOutsideTheAllowlist() public {
         template.setMode(template.MODE_WIRE());
         template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, ADMIN_UPGRADER_ROLE, WIRE_ACCOUNT);
 
-        vm.expectRevert(IRoycoFactory.FACTORY_GRANT_ROLE_FORBIDDEN.selector);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, ADMIN_UPGRADER_ROLE));
         factory.executeMarketDeployment(address(template), "");
     }
 
@@ -169,7 +168,7 @@ contract Test_FactoryDeploymentWiring is Test {
         template.setMode(template.MODE_WIRE());
         template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, ADMIN_ROLE, WIRE_ACCOUNT);
 
-        vm.expectRevert(IRoycoFactory.FACTORY_GRANT_ROLE_FORBIDDEN.selector);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, ADMIN_ROLE));
         factory.executeMarketDeployment(address(template), "");
     }
 

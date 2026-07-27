@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { IRoycoAccessManager } from "../interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactoryGatekeeper } from "../interfaces/factory/IRoycoFactoryGatekeeper.sol";
+import { BURNER_ROLE, SYNC_ROLE } from "./Roles.sol";
 
 /**
  * @title RoycoFactoryGatekeeper
@@ -62,5 +63,36 @@ contract RoycoFactoryGatekeeper is IRoycoFactoryGatekeeper {
         }
 
         emit FreshTargetConfigured(_target, _selectors.length);
+    }
+
+    /// @inheritdoc IRoycoFactoryGatekeeper
+    function grantMarketRoles(
+        uint64[] calldata _roleIds,
+        address[] calldata _accounts,
+        uint32[] calldata _executionDelays
+    )
+        external
+        override(IRoycoFactoryGatekeeper)
+        onlyFactory
+    {
+        require(_roleIds.length == _accounts.length && _accounts.length == _executionDelays.length, LENGTH_MISMATCH());
+
+        AccessManager am = AccessManager(ROYCO_ACCESS_MANAGER);
+        for (uint256 i; i < _roleIds.length; ++i) {
+            require(_roleIds[i] == SYNC_ROLE || _roleIds[i] == BURNER_ROLE, ROLE_FORBIDDEN(_roleIds[i]));
+            // Verify the contract has never been configured
+            _requireNotConfigured(_accounts[i]);
+            am.grantRole(_roleIds[i], _accounts[i], _executionDelays[i]);
+        }
+        emit MarketRolesGranted(_roleIds.length);
+    }
+
+    /**
+     * @dev A market deployment may only act on a contract that has never been configured before
+     * @param _subject The address a deployment is asking to configure or to grant a role to
+     */
+    function _requireNotConfigured(address _subject) private view {
+        require(_subject != ROYCO_ACCESS_MANAGER && _subject != ROYCO_FACTORY && _subject != address(this), TARGET_FORBIDDEN(_subject));
+        require(!IRoycoAccessManager(ROYCO_ACCESS_MANAGER).wasEverConfigured(_subject), TARGET_ALREADY_CONFIGURED(_subject));
     }
 }

@@ -14,9 +14,7 @@ import {
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
-    BURNER_ROLE,
     DEPLOYER_ROLE,
-    MARKET_ROLE_GRANTOR_ROLE,
     SYNC_ROLE
 } from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
@@ -26,8 +24,9 @@ import { IRoycoFactory } from "../../src/interfaces/factory/IRoycoFactory.sol";
  * @title FactoryScaffold
  * @notice Stands up the access manager / gatekeeper / factory triangle the way `Deploy.s.sol` does, for the hand-rolled
  *         fixtures that build a factory without running the deployment script
- * @dev The factory does NOT hold `ADMIN_ROLE`. The gatekeeper holds it and admits only never-before-configured targets,
- *      and the factory keeps only `ADMIN_ENTRY_POINT_ROLE`, `SYNC_ROLE` and `MARKET_ROLE_GRANTOR_ROLE`. The factory also
+ * @dev The factory does NOT hold `ADMIN_ROLE`. The gatekeeper holds it, admits only never-before-configured targets,
+ *      and applies the two role grants a deployment makes; the factory keeps only `ADMIN_ENTRY_POINT_ROLE` and
+ *      `SYNC_ROLE`, purely so `executeAsFactory` can forward periphery configuration. The factory also
  *      no longer binds its own selectors during `initialize`, so this helper applies them exactly as
  *      `Deploy.s.sol._wireFactoryRoles` does. A fixture that skips this leaves the factory's selectors unbound, which
  *      resolves to `ADMIN_ROLE` and makes `registerTemplate` / `executeMarketDeployment` callable only by root
@@ -85,17 +84,10 @@ library FactoryScaffold {
         _accessManager.setTargetFunctionRole(_factory, _one(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         _accessManager.setTargetFunctionRole(_factory, _one(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
 
+        // The only two roles the factory retains, both solely so `executeAsFactory` can forward periphery
+        // configuration. It holds no authority to configure targets or mint roles: the gatekeeper does both
         _accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, _factory, 0);
         _accessManager.grantRole(SYNC_ROLE, _factory, 0);
-        _accessManager.grantRole(MARKET_ROLE_GRANTOR_ROLE, _factory, 0);
-
-        // The fixture keeps the grantor role too: once the two roles' admin moves off ADMIN_ROLE, holding ADMIN_ROLE
-        // alone no longer permits granting them (OZ checks a role's CURRENT admin), and fixtures grant SYNC_ROLE
-        _accessManager.grantRole(MARKET_ROLE_GRANTOR_ROLE, address(this), 0);
-
-        // The factory grants SYNC_ROLE and BURNER_ROLE during a deployment, which requires it to be their role admin
-        _accessManager.setRoleAdmin(SYNC_ROLE, MARKET_ROLE_GRANTOR_ROLE);
-        _accessManager.setRoleAdmin(BURNER_ROLE, MARKET_ROLE_GRANTOR_ROLE);
     }
 
     function _one(bytes4 _selector) private pure returns (bytes4[] memory selectors) {

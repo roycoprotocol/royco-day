@@ -28,7 +28,6 @@ import {
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
     ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
-    MARKET_ROLE_GRANTOR_ROLE,
     ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
@@ -325,8 +324,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
      * @dev This is the containment property of the gatekeeper design. The factory's template-callable configuration
      *      primitive takes an arbitrary target, so `ADMIN_ROLE` on the factory handed every enabled template root-admin
      *      reach over the access manager's whole function map. That role now sits on the non-upgradeable gatekeeper,
-     *      which admits only never-before-configured targets, and the factory keeps just the two roles it forwards
-     *      periphery configuration under plus the admin role over the two roles a deployment grants
+     *      which admits only never-before-configured targets and applies the two grants a deployment makes. The factory
+     *      keeps ONLY the two roles `executeAsFactory` forwards periphery configuration under
      */
     function test_Auth_FactoryHoldsOnlyItsNarrowRoleSetAndNotAdmin() public view {
         (bool isAdmin,) = ACCESS_MANAGER.hasRole(0, address(FACTORY)); // ADMIN_ROLE == 0
@@ -336,8 +335,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertTrue(isEntry, "factory not ADMIN_ENTRY_POINT_ROLE");
         (bool isSync,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(FACTORY));
         assertTrue(isSync, "factory not SYNC_ROLE");
-        (bool isGrantor,) = ACCESS_MANAGER.hasRole(MARKET_ROLE_GRANTOR_ROLE, address(FACTORY));
-        assertTrue(isGrantor, "factory not MARKET_ROLE_GRANTOR_ROLE");
 
         // The role it lost lives on the gatekeeper the factory names, and the pairing is mutual
         address gatekeeper = FACTORY.ROYCO_FACTORY_GATEKEEPER();

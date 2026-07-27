@@ -175,15 +175,6 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
 
     ///  @notice Applies every binding in `_bindings` by calling back into the factory
     function _applyRoleBindings(RoleBindings memory _bindings) internal {
-        uint256 nTargets = _bindings.targetBindings.length;
-        for (uint256 i; i < nTargets; ++i) {
-            TargetBinding memory tb = _bindings.targetBindings[i];
-            require(tb.selectors.length == tb.roleIds.length, LENGTH_MISMATCH());
-            if (tb.selectors.length == 0) continue;
-            ROYCO_FACTORY.setMarketTargetFunctionRole(tb.target, tb.selectors, tb.roleIds);
-        }
-
-        // Flatten the post-init grants into index-aligned arrays and apply them in a single factory call
         uint256 nGrants = _bindings.postInitGrants.length;
         uint64[] memory grantRoleIds = new uint64[](nGrants);
         address[] memory grantAccounts = new address[](nGrants);
@@ -195,5 +186,13 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
             grantExecutionDelays[i] = g.executionDelay;
         }
         ROYCO_FACTORY.grantMarketRole(grantRoleIds, grantAccounts, grantExecutionDelays);
+
+        uint256 nTargets = _bindings.targetBindings.length;
+        for (uint256 i; i < nTargets; ++i) {
+            TargetBinding memory tb = _bindings.targetBindings[i];
+            require(tb.selectors.length == tb.roleIds.length, LENGTH_MISMATCH());
+            if (tb.selectors.length == 0) continue;
+            ROYCO_FACTORY.setMarketTargetFunctionRole(tb.target, tb.selectors, tb.roleIds);
+        }
     }
 }

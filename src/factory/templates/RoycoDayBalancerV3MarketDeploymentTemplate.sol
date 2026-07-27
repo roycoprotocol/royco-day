@@ -507,13 +507,11 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         else (s, r) = (_p.collateralAssetOracleBindingSelectors, _p.collateralAssetOracleBindingRoleIds);
         targetBindings[8] = TargetBinding({ target: targets[8], selectors: s, roleIds: r });
 
-        // Post-init grants: accountant SYNC, kernel BURNER, entry point SYNC, and (hooked markets only) hook SYNC (all zero execution delay)
-        // The entry point singleton is re-granted on every deployment: the grant is idempotent and the role is market-agnostic
-        RoleGrant[] memory grants = new RoleGrant[](_p.deployPoolHook ? 4 : 3);
+        // Post-init grants: accountant SYNC, kernel BURNER, and (hooked markets only) hook SYNC (all zero execution delay)
+        RoleGrant[] memory grants = new RoleGrant[](_p.deployPoolHook ? 3 : 2);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
         grants[1] = RoleGrant({ roleId: BURNER_ROLE, account: _r.kernel, executionDelay: 0 });
-        grants[2] = RoleGrant({ roleId: SYNC_ROLE, account: ROYCO_DAY_ENTRY_POINT, executionDelay: 0 });
-        if (_p.deployPoolHook) grants[3] = RoleGrant({ roleId: SYNC_ROLE, account: _balancerHook, executionDelay: 0 });
+        if (_p.deployPoolHook) grants[2] = RoleGrant({ roleId: SYNC_ROLE, account: _balancerHook, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targetBindings, postInitGrants: grants });
     }

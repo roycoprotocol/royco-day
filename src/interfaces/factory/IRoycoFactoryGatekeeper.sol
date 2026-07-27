@@ -10,6 +10,8 @@ pragma solidity ^0.8.28;
 interface IRoycoFactoryGatekeeper {
     /// @notice Emitted when a target is configured through the gatekeeper
     event FreshTargetConfigured(address indexed target, uint256 selectorCount);
+    /// @notice Emitted when a market deployment's role grants are applied
+    event MarketRolesGranted(uint256 grantCount);
 
     /// @notice Thrown when any caller other than the factory invokes the gatekeeper
     error ONLY_FACTORY();
@@ -17,6 +19,8 @@ interface IRoycoFactoryGatekeeper {
     error TARGET_ALREADY_CONFIGURED(address target);
     /// @notice Thrown when the target is the access manager, the factory, or the gatekeeper itself
     error TARGET_FORBIDDEN(address target);
+    /// @notice Thrown when a market deployment tries to grant a role outside the two it legitimately mints
+    error ROLE_FORBIDDEN(uint64 roleId);
     /// @notice Thrown when the selector and role arrays differ in length
     error LENGTH_MISMATCH();
     /// @notice Thrown when a constructor argument is the zero address
@@ -39,4 +43,12 @@ interface IRoycoFactoryGatekeeper {
      * @param _roleIds The role each selector is bound to
      */
     function configureFreshTarget(address _target, bytes4[] calldata _selectors, uint64[] calldata _roleIds) external;
+
+    /**
+     * @notice Grants the roles a market deployment mints, restricted to `SYNC_ROLE` and `BURNER_ROLE`
+     * @param _roleIds The roles to grant, index-aligned with `_accounts` and `_executionDelays`
+     * @param _accounts The accounts receiving them
+     * @param _executionDelays The access manager execution delay applied to each grant
+     */
+    function grantMarketRoles(uint64[] calldata _roleIds, address[] calldata _accounts, uint32[] calldata _executionDelays) external;
 }
