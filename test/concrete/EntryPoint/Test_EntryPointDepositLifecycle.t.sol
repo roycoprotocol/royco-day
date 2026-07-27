@@ -527,12 +527,15 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
         vm.prank(PAUSER);
         IRoycoAuth(address(kernel)).pause();
 
-        // Under the MAX sentinel a paused kernel reads as maxDeposit == 0, so the execution gracefully skips
-        uint256 minted = _executeDepositMax(USER_A, USER_A, nonce);
-        assertEq(minted, 0, "a paused kernel must gracefully skip a MAX-sentinel execution");
-        assertEq(entryPoint.getDepositRequest(USER_A, nonce).assets, toTrancheUnits(amount), "the skipped request must remain queued");
+        // Every execution path syncs the market first, and a paused kernel cannot be synced, so execution fails LOUDLY
+        // rather than proceeding against the last mark the kernel happened to commit before it was halted. This applies
+        // to the MAX sentinel too: it previously read maxDeposit == 0 and skipped, which is exactly the silent
+        // stale-mark path the unconditional sync exists to remove
+        vm.expectRevert();
+        _executeDepositMax(USER_A, USER_A, nonce);
+        assertEq(entryPoint.getDepositRequest(USER_A, nonce).assets, toTrancheUnits(amount), "the rejected request must remain queued");
 
-        // An explicit amount reaches the paused tranche deposit path and reverts
+        // An explicit amount is rejected the same way
         vm.expectRevert();
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(amount));

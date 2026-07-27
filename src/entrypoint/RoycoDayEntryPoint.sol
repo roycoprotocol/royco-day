@@ -99,6 +99,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Poke the market's collateral asset oracle to refresh it
         _pokeOracle(_tranche, config);
 
+        // Sync the market before the request is registered
+        _syncMarket(_tranche);
+
         // Resolve the request's executable and expiry timestamps: the expiry is a saturating add, so a maximal window
         // pins it at type(uint32).max and the request effectively never expires
         executableAtTimestamp = uint32(block.timestamp + config.baseConfig.depositDelaySeconds);
@@ -173,6 +176,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
         // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request (the tranche deposit below screens the receiver)
         _enforceNotBlacklisted(config.kernel, msg.sender, _user);
+
+        // Sync the market before the deposit is executed
+        _syncMarket(tranche);
 
         // Resolve the actual amount of assets to deposit
         _assetsToDeposit = (_assetsToDeposit == MAX_TRANCHE_UNITS)
@@ -345,6 +351,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
         // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request
         _enforceNotBlacklisted(config.kernel, msg.sender, _user);
+
+        // Sync the market before the redemption is executed
+        _syncMarket(tranche);
 
         // Resolve the actual amount of shares to redeem and the exit route from the request's redemption mode
         bool isMultiAssetRedemption;
@@ -568,6 +577,12 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             !_config.baseConfig.gateByOracleUpdate || (_pokeOracle(_baseRequest.tranche, _config) > _baseRequest.queuedAtTimestamp),
             COLLATERAL_ASSET_ORACLE_NOT_ADVANCED(_requestNonce)
         );
+    }
+
+    /// @dev Synchronizes a tranche's market
+    /// @param _tranche The tranche whose market is synchronized
+    function _syncMarket(address _tranche) internal {
+        IRoycoDayKernel(IRoycoVaultTranche(_tranche).KERNEL()).syncTrancheAccounting();
     }
 
     /**

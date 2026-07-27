@@ -404,9 +404,11 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
         vm.prank(PAUSER);
         kernel.pause();
 
-        (AssetClaims memory claims, uint256 quoteAssets) = _executeRedemptionMaxWithQuote(USER_A, USER_A, nonce);
-        assertEq(toUint256(claims.nav), 0, "a paused kernel must settle nothing");
-        assertEq(quoteAssets, 0, "a paused kernel must carry no quote");
+        // Execution syncs the market first, and a paused kernel cannot be synced, so the redemption fails LOUDLY
+        // instead of settling nothing against a mark the halted kernel can no longer refresh. The escrow is untouched
+        // either way, so the request survives the pause and stays cancellable
+        vm.expectRevert();
+        _executeRedemptionMaxWithQuote(USER_A, USER_A, nonce);
         assertEq(entryPoint.getRedemptionRequest(USER_A, nonce).shares, escrowedShares, "the escrow must stay queued untouched");
     }
 
