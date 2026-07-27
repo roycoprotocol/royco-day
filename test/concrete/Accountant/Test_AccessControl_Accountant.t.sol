@@ -69,17 +69,20 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
         }
     }
 
-    /// each of the 10 hard-sync setters calls the kernel sync BEFORE its body (snapshot taken at sync equals the pre-call state)
-    function test_SetterSync_hardSyncSettersSyncBeforeBody() public {
+    /// each of the 10 hard-sync setters brackets its body with kernel syncs: one observing the pre-call state before
+    /// the body runs, and one observing the mutated state after, so the config guard always judges the new parameters
+    function test_SetterSync_hardSyncSettersBracketBodyWithSyncs() public {
         bytes[] memory calls = _hardSyncSetterCalls();
         for (uint256 i; i < calls.length; ++i) {
             uint256 countBefore = kernel.syncCallCount();
             bytes32 preHash = _stateHash();
             (bool success,) = address(accountant).call(calls[i]);
             assertTrue(success, "setter must succeed");
-            assertEq(kernel.syncCallCount(), countBefore + 1, "kernel sync not attempted exactly once");
-            assertEq(keccak256(abi.encode(kernel.stateAtLastSync())), preHash, "sync observed post-body state: body ran first");
-            assertTrue(_stateHash() != preHash, "setter body must have mutated state");
+            assertEq(kernel.syncCallCount(), countBefore + 2, "kernel sync not attempted exactly twice");
+            assertEq(kernel.stateHashAtSync(countBefore), preHash, "the first sync must observe the pre-body state");
+            bytes32 postHash = _stateHash();
+            assertTrue(postHash != preHash, "setter body must have mutated state");
+            assertEq(kernel.stateHashAtSync(countBefore + 1), postHash, "the second sync must observe the mutated state the guard judges");
         }
     }
 
