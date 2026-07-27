@@ -43,11 +43,11 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Retrieve the result of the accounting synchronization after the paramter change
         SyncedAccountingState memory postOp = IRoycoDayKernel(KERNEL).syncTrancheAccounting();
         // Check that the coverage utilization is at most 100% or it didn't increase/worsen
-        require(postOp.coverageUtilizationWAD <= WAD || (postOp.coverageUtilizationWAD <= preOp.coverageUtilizationWAD), INVALID_COVERAGE_CONFIG());
         // Check that the coverage liquidation utilization remained static or this parameter change did not send the market into a liquidation state
         require(
-            (preOp.coverageLiquidationUtilizationWAD == postOp.coverageLiquidationUtilizationWAD)
-                || (postOp.coverageLiquidationUtilizationWAD > postOp.coverageUtilizationWAD),
+            (postOp.coverageUtilizationWAD <= WAD || (postOp.coverageUtilizationWAD <= preOp.coverageUtilizationWAD))
+                && ((preOp.coverageLiquidationUtilizationWAD == postOp.coverageLiquidationUtilizationWAD)
+                    || (postOp.coverageLiquidationUtilizationWAD > postOp.coverageUtilizationWAD)),
             INVALID_COVERAGE_CONFIG()
         );
         // Check that the liquidity utilization is at most 100% or it didn't increase/worsen
