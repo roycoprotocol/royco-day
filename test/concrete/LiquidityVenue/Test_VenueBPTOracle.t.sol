@@ -90,7 +90,9 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
         kernel.setBPTOracle(address(secondReplacement), false);
 
         assertEq(kernel.getBalancerV3LiquidityVenueState().bptOracle, address(secondReplacement), "the no-pre-sync path must also land the oracle in storage");
-        assertEq(toUint256(accountant.getState().lastLPTRawNAV), expectedSecondLptRawNAV, "the no-pre-sync path must also re-commit against the incoming oracle");
+        assertEq(
+            toUint256(accountant.getState().lastLPTRawNAV), expectedSecondLptRawNAV, "the no-pre-sync path must also re-commit against the incoming oracle"
+        );
     }
 
     /**
@@ -144,7 +146,9 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
         vm.stopPrank();
 
         assertEq(kernel.getBalancerV3LiquidityVenueState().bptOracle, oracleBefore, "the BPT oracle must be untouched by the failed attempts");
-        assertEq(kernel.getBalancerV3LiquidityVenueState().maxReinvestmentSlippageWAD, slippageBefore, "the slippage bound must be untouched by the failed attempts");
+        assertEq(
+            kernel.getBalancerV3LiquidityVenueState().maxReinvestmentSlippageWAD, slippageBefore, "the slippage bound must be untouched by the failed attempts"
+        );
     }
 
     // =============================
@@ -226,12 +230,10 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
     }
 
     /**
-     * @notice Before the senior tranche is seeded the rate floors to exactly 1 wei, never zero
-     * @dev With zero supply the effective NAV per share is 0, and the pool would reject a zero rate, so the
-     *      provider floors it at 1 wei. This is inert: an unseeded market has an empty senior pool leg to scale
+     * @notice Before the senior tranche is seeded the rate floors to exactly 1 WAD, never zero
      */
-    function test_GetRate_UnseededMarketFloorsAtOneWei() public view {
-        assertEq(kernel.getRate(), 1, "the rate on an unseeded market must be the 1-wei floor");
+    function test_GetRate_UnseededMarketFloorsAtWAD() public view {
+        assertEq(kernel.getRate(), WAD, "the rate on an unseeded market must be the 1 WAD floor");
     }
 }
 

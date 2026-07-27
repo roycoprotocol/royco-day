@@ -162,8 +162,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
      * @dev Values one senior tranche share in NAV units, the rate at which the pool prices its senior share leg
      * @dev Within a synchronized operation the returned rate is the one the pre-op sync cached, so an inline senior share mint or burn (a multi-asset deposit or redemption) cannot transiently move the senior-leg mark before the matching effective NAV is committed
      * @dev Before the first sync of a transaction the cache is unset, so a standalone pool interaction or an off-chain read previews the fresh rate the next sync would resolve from committed state
-     * @dev The rate is floored to a minimum of 1 wei so the pool never receives a zero rate, which it would reject
-     * @dev Before the senior tranche is seeded (zero ST supply) the rate resolves to that 1-wei floor rather than a neutral 1.0, this is inert because with no ST shares in existence the pool's ST leg is empty, so the rate only ever scales a zero balance until the tranche is seeded
+     * @dev The rate is floored to a minimum of 1 WAD so the pool never receives a zero rate, which it would reject
      */
     function getRate() external view override(IRateProvider) whenNotPaused returns (uint256 rate) {
         // Query the cache for the ST share price
@@ -184,7 +183,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         }
 
         // Floor the ST share rate to 1 wei so the Balancer pool never receives a zero rate, which it would reject
-        return (rate == 0 ? 1 : rate);
+        return (rate == 0 ? WAD : rate);
     }
 
     // =============================
