@@ -38,8 +38,10 @@ interface IRoycoFactory {
     error ACCESS_MANAGER_CANNOT_BE_ZERO_ADDRESS();
     /// @notice Thrown when the supplied access manager has no code
     error ACCESS_MANAGER_HAS_NO_CODE();
-    /// @notice Thrown when the factory does not hold ADMIN_ROLE on the supplied access manager
-    error FACTORY_NOT_ADMIN_ON_ACCESS_MANAGER();
+    /// @notice Thrown when this factory's gatekeeper holds authority over a different access manager
+    error FACTORY_GATEKEEPER_MISMATCH();
+    /// @notice Thrown when constructing the factory without a gatekeeper
+    error FACTORY_GATEKEEPER_CANNOT_BE_ZERO_ADDRESS();
     /// @notice Thrown when registering the zero address as a template
     error TEMPLATE_CANNOT_BE_ZERO_ADDRESS();
     /// @notice Thrown when registering an already-registered template
@@ -106,17 +108,19 @@ interface IRoycoFactory {
         external
         returns (address deployed, bool alreadyDeployed);
 
+    /// @notice The gatekeeper this factory routes market target configuration through, fixed at construction
+    function ROYCO_FACTORY_GATEKEEPER() external view returns (address gatekeeper);
+
     /// @notice Predicts the CREATE3 address for a salt
     function predictDeterministicAddress(bytes32 _salt) external view returns (address);
 
     /**
-     * @notice Binds each target's selector to a role on the AccessManager, callable only by the active template
-     * @dev The three arrays are index-aligned: `_selectors[i]` on `_targets[i]` is bound to `_roleIds[i]`
-     * @param _targets The contracts whose functions are being access-gated, index-aligned with `_selectors`/`_roleIds`
-     * @param _selectors The function selectors to bind, index-aligned with `_targets`/`_roleIds`
-     * @param _roleIds The role id required to call each corresponding selector, index-aligned with `_targets`/`_selectors`
+     * @notice Binds one target's selectors to their roles on the AccessManager, callable only by the active template
+     * @param _target The contract whose functions are being access-gated
+     * @param _selectors The function selectors to bind, index-aligned with `_roleIds`
+     * @param _roleIds The role id required to call each corresponding selector, index-aligned with `_selectors`
      */
-    function setMarketTargetFunctionRole(address[] calldata _targets, bytes4[] calldata _selectors, uint64[] calldata _roleIds) external;
+    function setMarketTargetFunctionRole(address _target, bytes4[] calldata _selectors, uint64[] calldata _roleIds) external;
 
     /**
      * @notice Grants each role to an account on the AccessManager, callable only by the active template

@@ -75,13 +75,12 @@ contract MockWiringTemplate is BaseDeploymentTemplate {
         }
     }
 
-    /// @dev Drives the factory's array-based role-wiring primitives with the single configured (target, selector, role, account) tuple
+    /// @dev Drives the factory's role-wiring primitives with the single configured (target, selector, role, account) tuple
     function _wireOnce() private {
-        address[] memory targets = new address[](1);
         bytes4[] memory selectors = new bytes4[](1);
         uint64[] memory roleIds = new uint64[](1);
-        (targets[0], selectors[0], roleIds[0]) = (wireTarget, wireSelector, wireRole);
-        ROYCO_FACTORY.setMarketTargetFunctionRole(targets, selectors, roleIds);
+        (selectors[0], roleIds[0]) = (wireSelector, wireRole);
+        ROYCO_FACTORY.setMarketTargetFunctionRole(wireTarget, selectors, roleIds);
 
         uint64[] memory grantRoleIds = new uint64[](1);
         address[] memory grantAccounts = new address[](1);

@@ -11,18 +11,10 @@ import { IRoycoAuth } from "../interfaces/IRoycoAuth.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
+import { IRoycoFactoryGatekeeper } from "../interfaces/factory/IRoycoFactoryGatekeeper.sol";
 import { IRoycoProtocolTemplate } from "../interfaces/factory/IRoycoProtocolTemplate.sol";
 import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
-import {
-    ADMIN_ENTRY_POINT_ROLE,
-    ADMIN_FACTORY_ROLE,
-    ADMIN_PAUSER_ROLE,
-    ADMIN_ROLE,
-    ADMIN_UNPAUSER_ROLE,
-    ADMIN_UPGRADER_ROLE,
-    DEPLOYER_ROLE,
-    SYNC_ROLE
-} from "./Roles.sol";
+import { BURNER_ROLE, SYNC_ROLE } from "./Roles.sol";
 
 /**
  * @title RoycoFactory
@@ -34,6 +26,9 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
 
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoFactoryV2State")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_FACTORY_STORAGE_SLOT = 0x40ecf137e43ccc3fb8e0ec956edc7094cfc159472690a44f90b2be053a987500;
+
+    /// @inheritdoc IRoycoFactory
+    address public immutable override(IRoycoFactory) ROYCO_FACTORY_GATEKEEPER;
 
     /// @dev Holds the address of the template currently inside an `executeMarketDeployment` window, `address(0)` otherwise
     address private transient _activeTemplate;
@@ -53,57 +48,26 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     // CONSTRUCTION + INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    constructor() {
+    /// @param _roycoFactoryGatekeeper The gatekeeper this factory routes market target configuration through
+    constructor(address _roycoFactoryGatekeeper) {
+        require(_roycoFactoryGatekeeper != address(0), FACTORY_GATEKEEPER_CANNOT_BE_ZERO_ADDRESS());
+        ROYCO_FACTORY_GATEKEEPER = _roycoFactoryGatekeeper;
         _disableInitializers();
     }
 
     /**
-     * @notice Initializes the factory proxy against a pre-deployed `AccessManager`
-     * @param _roycoAccessManager Pre-deployed AM. Must already grant `ADMIN_ROLE` to this
-     *        factory's address
+     * @notice Initializes the factory proxy against a pre-deployed `RoycoAccessManager`
+     * @param _roycoAccessManager Pre-deployed access manager whose gatekeeper must already point back at this factory
      */
     function initialize(address _roycoAccessManager) external initializer {
         require(_roycoAccessManager != address(0), ACCESS_MANAGER_CANNOT_BE_ZERO_ADDRESS());
         require(_roycoAccessManager.code.length > 0, ACCESS_MANAGER_HAS_NO_CODE());
 
-        AccessManager am = AccessManager(_roycoAccessManager);
-
-        // Verify the factory holds ADMIN_ROLE on the AM
-        (bool factoryIsAdmin,) = am.hasRole(ADMIN_ROLE, address(this));
-        require(factoryIsAdmin, FACTORY_NOT_ADMIN_ON_ACCESS_MANAGER());
+        // Verify the gatekeeper points back at this factory
+        require(IRoycoFactoryGatekeeper(ROYCO_FACTORY_GATEKEEPER).ROYCO_ACCESS_MANAGER() == _roycoAccessManager, FACTORY_GATEKEEPER_MISMATCH());
 
         // Wire the factory's authority to the specified access manager
         __RoycoBase_init(_roycoAccessManager);
-
-        // Bind factory-level gated selectors to their roles
-        bytes4[] memory deployerSelectors = new bytes4[](2);
-        deployerSelectors[0] = IRoycoFactory.executeMarketDeployment.selector;
-        deployerSelectors[1] = IRoycoFactory.deployDeterministicProxy.selector;
-        am.setTargetFunctionRole(address(this), deployerSelectors, DEPLOYER_ROLE);
-
-        bytes4[] memory upgraderSelectors = new bytes4[](1);
-        upgraderSelectors[0] = UUPSUpgradeable.upgradeToAndCall.selector;
-        am.setTargetFunctionRole(address(this), upgraderSelectors, ADMIN_UPGRADER_ROLE);
-
-        bytes4[] memory adminFactorySelectors = new bytes4[](2);
-        adminFactorySelectors[0] = IRoycoFactory.registerTemplate.selector;
-        adminFactorySelectors[1] = IRoycoFactory.disableTemplate.selector;
-        am.setTargetFunctionRole(address(this), adminFactorySelectors, ADMIN_FACTORY_ROLE);
-
-        // Bind the factory's pause/unpause to the pauser/unpauser roles
-        bytes4[] memory pauserSelectors = new bytes4[](1);
-        pauserSelectors[0] = IRoycoAuth.pause.selector;
-        am.setTargetFunctionRole(address(this), pauserSelectors, ADMIN_PAUSER_ROLE);
-
-        bytes4[] memory unpauserSelectors = new bytes4[](1);
-        unpauserSelectors[0] = IRoycoAuth.unpause.selector;
-        am.setTargetFunctionRole(address(this), unpauserSelectors, ADMIN_UNPAUSER_ROLE);
-
-        // Grant the factory `ADMIN_ENTRY_POINT_ROLE` on the AM
-        am.grantRole(ADMIN_ENTRY_POINT_ROLE, address(this), 0);
-
-        // Grant the factory `SYNC_ROLE` on the AM so market deployments can register kernels on the market syncer
-        am.grantRole(SYNC_ROLE, address(this), 0);
     }
 
     /// @inheritdoc IRoycoFactory
@@ -238,7 +202,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
 
     /// @inheritdoc IRoycoFactory
     function setMarketTargetFunctionRole(
-        address[] calldata _targets,
+        address _target,
         bytes4[] calldata _selectors,
         uint64[] calldata _roleIds
     )
@@ -247,14 +211,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         whenNotPaused
         onlyActiveTemplate
     {
-        require(_targets.length == _selectors.length && _selectors.length == _roleIds.length, LENGTH_MISMATCH());
-
-        AccessManager am = AccessManager(authority());
-        bytes4[] memory selector = new bytes4[](1);
-        for (uint256 i; i < _targets.length; ++i) {
-            selector[0] = _selectors[i];
-            am.setTargetFunctionRole(_targets[i], selector, _roleIds[i]);
-        }
+        IRoycoFactoryGatekeeper(ROYCO_FACTORY_GATEKEEPER).configureFreshTarget(_target, _selectors, _roleIds);
     }
 
     /// @inheritdoc IRoycoFactory
@@ -272,8 +229,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
 
         AccessManager am = AccessManager(authority());
         for (uint256 i; i < _roleIds.length; ++i) {
-            // No template ever legitimately grants the access manager's root-admin role
-            require(_roleIds[i] != ADMIN_ROLE, FACTORY_GRANT_ROLE_FORBIDDEN());
+            require(_roleIds[i] == SYNC_ROLE || _roleIds[i] == BURNER_ROLE, FACTORY_GRANT_ROLE_FORBIDDEN());
             am.grantRole(_roleIds[i], _accounts[i], _executionDelays[i]);
         }
     }
@@ -290,7 +246,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         returns (bytes memory result)
     {
         // The access manager is never a legitimate target for an arbitrary call
-        require(_target != authority(), FACTORY_CALL_TARGET_FORBIDDEN());
+        require(_target != authority() && _target != ROYCO_FACTORY_GATEKEEPER, FACTORY_CALL_TARGET_FORBIDDEN());
 
         // Forward as an execution dispatch
         return _target._dispatch(false, _data);

@@ -4,10 +4,11 @@ pragma solidity ^0.8.28;
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { TAG_ST_PROXY } from "../../../src/factory/templates/base/Constants.sol";
 import { CREATE3 } from "../../../lib/solady/src/utils/CREATE3.sol";
-import { Test } from "lib/forge-std/src/Test.sol";
-import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
+import { Test, console } from "lib/forge-std/src/Test.sol";
+import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
+import { RoycoCreate3Deployer } from "../../../src/factory/RoycoCreate3Deployer.sol";
 
 /**
  * @title Test_MineMarketId
@@ -40,10 +41,9 @@ contract Test_MineMarketId is Test {
     /// @dev The production ("_PROD" salts) factory proxy a given deployer stands up. Mirrors
     ///      DeployScript._deployAccessManagerAndFactory; the whole test suite runs on the production config.
     function _predictFactory(address _deployer) internal pure returns (address) {
-        address am = _c2(keccak256("ROYCO_ACCESS_MANAGER_PROD"), abi.encodePacked(type(AccessManager).creationCode, abi.encode(_deployer)));
-        address impl = _c2(keccak256("ROYCO_FACTORY_IMPLEMENTATION_PROD"), type(RoycoFactory).creationCode);
-        bytes memory proxyCode = abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(impl, abi.encodeCall(RoycoFactory.initialize, (am))));
-        return _c2(keccak256("ROYCO_FACTORY_PROXY_PROD"), proxyCode);
+        // The proxy is a CREATE3 address off the protocol's CREATE3 deployer, so it depends on the salt alone
+        address create3Deployer = _c2(keccak256("ROYCO_CREATE3_DEPLOYER_PROD"), type(RoycoCreate3Deployer).creationCode);
+        return CREATE3.predictDeterministicAddress(keccak256(abi.encode(_deployer, keccak256("ROYCO_FACTORY_PROXY_PROD"))), create3Deployer);
     }
 
     /// @dev The senior-tranche CREATE3 proxy address for a marketId under `_factory`.
@@ -62,5 +62,25 @@ contract Test_MineMarketId is Test {
 
     function test_ConfiguredMarketId_Local_PutsSeniorTrancheFirst() public {
         _assertSeniorTrancheFirst(_predictFactory(vm.createWallet("DEPLOYER").addr));
+    }
+
+    /**
+     * @notice Re-mines the production marketId and logs it, for pasting into MarketDeploymentConfig
+     *         `_initializeMinedMarketIds`. Run when the factory address moves (any change to the access manager's or
+     *         the factory's creation code, or to the singleton salts) and the two guards above start failing
+     * @dev Mirrors MarketDeploymentConfig._mineMarketId: the lowest nonce whose senior-tranche proxy sorts below the
+     *      quote asset, so the senior tranche registers as pool token0
+     */
+    function test_MineForConfigFactories() public view {
+        address factory = _predictFactory(PROD_DEPLOYER);
+        for (uint64 nonce;; ++nonce) {
+            bytes32 id = keccak256(abi.encodePacked(bytes(MARKET_NAME), nonce));
+            if (uint160(_predictSeniorTranche(factory, id)) < uint160(QUOTE_ASSET)) {
+                console.log("production factory:", factory);
+                console.log("mined nonce:", nonce);
+                console.logBytes32(id);
+                return;
+            }
+        }
     }
 }

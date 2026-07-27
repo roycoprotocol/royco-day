@@ -28,6 +28,7 @@ import {
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
     ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
+    MARKET_ROLE_GRANTOR_ROLE,
     ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
@@ -45,6 +46,8 @@ import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
+import { IRoycoAccessManager } from "../../../src/interfaces/factory/IRoycoAccessManager.sol";
+import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
 import { RoycoDayKernel } from "../../../src/kernels/base/RoycoDayKernel.sol";
 import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { RoycoDayBalancerV3Hooks } from "../../../src/kernels/base/liquidity-venue/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
@@ -317,15 +320,49 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(AccessManagedUpgradeable(BALANCER_HOOK).authority(), am, "balancer hook authority");
     }
 
-    /// @notice The factory retains ADMIN_ROLE, ADMIN_ENTRY_POINT_ROLE, and SYNC_ROLE on the AccessManager after
-    ///         deployment (the latter two drive per-market periphery configuration)
-    function test_Auth_FactoryHoldsAdminAndEntryPointRoles() public view {
+    /**
+     * @notice The factory holds ONLY the narrow role set a deployment needs, and specifically NOT `ADMIN_ROLE`
+     * @dev This is the containment property of the gatekeeper design. The factory's template-callable configuration
+     *      primitive takes an arbitrary target, so `ADMIN_ROLE` on the factory handed every enabled template root-admin
+     *      reach over the access manager's whole function map. That role now sits on the non-upgradeable gatekeeper,
+     *      which admits only never-before-configured targets, and the factory keeps just the two roles it forwards
+     *      periphery configuration under plus the admin role over the two roles a deployment grants
+     */
+    function test_Auth_FactoryHoldsOnlyItsNarrowRoleSetAndNotAdmin() public view {
         (bool isAdmin,) = ACCESS_MANAGER.hasRole(0, address(FACTORY)); // ADMIN_ROLE == 0
-        assertTrue(isAdmin, "factory not ADMIN_ROLE");
+        assertFalse(isAdmin, "the factory must NOT hold ADMIN_ROLE: the gatekeeper holds it instead");
+
         (bool isEntry,) = ACCESS_MANAGER.hasRole(ADMIN_ENTRY_POINT_ROLE, address(FACTORY));
         assertTrue(isEntry, "factory not ADMIN_ENTRY_POINT_ROLE");
         (bool isSync,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(FACTORY));
         assertTrue(isSync, "factory not SYNC_ROLE");
+        (bool isGrantor,) = ACCESS_MANAGER.hasRole(MARKET_ROLE_GRANTOR_ROLE, address(FACTORY));
+        assertTrue(isGrantor, "factory not MARKET_ROLE_GRANTOR_ROLE");
+
+        // The role it lost lives on the gatekeeper the factory names, and the pairing is mutual
+        address gatekeeper = FACTORY.ROYCO_FACTORY_GATEKEEPER();
+        assertTrue(gatekeeper != address(0), "the factory must name a gatekeeper");
+        (bool gatekeeperIsAdmin,) = ACCESS_MANAGER.hasRole(0, gatekeeper);
+        assertTrue(gatekeeperIsAdmin, "the gatekeeper must hold ADMIN_ROLE");
+        assertEq(IRoycoFactoryGatekeeper(gatekeeper).ROYCO_FACTORY(), address(FACTORY), "the gatekeeper must serve this factory");
+        assertEq(IRoycoFactoryGatekeeper(gatekeeper).ROYCO_ACCESS_MANAGER(), address(ACCESS_MANAGER), "the gatekeeper must govern this access manager");
+    }
+
+    /**
+     * @notice The market's own contracts are recorded as configured, so no later deployment can re-point them
+     * @dev The invariant the gatekeeper enforces, observed on a real deployment: every contract this market stood up
+     *      is now permanently off limits to any future template
+     */
+    function test_Auth_EveryMarketContractIsRecordedAsConfigured() public view {
+        IRoycoAccessManager am = IRoycoAccessManager(address(ACCESS_MANAGER));
+        assertTrue(am.wasEverConfigured(address(KERNEL)), "kernel must be recorded as configured");
+        assertTrue(am.wasEverConfigured(address(ACCOUNTANT)), "accountant must be recorded as configured");
+        assertTrue(am.wasEverConfigured(address(ST)), "senior tranche must be recorded as configured");
+        assertTrue(am.wasEverConfigured(address(JT)), "junior tranche must be recorded as configured");
+        assertTrue(am.wasEverConfigured(address(LPT)), "liquidity provider tranche must be recorded as configured");
+        assertTrue(am.wasEverConfigured(BALANCER_HOOK), "balancer hook must be recorded as configured");
+        // The shared Balancer governance targets too, which is what makes a second market skip them
+        assertTrue(am.wasEverConfigured(address(VAULT)), "the Balancer vault must be recorded as configured");
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════

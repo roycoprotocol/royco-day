@@ -2,8 +2,18 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
+import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
+import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
+import {
+    ADMIN_ENTRY_POINT_ROLE,
+    ADMIN_FACTORY_ROLE,
+    ADMIN_ROLE,
+    ADMIN_UPGRADER_ROLE,
+    BURNER_ROLE,
+    DEPLOYER_ROLE,
+    SYNC_ROLE
+} from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
@@ -18,7 +28,8 @@ import { UninitializedERC1967Proxy } from "../../mocks/UninitializedERC1967Proxy
  *         guard (NO_ACTIVE_TEMPLATE). The production template exercises these only on a mainnet fork.
  */
 contract Test_FactoryDeploymentWiring is Test {
-    AccessManager internal am;
+    RoycoAccessManager internal am;
+    RoycoFactoryGatekeeper internal gatekeeper;
     RoycoFactory internal factory;
     MockWiringTemplate internal template;
 
@@ -29,12 +40,11 @@ contract Test_FactoryDeploymentWiring is Test {
     function setUp() public {
         WIRE_TARGET = makeAddr("WIRE_TARGET");
         WIRE_ACCOUNT = makeAddr("WIRE_ACCOUNT");
-        am = new AccessManager(address(this));
+        am = new RoycoAccessManager(address(this));
 
-        RoycoFactory impl = new RoycoFactory();
-        factory = RoycoFactory(address(new UninitializedERC1967Proxy(address(impl))));
-        am.grantRole(ADMIN_ROLE, address(factory), 0);
-        factory.initialize(address(am));
+        // The gatekeeper holds ADMIN_ROLE on the factory's behalf; the scaffold stands both up and wires the
+        // factory's own selectors and roles
+        (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         am.grantRole(ADMIN_FACTORY_ROLE, address(this), 0);
         am.grantRole(DEPLOYER_ROLE, address(this), 0);
@@ -58,16 +68,23 @@ contract Test_FactoryDeploymentWiring is Test {
     }
 
     // ---------------------------------------------------------------------
-    // initialize: the factory self-grants the roles its deployment path drives
+    // The factory's standing role set: narrow, and specifically not ADMIN_ROLE
     // ---------------------------------------------------------------------
 
-    function test_Initialize_selfGrantsEntryPointAndSyncRoles() public view {
-        // The periphery configuration hook drives modifyTrancheConfigs (ADMIN_ENTRY_POINT_ROLE) and addMarketKernels
-        // (SYNC_ROLE) as the factory, so initialize must have granted the factory both roles on the AM
+    /// @dev The factory no longer configures itself during `initialize` (it cannot, having no ADMIN_ROLE): the
+    ///      deployment script grants these, which the scaffold mirrors. The periphery configuration hook drives
+    ///      modifyTrancheConfigs (ADMIN_ENTRY_POINT_ROLE) and addMarketKernels (SYNC_ROLE) as the factory
+    function test_FactoryHoldsEntryPointAndSyncRolesButNotAdmin() public view {
         (bool holdsEntryPointRole,) = am.hasRole(ADMIN_ENTRY_POINT_ROLE, address(factory));
-        assertTrue(holdsEntryPointRole, "the factory must hold ADMIN_ENTRY_POINT_ROLE after initialize");
+        assertTrue(holdsEntryPointRole, "the factory must hold ADMIN_ENTRY_POINT_ROLE");
         (bool holdsSyncRole,) = am.hasRole(SYNC_ROLE, address(factory));
-        assertTrue(holdsSyncRole, "the factory must hold SYNC_ROLE after initialize");
+        assertTrue(holdsSyncRole, "the factory must hold SYNC_ROLE");
+
+        // The containment property: ADMIN_ROLE sits on the gatekeeper, never on the factory
+        (bool holdsAdmin,) = am.hasRole(ADMIN_ROLE, address(factory));
+        assertFalse(holdsAdmin, "the factory must NOT hold ADMIN_ROLE");
+        (bool gatekeeperHoldsAdmin,) = am.hasRole(ADMIN_ROLE, address(gatekeeper));
+        assertTrue(gatekeeperHoldsAdmin, "the gatekeeper must hold ADMIN_ROLE instead");
     }
 
     // ---------------------------------------------------------------------
@@ -75,14 +92,12 @@ contract Test_FactoryDeploymentWiring is Test {
     // ---------------------------------------------------------------------
 
     function test_ONLY_ACTIVE_TEMPLATE_guardsSetTargetFunctionRole() public {
-        address[] memory targets = new address[](1);
-        targets[0] = WIRE_TARGET;
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = WIRE_SELECTOR;
         uint64[] memory roleIds = new uint64[](1);
         roleIds[0] = SYNC_ROLE;
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
-        factory.setMarketTargetFunctionRole(targets, selectors, roleIds);
+        factory.setMarketTargetFunctionRole(WIRE_TARGET, selectors, roleIds);
     }
 
     function test_ONLY_ACTIVE_TEMPLATE_guardsGrantMarketRole() public {
@@ -117,6 +132,45 @@ contract Test_FactoryDeploymentWiring is Test {
         // The registry write landed for all three tranches.
         assertEq(factory.trancheToKernel(makeAddr("ST")), makeAddr("KERNEL"), "ST -> kernel registry write");
         assertEq(factory.trancheToKernel(makeAddr("LPT")), makeAddr("KERNEL"), "LPT -> kernel registry write");
+    }
+
+    // ---------------------------------------------------------------------
+    // grantMarketRole: the constant allowlist of roles a deployment may grant
+    // ---------------------------------------------------------------------
+
+    /// @notice `BURNER_ROLE` is the second of the two roles a market deployment legitimately grants (to its kernel)
+    function test_grantMarketRole_allowsBurnerRole() public {
+        template.setMode(template.MODE_WIRE());
+        template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, BURNER_ROLE, WIRE_ACCOUNT);
+
+        factory.executeMarketDeployment(address(template), "");
+
+        (bool member,) = am.hasRole(BURNER_ROLE, WIRE_ACCOUNT);
+        assertTrue(member, "the account must have been granted BURNER_ROLE");
+    }
+
+    /**
+     * @notice Every other role is refused, including ones the factory might otherwise be able to grant
+     * @dev The access manager independently blocks this by making the factory the admin of only `SYNC_ROLE` and
+     *      `BURNER_ROLE`, but that is a global, mutable property: a future `setRoleAdmin` pointing another role at
+     *      `MARKET_ROLE_GRANTOR_ROLE` would silently widen what a template can mint. The factory's constant allowlist
+     *      means widening requires a factory upgrade, behind the upgrader role's execution delay
+     */
+    function test_RevertIf_grantMarketRoleGrantsAnythingOutsideTheAllowlist() public {
+        template.setMode(template.MODE_WIRE());
+        template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, ADMIN_UPGRADER_ROLE, WIRE_ACCOUNT);
+
+        vm.expectRevert(IRoycoFactory.FACTORY_GRANT_ROLE_FORBIDDEN.selector);
+        factory.executeMarketDeployment(address(template), "");
+    }
+
+    /// @notice Including the access manager's root-admin role, the escalation the allowlist most directly denies
+    function test_RevertIf_grantMarketRoleGrantsAdminRole() public {
+        template.setMode(template.MODE_WIRE());
+        template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, ADMIN_ROLE, WIRE_ACCOUNT);
+
+        vm.expectRevert(IRoycoFactory.FACTORY_GRANT_ROLE_FORBIDDEN.selector);
+        factory.executeMarketDeployment(address(template), "");
     }
 
     // ---------------------------------------------------------------------

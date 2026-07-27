@@ -173,32 +173,15 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
     // ROLE BINDING APPLICATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Applies every binding in `_bindings` by calling back into the factory
+    ///  @notice Applies every binding in `_bindings` by calling back into the factory
     function _applyRoleBindings(RoleBindings memory _bindings) internal {
-        // Flatten every (target, selector, roleId) triple across all target bindings into index-aligned arrays, then
-        // install them in a single factory call
         uint256 nTargets = _bindings.targetBindings.length;
-        uint256 totalSelectors;
-        for (uint256 i; i < nTargets; ++i) {
-            require(_bindings.targetBindings[i].selectors.length == _bindings.targetBindings[i].roleIds.length, LENGTH_MISMATCH());
-            totalSelectors += _bindings.targetBindings[i].selectors.length;
-        }
-
-        address[] memory targets = new address[](totalSelectors);
-        bytes4[] memory selectors = new bytes4[](totalSelectors);
-        uint64[] memory roleIds = new uint64[](totalSelectors);
-        uint256 k;
         for (uint256 i; i < nTargets; ++i) {
             TargetBinding memory tb = _bindings.targetBindings[i];
-            uint256 m = tb.selectors.length;
-            for (uint256 j; j < m; ++j) {
-                targets[k] = tb.target;
-                selectors[k] = tb.selectors[j];
-                roleIds[k] = tb.roleIds[j];
-                ++k;
-            }
+            require(tb.selectors.length == tb.roleIds.length, LENGTH_MISMATCH());
+            if (tb.selectors.length == 0) continue;
+            ROYCO_FACTORY.setMarketTargetFunctionRole(tb.target, tb.selectors, tb.roleIds);
         }
-        ROYCO_FACTORY.setMarketTargetFunctionRole(targets, selectors, roleIds);
 
         // Flatten the post-init grants into index-aligned arrays and apply them in a single factory call
         uint256 nGrants = _bindings.postInitGrants.length;

@@ -2,10 +2,11 @@
 pragma solidity ^0.8.28;
 
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
-import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
+import { RoycoAccessManager } from "../../src/factory/RoycoAccessManager.sol";
+import { RoycoCreate3Deployer } from "../../src/factory/RoycoCreate3Deployer.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { TAG_ST_PROXY } from "../../src/factory/templates/base/Constants.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -159,11 +160,15 @@ abstract contract MarketDeploymentConfig {
     function _predictFactoryProxy(address _deployer, bool _isTest) internal pure returns (address) {
         string memory suffix = _isTest ? "_TEST" : "_PROD";
         address am = _create2Address(
-            keccak256(abi.encodePacked("ROYCO_ACCESS_MANAGER", suffix)), keccak256(abi.encodePacked(type(AccessManager).creationCode, abi.encode(_deployer)))
+            keccak256(abi.encodePacked("ROYCO_ACCESS_MANAGER", suffix)),
+            keccak256(abi.encodePacked(type(RoycoAccessManager).creationCode, abi.encode(_deployer)))
         );
-        address impl = _create2Address(keccak256(abi.encodePacked("ROYCO_FACTORY_IMPLEMENTATION", suffix)), keccak256(type(RoycoFactory).creationCode));
-        bytes memory proxyCode = abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(impl, abi.encodeCall(RoycoFactory.initialize, (am))));
-        return _create2Address(keccak256(abi.encodePacked("ROYCO_FACTORY_PROXY", suffix)), keccak256(proxyCode));
+        // The proxy is a CREATE3 address: a function of the CREATE3 deployer and the salt alone, independent of the
+        // implementation it points at. That independence is what lets the gatekeeper take it as a constructor argument.
+        address create3Deployer =
+            _create2Address(keccak256(abi.encodePacked("ROYCO_CREATE3_DEPLOYER", suffix)), keccak256(type(RoycoCreate3Deployer).creationCode));
+        return
+            CREATE3.predictDeterministicAddress(keccak256(abi.encode(_deployer, keccak256(abi.encodePacked("ROYCO_FACTORY_PROXY", suffix)))), create3Deployer);
     }
 
     /// @notice Mines the lowest-nonce marketId whose senior-tranche CREATE3 proxy sorts below `_quoteAsset` under

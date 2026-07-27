@@ -8,7 +8,9 @@ import { TokenInfo, TokenType } from "../../../lib/balancer-v3-monorepo/pkg/inte
 import { LPOracleBase } from "../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/LPOracleBase.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
+import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
+import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
+import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
@@ -62,7 +64,8 @@ contract Test_IdleCDOMarketDeployment is Test {
 
     address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // non-tranche collateral for the guard test
 
-    AccessManager internal am;
+    RoycoAccessManager internal am;
+    RoycoFactoryGatekeeper internal gatekeeper;
     RoycoFactory internal factory;
     DeployScript internal deployScript;
     RoycoDayBalancerV3MarketDeploymentTemplate internal template;
@@ -82,21 +85,12 @@ contract Test_IdleCDOMarketDeployment is Test {
         vm.createSelectFork(rpc, FORK_BLOCK);
 
         // This test contract is the AccessManager admin (ADMIN_ROLE).
-        am = new AccessManager(address(this));
+        am = new RoycoAccessManager(address(this));
 
-        // OZ mandates init data in the ERC1967Proxy constructor, and `initialize` requires the factory to already
-        // hold ADMIN_ROLE on the AM. So deploy the proxy via CREATE2: predict the salted address, grant it
-        // ADMIN_ROLE, then construct the proxy with real init data. (A salt-based prediction is nonce-independent,
-        // the golden suite's CREATE-nonce prediction drifts after createSelectFork on current foundry.)
-        RoycoFactory impl = new RoycoFactory();
-        bytes memory factoryInitData = abi.encodeCall(RoycoFactory.initialize, (address(am)));
-        bytes32 proxySalt = keccak256("FACTORY_PROXY");
-        address predicted = vm.computeCreate2Address(
-            proxySalt, keccak256(abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(address(impl), factoryInitData))), address(this)
-        );
-        am.grantRole(ADMIN_ROLE, predicted, 0);
-        factory = RoycoFactory(address(new ERC1967Proxy{ salt: proxySalt }(address(impl), factoryInitData)));
-        require(address(factory) == predicted, "proxy address prediction failed");
+        // The factory proxy takes a CREATE3 address, a function of its salt alone, which is what lets the gatekeeper
+        // and the factory each hold the other as a constructor immutable. The scaffold stands both up and binds the
+        // factory's own selectors and roles, exactly as the deployment script does.
+        (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         // Grant the factory-facing roles the initialize() call bound to selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);

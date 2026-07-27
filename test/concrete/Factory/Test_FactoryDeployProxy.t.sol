@@ -3,7 +3,9 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
+import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
+import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
+import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ADMIN_PAUSER_ROLE, ADMIN_ROLE, DEPLOYER_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
@@ -28,7 +30,8 @@ contract MockProxyImpl {
  *         implementation provenance, event), its access-control gate, its salt-reuse revert, and its pause gate.
  */
 contract Test_FactoryDeployProxy is Test {
-    AccessManager internal am;
+    RoycoAccessManager internal am;
+    RoycoFactoryGatekeeper internal gatekeeper;
     RoycoFactory internal factory;
     MockProxyImpl internal impl;
 
@@ -37,14 +40,11 @@ contract Test_FactoryDeployProxy is Test {
 
     function setUp() public {
         // This test contract is the AccessManager admin (ADMIN_ROLE).
-        am = new AccessManager(address(this));
+        am = new RoycoAccessManager(address(this));
 
-        // `initialize` requires the factory to already hold ADMIN_ROLE on the AM, so deploy the proxy uninitialized,
-        // grant its (now known) address ADMIN_ROLE, then initialize.
-        RoycoFactory factoryImpl = new RoycoFactory();
-        factory = RoycoFactory(address(new UninitializedERC1967Proxy(address(factoryImpl))));
-        am.grantRole(ADMIN_ROLE, address(factory), 0);
-        factory.initialize(address(am));
+        // The gatekeeper holds ADMIN_ROLE on the factory's behalf; the scaffold stands both up and wires the
+        // factory's own selectors and roles
+        (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         // This contract drives deployDeterministicProxy (DEPLOYER_ROLE) and pause (ADMIN_PAUSER_ROLE) directly.
         am.grantRole(DEPLOYER_ROLE, address(this), 0);

@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IProtocolFeeController } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IProtocolFeeController.sol";
 import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
+import { IVaultAdmin } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultAdmin.sol";
 import { TokenInfo, TokenType } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
+import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
+import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
+import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
+import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
@@ -24,6 +29,7 @@ import {
 } from "../../../script/config/DeploymentTypes.sol";
 import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
 import {
+    ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_FACTORY_ROLE,
     ADMIN_PAUSER_ROLE,
@@ -42,6 +48,7 @@ import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/E
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol";
+import { IRoycoAccessManager } from "../../../src/interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
@@ -61,7 +68,8 @@ contract Test_RoycoFactory is Test {
     uint256 internal constant FORK_BLOCK = 25_400_000;
     address internal constant GYRO_ECLP_POOL_FACTORY = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
 
-    AccessManager internal am;
+    RoycoAccessManager internal am;
+    RoycoFactoryGatekeeper internal gatekeeper;
     RoycoFactory internal factory;
     DeployScript internal deployScript;
     RoycoDayBalancerV3MarketDeploymentTemplate internal template;
@@ -88,28 +96,18 @@ contract Test_RoycoFactory is Test {
         vm.createSelectFork(rpc, FORK_BLOCK);
 
         // This test contract is the AccessManager admin (ADMIN_ROLE).
-        am = new AccessManager(address(this));
+        am = new RoycoAccessManager(address(this));
 
-        // OZ mandates init data in the ERC1967Proxy constructor, and `initialize` requires the factory to already
-        // hold ADMIN_ROLE on the AM. So deploy the proxy via CREATE2: predict the salted address, grant it
-        // ADMIN_ROLE, then construct the proxy with real init data. A salt-based prediction is nonce-independent (a
-        // CREATE-nonce prediction drifts after createSelectFork on current foundry), which keeps `factory` — and the
-        // pre-mined MARKET_ID_* below, keyed to it — stable.
-        RoycoFactory impl = new RoycoFactory();
-        bytes memory factoryInitData = abi.encodeCall(RoycoFactory.initialize, (address(am)));
-        bytes32 proxySalt = keccak256("FACTORY_PROXY");
-        address predicted = vm.computeCreate2Address(
-            proxySalt, keccak256(abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(address(impl), factoryInitData))), address(this)
-        );
-        am.grantRole(ADMIN_ROLE, predicted, 0);
-        factory = RoycoFactory(address(new ERC1967Proxy{ salt: proxySalt }(address(impl), factoryInitData)));
-        require(address(factory) == predicted, "proxy address prediction failed");
+        // The factory proxy takes a CREATE3 address, a function of its salt alone, which is what lets the gatekeeper
+        // and the factory each hold the other as a constructor immutable. The scaffold stands both up and binds the
+        // factory's own selectors and roles, exactly as the deployment script does.
+        (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
-        // Grant the factory-facing roles the initialize() call bound to selectors.
+        // Grant the factory-facing roles the scaffold bound to the factory's selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
         am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
         am.grantRole(ADMIN_UPGRADER_ROLE, UPGRADER, 0);
-        // initialize() binds the factory's pause/unpause to the pauser/unpauser roles, so this test contract (the AM
+        // The scaffold binds the factory's pause/unpause to the pauser/unpauser roles, so this test contract (the AM
         // admin) needs them to pause/unpause the factory directly.
         am.grantRole(ADMIN_PAUSER_ROLE, address(this), 0);
         am.grantRole(ADMIN_UNPAUSER_ROLE, address(this), 0);
@@ -218,7 +216,7 @@ contract Test_RoycoFactory is Test {
 
     /// A zero AccessManager address is rejected at initialization
     function test_RevertIf_InitializedWithZeroAccessManager() external {
-        RoycoFactory freshImpl = new RoycoFactory();
+        RoycoFactory freshImpl = new RoycoFactory(address(gatekeeper));
         vm.expectRevert(IRoycoFactory.ACCESS_MANAGER_CANNOT_BE_ZERO_ADDRESS.selector);
         new ERC1967Proxy(address(freshImpl), abi.encodeCall(RoycoFactory.initialize, (address(0))));
     }
@@ -226,16 +224,24 @@ contract Test_RoycoFactory is Test {
     /// An AccessManager with no code is rejected: the factory refuses a dead authority
     function test_RevertIf_InitializedWithCodelessAccessManager() external {
         address eoa = makeAddr("EOA_NO_CODE");
-        RoycoFactory freshImpl = new RoycoFactory();
+        RoycoFactory freshImpl = new RoycoFactory(address(gatekeeper));
         vm.expectRevert(IRoycoFactory.ACCESS_MANAGER_HAS_NO_CODE.selector);
         new ERC1967Proxy(address(freshImpl), abi.encodeCall(RoycoFactory.initialize, (eoa)));
     }
 
-    /// The factory must already hold ADMIN_ROLE on the AccessManager when initialize runs
-    function test_RevertIf_InitializedWithoutAdminRoleOnAccessManager() external {
-        RoycoFactory freshImpl = new RoycoFactory();
-        vm.expectRevert(IRoycoFactory.FACTORY_NOT_ADMIN_ON_ACCESS_MANAGER.selector);
+    /// The factory's gatekeeper must hold authority over the access manager it is initialized against: a factory whose
+    /// gatekeeper governs some OTHER manager would have no way to configure anything
+    function test_RevertIf_InitializedAgainstAnAccessManagerItsGatekeeperDoesNotGovern() external {
+        RoycoAccessManager otherAM = new RoycoAccessManager(address(this));
+        RoycoFactory freshImpl = new RoycoFactory(address(new RoycoFactoryGatekeeper(address(otherAM), address(factory))));
+        vm.expectRevert(IRoycoFactory.FACTORY_GATEKEEPER_MISMATCH.selector);
         new ERC1967Proxy(address(freshImpl), abi.encodeCall(RoycoFactory.initialize, (address(am))));
+    }
+
+    /// A factory can never be constructed without a gatekeeper to route its configuration through
+    function test_RevertIf_ConstructedWithoutAGatekeeper() external {
+        vm.expectRevert(IRoycoFactory.FACTORY_GATEKEEPER_CANNOT_BE_ZERO_ADDRESS.selector);
+        new RoycoFactory(address(0));
     }
 
     /// The initializer is single-use
@@ -475,6 +481,46 @@ contract Test_RoycoFactory is Test {
     }
 
     /**
+     * @notice A second market deploys against an access manager where the chain-global Balancer governance targets are
+     *         already configured, and declines to re-assert them
+     * @dev This is the interaction between the gatekeeper's fresh-target rule and the shared, non-market-owned targets
+     *      in the template's binding set. The Balancer vault and its protocol fee controller belong to the chain, not to
+     *      a market, so whichever deployment reaches them first configures them and every later one must skip: without
+     *      the skip the gatekeeper would reject market B outright and no second market could ever be deployed
+     */
+    function test_ExecuteMarketDeployment_SecondMarketSkipsAlreadyConfiguredBalancerTargets() external {
+        _register();
+
+        address vault = address(template.BALANCER_V3_VAULT());
+        address feeController = address(template.BALANCER_V3_VAULT().getProtocolFeeController());
+        IRoycoAccessManager accessManager = IRoycoAccessManager(address(am));
+
+        assertFalse(accessManager.wasEverConfigured(vault), "the Balancer vault must start unconfigured");
+        assertFalse(accessManager.wasEverConfigured(feeController), "the fee controller must start unconfigured");
+
+        _deploy(MARKET_ID_A);
+
+        // Market A configured them, and the bindings it installed are live
+        assertTrue(accessManager.wasEverConfigured(vault), "market A must configure the Balancer vault");
+        assertTrue(accessManager.wasEverConfigured(feeController), "market A must configure the fee controller");
+        assertEq(am.getTargetFunctionRole(vault, IVaultAdmin.pausePool.selector), ADMIN_PAUSER_ROLE, "vault pausePool binding from market A");
+        assertEq(
+            am.getTargetFunctionRole(feeController, IProtocolFeeController.setPoolCreatorSwapFeePercentage.selector),
+            ADMIN_BALANCER_POOL_MANAGER_ROLE,
+            "fee controller binding from market A"
+        );
+
+        // Market B deploys without re-asserting them, and market A's bindings survive untouched
+        _deploy(MARKET_ID_B);
+        assertEq(am.getTargetFunctionRole(vault, IVaultAdmin.pausePool.selector), ADMIN_PAUSER_ROLE, "vault binding must survive the second deployment");
+        assertEq(
+            am.getTargetFunctionRole(feeController, IProtocolFeeController.setPoolCreatorSwapFeePercentage.selector),
+            ADMIN_BALANCER_POOL_MANAGER_ROLE,
+            "fee controller binding must survive the second deployment"
+        );
+    }
+
+    /**
      * @notice The YDM salt is market-agnostic: two markets deployed with the same (role, model) pair share ONE JT
      *         YDM instance and ONE LPT LDM instance, while each market's JT-vs-LPT pair stays distinct (the role tag
      *         is part of the salt), and each market's accountant initializes its own curve on the shared instance.
@@ -618,7 +664,7 @@ contract Test_RoycoFactory is Test {
         uint32[] memory delays = new uint32[](1);
 
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
-        factory.setMarketTargetFunctionRole(addrs, selectors, roleIds);
+        factory.setMarketTargetFunctionRole(address(this), selectors, roleIds);
 
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
         factory.grantMarketRole(roleIds, addrs, delays);
@@ -689,9 +735,10 @@ contract Test_RoycoFactory is Test {
      * @notice Even legitimate role holders cannot use the template-callable role primitives outside a deployment
      *         window: a deployer trying to grant itself a market role, or bind a selector to a role it controls,
      *         is rejected because no template is active
-     * @dev This is the factory's privilege-escalation chokepoint: grantMarketRole and
-     *      setMarketTargetFunctionRole wield the factory's ADMIN_ROLE on the AccessManager, so they must be
-     *      callable only from inside executeMarketDeployment's transient template binding
+     * @dev This is the factory's outer privilege-escalation chokepoint: the role primitives reach the AccessManager
+     *      (via the gatekeeper, which holds ADMIN_ROLE), so they must be callable only from inside
+     *      executeMarketDeployment's transient template binding. The gatekeeper's fresh-target rule and the factory's
+     *      grant allowlist are the inner gates, covered separately
      */
     function test_RevertIf_RoleHolderCallsTemplatePrimitivesOutsideDeploymentWindow() external {
         _register();
@@ -703,8 +750,6 @@ contract Test_RoycoFactory is Test {
         accounts[0] = DEPLOYER;
         uint32[] memory delays = new uint32[](1);
 
-        address[] memory targets = new address[](1);
-        targets[0] = address(factory);
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = IRoycoFactory.registerTemplate.selector;
         uint64[] memory bindRoleIds = new uint64[](1);
@@ -714,9 +759,13 @@ contract Test_RoycoFactory is Test {
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
         factory.grantMarketRole(roleIds, accounts, delays);
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
-        factory.setMarketTargetFunctionRole(targets, selectors, bindRoleIds);
+        factory.setMarketTargetFunctionRole(address(factory), selectors, bindRoleIds);
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
-        factory.executeAsFactory(address(am), abi.encodeCall(AccessManager.grantRole, (ADMIN_ROLE, DEPLOYER, 0)));
+        factory.executeAsFactory(address(am), abi.encodeCall(IAccessManager.grantRole, (ADMIN_ROLE, DEPLOYER, 0)));
+        // The gatekeeper is denied as an arbitrary-call target alongside the access manager itself: it holds
+        // ADMIN_ROLE, so from a blast-radius standpoint it IS the access manager
+        vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
+        factory.executeAsFactory(address(gatekeeper), "");
         vm.stopPrank();
     }
 
@@ -726,7 +775,7 @@ contract Test_RoycoFactory is Test {
 
     /// Only ADMIN_UPGRADER_ROLE may upgrade the factory proxy
     function test_RevertIf_NonUpgraderUpgradesFactory() external {
-        address newImpl = address(new RoycoFactory());
+        address newImpl = address(new RoycoFactory(address(gatekeeper)));
         vm.prank(STRANGER);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, STRANGER));
         factory.upgradeToAndCall(newImpl, "");
@@ -734,7 +783,7 @@ contract Test_RoycoFactory is Test {
 
     /// The upgrader role can upgrade and the authority survives the implementation swap
     function test_UpgradeToAndCall_SucceedsForUpgrader() external {
-        address newImpl = address(new RoycoFactory());
+        address newImpl = address(new RoycoFactory(address(gatekeeper)));
         vm.prank(UPGRADER);
         factory.upgradeToAndCall(newImpl, "");
         assertEq(factory.authority(), address(am), "authority preserved");

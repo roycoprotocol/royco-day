@@ -38,17 +38,22 @@ import {
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
+    BURNER_ROLE,
     DEPLOYER_ROLE,
     DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
+    MARKET_ROLE_GRANTOR_ROLE,
     PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../src/factory/Roles.sol";
+import { RoycoAccessManager } from "../src/factory/RoycoAccessManager.sol";
+import { RoycoCreate3Deployer } from "../src/factory/RoycoCreate3Deployer.sol";
 import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
+import { RoycoFactoryGatekeeper } from "../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import {
     TAG_ACCOUNTANT_IMPL,
@@ -279,7 +284,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](21);
+        roleAssignments = new RoleAssignment[](23);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -301,6 +306,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         roleAssignments[18] = _assignment(ADMIN_ENTRY_POINT_ROLE, _addresses.adminEntryPointAddress);
         roleAssignments[19] = _assignment(ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, _addresses.entryPointFeeCollectorAddress);
         roleAssignments[20] = _assignment(ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE, _addresses.marketReinvestLiquidityPremiumAddress);
+        roleAssignments[21] = _assignment(MARKET_ROLE_GRANTOR_ROLE, address(0));
+        roleAssignments[22] = _assignment(BURNER_ROLE, address(0));
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -314,7 +321,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == ADMIN_UPGRADER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         if (role == ST_LP_ROLE || role == JT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == LP_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == SYNC_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == SYNC_ROLE) return RoleConfig({ adminRole: MARKET_ROLE_GRANTOR_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == BURNER_ROLE) return RoleConfig({ adminRole: MARKET_ROLE_GRANTOR_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == MARKET_ROLE_GRANTOR_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_KERNEL_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         if (role == ADMIN_ACCOUNTANT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
@@ -338,38 +347,79 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     // INTERNAL: ACCESS MANAGER + FACTORY
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys (or reuses) the standalone AccessManager + the template-driven factory.
+    /// @notice Deploys (or reuses) the standalone RoycoAccessManager, its factory gatekeeper, and the factory.
     /// @dev The role graph is applied by the caller (when `amExisted` is false) AFTER the periphery singletons are
     ///      deployed, so grants that require default (ADMIN_ROLE) role admins can land before pass 2 re-points them.
-    function _deployAccessManagerAndFactory(address _deployer) internal returns (AccessManager accessManager, RoycoFactory factory, bool amExisted) {
+    function _deployAccessManagerAndFactory(address _deployer) internal returns (RoycoAccessManager accessManager, RoycoFactory factory, bool amExisted) {
         _logSection("Protocol scaffolding");
 
         // Deploy the AccessManager with the deployer as the initial admin so it can wire roles during this broadcast.
         address amAddr;
-        (amAddr, amExisted) =
-            deployWithSanityChecks(_singletonSalt("ROYCO_ACCESS_MANAGER"), abi.encodePacked(type(AccessManager).creationCode, abi.encode(_deployer)), false);
-        accessManager = AccessManager(amAddr);
+        (amAddr, amExisted) = deployWithSanityChecks(
+            _singletonSalt("ROYCO_ACCESS_MANAGER"), abi.encodePacked(type(RoycoAccessManager).creationCode, abi.encode(_deployer)), false
+        );
+        accessManager = RoycoAccessManager(amAddr);
         _logDeploy("AccessManager      ", amAddr, amExisted);
 
-        // Predict the factory proxy address so we can grant it ADMIN_ROLE before its constructor runs `initialize`.
-        (address factoryImpl, bool factoryImplExisted) =
-            deployWithSanityChecks(_singletonSalt("ROYCO_FACTORY_IMPLEMENTATION"), type(RoycoFactory).creationCode, false);
+        // Deploy the CREATE3 deployer
+        (address create3Deployer, bool create3DeployerExisted) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_CREATE3_DEPLOYER"), type(RoycoCreate3Deployer).creationCode, false);
+        _logDeploy("CREATE3 deployer   ", create3Deployer, create3DeployerExisted);
+
+        bytes32 factoryProxySalt = _singletonSalt("ROYCO_FACTORY_PROXY");
+        address factoryProxy = RoycoCreate3Deployer(create3Deployer).predict(_deployer, factoryProxySalt);
+
+        // Deploy the factory gatekeeper against the factory address the CREATE3 salt has already fixed
+        (address gatekeeper, bool gatekeeperExisted) = deployWithSanityChecks(
+            _singletonSalt("ROYCO_FACTORY_GATEKEEPER"), abi.encodePacked(type(RoycoFactoryGatekeeper).creationCode, abi.encode(amAddr, factoryProxy)), false
+        );
+        _logDeploy("Gatekeeper         ", gatekeeper, gatekeeperExisted);
+
+        // Hand it the ADMIN_ROLE the factory used to hold.
+        if (!gatekeeperExisted) accessManager.grantRole(ADMIN_ROLE, gatekeeper, 0);
+
+        (address factoryImpl, bool factoryImplExisted) = deployWithSanityChecks(
+            _singletonSalt("ROYCO_FACTORY_IMPLEMENTATION"), abi.encodePacked(type(RoycoFactory).creationCode, abi.encode(gatekeeper)), false
+        );
         _logDeploy("Factory (impl)     ", factoryImpl, factoryImplExisted);
-        bytes memory factoryProxyCreationCode = getERC1967ProxyCreationCode(factoryImpl, abi.encodeCall(RoycoFactory.initialize, (amAddr)));
-        address predictedFactory = generateDeterminsticAddress(_singletonSalt("ROYCO_FACTORY_PROXY"), factoryProxyCreationCode);
 
-        if (predictedFactory.code.length == 0) {
-            accessManager.grantRole(ADMIN_ROLE, predictedFactory, 0);
-            // The factory must be able to grant the tranche LP roles (admin'd by LP_ROLE_ADMIN_ROLE) so a market's
-            // template can grant them to the kernel + fee recipient during deployment. Granted here,
-            // before any `setRoleAdmin` re-points the LP roles' admin, while the deployer (ADMIN_ROLE) can still grant it.
-            accessManager.grantRole(LP_ROLE_ADMIN_ROLE, predictedFactory, 0);
+        bool factoryProxyExisted = factoryProxy.code.length > 0;
+        if (!factoryProxyExisted) {
+            address deployedProxy = RoycoCreate3Deployer(create3Deployer)
+                .deploy(factoryProxySalt, getERC1967ProxyCreationCode(factoryImpl, abi.encodeCall(RoycoFactory.initialize, (amAddr))));
+            require(deployedProxy == factoryProxy, "factory address mismatch");
         }
-
-        (address factoryProxy, bool factoryProxyExisted) = deployWithSanityChecks(_singletonSalt("ROYCO_FACTORY_PROXY"), factoryProxyCreationCode, false);
-        require(factoryProxy == predictedFactory, "factory address mismatch");
         factory = RoycoFactory(factoryProxy);
         _logDeploy("Factory (proxy)    ", factoryProxy, factoryProxyExisted);
+
+        // Wire the factory roles
+        if (!factoryProxyExisted) _wireFactoryRoles(accessManager, factoryProxy);
+    }
+
+    /// @notice Binds the factory's own gated selectors and grants it the narrow role set it retains.
+    /// @dev Moved out of `RoycoFactory.initialize`, which can no longer perform these writes now that the factory does
+    ///      not hold ADMIN_ROLE. MUST run before `_applyRoleGraph`, whose second pass re-points SYNC_ROLE's admin away
+    ///      from ADMIN_ROLE and would leave the deployer unable to make the SYNC_ROLE grant below.
+    function _wireFactoryRoles(AccessManager _accessManager, address _factory) internal {
+        bytes4[] memory deployerSelectors = new bytes4[](2);
+        deployerSelectors[0] = IRoycoFactory.executeMarketDeployment.selector;
+        deployerSelectors[1] = IRoycoFactory.deployDeterministicProxy.selector;
+        _accessManager.setTargetFunctionRole(_factory, deployerSelectors, DEPLOYER_ROLE);
+
+        bytes4[] memory adminFactorySelectors = new bytes4[](2);
+        adminFactorySelectors[0] = IRoycoFactory.registerTemplate.selector;
+        adminFactorySelectors[1] = IRoycoFactory.disableTemplate.selector;
+        _accessManager.setTargetFunctionRole(_factory, adminFactorySelectors, ADMIN_FACTORY_ROLE);
+
+        _accessManager.setTargetFunctionRole(_factory, _sel(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
+        _accessManager.setTargetFunctionRole(_factory, _sel(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
+        _accessManager.setTargetFunctionRole(_factory, _sel(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
+
+        // The two roles the factory forwards periphery configuration under, and the admin role over the only two roles
+        // a market deployment grants (SYNC_ROLE to the accountant/entry point, BURNER_ROLE to the kernel).
+        _accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, _factory, 0);
+        _accessManager.grantRole(SYNC_ROLE, _factory, 0);
+        _accessManager.grantRole(MARKET_ROLE_GRANTOR_ROLE, _factory, 0);
     }
 
     /// @notice Deploys the market's off-factory contracts, executes the factory wiring transaction, and assembles the
@@ -432,6 +482,11 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     function _applyRoleGraph(AccessManager _am, address _factoryAdmin, address _deployer, RoleAssignment[] memory _roleAssignments) internal {
         // Ensure the factory admin holds ADMIN_ROLE (role 0).
         if (_factoryAdmin != _deployer) _am.grantRole(ADMIN_ROLE, _factoryAdmin, 0);
+
+        // The factory admin also needs MARKET_ROLE_GRANTOR_ROLE. Pass 2 below re-points SYNC_ROLE's and BURNER_ROLE's
+        // admin to it, and OZ checks `grantRole` against a role's CURRENT admin rather than ADMIN_ROLE, so without
+        // this the root admin could no longer grant either role without first re-pointing them back.
+        _am.grantRole(MARKET_ROLE_GRANTOR_ROLE, _factoryAdmin, 0);
 
         // The deployer needs DEPLOYER_ROLE (executeMarketDeployment) + ADMIN_FACTORY_ROLE (registerTemplate).
         _am.grantRole(DEPLOYER_ROLE, _deployer, 0);

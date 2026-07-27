@@ -257,18 +257,26 @@ contract Test_OracleClocks is Test {
         assertEq(clock.poke(), uint32(block.timestamp), "a downward deviation must count the same as an upward one");
     }
 
-    function test_checkpointClock_zeroCheckpointWithThreshold_failsShutOnEveryPoke() public {
-        // A relative deviation from a zero checkpoint is undefined: under a nonzero threshold the deviation check
-        // fails shut (division panic) on every poke, so a zero-baselined clock can never stamp a manufactured
-        // timestamp, the tranche's queue reverts loudly until the clock is rotated
+    function test_checkpointClock_zeroCheckpointWithThreshold_resolvesOnFirstNonZeroRead() public {
+        // A RELATIVE deviation from a zero checkpoint has no scale to measure against, so the threshold cannot be
+        // applied and any nonzero observation counts as a full deviation. The alternative — dividing by the zero
+        // baseline — bricks the clock permanently, holding the tranche's execution gate shut until the clock is
+        // rotated, which is a far worse outcome than resolving off the first real observation
         source.setValue(0);
         MockCheckpointClock clock = _deployCheckpointClock(0.01e18);
         assertEq(clock.getOracleClockState().lastUpdatedAt, 0, "a zero baseline must not stamp at initialization");
 
         vm.warp(block.timestamp + 1 hours);
         source.setValue(1e18);
-        vm.expectRevert(stdError.divisionError);
-        clock.poke();
+        uint256 resolvedAt = clock.poke();
+        assertEq(resolvedAt, uint32(block.timestamp), "the first nonzero observation must checkpoint off a zero baseline");
+        assertEq(_lastValue(clock), 1e18, "the checkpoint must move to the observed value");
+
+        // Once the baseline is nonzero the threshold applies again: a sub-threshold move leaves the checkpoint where
+        // it is, so poke keeps reporting the earlier stamp rather than advancing to now
+        vm.warp(block.timestamp + 1 hours);
+        source.setValue(1e18 + 0.0099e18);
+        assertEq(clock.poke(), resolvedAt, "the threshold must resume governing once a real baseline exists");
     }
 
     function test_checkpointClock_zeroCheckpointWithZeroThreshold_stampsOnFirstNonZeroRead() public {
@@ -281,10 +289,10 @@ contract Test_OracleClocks is Test {
         assertEq(clock.poke(), uint32(block.timestamp), "the first nonzero observation must checkpoint under a zero threshold");
     }
 
-    function test_checkpointClock_midLifeZeroCrossing_dropCheckpointsThenFailsShut() public {
-        // A mid-life wipeout checkpoints the drop to zero as a full deviation, but the zero checkpoint then makes
-        // every further thresholded deviation check fail shut (division panic): the clock stays bricked, loudly,
-        // until rotated, rather than ever stamping off an undefined relative base
+    function test_checkpointClock_midLifeZeroCrossing_checkpointsBothTheDropAndTheRecovery() public {
+        // A mid-life wipeout checkpoints the drop to zero as a full deviation, and the recovery off that zero
+        // checkpoint is a full deviation too, for the same reason: there is no relative scale to apply a threshold
+        // against. The clock passes THROUGH zero rather than being stranded at it
         MockCheckpointClock clock = _deployCheckpointClock(0.01e18);
 
         vm.warp(block.timestamp + 1 hours);
@@ -292,9 +300,19 @@ contract Test_OracleClocks is Test {
         assertEq(clock.poke(), uint32(block.timestamp), "the drop to zero must checkpoint as a full deviation");
         assertEq(_lastValue(clock), 0, "the checkpoint must move to zero");
 
+        vm.warp(block.timestamp + 1 hours);
         source.setValue(1e18);
-        vm.expectRevert(stdError.divisionError);
-        clock.poke();
+        assertEq(clock.poke(), uint32(block.timestamp), "the recovery off a zero checkpoint must checkpoint too");
+        assertEq(_lastValue(clock), 1e18, "the checkpoint must move to the recovered value");
+
+        // A zero source that STAYS zero is not a deviation, so a wiped-out source cannot stamp the clock repeatedly:
+        // the checkpoint holds at the drop's timestamp instead of advancing on every poke
+        vm.warp(block.timestamp + 1 hours);
+        source.setValue(0);
+        uint256 droppedAt = clock.poke();
+        assertEq(droppedAt, uint32(block.timestamp), "the second drop to zero checkpoints");
+        vm.warp(block.timestamp + 1 hours);
+        assertEq(clock.poke(), droppedAt, "an unchanged zero source must not advance the clock");
     }
 
     function test_checkpointClock_missedRoundTripStaysConservative() public {

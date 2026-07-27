@@ -16,6 +16,7 @@ import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
+import { IRoycoAccessManager } from "../../interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
 import { RoycoDayBalancerV3Kernel } from "../../kernels/RoycoDayBalancerV3Kernel.sol";
@@ -462,7 +463,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     ///         the selector/role sets from the per-target binding helpers and the deployer-declared oracle bindings
     function _buildRoleBindings(MarketParams memory _p, DeploymentResult memory _r, address _balancerHook) internal view returns (RoleBindings memory) {
         // Runtime target addresses, index-aligned with the binding helpers below
-        address[10] memory targets = [
+        address[9] memory targets = [
             _r.seniorTranche,
             _r.juniorTranche,
             _r.liquidityProviderTranche,
@@ -471,9 +472,10 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
             address(BALANCER_V3_VAULT),
             address(BALANCER_V3_VAULT.getProtocolFeeController()),
             _balancerHook,
-            _r.kernel,
             _p.collateralAssetOracle
         ];
+
+        IRoycoAccessManager accessManager = IRoycoAccessManager(ROYCO_FACTORY.ROYCO_AUTHORITY());
 
         TargetBinding[] memory targetBindings = new TargetBinding[](targets.length);
         bytes4[] memory s;
@@ -488,22 +490,22 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         targetBindings[3] = TargetBinding({ target: targets[3], selectors: s, roleIds: r });
         (s, r) = _accountantBinding(); // 4: accountant
         targetBindings[4] = TargetBinding({ target: targets[4], selectors: s, roleIds: r });
-        (s, r) = _balancerVaultBinding(); // 5: Balancer vault
+        // 5: Balancer vault, skipped once any market has configured it
+        if (accessManager.wasEverConfigured(targets[5])) (s, r) = (new bytes4[](0), new uint64[](0));
+        else (s, r) = _balancerVaultBinding();
         targetBindings[5] = TargetBinding({ target: targets[5], selectors: s, roleIds: r });
-        (s, r) = _balancerProtocolFeeControllerBinding(); // 6: protocol fee controller
+        // 6: protocol fee controller, skipped once configured.
+        if (accessManager.wasEverConfigured(targets[6])) (s, r) = (new bytes4[](0), new uint64[](0));
+        else (s, r) = _balancerProtocolFeeControllerBinding();
         targetBindings[6] = TargetBinding({ target: targets[6], selectors: s, roleIds: r });
-        if (_p.deployPoolHook) {
-            (s, r) = _balancerHookBinding();
-        } else {
-            // Skipped
-            (s, r) = (new bytes4[](0), new uint64[](0));
-        }
+        // 7: Balancer pool hook, skipped entirely for a hookless market (the target is the zero address)
+        if (_p.deployPoolHook) (s, r) = _balancerHookBinding();
+        else (s, r) = (new bytes4[](0), new uint64[](0));
         targetBindings[7] = TargetBinding({ target: targets[7], selectors: s, roleIds: r });
-        (s, r) = _kernelPricingBinding(); // 8: kernel pricing admin surface
+        // 8: collateral asset oracle restricted surface, declared per oracle kind by the deployer .
+        if (accessManager.wasEverConfigured(targets[8])) (s, r) = (new bytes4[](0), new uint64[](0));
+        else (s, r) = (_p.collateralAssetOracleBindingSelectors, _p.collateralAssetOracleBindingRoleIds);
         targetBindings[8] = TargetBinding({ target: targets[8], selectors: s, roleIds: r });
-        // 9: collateral asset oracle restricted surface, declared per oracle kind by the deployer (empty for kinds with no restricted surface)
-        targetBindings[9] =
-            TargetBinding({ target: targets[9], selectors: _p.collateralAssetOracleBindingSelectors, roleIds: _p.collateralAssetOracleBindingRoleIds });
 
         // Post-init grants: accountant SYNC, kernel BURNER, entry point SYNC, and (hooked markets only) hook SYNC (all zero execution delay)
         // The entry point singleton is re-granted on every deployment: the grant is idempotent and the role is market-agnostic
@@ -518,6 +520,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /// @dev The Day kernel's pricing admin selectors: the Balancer liquidity venue setters and the kernel's collateral
     ///      asset oracle setters, all bound to ADMIN_ORACLE_ROLE
+    /// @dev Overridable so a kernel variant can restate its pricing surface; the result is appended to the kernel's
+    ///      operational selectors by `_kernelBinding` rather than declared as a second binding on the same target
     function _kernelPricingBinding() internal view virtual returns (bytes4[] memory s, uint64[] memory r) {
         s = new bytes4[](4);
         r = new uint64[](4);
@@ -572,9 +576,16 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         }
     }
 
-    function _kernelBinding() private pure returns (bytes4[] memory s, uint64[] memory r) {
-        s = new bytes4[](9);
-        r = new uint64[](9);
+    /// @dev The kernel's operational surface
+    function _kernelBinding() private view returns (bytes4[] memory s, uint64[] memory r) {
+        (bytes4[] memory ps, uint64[] memory pr) = _kernelPricingBinding();
+        uint256 n = 9 + ps.length;
+        s = new bytes4[](n);
+        r = new uint64[](n);
+        for (uint256 i; i < ps.length; ++i) {
+            s[9 + i] = ps[i];
+            r[9 + i] = pr[i];
+        }
         s[0] = IRoycoDayKernel.setProtocolFeeRecipient.selector;
         r[0] = ADMIN_KERNEL_ROLE;
         s[1] = IRoycoAuth.pause.selector;
