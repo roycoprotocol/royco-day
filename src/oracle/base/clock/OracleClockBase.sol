@@ -134,6 +134,8 @@ abstract contract OracleClockBase is RoycoBase {
     function _hasDeviated(uint256 _value, uint256 _checkpointValue, uint256 _minDeviationWAD) internal pure returns (bool deviated) {
         if (_value == _checkpointValue) return false;
         if (_minDeviationWAD == 0) return true;
+        // A zero checkpoint has no relative scale to measure against, so any nonzero observation is a full deviation
+        if (_checkpointValue == 0) return true;
         uint256 delta = (_value > _checkpointValue) ? (_value - _checkpointValue) : (_checkpointValue - _value);
         return (WAD.mulDiv(delta, _checkpointValue) >= _minDeviationWAD);
     }
