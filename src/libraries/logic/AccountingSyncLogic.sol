@@ -288,7 +288,7 @@ library AccountingSyncLogic {
         }
 
         // Signal the settled sync with the final LPT mark and utilization the operation left behind
-        emit IRoycoDayKernel.PostOpTrancheAccountingSynced(state);
+        emit IRoycoDayKernel.PostOpTrancheAccountingSynced(_op, state);
     }
 
     /**

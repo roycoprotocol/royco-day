@@ -19,7 +19,7 @@ import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
 
 /**
  * @title RoycoDayEntryPoint
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Aman Raj
  * @notice Periphery contract enabling asynchronous deposit and redemption flows on Royco Tranches
  * @dev Enforces configurable delays between request and execution to prevent oracle front-running attacks
  * @dev Tranches configured with an oracle clock additionally gate execution on at least one observed oracle update after the request, so any information known at request time is priced into the mark before execution
@@ -99,8 +99,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Poke the market's collateral asset oracle to refresh it
         _pokeOracle(_tranche, config);
 
-        // Sync the market before the request is registered
-        _syncMarket(_tranche);
+        // Sync the market before the request is registered, the reference below prices against this one accounting state
+        (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(config.kernel).syncTrancheAccountingFor(config.trancheType);
 
         // Resolve the request's executable and expiry timestamps: the expiry is a saturating add, so a maximal window
         // pins it at type(uint32).max and the request effectively never expires
@@ -112,7 +112,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         DepositRequest memory request = DepositRequest({
             assets: _assets,
             // Snapshot the shares this deposit would mint at request-time pricing
-            equivalentSharesAtRequestTime: _depositSharesReference(config.kernel, config.trancheType, _tranche, _assets),
+            equivalentSharesAtRequestTime: _depositSharesReference(config.kernel, config.trancheType, _assets, trancheClaims, totalTrancheShares),
             baseRequest: BaseRequest({
                 tranche: _tranche,
                 queuedAtTimestamp: uint32(block.timestamp),
@@ -181,7 +181,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         _enforceNotBlacklisted(config.kernel, msg.sender, _user);
 
         // Sync the market before the deposit is executed
-        _syncMarket(tranche);
+        IRoycoDayKernel(config.kernel).syncTrancheAccountingFor(config.trancheType);
 
         // Resolve the actual amount of assets to deposit
         _assetsToDeposit = (_assetsToDeposit == MAX_TRANCHE_UNITS)
@@ -278,6 +278,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Poke the market's collateral asset oracle to refresh it
         _pokeOracle(_tranche, config);
 
+        // Sync the market before the request is registered, the reference below prices against this one accounting state
+        (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(config.kernel).syncTrancheAccountingFor(config.trancheType);
+
         // Resolve the request's executable and expiry timestamps: the expiry is a saturating add, so a maximal window
         // pins it at type(uint32).max and the request effectively never expires
         executableAtTimestamp = uint32(block.timestamp + config.baseConfig.redemptionDelaySeconds);
@@ -288,7 +291,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         RedemptionRequest memory request = RedemptionRequest({
             shares: _shares,
             // Snapshot the value of the escrowed shares
-            valueAtRequestTime: _redemptionValueReference(config.kernel, config.trancheType, _shares),
+            valueAtRequestTime: _redemptionValueReference(_shares, trancheClaims, totalTrancheShares),
             mode: _mode,
             baseRequest: BaseRequest({
                 tranche: _tranche,
@@ -358,22 +361,22 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request
         _enforceNotBlacklisted(config.kernel, msg.sender, _user);
 
-        // Sync the market before the redemption is executed
-        _syncMarket(tranche);
+        // Sync the market before the redemption is executed, the execution-time value below is measured against this one accounting state
+        (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(config.kernel).syncTrancheAccountingFor(config.trancheType);
 
         // Resolve the actual amount of shares to redeem and the exit route from the request's redemption mode
-        bool isMultiAssetRedemption;
+        bool executeMultiAssetRedemption;
         if (request.mode == RedemptionMode.OPTIMIZED) {
-            (_sharesToRedeem, isMultiAssetRedemption) =
+            (_sharesToRedeem, executeMultiAssetRedemption) =
                 _resolveOptimizedRedemption(tranche, (_sharesToRedeem == type(uint256).max) ? request.shares : _sharesToRedeem);
         } else {
-            isMultiAssetRedemption = (request.mode == RedemptionMode.MULTIASSET);
+            executeMultiAssetRedemption = (request.mode == RedemptionMode.MULTIASSET);
             if (_sharesToRedeem == type(uint256).max) {
-                _sharesToRedeem =
-                    Math.min((isMultiAssetRedemption ? _maxRedeemMultiAsset(tranche) : IRoycoVaultTranche(tranche).maxRedeem(address(this))), request.shares);
+                _sharesToRedeem = Math.min(
+                    (executeMultiAssetRedemption ? _maxRedeemMultiAsset(tranche) : IRoycoVaultTranche(tranche).maxRedeem(address(this))), request.shares
+                );
             }
         }
-        RedemptionMode executedMode = isMultiAssetRedemption ? RedemptionMode.MULTIASSET : RedemptionMode.INKIND;
         // Return early without reverting if the resolved amount is 0 due to market conditions
         if (_sharesToRedeem == 0) return (AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS), 0);
 
@@ -399,8 +402,15 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         uint256 bonusQuoteAssets;
         if (_user == msg.sender || request.baseRequest.executorBonusWAD == 0) {
             // Redeem shares directly to the receiver, forfeiting the value accrued during the queue as protocol fees
-            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) =
-                _redeemWithValueForfeiture(tranche, _sharesToRedeem, request.valueAtRequestTime, request.baseRequest.receiver, isMultiAssetRedemption);
+            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) = _redeemWithValueForfeiture(
+                tranche,
+                _sharesToRedeem,
+                request.valueAtRequestTime,
+                request.baseRequest.receiver,
+                executeMultiAssetRedemption,
+                trancheClaims,
+                totalTrancheShares
+            );
         }
         // Else, if this is a third party execution, withdraw the assets, forfeit the value accrued during the queue as protocol fees, and remit the executor bonus
         else {
@@ -410,8 +420,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             IRoycoDayKernel(config.kernel).enforceNotBlacklisted(request.baseRequest.receiver);
 
             // Redeem shares to this contract for bonus calculation, forfeiting the value accrued during the queue as protocol fees
-            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) =
-                _redeemWithValueForfeiture(tranche, _sharesToRedeem, request.valueAtRequestTime, address(this), isMultiAssetRedemption);
+            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) = _redeemWithValueForfeiture(
+                tranche, _sharesToRedeem, request.valueAtRequestTime, address(this), executeMultiAssetRedemption, trancheClaims, totalTrancheShares
+            );
 
             // Split the redeemed claims and quote into the executor's bonus and the receiver's portion, then remit both
             (bonusClaims, bonusQuoteAssets) =
@@ -420,7 +431,16 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         }
 
         emit RedemptionExecuted(
-            _user, _requestNonce, msg.sender, userSharesRedeemed, executedMode, protocolFeeShares, userClaims, quoteAssets, bonusClaims, bonusQuoteAssets
+            _user,
+            _requestNonce,
+            msg.sender,
+            userSharesRedeemed,
+            (executeMultiAssetRedemption ? RedemptionMode.MULTIASSET : RedemptionMode.INKIND),
+            protocolFeeShares,
+            userClaims,
+            quoteAssets,
+            bonusClaims,
+            bonusQuoteAssets
         );
     }
 
@@ -588,12 +608,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         );
     }
 
-    /// @dev Synchronizes a tranche's market
-    /// @param _tranche The tranche whose market is synchronized
-    function _syncMarket(address _tranche) internal {
-        IRoycoDayKernel(IRoycoVaultTranche(_tranche).KERNEL()).syncTrancheAccounting();
-    }
-
     /**
      * @dev Pokes the collateral asset oracle of the tranche's market
      * @dev The oracle is resolved live from the kernel since an admin can replace it at any time
@@ -651,7 +665,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      * @param _shares The amount of shares to redeem from the tranche
      * @param _valueAtRequestTime The value of the shares being redeemed at the time the redemption was requested
      * @param _receiver The address to receive the redeemed assets
-     * @param _isMultiAssetRedemption Whether to exit a liquidity provider tranche redemption to the LP token's constituents instead of in-kind
+     * @param _executeMultiAssetRedemption Whether to exit a liquidity provider tranche redemption to the LP token's constituents instead of in-kind
+     * @param _trancheClaims The tranche's post-sync claims the execution-time value is measured against
+     * @param _totalTrancheShares The tranche's post-sync share supply
      * @return userSharesRedeemed The shares actually redeemed for the user (total minus forfeited)
      * @return protocolFeeShares The shares forfeited to the protocol equating to the value the escrowed shares accrued during the request lifecycle (zero if their value did not increase)
      * @return userClaims The assets withdrawn from the tranche for the user after forfeiting the accrued value
@@ -662,23 +678,24 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         uint256 _shares,
         NAV_UNIT _valueAtRequestTime,
         address _receiver,
-        bool _isMultiAssetRedemption
+        bool _executeMultiAssetRedemption,
+        AssetClaims memory _trancheClaims,
+        uint256 _totalTrancheShares
     )
         internal
         returns (uint256 userSharesRedeemed, uint256 protocolFeeShares, AssetClaims memory userClaims, uint256 quoteAssets)
     {
         // Initialize the user's shares redeemed as the input
         userSharesRedeemed = _shares;
-        // Compute the value of the shares at execution, without any self-liquidation bonus applied
-        EnrichedTrancheConfig storage config = _getRoycoDayEntryPointStorage().trancheToConfig[_tranche];
-        NAV_UNIT valueAtExecutionTime = _redemptionValueReference(config.kernel, config.trancheType, _shares);
+        // Compute the value of the shares at execution against the caller's synced claims, without any self-liquidation bonus applied
+        NAV_UNIT valueAtExecutionTime = _redemptionValueReference(_shares, _trancheClaims, _totalTrancheShares);
         if (valueAtExecutionTime > _valueAtRequestTime) {
             protocolFeeShares = _shares.mulDiv((valueAtExecutionTime - _valueAtRequestTime), valueAtExecutionTime, Math.Rounding.Floor);
         }
         // Redeem the shares the user is entitled to after deducting the protocol fee shares
         // A fully forfeited redemption (a zero-value snapshot) settles without a redeem call, mirroring the deposit path
         if ((userSharesRedeemed -= protocolFeeShares) != 0) {
-            if (_isMultiAssetRedemption) {
+            if (_executeMultiAssetRedemption) {
                 // Multi-asset redemptions mandate that liquidity is removed in a way that cannot render less value than promised at present NAV values
                 (userClaims, quoteAssets) = IRoycoLiquidityProviderTranche(_tranche).redeemMultiAsset(userSharesRedeemed, 0, 0, _receiver, address(this));
             } else {
@@ -689,28 +706,46 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         if (protocolFeeShares != 0) _getRoycoDayEntryPointStorage().trancheToProtocolFeeShares[_tranche] += protocolFeeShares;
     }
 
-    /// @dev Resolves the request-time SHARE reference for a deposit: the shares the deposit would mint at request-time pricing, the basis the execution-time forfeiture is measured against.
-    function _depositSharesReference(address _kernel, TrancheType _trancheType, address _tranche, TRANCHE_UNIT _assets) internal returns (uint256 shares) {
+    /**
+     * @dev Resolves the request-time SHARE reference for a deposit: the shares the deposit would mint at request-time pricing, the basis the execution-time forfeiture is measured against
+     * @dev Priced against the caller's synced claims, so the NAV basis and the supply come from the one accounting state the call already resolved
+     * @param _kernel The kernel of the market the deposit is priced against
+     * @param _trancheType The type of the tranche being deposited into
+     * @param _assets The amount of tranche assets the reference is priced for
+     * @param _trancheClaims The tranche's post-sync claims, the mint's NAV basis
+     * @param _totalTrancheShares The tranche's post-sync share supply
+     * @return shares The shares the deposit would mint at the synced pricing
+     */
+    function _depositSharesReference(
+        address _kernel,
+        TrancheType _trancheType,
+        TRANCHE_UNIT _assets,
+        AssetClaims memory _trancheClaims,
+        uint256 _totalTrancheShares
+    )
+        internal
+        view
+        returns (uint256 shares)
+    {
         // Convert the assets to NAV units
         NAV_UNIT depositValue = (_trancheType == TrancheType.LIQUIDITY_PROVIDER)
             ? IRoycoDayKernel(_kernel).convertLPTAssetsToValue(_assets)
             : IRoycoDayKernel(_kernel).convertCollateralAssetsToValue(_assets);
-        // Read the post-sync state so the NAV basis and supply come from one accounting state
-        (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 totalTrancheShares) =
-            IRoycoDayKernel(_kernel).syncTrancheAccountingFor(_trancheType);
         // Use the clamp-free conversion so the dilution clamp never manufactures forfeiture, the real mint at execution is still clamped
-        return ValuationLogic._convertToSharesUnclamped(depositValue, trancheClaims.nav, totalTrancheShares, Math.Rounding.Floor);
+        return ValuationLogic._convertToSharesUnclamped(depositValue, _trancheClaims.nav, _totalTrancheShares, Math.Rounding.Floor);
     }
 
     /**
      * @dev Resolves the redemption value reference: the escrowed shares' pro-rata claim on the tranche's full post-sync claims
      * @dev The full claims basis mirrors execution, an LPT redemption claims both effective-NAV legs including the idle liquidity premium senior shares
      * @dev The reference excludes any self-liquidation bonus applied when the redemption executes, so the bonus is never skimmed as queue-time accrual
+     * @param _shares The amount of escrowed shares the reference is priced for
+     * @param _trancheClaims The tranche's post-sync claims the shares are scaled against
+     * @param _totalTrancheShares The tranche's post-sync share supply
+     * @return value The escrowed shares' pro-rata claim on the synced claims
      */
-    function _redemptionValueReference(address _kernel, TrancheType _trancheType, uint256 _shares) internal returns (NAV_UNIT value) {
-        // Read the post-sync state so the claims and supply come from one accounting state
-        (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(_kernel).syncTrancheAccountingFor(_trancheType);
-        return TrancheClaimsLogic._scaleAssetClaims(trancheClaims, _shares, totalTrancheShares, true).nav;
+    function _redemptionValueReference(uint256 _shares, AssetClaims memory _trancheClaims, uint256 _totalTrancheShares) internal pure returns (NAV_UNIT value) {
+        return TrancheClaimsLogic._scaleAssetClaims(_trancheClaims, _shares, _totalTrancheShares, true).nav;
     }
 
     /**
@@ -719,17 +754,23 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      *      exiting multi-asset only when its bound is strictly wider (equal bounds stay in-kind), so a redemption the
      *      market can serve is never left behind by the in-kind gate
      * @param _tranche The liquidity provider tranche being redeemed from
-     * @param _target The share count the execution targets (the whole remaining request under the MAX sentinel)
+     * @param _targetSharesToRedeem The share count the execution targets (the whole remaining request under the MAX sentinel)
      * @return sharesToRedeem The resolved share count: the target when in-kind serves it whole, else the dominant bound capped at the target
-     * @return isMultiAssetRedemption Whether the redemption exits multi-asset (the multi-asset bound is strictly wider)
+     * @return executeMultiAssetRedemption Whether the redemption exits multi-asset (the multi-asset bound is strictly wider)
      */
-    function _resolveOptimizedRedemption(address _tranche, uint256 _target) internal returns (uint256 sharesToRedeem, bool isMultiAssetRedemption) {
+    function _resolveOptimizedRedemption(
+        address _tranche,
+        uint256 _targetSharesToRedeem
+    )
+        internal
+        returns (uint256 sharesToRedeem, bool executeMultiAssetRedemption)
+    {
         // In-kind whenever it can serve the entire target
         uint256 maxRedeemInKind = IRoycoVaultTranche(_tranche).maxRedeem(address(this));
-        if (maxRedeemInKind >= _target) return (_target, false);
+        if (maxRedeemInKind >= _targetSharesToRedeem) return (_targetSharesToRedeem, false);
         // Otherwise fill up to the dominant bound, exiting multi-asset only when its bound is strictly wider
         uint256 maxRedeemMultiAsset = _maxRedeemMultiAsset(_tranche);
-        return (Math.min(Math.max(maxRedeemInKind, maxRedeemMultiAsset), _target), maxRedeemMultiAsset > maxRedeemInKind);
+        return (Math.min(Math.max(maxRedeemInKind, maxRedeemMultiAsset), _targetSharesToRedeem), maxRedeemMultiAsset > maxRedeemInKind);
     }
 
     /**

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
-import { AssetClaims, SyncedAccountingState, TrancheType } from "../libraries/Types.sol";
+import { AssetClaims, Operation, SyncedAccountingState, TrancheType } from "../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
 
 /**
@@ -128,9 +128,12 @@ interface IRoycoDayKernel {
     /// @param resultingState The resulting market state after synchronizing the tranche accounting
     event PreOpTrancheAccountingSynced(SyncedAccountingState resultingState);
 
-    /// @notice Emitted when a post-operation tranche accounting synchronization settles
-    /// @param resultingState The resulting market state after synchronizing the tranche accounting
-    event PostOpTrancheAccountingSynced(SyncedAccountingState resultingState);
+    /**
+     * @notice Emitted when a post-operation tranche accounting synchronization settles
+     * @param op The operation the synchronization settled
+     * @param resultingState The resulting market state after synchronizing the tranche accounting
+     */
+    event PostOpTrancheAccountingSynced(Operation op, SyncedAccountingState resultingState);
 
     /**
      * @notice Emitted when the kernel deploys its held liquidity-premium senior shares into the liquidity provider tranche's venue
