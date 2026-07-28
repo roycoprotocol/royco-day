@@ -317,7 +317,9 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
         AssetClaims memory zeroClaims;
         vm.prank(USER_A);
         vm.expectEmit(address(entryPoint));
-        emit IRoycoDayEntryPoint.RedemptionExecuted(USER_A, nonce, USER_A, maxMultiAssetShares, 0, previewClaims, previewQuote, zeroClaims, 0);
+        emit IRoycoDayEntryPoint.RedemptionExecuted(
+            USER_A, nonce, USER_A, maxMultiAssetShares, IRoycoDayEntryPoint.RedemptionMode.MULTIASSET, 0, previewClaims, previewQuote, zeroClaims, 0
+        );
         entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
     }
 

@@ -128,20 +128,9 @@ interface IRoycoDayEntryPoint {
      * @param user The user requesting the deposit
      * @param nonce The nonce identifying this request
      * @param tranche The tranche for which the deposit was requested
-     * @param assets The amount of assets requested to be deposited into the tranche
-     * @param executableAtTimestamp The timestamp at which the request can be executed
-     * @param expiresAtTimestamp The timestamp at or after which the request can no longer be executed and may only be cancelled (saturated at type(uint32).max: a maximal value effectively never arrives)
-     * @param executorBonusWAD The bonus percentage offered to executors (type(uint64).max if opted out), scaled to WAD precision
+     * @param request The complete deposit request snapshot
      */
-    event DepositRequested(
-        address indexed user,
-        uint256 indexed nonce,
-        address indexed tranche,
-        TRANCHE_UNIT assets,
-        uint32 executableAtTimestamp,
-        uint32 expiresAtTimestamp,
-        uint64 executorBonusWAD
-    );
+    event DepositRequested(address indexed user, uint256 indexed nonce, address indexed tranche, DepositRequest request);
 
     /**
      * @notice Emitted when a deposit request is executed
@@ -177,22 +166,9 @@ interface IRoycoDayEntryPoint {
      * @param user The user requesting the redemption
      * @param nonce The nonce identifying this request
      * @param tranche The tranche for which the redemption was requested
-     * @param shares The amount of shares requested to be redeemed from the tranche
-     * @param mode The asset composition this redemption exits to (see RedemptionMode)
-     * @param executableAtTimestamp The timestamp at which the request can be executed
-     * @param expiresAtTimestamp The timestamp at or after which the request can no longer be executed and may only be cancelled (saturated at type(uint32).max: a maximal value effectively never arrives)
-     * @param executorBonusWAD The bonus percentage offered to executors (type(uint64).max if opted out), scaled to WAD precision
+     * @param request The complete redemption request snapshot
      */
-    event RedemptionRequested(
-        address indexed user,
-        uint256 indexed nonce,
-        address indexed tranche,
-        uint256 shares,
-        RedemptionMode mode,
-        uint32 executableAtTimestamp,
-        uint32 expiresAtTimestamp,
-        uint64 executorBonusWAD
-    );
+    event RedemptionRequested(address indexed user, uint256 indexed nonce, address indexed tranche, RedemptionRequest request);
 
     /**
      * @notice Emitted when a redemption request is executed
@@ -200,6 +176,7 @@ interface IRoycoDayEntryPoint {
      * @param nonce The nonce identifying the executed request
      * @param executor The address that executed the request (user or executor)
      * @param sharesRedeemed The shares redeemed for the user (the receiver's and the executor's portions combined)
+     * @param executedMode The asset composition actually used for this fill; OPTIMIZED resolves to INKIND or MULTIASSET
      * @param protocolFeeShares The shares forfeited to the protocol equating to the value the escrowed shares accrued during the request lifecycle (zero if their value did not increase)
      * @param userClaims The asset claims withdrawn to the receiver
      * @param quoteAssets The quote withdrawn to the receiver (zero unless a liquidity provider tranche redemption exits multi-asset)
@@ -211,6 +188,7 @@ interface IRoycoDayEntryPoint {
         uint256 indexed nonce,
         address indexed executor,
         uint256 sharesRedeemed,
+        RedemptionMode executedMode,
         uint256 protocolFeeShares,
         AssetClaims userClaims,
         uint256 quoteAssets,
