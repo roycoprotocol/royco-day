@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { stdError } from "../../../lib/forge-std/src/StdError.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { MarketState, Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
@@ -591,7 +592,7 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         assertEq(s.fixedTermEndTimestamp, end, "stored fixed-term end untouched");
         assertEq(jtYDM.yieldShareCallCount(), jtCallsBefore, "no jt accrual in a post-op");
         assertEq(lptYDM.yieldShareCallCount(), lptCallsBefore, "no lt accrual in a post-op");
-        assertEq(_countAccountantLogs(vm.getRecordedLogs(), IRoycoDayAccountant.PreOpTrancheAccountingSynced.selector), 0, "post-op emits no sync event");
+        assertEq(_countAccountantLogs(vm.getRecordedLogs(), IRoycoDayKernel.PreOpTrancheAccountingSynced.selector), 0, "the sync events live on the kernel, the accountant emits none");
     }
 
     /**
@@ -816,11 +817,9 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         assertLe(state.liquidityUtilizationWAD, WAD, "its own liquidity gate was satisfied");
     }
 
-    /// commitLiquidityProviderTrancheRawNAV writes the committed liquidity raw NAV with its exact event
-    function test_Commit_writesLastLPTRawNAVWithEvent() public {
+    /// commitLiquidityProviderTrancheRawNAV writes the committed liquidity raw NAV
+    function test_Commit_writesLastLPTRawNAV() public {
         _seedFlatWithLPT(SEED_LPT_RAW);
-        vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.LiquidityProviderTrancheRawNAVCommitted(toNAVUnits(uint256(77e18)));
         kernel.doCommit(toNAVUnits(uint256(77e18)));
         assertEq(toUint256(accountant.getState().lastLPTRawNAV), 77e18, "lt raw NAV committed");
     }
@@ -852,9 +851,7 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
      */
     function test_Commit_isUngatedAndArmsBothGatesForLaterOperations() public {
         _seedFlatWithLPT(SEED_LPT_RAW);
-        // The breaching commit passes with only its event, no gate, no revert
-        vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.LiquidityProviderTrancheRawNAVCommitted(toNAVUnits(uint256(10e18)));
+        // The breaching commit passes, no gate, no revert
         kernel.doCommit(toNAVUnits(uint256(10e18)));
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         assertEq(toUint256(s.lastLPTRawNAV), 10e18, "the breaching mark is committed verbatim");

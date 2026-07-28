@@ -13,6 +13,7 @@ contract MockTrancheShareLedger {
     uint256 public totalSupply;
 
     uint256 public premiumMintCallCount;
+    /// @dev The caller of the last premium mint (the kernel, the only mint recipient now that the surface takes none)
     address public lastPremiumMintTo;
     uint256 public lastPremiumSharesMinted;
 
@@ -25,9 +26,9 @@ contract MockTrancheShareLedger {
     }
 
     /// @dev Mirror of IRoycoSeniorTranche.mintLiquidityPremiumShares, recording the call and growing the supply
-    function mintLiquidityPremiumShares(address _to, uint256 _liquidityPremiumShares) external returns (uint256 totalTrancheShares) {
+    function mintLiquidityPremiumShares(uint256 _liquidityPremiumShares) external returns (uint256 totalTrancheShares) {
         premiumMintCallCount++;
-        lastPremiumMintTo = _to;
+        lastPremiumMintTo = msg.sender;
         lastPremiumSharesMinted = _liquidityPremiumShares;
         totalSupply += _liquidityPremiumShares;
         return totalSupply;

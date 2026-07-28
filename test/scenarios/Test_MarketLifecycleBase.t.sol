@@ -271,8 +271,6 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), LPT_PREMIUM_SHARES, POST_SYNC_ST_SUPPLY);
         vm.expectEmit(address(kernel));
         emit IRoycoDayKernel.LiquidityPremiumReinvested(LPT_PREMIUM_SHARES, toTrancheUnits(REINVESTED_BPT));
-        vm.expectEmit(address(accountant));
-        emit IRoycoDayAccountant.LiquidityProviderTrancheRawNAVCommitted(toNAVUnits(POST_DEPLOY_LPT_RAW_NAV));
         SyncedAccountingState memory state = _sync();
 
         // The collateral mark is hand-derived exactly from the rate and oracle price in one conversion

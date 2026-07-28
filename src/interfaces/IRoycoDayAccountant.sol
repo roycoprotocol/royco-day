@@ -124,18 +124,6 @@ interface IRoycoDayAccountant {
     /// @param fixedTermEndTimestamp The end timestamp of the new fixed term regime
     event FixedTermCommenced(uint32 fixedTermEndTimestamp);
 
-    /// @notice Emitted when a pre-operation tranche accounting synchronization is executed
-    /// @param resultingState The resulting market state after synchronizing the tranche accounting
-    event PreOpTrancheAccountingSynced(SyncedAccountingState resultingState);
-
-    /// @notice Emitted when a post-operation tranche accounting synchronization is executed
-    /// @param resultingState The resulting market state after synchronizing the tranche accounting
-    event PostOpTrancheAccountingSynced(SyncedAccountingState resultingState);
-
-    /// @notice Emitted when the kernel commits the liquidity provider tranche's freshly marked raw NAV after a sync
-    /// @param lptRawNAV The committed liquidity provider tranche raw NAV (the oracle value of the AMM or another market-making venue)
-    event LiquidityProviderTrancheRawNAVCommitted(NAV_UNIT lptRawNAV);
-
     /// @notice Emitted when the junior tranche yield distribution model is updated
     /// @param jtYDM The new junior tranche's YDM address
     event JuniorTrancheYDMUpdated(address jtYDM);

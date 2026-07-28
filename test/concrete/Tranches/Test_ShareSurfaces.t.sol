@@ -99,7 +99,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
      */
     function test_MintLiquidityPremiumShares_KernelOnlyAndZeroIsNoOp() public {
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
-        seniorTranche.mintLiquidityPremiumShares(address(kernel), 1e18);
+        seniorTranche.mintLiquidityPremiumShares(1e18);
 
         // Expected values are pre-call reads: a no-op must leave every one of them byte-identical
         uint256 supplyBefore = seniorTranche.totalSupply();
@@ -107,7 +107,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         vm.expectEmit(address(seniorTranche));
         emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), 0, supplyBefore);
         vm.prank(address(kernel));
-        uint256 reportedSupply = seniorTranche.mintLiquidityPremiumShares(address(kernel), 0);
+        uint256 reportedSupply = seniorTranche.mintLiquidityPremiumShares(0);
 
         assertEq(reportedSupply, supplyBefore, "a zero-share premium mint must report the unchanged supply");
         assertEq(seniorTranche.totalSupply(), supplyBefore, "a zero-share premium mint must not change the supply");
@@ -133,7 +133,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         seniorTranche.mintProtocolFeeShares(PROTOCOL_FEE_RECIPIENT, 1e18);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        seniorTranche.mintLiquidityPremiumShares(address(kernel), 1e18);
+        seniorTranche.mintLiquidityPremiumShares(1e18);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         seniorTranche.mint(address(this), 1e18);
         vm.stopPrank();
@@ -161,7 +161,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         // So does the zero-share premium mint
         vm.expectEmit(address(seniorTranche));
         emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), 0, supplyBefore);
-        uint256 premiumReportedSupply = seniorTranche.mintLiquidityPremiumShares(address(kernel), 0);
+        uint256 premiumReportedSupply = seniorTranche.mintLiquidityPremiumShares(0);
         // The plain mint refuses the same zero-share call on its own zero-shares guard, before any balance update
         vm.expectRevert(IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector);
         seniorTranche.mint(address(this), 0);

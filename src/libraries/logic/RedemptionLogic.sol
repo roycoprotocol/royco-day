@@ -348,8 +348,6 @@ library RedemptionLogic {
      * @dev Max assets withdrawable from LPT multi-asset, z: (LPT_RAW_NAV - z) = ((ST_EFFECTIVE_NAV - (z * r)) * MIN_LIQUIDITY)
      *      Isolate z: z = (LPT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)) * LPT_RAW_NAV / (LPT_RAW_NAV - (SENIOR_SHARE_REDEMPTION_NAV * MIN_LIQUIDITY))
      *
-     * @dev The idle liquidity premium senior shares are assumed unreinvested (the worst case): a reinvestment grows the LPT raw NAV
-     *      and its withdrawable surplus by the same premium value, which can only raise the bound
      * @param _owner The address that is withdrawing the assets
      * @return claimOnLPTNAV The notional claims on LPT assets that the liquidity provider tranche has denominated in kernel's NAV units
      * @return lptMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units

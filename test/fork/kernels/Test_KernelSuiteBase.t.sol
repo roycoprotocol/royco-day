@@ -3601,10 +3601,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // The independent signal: the kernel's ERC20 BPT balance grew by exactly the credited mint
         assertEq(post.kernelBPTBal - pre.kernelBPTBal, ownedDeltaAssets, "the kernel's BPT balance must grow by exactly the credited venue mint");
 
-        (uint256 commitCount, bytes memory commitData) =
-            _lastLogData(logs, address(ACCOUNTANT), IRoycoDayAccountant.LiquidityProviderTrancheRawNAVCommitted.selector);
-        assertGt(commitCount, 0, "the fresh depth must be re-committed");
-        assertEq(toNAVUnits(abi.decode(commitData, (uint256))), post.lastLPTRawNAV, "the final commit must carry the committed mark");
+        // The re-commit has no event of its own, the committed state is the pin
         assertGt(post.lastLPTRawNAV, pre.lastLPTRawNAV, "the committed depth must grow");
         assertLt(post.liquidityUtilizationWAD, pre.liquidityUtilizationWAD, "the deployment must lower liquidity utilization");
         _assertSolvency();

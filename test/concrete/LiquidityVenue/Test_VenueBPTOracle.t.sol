@@ -191,10 +191,10 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
     /**
      * @notice At TVL == 0 with BPT supply outstanding, BPT -> NAV marks exactly 0 without reverting (TVL is the numerator
      *         of the mark), while NAV -> BPT panics with division-by-zero (TVL is the denominator of the inverse)
-     * @dev This directional asymmetry is why the raw-NAV mark itself never bricks a sync: the sync only ever reads the
-     *      tolerant BPT -> NAV direction, and the sole sync-bricking consumer of the panicking inverse is the reinvest
-     *      path's NAV -> tranche division (pinned in the sibling reinvest test file). This test pins the exact boundary
-     *      between the tolerant and the panicking direction
+     * @dev This directional asymmetry is why the raw-NAV mark never bricks an operation: syncs only ever read the
+     *      tolerant BPT -> NAV direction, and the panicking inverse's one protocol consumer, the reinvestment floor,
+     *      tolerates the conversion and defers (pinned in the sibling reinvest test file). This test pins the exact
+     *      boundary between the tolerant and the panicking direction
      */
     function test_LPTConvertTrancheUnitsToNAVUnits_ZeroTVLWithSupply_MarksZeroWithoutRevert() public {
         bptOracle.setTVL(0);

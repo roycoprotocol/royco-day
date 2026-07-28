@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { stdError } from "../../../lib/forge-std/src/StdError.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -137,55 +138,58 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
     }
 
     /**
-     * @notice With the BPT oracle marking a zero TVL while BPT supply is positive, the sync that would mint a
-     *         pending liquidity premium reverts with a division-by-zero — and because every tranche operation runs
-     *         that same pre-op sync, every operation reverts until the oracle heals
-     * @dev The reinvestment attempt is designed to be non-blocking: the venue add runs behind a tolerated low-level
-     *      call so a failed deploy leaves the premium idle instead of reverting the operation. But the gate's floor
-     *      is computed BEFORE that tolerated frame, and converting the premium's NAV to BPT divides by the oracle
-     *      TVL — zero TVL with a nonzero BPT supply skips the empty-pool early-return and reverts in the conversion
-     *      itself. The pending senior gain never commits (every sync reverts before committing), so no sync, no
-     *      deposit, and no redemption can run until the oracle reports a sane TVL.
+     * @notice With the BPT oracle marking a zero TVL while BPT supply is positive, the sync survives and commits a
+     *         zero mark through the tolerant conversion direction, and the market degrades through its own gates:
+     *         liquidity utilization pegs, so every liquidity-enforced operation reverts while the operations priced
+     *         solely by the collateral oracle keep running
+     * @dev No conversion-level guard exists by design (a zero TVL marks zero, it never bricks a sync), so the fail-shut
+     *      surface is exactly the existing requirement enforcement: ST deposits and both LPT exits clamp on
+     *      LIQUIDITY_REQUIREMENT_VIOLATED, senior redemptions stay live, and their post-op deployment attempt defers
+     *      against the unpriceable floor instead of reverting
      */
-    function test_SyncTrancheAccounting_RevertsWhenOracleTVLZeroWithBPTSupply() public {
+    function test_SyncTrancheAccounting_ZeroTVLMarksZeroAndClampsLiquidityGates() public {
         _seedMarket(100e18, 50e18);
+        // Seed live kernel-held depth so the poisoned mark prices real holdings, and stage a redeemable senior position
+        _seedLPT(10e18, 2e18, 8 * (10 ** uint256(cell.quoteAsset.decimals)));
+        stJtVault.mintShares(ST_PROVIDER, 1e18);
+        vm.startPrank(ST_PROVIDER);
+        stJtVault.approve(address(seniorTranche), 1e18);
+        seniorTranche.deposit(toTrancheUnits(1e18), ST_PROVIDER);
+        vm.stopPrank();
 
-        // The first sync initializes the premium accrual clock
-        vm.prank(SYNC_OPERATOR);
-        kernel.syncTrancheAccounting();
-
-        // Arm venue slippage so that even if the deploy attempt were reached it would defer and keep the premium
-        // idle — proving the revert below comes from the floor computation, not from the tolerated venue add
-        setVenueSlippageMode(true);
-
-        // Accrue senior gain across a real time window so the NEXT sync mints a nonzero premium (the fee path only
-        // attempts a reinvestment when premium shares actually minted, so a nonzero pending premium is what arms it)
+        // Accrue senior gain across a real time window so the poisoned sync below still stages its premium normally
         _warpAndRefreshFeed(1 days);
         applySTPnL(1000); // +10%
 
-        // Poison the oracle: zero TVL against a live pool. The seeded pool carries 6.000001e18 BPT, so the
-        // fair-value conversion's zero-supply early-return does not fire and the division by TVL == 0 is reached
+        // Poison the oracle: zero TVL against a live pool
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
         bptOracle.setTVL(0);
         assertGt(balancerVault.totalSupply(address(bpt)), 0, "arrange: the poisoned state requires live BPT supply against the zero TVL");
 
-        // The sync itself reverts: the premium mint's deploy attempt divides by the zero TVL while computing the gate floor
+        // The sync survives and commits the zero mark: the tolerant conversion direction prices the holdings at zero
         vm.prank(SYNC_OPERATOR);
-        vm.expectRevert(stdError.divisionError);
         kernel.syncTrancheAccounting();
+        assertEq(toUint256(accountant.getState().lastLPTRawNAV), 0, "the poisoned mark must commit as exactly zero");
+        assertGt(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the sync must still stage its accrued premium idle");
 
-        // An ordinary senior deposit reverts identically: its pre-op sync mints the same pending premium and hits
-        // the same division, so the oracle outage locks out depositors with no exposure to the liquidity provider tranche
+        // The zero mark pegs liquidity utilization, so the existing gates clamp every operation the mark prices
         stJtVault.mintShares(ST_PROVIDER, 1e18);
         vm.startPrank(ST_PROVIDER);
         stJtVault.approve(address(seniorTranche), 1e18);
-        vm.expectRevert(stdError.divisionError);
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         seniorTranche.deposit(toTrancheUnits(1e18), ST_PROVIDER);
         vm.stopPrank();
+        vm.startPrank(LPT_PROVIDER);
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        liquidityProviderTranche.redeem(1e18, LPT_PROVIDER, LPT_PROVIDER);
+        vm.stopPrank();
 
-        // Nothing committed and nothing staged: the premium was never minted, so the gain is still pending and every
-        // future operation will retry the same reverting path until the oracle reports a nonzero TVL again
-        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "no premium may stage while every sync reverts");
+        // The firewall holds: a senior redemption is priced by the collateral oracle alone and stays live, its
+        // post-op deployment attempt deferring against the unpriceable floor instead of reverting
+        uint256 stShares = seniorTranche.balanceOf(ST_PROVIDER) / 2;
+        vm.prank(ST_PROVIDER);
+        seniorTranche.redeem(stShares, ST_PROVIDER, ST_PROVIDER);
+        assertGt(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the deferred deployment must leave the pile idle");
     }
 
     // =============================

@@ -108,6 +108,30 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
     // The maximum's algebra: boundary, wedge, dominance, equality
     // =============================
 
+    /// @notice With an idle premium pile and an OPEN reinvest gate, the reported maximum still executes: no sync ever
+    ///         deploys the pile, so the bound prices the pile idle exactly as the redemption's own pre-op sync finds it,
+    ///         and the deployment happens only in the post-op once the redemption has settled
+    /// @dev The regression cell for the pre-op-reinvestment mismatch: the bound counted the pile's full deleverage
+    ///      effect while a pre-op deployment would have scattered the shares into the shared pool, shrinking the
+    ///      requirement reduction by the leaked slippage and the LPT's pool fraction, so the reported maximum reverted
+    function test_RedeemMultiAsset_MaxBoundary_HoldsWithOpenReinvestGateAndIdlePremium() public {
+        _accumulateIdleLiquidityPremiumSeniorShares();
+        // Disarm the venue slippage so the deployment gate is genuinely open at execution
+        setVenueSlippageMode(false);
+
+        uint256 maxShares = liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER);
+        assertGt(maxShares, 0, "the fixture must leave multi-asset redemption capacity");
+
+        // The advertised maximum executes even though the redemption's own sync could have deployed the pile pre-fix
+        vm.prank(LPT_PROVIDER);
+        liquidityProviderTranche.redeemMultiAsset(maxShares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
+        _sync();
+        assertLe(_liquidityUtilization(), WAD, "the executed maximum must respect the liquidity requirement");
+
+        // The post-op deployed the entire remaining pile through the open gate once the redemption settled
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the post-op must deploy the whole pile through the open gate");
+    }
+
     /// @notice The reported maximum is a true maximum at the liquidity gate: it executes, and a hair more reverts
     function test_RedeemMultiAsset_MaxRedeemMultiAssetBoundary_ExactlyRedeemable() public {
         uint256 maxShares = liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER);

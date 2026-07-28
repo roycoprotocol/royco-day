@@ -227,22 +227,22 @@ contract Test_BalancerPoolInitialization_SeniorLeg_Kernel is DayMarketTestBase {
     /**
      * @notice Premium reinvestment on an uninitialized pool defers cleanly: the empty pool's zero BPT supply floors
      *         the reinvest gate's fair-value conversion to zero, the attempt preemptively returns, the premium stays
-     *         idle, and no sync or explicit reinvest can brick or seed the pool. The first genesis deposit then
-     *         unblocks the deferred pile end to end
+     *         idle, and no sync or explicit reinvest can brick or seed the pool. The first genesis deposit's own
+     *         post-op then unblocks the deferred pile end to end
      * @dev Pins that convertValueToLPTAssets returns zero at zero BPT supply, so the gate's zero-floor
      *      early return (not the tolerated-failure path) is what defers: no LiquidityPremiumReinvestmentFailed
      *      state change, no unprotected add, and the pool must never be initialized by a reinvestment
      */
     function test_ReinvestOnUninitializedPool_DefersWithIdlePremiumIntact() public {
-        // Accrue senior yield across a day so the sync mints the liquidity premium as idle senior shares, the
-        // sync's own auto-reinvest attempt must defer against the uninitialized pool instead of reverting
+        // Accrue senior yield across a day so the sync mints the liquidity premium as idle senior shares, a sync
+        // never touches the venue so the uninitialized pool cannot brick or be seeded by it
         applySTPnL(200);
         vm.warp(block.timestamp + 1 days);
         _sync();
         uint256 idleShares = kernel.getState().lptOwnedSeniorTrancheShares;
         assertGt(idleShares, 0, "the sync must stage the premium as idle senior shares");
-        assertFalse(balancerVault.isPoolInitialized(address(bpt)), "the sync's auto-reinvest must never seed the pool");
-        assertEq(toUint256(kernel.getState().totalLPTAssets), 0, "no BPT may be credited by a deferred reinvest");
+        assertFalse(balancerVault.isPoolInitialized(address(bpt)), "a sync must never seed the pool");
+        assertEq(toUint256(kernel.getState().totalLPTAssets), 0, "no BPT may be credited by a sync");
 
         // An explicit reinvest against the uninitialized pool defers identically, the idle pile is untouched
         vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
@@ -250,15 +250,13 @@ contract Test_BalancerPoolInitialization_SeniorLeg_Kernel is DayMarketTestBase {
         assertEq(kernel.getState().lptOwnedSeniorTrancheShares, idleShares, "the explicit reinvest must leave the idle pile untouched");
         assertFalse(balancerVault.isPoolInitialized(address(bpt)), "the explicit reinvest must never seed the pool");
 
-        // A genesis deposit seeds the pool, the deferred pile then deploys in full through the same reinvest
+        // A genesis deposit seeds the pool, and its own post-op deploys the entire deferred pile through the open gate
         _fundDepositLegs(LPT_PROVIDER, 0, 1000 * QUOTE_UNIT);
+        uint256 kernelBptBefore = bpt.balanceOf(address(kernel));
         vm.prank(LPT_PROVIDER);
         liquidityProviderTranche.depositMultiAsset(0, 1000 * QUOTE_UNIT, 0, LPT_PROVIDER);
-        uint256 kernelBptBefore = bpt.balanceOf(address(kernel));
-        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
-        kernel.reinvestLiquidityPremium(type(uint256).max);
-        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the seeded pool must unblock the entire deferred pile");
-        assertGt(bpt.balanceOf(address(kernel)) - kernelBptBefore, 0, "the unblocked reinvest must credit the kernel new BPT");
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the seeding deposit's post-op must deploy the entire deferred pile");
+        assertGt(bpt.balanceOf(address(kernel)) - kernelBptBefore, 0, "the deployment must credit the kernel new BPT");
     }
 
     /**

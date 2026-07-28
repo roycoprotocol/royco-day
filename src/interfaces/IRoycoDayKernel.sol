@@ -124,6 +124,14 @@ interface IRoycoDayKernel {
      */
     event SequencerUptimeFeedUpdated(address indexed sequencerUptimeFeed, uint48 gracePeriodSeconds);
 
+    /// @notice Emitted when a pre-operation tranche accounting synchronization settles
+    /// @param resultingState The resulting market state after synchronizing the tranche accounting
+    event PreOpTrancheAccountingSynced(SyncedAccountingState resultingState);
+
+    /// @notice Emitted when a post-operation tranche accounting synchronization settles
+    /// @param resultingState The resulting market state after synchronizing the tranche accounting
+    event PostOpTrancheAccountingSynced(SyncedAccountingState resultingState);
+
     /**
      * @notice Emitted when the kernel deploys its held liquidity-premium senior shares into the liquidity provider tranche's venue
      * @param stSharesReinvested The senior tranche shares drained from the kernel's held balance and deployed into the liquidity venue
@@ -326,6 +334,8 @@ interface IRoycoDayKernel {
     /**
      * @notice Synchronizes and persists the raw and effective NAVs of all tranches
      * @dev Only executes a pre-op sync because there is no operation being executed in the same call as this sync
+     * @dev Never deploys the idle liquidity-premium senior shares: the pool hook routes this sync from inside the venue's
+     *      own frame, where a deployment's venue add would re-enter it
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function syncTrancheAccounting() external returns (SyncedAccountingState memory state);
@@ -346,6 +356,8 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Syncs the tranche accounting and attempts to reinvest the liquidity provider tranche's idle liquidity-premium senior shares into its market-making inventory
+     * @dev The on-demand deployment path: a sync never deploys the pile, so idle premium leaves the kernel only through an
+     *      operation's post-op sync or this entrypoint
      * @dev Values the reinvested shares against the freshly synced senior share rate, so a smaller amount can clear the venue's slippage gate when reinvesting the entire idle balance would not
      * @param _stShares The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
      */

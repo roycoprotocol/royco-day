@@ -161,7 +161,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      * delta is exactly the two share mints), and at these nominal inputs the clamp is inert (see the nominal joint-pricing scenario), so the
      * literals are the historical ones
      */
-    function test_ProcessFeesAndLiquidityPremium_CoverageNeutralMint_IdlesWhenReinvestmentDefers() public {
+    function test_ProcessFeesAndLiquidityPremium_CoverageNeutralMint_StagesPremiumIdle() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
         flp.setTotalCollateralAssets(1000e18);
         flp.setLPTOwnedSeniorTrancheShares(5e18);
@@ -180,13 +180,10 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
         assertEq(flp.ST_LEDGER().feeMintCallCount(), 1, "one senior fee mint");
         assertEq(flp.ST_LEDGER().lastFeeSharesMinted(), 4_093_426_438_719_002_407, "fee share count");
         assertEq(flp.ST_LEDGER().lastFeeMintTo(), flp.PROTOCOL_FEE_RECIPIENT(), "fee shares mint to the recipient");
-        // Idle pile delta == premShares - reinvested (reinvested == 0 on the deferred path)
+        // Idle pile delta == premShares exactly: the mint stages the premium idle and never deploys
         assertEq(flp.lptOwnedSeniorTrancheShares(), 5e18 + 2_407_897_905_128_824_945, "idle premium share balance grows by exactly the premium shares");
-        // Reinvestment attempt args pin the post-mint valuation basis
-        assertEq(flp.reinvestCallCount(), 1, "one reinvestment attempt");
-        assertEq(flp.lastReinvestSharesArg(), type(uint256).max, "attempts to deploy the entire idle premium share balance");
-        assertEq(toUint256(flp.lastReinvestSTEffectiveNAVArg()), 1045e18, "valued at the synced senior effective NAV");
-        assertEq(flp.lastReinvestTotalSTSharesArg(), 1_006_501_324_343_847_827_352, "valued at the post-mint supply");
+        // The mint never touches the venue: deployment lives in the operation post-op and the explicit entrypoint only
+        assertEq(flp.reinvestCallCount(), 0, "the mint must make no reinvestment attempt");
 
         // RTM cross-assert of the two share counts driving the deltas
         (uint256 rtmPrem, uint256 rtmFee,) = RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(1045e18, 2.5e18, 4.25e18, 1000e18);
@@ -195,11 +192,12 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     }
 
     /**
-     * The partial-reinvestment arm of the coverage-neutral mint: with the stub draining 1e18 shares inside
-     * the reinvestment attempt, the idle premium share balance lands at pre + premShares - drained
-     * = 5e18 + 2_407_897_905_128_824_945 - 1e18, so a partial deploy never strands or double-counts shares
+     * The mint cannot be short-circuited into a deployment: with the harness's drain stub armed to consume 1e18
+     * shares inside any reinvestment attempt, the idle premium share balance still grows by the full premium
+     * because the mint makes no attempt at all, the pile deploys only through the operation post-op and the
+     * explicit reinvestment entrypoint
      */
-    function test_ProcessFeesAndLiquidityPremium_PartialReinvestmentDrainsIdlePremiumShares() public {
+    function test_ProcessFeesAndLiquidityPremium_NeverDeploys_IdlePileGrowsByFullPremium() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
         flp.setLPTOwnedSeniorTrancheShares(5e18);
         flp.setReinvestSharesToDrain(1e18);
@@ -207,7 +205,8 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
 
         flp.processFeesAndLiquidityPremium(s);
 
-        assertEq(flp.lptOwnedSeniorTrancheShares(), 5e18 + 2_407_897_905_128_824_945 - 1e18, "idle delta == premShares - reinvested");
+        assertEq(flp.lptOwnedSeniorTrancheShares(), 5e18 + 2_407_897_905_128_824_945, "the armed drain stub must never fire, the idle delta is the full premium");
+        assertEq(flp.reinvestCallCount(), 0, "the mint must make no reinvestment attempt");
     }
 
     /*//////////////////////////////////////////////////////////////////////

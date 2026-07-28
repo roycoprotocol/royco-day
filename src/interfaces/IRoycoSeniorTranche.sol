@@ -22,15 +22,15 @@ interface IRoycoSeniorTranche is IRoycoVaultTranche {
     event LiquidityPremiumSharesMinted(address indexed holder, uint256 mintedLiquidityPremiumShares, uint256 totalTrancheShares);
 
     /**
-     * @notice Mints a kernel-computed number of liquidity premium shares to the specified holder
+     * @notice Mints a kernel-computed number of liquidity premium shares to the kernel
      * @dev Only callable by the kernel during accounting synchronization
+     * @dev The premium shares always land in the kernel, which custodies them for the liquidity provider tranche
      * @dev The liquidity premium is senior yield routed to the liquidity provider tranche, minted as senior tranche shares held by
      *      the kernel on the LPT's behalf, this leaves the collateral NAV (and thus coverage) unchanged, so the mint is
      *      coverage-neutral and only reassigns senior appreciation to the LPT
      * @dev Takes a precomputed share count, priced jointly with the ST protocol fee so neither carve-out dilutes the other
-     * @param _to The account to mint the premium shares to (the kernel, which custodies them for the liquidity provider tranche)
      * @param _liquidityPremiumShares The precomputed number of liquidity premium shares to mint
      * @return totalTrancheShares The total shares in the senior tranche after minting the liquidity premium shares
      */
-    function mintLiquidityPremiumShares(address _to, uint256 _liquidityPremiumShares) external returns (uint256 totalTrancheShares);
+    function mintLiquidityPremiumShares(uint256 _liquidityPremiumShares) external returns (uint256 totalTrancheShares);
 }

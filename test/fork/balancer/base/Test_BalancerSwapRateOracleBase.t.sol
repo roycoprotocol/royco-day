@@ -7,6 +7,7 @@ import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/mat
 
 import { ADMIN_UNPAUSER_ROLE } from "../../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
+import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
@@ -90,7 +91,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
 
         vm.recordLogs();
         _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
-        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.PreOpTrancheAccountingSynced.selector);
+        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(KERNEL), IRoycoDayKernel.PreOpTrancheAccountingSynced.selector);
         assertEq(syncCount, 1, "the before-swap hook must sync the kernel exactly once");
 
         IRoycoDayAccountant.RoycoDayAccountantState memory committed = ACCOUNTANT.getState();
@@ -568,7 +569,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         vm.recordLogs();
         uint256 bptOut = _externalAddUnbalanced(actor, stShares, quoteAssets, 0);
         assertGt(bptOut, 0, "the external add (with its mid-unlock oracle read) must succeed");
-        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.PreOpTrancheAccountingSynced.selector);
+        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(KERNEL), IRoycoDayKernel.PreOpTrancheAccountingSynced.selector);
         assertEq(syncCount, 1, "the hook must have synced (and read the oracle) inside the unlock");
     }
 

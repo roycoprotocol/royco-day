@@ -53,10 +53,12 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     function _runSyncVector(uint256 _collateralNew, ExpectedSync memory _e) internal {
         IRoycoDayAccountant.RoycoDayAccountantState memory pre = accountant.getState();
         SyncedAccountingState memory previewed = accountant.previewSyncTrancheAccounting(toNAVUnits(_collateralNew));
-        // The committed sync must emit PreOpTrancheAccountingSynced with the exact hand-derived resulting state
-        vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.PreOpTrancheAccountingSynced(_expectedSyncedState(pre, _collateralNew, _e));
+        // The committed sync must return the exact hand-derived resulting state (the sync event lives on the kernel,
+        // which is mocked here, so the state pin binds to the accountant's return value)
         SyncedAccountingState memory executed = kernel.doPreOp(toNAVUnits(_collateralNew));
+        assertEq(
+            keccak256(abi.encode(executed)), keccak256(abi.encode(_expectedSyncedState(pre, _collateralNew, _e))), "vector: executed state must match the hand-derived state exactly"
+        );
         assertEq(keccak256(abi.encode(previewed)), keccak256(abi.encode(executed)), "vector: preview must match execution exactly");
 
         assertEq(uint8(executed.marketState), uint8(_e.marketState), "vector: market state");

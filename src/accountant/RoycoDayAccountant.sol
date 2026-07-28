@@ -184,7 +184,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
         // If the JT IL was erased, signal the resetting
         if (jtImpermanentLossErased != ZERO_NAV_UNITS) emit JuniorTrancheImpermanentLossReset(jtImpermanentLossErased);
-        emit PreOpTrancheAccountingSynced(state);
     }
 
     /// @inheritdoc IRoycoDayAccountant
@@ -192,7 +191,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Commit the freshly marked liquidity provider tranche raw NAV: the kernel marks it after the sync commits the senior/junior NAVs and mints any fee shares
         // The LPT raw NAV is dependent on the fresh ST share price which is resolved on the preceding pre-op synchronization
         _getRoycoDayAccountantStorage().lastLPTRawNAV = _freshLPTRawNAV;
-        emit LiquidityProviderTrancheRawNAVCommitted(_freshLPTRawNAV);
     }
 
     /// @inheritdoc IRoycoDayAccountant
@@ -297,7 +295,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             coverageLiquidationUtilizationWAD: $.coverageLiquidationUtilizationWAD,
             minLiquidityWAD: minLiquidityWAD
         });
-        emit PostOpTrancheAccountingSynced(state);
 
         // Preemptively return if the kernel specified that the market's requirements don't need to be enforced
         if (!_enforceCoverageAndLiquidityRequirements) return state;
