@@ -187,6 +187,9 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
 
     function test_depositForfeiture_partialExecutions_conserveTotalForfeiture() public {
         uint256 amount = 10 * stUnit;
+        // Arrange senior deposit capacity for both requests up front: depth deploys only in operation post-ops, so
+        // the conservation comparison must never be distorted by one path exhausting the liquidity headroom
+        _ensureLiquidityCapacityForSTDeposit(3 * amount);
         // Senior tranche: only the capped tranche forfeits a deposit on a collateral gain (see the yieldAccruedInQueue test)
         // Two identical requests, one executed in halves and one in full, under identical PnL
         (uint256 noncePartial,) = _requestDeposit(USER_A, address(seniorTranche), amount, USER_A, 0);
@@ -202,6 +205,9 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
         _executeDepositMax(USER_B, USER_B, nonceFull);
         uint256 forfeitedByFull = entryPoint.getProtocolFeeSharesPendingCollection(address(seniorTranche)) - forfeitedAfterPartials;
 
+        // Both requests must have filled fully, the conservation claim is only well-formed over equal deposits
+        assertEq(toUint256(entryPoint.getDepositRequest(USER_A, noncePartial).assets), 0, "arrange: the split request must be fully consumed");
+        assertEq(toUint256(entryPoint.getDepositRequest(USER_B, nonceFull).assets), 0, "arrange: the single-shot request must be fully consumed");
         assertGt(forfeitedAfterPartials, 0, "the split deposit must forfeit the queued gain");
         // The partial path may only differ from the single-shot path by flooring dust
         assertApproxEqAbs(forfeitedAfterPartials, forfeitedByFull, 2, "split execution must forfeit the same total as a single execution");

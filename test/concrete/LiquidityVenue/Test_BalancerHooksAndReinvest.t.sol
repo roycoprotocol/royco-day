@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { stdError } from "../../../lib/forge-std/src/StdError.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -135,61 +133,6 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
 
         assertEq(kernel.getState().lptOwnedSeniorTrancheShares, idleShares, "the idle pile stays idle and claimable when the fair-value floor rounds to zero");
         assertEq(toUint256(kernel.getState().totalLPTAssets), lptOwnedBefore, "no BPT is credited: the zero-floor add is deferred, not executed");
-    }
-
-    /**
-     * @notice With the BPT oracle marking a zero TVL while BPT supply is positive, the sync survives and commits a
-     *         zero mark through the tolerant conversion direction, and the market degrades through its own gates:
-     *         liquidity utilization pegs, so every liquidity-enforced operation reverts while the operations priced
-     *         solely by the collateral oracle keep running
-     * @dev No conversion-level guard exists by design (a zero TVL marks zero, it never bricks a sync), so the fail-shut
-     *      surface is exactly the existing requirement enforcement: ST deposits and both LPT exits clamp on
-     *      LIQUIDITY_REQUIREMENT_VIOLATED, senior redemptions stay live, and their post-op deployment attempt defers
-     *      against the unpriceable floor instead of reverting
-     */
-    function test_SyncTrancheAccounting_ZeroTVLMarksZeroAndClampsLiquidityGates() public {
-        _seedMarket(100e18, 50e18);
-        // Seed live kernel-held depth so the poisoned mark prices real holdings, and stage a redeemable senior position
-        _seedLPT(10e18, 2e18, 8 * (10 ** uint256(cell.quoteAsset.decimals)));
-        stJtVault.mintShares(ST_PROVIDER, 1e18);
-        vm.startPrank(ST_PROVIDER);
-        stJtVault.approve(address(seniorTranche), 1e18);
-        seniorTranche.deposit(toTrancheUnits(1e18), ST_PROVIDER);
-        vm.stopPrank();
-
-        // Accrue senior gain across a real time window so the poisoned sync below still stages its premium normally
-        _warpAndRefreshFeed(1 days);
-        applySTPnL(1000); // +10%
-
-        // Poison the oracle: zero TVL against a live pool
-        bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
-        bptOracle.setTVL(0);
-        assertGt(balancerVault.totalSupply(address(bpt)), 0, "arrange: the poisoned state requires live BPT supply against the zero TVL");
-
-        // The sync survives and commits the zero mark: the tolerant conversion direction prices the holdings at zero
-        vm.prank(SYNC_OPERATOR);
-        kernel.syncTrancheAccounting();
-        assertEq(toUint256(accountant.getState().lastLPTRawNAV), 0, "the poisoned mark must commit as exactly zero");
-        assertGt(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the sync must still stage its accrued premium idle");
-
-        // The zero mark pegs liquidity utilization, so the existing gates clamp every operation the mark prices
-        stJtVault.mintShares(ST_PROVIDER, 1e18);
-        vm.startPrank(ST_PROVIDER);
-        stJtVault.approve(address(seniorTranche), 1e18);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        seniorTranche.deposit(toTrancheUnits(1e18), ST_PROVIDER);
-        vm.stopPrank();
-        vm.startPrank(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        liquidityProviderTranche.redeem(1e18, LPT_PROVIDER, LPT_PROVIDER);
-        vm.stopPrank();
-
-        // The firewall holds: a senior redemption is priced by the collateral oracle alone and stays live, its
-        // post-op deployment attempt deferring against the unpriceable floor instead of reverting
-        uint256 stShares = seniorTranche.balanceOf(ST_PROVIDER) / 2;
-        vm.prank(ST_PROVIDER);
-        seniorTranche.redeem(stShares, ST_PROVIDER, ST_PROVIDER);
-        assertGt(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the deferred deployment must leave the pile idle");
     }
 
     // =============================

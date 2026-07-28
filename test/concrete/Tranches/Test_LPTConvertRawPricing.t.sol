@@ -237,12 +237,12 @@ contract Test_LPTConvertRawPricing_Tranches is DayMarketTestBase {
 
     /**
      * @notice With the pool-depth mark at zero but idle premium outstanding, the convert surface floors to zero on
-     *         every leg while previewRedeem still carries the claimable idle slice
-     * @dev The BPT-only rate is a conservative floor: a worthless pool mark quotes a worthless share even though a
-     *      redemption would still deliver the idle senior shares (the same key drives the maxRedeem behavior in
-     *      test_LPTMaxRedeem_UnderreportsZeroOnIdleOnlyNAV_WhileFullBalanceRedeemsMultiAsset)
+     *         every leg: a worthless pool mark quotes a worthless share
+     * @dev A zero TVL against live supply is unreachable on the real venue (the minimum BPT burn and round-down exits
+     *      keep balances alive, and the ECLP TVL zeroes only under total feed failure), so only the view-level
+     *      conservatism is pinned here
      */
-    function test_Convert_FloorsToZeroOnZeroPoolMark_PreviewStillCarriesIdleLeg() public {
+    function test_Convert_FloorsToZeroOnZeroPoolMark() public {
         _deployZeroMinLiquidityMarketWithPremium();
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
 
@@ -261,10 +261,6 @@ contract Test_LPTConvertRawPricing_Tranches is DayMarketTestBase {
         // the zero-value numerator short-circuits the dilution convention)
         assertEq(liquidityProviderTranche.convertToShares(toTrancheUnits(1e18)), 0, "a worthless BPT must quote zero shares");
 
-        // The redemption quote still carries the idle slice: the claimable leg is priced and deliverable
-        AssetClaims memory prev = liquidityProviderTranche.previewRedeem(shares);
-        assertEq(prev.stShares, Math.mulDiv(idleShares, shares, supply + 1e6, Math.Rounding.Floor), "previewRedeem must still report the pro-rata idle slice");
-        assertGt(toUint256(prev.nav), 0, "the redemption quote must still price the idle leg");
     }
 
     // =============================

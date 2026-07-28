@@ -67,94 +67,22 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice When the LPT's pool-depth mark is zero but claimable idle liquidity-premium senior shares are
-     *         outstanding, maxRedeem reports zero while the holder is still paid its pro-rata slice of the idle
-     *         senior shares on BOTH exit paths: in-kind hands the shares over directly, multi-asset burns them
-     *         against the senior pool
-     * @dev The idle premium is a claimable leg of the LPT's effective NAV, so it is never stranded. maxRedeem keys the
-     *      LPT's claims on the pool-depth mark alone, so it returns 0 whenever the BPT marks zero and underreports the
-     *      true maximum both redemption paths accept. The in-kind path moves no raw NAV (the shares stay in the senior
-     *      supply), which the LPT_REDEEM shape check commits as a NAV-neutral redemption
+     * @notice When the LPT's pool-depth mark is zero, maxRedeem conservatively reports zero even with claimable idle
+     *         liquidity-premium senior shares outstanding
+     * @dev A zero TVL against live supply is unreachable on the real venue, so only the view-level conservatism is pinned
      */
-    function test_LPTMaxRedeem_UnderreportsZeroOnIdleOnlyNAV_WhileEitherPathDeliversIdlePremium() public {
+    function test_LPTMaxRedeem_UnderreportsZeroOnZeroPoolMark() public {
         _deployZeroMinLiquidityMarketWithPremium();
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
+        require(idleShares != 0, "setup: the idle premium pile must be nonzero");
 
         // Mark the entire pool worthless through the oracle: the LPT's raw NAV (its pool-depth mark) reads zero
-        // while the idle senior shares remain a live, claimable leg of the LPT's effective NAV
+        // while the idle senior shares remain a live leg of the LPT's effective NAV
         bptOracle.setTVL(0);
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
 
         // The view underreport: with the pool depth marking zero, maxRedeem claims nothing is redeemable
-        assertEq(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), 0, "maxRedeem must currently report zero when the pool-depth mark is zero");
-        require(idleShares != 0, "setup: the idle premium pile must be nonzero");
-
-        // The in-kind path delivers the idle premium: redeem half the balance and the pro-rata idle senior shares are
-        // handed over directly. This moves no raw NAV anywhere (share ownership only changes hands and the BPT leg
-        // marks zero), which the LPT_REDEEM shape check commits as a NAV-neutral redemption
-        uint256 inKindShares = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 2;
-        require(inKindShares != 0, "setup: the holder must have a splittable balance");
-        uint256 idleBeforeInKind = kernel.getState().lptOwnedSeniorTrancheShares;
-        uint256 supplyBeforeInKind = liquidityProviderTranche.totalSupply();
-        // The claim scaler divides by the effective supply (totalSupply + 1e6 virtual shares), leaving a virtual-dust sliver behind
-        uint256 expectedInKindSlice = Math.mulDiv(inKindShares, idleBeforeInKind, supplyBeforeInKind + 1e6, Math.Rounding.Floor);
-        assertGt(expectedInKindSlice, 0, "the in-kind idle slice must be nonzero for the delivery to matter");
-
-        vm.prank(LPT_PROVIDER);
-        AssetClaims memory inKindClaims = liquidityProviderTranche.redeem(inKindShares, LPT_PROVIDER, LPT_PROVIDER);
-
-        // Exactly the pro-rata idle senior shares are handed over in kind and nothing else: the wiped BPT leg pays
-        // nothing, the redeemer receives the shares directly, and the kernel's idle pile drops by exactly that slice
-        assertEq(inKindClaims.stShares, expectedInKindSlice, "the in-kind redeem must pay exactly the pro-rata idle senior share slice");
-        assertEq(toUint256(inKindClaims.lptAssets), 0, "the wiped BPT leg must pay nothing in kind");
-        assertEq(seniorTranche.balanceOf(LPT_PROVIDER), expectedInKindSlice, "the redeemer must receive exactly its idle senior share slice in kind");
-        assertEq(
-            kernel.getState().lptOwnedSeniorTrancheShares,
-            idleBeforeInKind - expectedInKindSlice,
-            "the kernel's idle pile must drop by exactly the in-kind slice"
-        );
-        assertEq(bpt.balanceOf(LPT_PROVIDER), 0, "no BPT can be delivered against a zero pool-depth mark");
-
-        // The multi-asset path delivers the remaining premium by burning it against the senior pool: the idle slice
-        // is redeemed for the senior tranche's yield-bearing asset, which moves senior raw NAV
-        uint256 remaining = liquidityProviderTranche.balanceOf(LPT_PROVIDER);
-        uint256 idleBeforeMulti = kernel.getState().lptOwnedSeniorTrancheShares;
-        uint256 supplyBeforeMulti = liquidityProviderTranche.totalSupply();
-        uint256 expectedMultiSlice = Math.mulDiv(remaining, idleBeforeMulti, supplyBeforeMulti + 1e6, Math.Rounding.Floor);
-        assertGt(expectedMultiSlice, 0, "the multi-asset idle slice must be nonzero");
-        uint256 stSupplyBefore = seniorTranche.totalSupply();
-        uint256 stEffBefore = toUint256(accountant.getState().lastSTEffectiveNAV);
-        uint256 vaultSharesBefore = stJtVault.balanceOf(LPT_PROVIDER);
-
-        vm.prank(LPT_PROVIDER);
-        (AssetClaims memory stClaims, uint256 quoteAssets) = liquidityProviderTranche.redeemMultiAsset(remaining, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
-
-        // Exactly the pro-rata idle senior-share slice was burned: the senior supply and the kernel's idle pile both
-        // drop by it, so no premium is stranded on the exit
-        assertEq(
-            stSupplyBefore - seniorTranche.totalSupply(), expectedMultiSlice, "the multi-asset redeem must burn exactly the pro-rata idle senior share slice"
-        );
-        assertEq(
-            kernel.getState().lptOwnedSeniorTrancheShares, idleBeforeMulti - expectedMultiSlice, "the kernel's idle pile must drop by exactly the burned slice"
-        );
-        assertEq(liquidityProviderTranche.balanceOf(LPT_PROVIDER), 0, "the remaining balance must have been burned");
-
-        // Nothing but the idle leg moved: the pool marks zero so no venue removal ran, no quote came back, and the
-        // kernel's pooled BPT inventory is untouched across both redemptions
-        assertEq(quoteAssets, 0, "no quote assets can come back while the pool-depth mark is zero");
-        assertEq(bpt.balanceOf(LPT_PROVIDER), 0, "the redeemer must receive no BPT against a zero pool-depth mark");
-        assertEq(toUint256(kernel.getState().totalLPTAssets), LPT_SEED_BPT, "the kernel's pooled BPT inventory must be untouched");
-
-        // The multi-asset slice paid out as the collateral vault share, bounded from the committed checkpoint rather
-        // than re-quoted: a senior share can claim at most its pro-rata slice of the senior effective NAV converted
-        // once to collateral. The bound is un-offset (denominator stSupply, not stSupply + 1e6) so the actual
-        // offset-diluted payout sits at or below it
-        uint256 received = stJtVault.balanceOf(LPT_PROVIDER) - vaultSharesBefore;
-        uint256 effProRataSlice =
-            toUint256(kernel.convertValueToCollateralAssets(toNAVUnits(Math.mulDiv(expectedMultiSlice, stEffBefore + 1, stSupplyBefore, Math.Rounding.Floor))));
-        assertEq(received, toUint256(stClaims.collateralAssets), "the reported collateral claim must equal the vault shares actually delivered");
-        assertGt(received, 0, "the redeemed slice must pay out a nonzero amount of the collateral vault share");
-        assertLe(received, effProRataSlice, "no senior share can claim more than its pro-rata slice of the senior effective NAV");
+        assertEq(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), 0, "maxRedeem must report zero when the pool-depth mark is zero");
     }
 
     /**

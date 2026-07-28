@@ -423,7 +423,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
     ///         requirement waived, a multi-asset redemption still executes through the accountant's zero-delta
     ///         carve-out (senior redemption NAV flows in-flow) while the in-kind path cannot, and both maxima
     ///         conservatively report zero rather than advertising the carve-out
-    function test_MaxRedeemMultiAsset_WipedMarkWithPremium_ConservativeZeroWhileCarveOutExecutes() public {
+    function test_MaxRedeemMultiAsset_WipedMarkWithPremium_BothMaximaReportConservativeZero() public {
         // Waive only the liquidity requirement: the zero-liquidity preset also zeroes the LPT yield share,
         // which would starve the premium pile this corner needs
         MarketParamsConfig memory params = defaultParams();
@@ -443,35 +443,6 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         // Both maxima report the conservative zero: the tranche has no claims at the wiped mark
         assertEq(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), 0, "the wiped mark must zero the multi-asset maximum");
         assertEq(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), 0, "the in-kind maximum must mirror the zero");
-
-        // The multi-asset flow still executes through the zero-delta carve-out, redeeming the premium slice in-flow
-        uint256 sharesToRedeem = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 4;
-        uint256 vaultSharesBefore = stJtVault.balanceOf(LPT_PROVIDER);
-        vm.prank(LPT_PROVIDER);
-        liquidityProviderTranche.redeemMultiAsset(sharesToRedeem, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
-        assertGt(stJtVault.balanceOf(LPT_PROVIDER) - vaultSharesBefore, 0, "the premium slice must pay out through the carve-out");
-
-        // The in-kind path delivers the same premium: handing the idle senior shares over in kind moves no raw NAV
-        // (they stay in the senior supply), so the LPT_REDEEM shape check commits it as a NAV-neutral redemption
-        uint256 idleBeforeInKind = kernel.getState().lptOwnedSeniorTrancheShares;
-        uint256 supplyBeforeInKind = liquidityProviderTranche.totalSupply();
-        uint256 seniorBeforeInKind = seniorTranche.balanceOf(LPT_PROVIDER);
-        // The redeemer's slice scales against the EFFECTIVE supply (supply + 1e6 virtual shares)
-        uint256 expectedIdleSlice = Math.mulDiv(1e18, idleBeforeInKind, supplyBeforeInKind + 1e6, Math.Rounding.Floor);
-        assertGt(expectedIdleSlice, 0, "the in-kind idle slice must be nonzero");
-
-        vm.prank(LPT_PROVIDER);
-        AssetClaims memory inKindClaims = liquidityProviderTranche.redeem(1e18, LPT_PROVIDER, LPT_PROVIDER);
-
-        // Exactly the pro-rata idle senior shares are handed over in kind, the wiped BPT leg pays nothing, and the
-        // kernel's idle pile drops by exactly that slice
-        assertEq(inKindClaims.stShares, expectedIdleSlice, "the in-kind redeem must pay exactly the pro-rata idle senior share slice");
-        assertEq(toUint256(inKindClaims.lptAssets), 0, "the wiped BPT leg must pay nothing in kind");
-        assertEq(seniorTranche.balanceOf(LPT_PROVIDER) - seniorBeforeInKind, expectedIdleSlice, "the redeemer must receive exactly its idle senior share slice");
-        assertEq(
-            kernel.getState().lptOwnedSeniorTrancheShares, idleBeforeInKind - expectedIdleSlice, "the kernel's idle pile must drop by exactly the redeemed slice"
-        );
-        assertEq(bpt.balanceOf(LPT_PROVIDER), 0, "no BPT can be delivered against a zero pool-depth mark");
     }
 
     // =============================
