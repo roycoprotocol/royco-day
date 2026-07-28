@@ -107,19 +107,22 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         executableAtTimestamp = uint32(block.timestamp + config.baseConfig.depositDelaySeconds);
         expiresAtTimestamp = uint32(Math.min(uint256(executableAtTimestamp) + config.baseConfig.depositExpirySeconds, type(uint32).max));
 
-        // Register the user's deposit request with a fresh nonce
-        DepositRequest storage request = $.userToNonceToDepositRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)];
-        request.assets = _assets;
-        // Snapshot the shares this deposit would mint at request-time pricing
-        request.equivalentSharesAtRequestTime = _depositSharesReference(config.kernel, config.trancheType, _tranche, _assets);
-        request.baseRequest = BaseRequest({
-            tranche: _tranche,
-            queuedAtTimestamp: uint32(block.timestamp),
-            receiver: _receiver,
-            executableAtTimestamp: executableAtTimestamp,
-            expiresAtTimestamp: expiresAtTimestamp,
-            executorBonusWAD: _executorBonusWAD
+        // Populate the user's deposit request in memory before registering it
+        requestNonce = ++$.lastRequestNonce;
+        DepositRequest memory request = DepositRequest({
+            assets: _assets,
+            // Snapshot the shares this deposit would mint at request-time pricing
+            equivalentSharesAtRequestTime: _depositSharesReference(config.kernel, config.trancheType, _tranche, _assets),
+            baseRequest: BaseRequest({
+                tranche: _tranche,
+                queuedAtTimestamp: uint32(block.timestamp),
+                receiver: _receiver,
+                executableAtTimestamp: executableAtTimestamp,
+                expiresAtTimestamp: expiresAtTimestamp,
+                executorBonusWAD: _executorBonusWAD
+            })
         });
+        $.userToNonceToDepositRequest[msg.sender][requestNonce] = request;
 
         // Transfer the requested amount of tranche assets into the entry point to queue the deposit
         IERC20(config.asset).safeTransferFrom(msg.sender, address(this), toUint256(_assets));
@@ -280,20 +283,23 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         executableAtTimestamp = uint32(block.timestamp + config.baseConfig.redemptionDelaySeconds);
         expiresAtTimestamp = uint32(Math.min(uint256(executableAtTimestamp) + config.baseConfig.redemptionExpirySeconds, type(uint32).max));
 
-        // Register the user's redemption request with a fresh nonce
-        RedemptionRequest storage request = $.userToNonceToRedemptionRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)];
-        request.shares = _shares;
-        request.mode = _mode;
-        // Snapshot the value of the escrowed shares
-        request.valueAtRequestTime = _redemptionValueReference(config.kernel, config.trancheType, _shares);
-        request.baseRequest = BaseRequest({
-            tranche: _tranche,
-            queuedAtTimestamp: uint32(block.timestamp),
-            receiver: _receiver,
-            executableAtTimestamp: executableAtTimestamp,
-            expiresAtTimestamp: expiresAtTimestamp,
-            executorBonusWAD: _executorBonusWAD
+        // Populate the user's redemption request in memory before registering it
+        requestNonce = ++$.lastRequestNonce;
+        RedemptionRequest memory request = RedemptionRequest({
+            shares: _shares,
+            // Snapshot the value of the escrowed shares
+            valueAtRequestTime: _redemptionValueReference(config.kernel, config.trancheType, _shares),
+            mode: _mode,
+            baseRequest: BaseRequest({
+                tranche: _tranche,
+                queuedAtTimestamp: uint32(block.timestamp),
+                receiver: _receiver,
+                executableAtTimestamp: executableAtTimestamp,
+                expiresAtTimestamp: expiresAtTimestamp,
+                executorBonusWAD: _executorBonusWAD
+            })
         });
+        $.userToNonceToRedemptionRequest[msg.sender][requestNonce] = request;
 
         // Transfer the requested amount of tranche shares into the entry point to queue the redemption
         IERC20(_tranche).safeTransferFrom(msg.sender, address(this), _shares);
