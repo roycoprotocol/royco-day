@@ -906,6 +906,21 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         fail("_breachLiquidation: liquidation coverage utilization threshold not reached");
     }
 
+    /// @notice Drives `liquidityUtilizationWAD` comfortably past WAD via market movement: the config guard forbids
+    ///         arming a breached requirement, so the requirement is tightened to just under full utilization and
+    ///         senior yield (which outpaces the pool's senior-leg mark) carries utilization through 100%, syncing each step.
+    /// @dev Fails the test (never silently gives up) if the breach is not reached within the iteration bound.
+    function _breachLiquidityRequirement() internal {
+        _sync();
+        _setMinLiquidityWAD(_minLiquidityForTargetUtilization(0.98e18));
+        for (uint256 i = 0; i < 40; ++i) {
+            _applySTYield(0.05e18);
+            _sync();
+            if (_snap().liquidityUtilizationWAD >= 1.15e18) return;
+        }
+        fail("_breachLiquidityRequirement: liquidity utilization never breached");
+    }
+
     /// @notice Enters FIXED_TERM: nonzero duration, a covered loss (below jtEffectiveNAV), then a sync, with an arrange-guard.
     function _enterFixedTerm() internal {
         _setFixedTermDuration(7 days);
@@ -1830,9 +1845,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 bptAssets = toUint256(rRedeem.claims.lptAssets);
         assertGt(bptAssets, 0, "arrange: the redemption must pay out BPT");
 
-        // Arrange A: breach the liquidity requirement outright
-        _setMinLiquidityWAD(0.9e18);
-        _sync();
+        // Arrange A: breach the liquidity requirement through market movement
+        _breachLiquidityRequirement();
         assertGt(_snap().liquidityUtilizationWAD, WAD, "arrange: the liquidity requirement must be breached");
         assertEq(LPT.maxDeposit(LPT_ALICE_ADDRESS), MAX_TRANCHE_UNITS, "lptMaxDeposit must stay unbounded while breached");
         vm.startPrank(LPT_ALICE_ADDRESS);
@@ -1907,8 +1921,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function test_RevertIf_LPTDepositMultiAssetBreachesLiquidity_atomic() public whenLPT {
         _seedMarket(testConfig.initialFunding / 10, testConfig.initialFunding / 2);
         _seedDefaultLPT();
-        _setMinLiquidityWAD(0.9e18);
-        _sync();
+        _breachLiquidityRequirement();
         MarketSnapshot memory pre = _snap();
         assertGt(pre.liquidityUtilizationWAD, WAD, "arrange: the liquidity requirement must be breached");
 
@@ -1922,7 +1935,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         );
         // Even crediting both legs fully to the pooled depth, the post-op utilization stays breached
         assertGt(
-            _expectedLiquidityUtilization(pre.lastSTEffectiveNAV + collateralValue, 0.9e18, pre.lastLPTRawNAV + collateralValue + collateralValue),
+            _expectedLiquidityUtilization(
+                pre.lastSTEffectiveNAV + collateralValue, ACCOUNTANT.getState().minLiquidityWAD, pre.lastLPTRawNAV + collateralValue + collateralValue
+            ),
             WAD,
             "arrange: the deposit must not heal the breached requirement"
         );
@@ -2247,8 +2262,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function test_STRedeem_liquidityBreach_notGated() public whenLPT {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _seedDefaultLPT();
-        _setMinLiquidityWAD(0.9e18);
-        _sync();
+        _breachLiquidityRequirement();
         MarketSnapshot memory pre = _snap();
         assertGt(pre.liquidityUtilizationWAD, WAD, "arrange: the liquidity requirement must be breached");
 
@@ -2346,8 +2360,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function test_JTRedeem_liquidityBreach_notGated() public whenLPT {
         _seedMarket(testConfig.initialFunding / 10, testConfig.initialFunding / 2);
         _seedDefaultLPT();
-        _setMinLiquidityWAD(0.9e18);
-        _sync();
+        _breachLiquidityRequirement();
         MarketSnapshot memory pre = _snap();
         assertGt(pre.liquidityUtilizationWAD, WAD, "arrange: the liquidity requirement must be breached");
 

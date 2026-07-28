@@ -16,6 +16,7 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
 import { defaultParams, zeroLiquidityParams } from "../../utils/MarketParams.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
@@ -581,14 +582,35 @@ contract DayMarketHandler is DayMarketTestBase {
             uint256 kind = bound(_paramSeed, 0, 4);
             vm.startPrank(ACCOUNTANT_ADMIN);
             if (kind == 0 && !IS_ZERO_LIQUIDITY_PROFILE) {
-                // Uniform over two to eight percent minimum liquidity
-                accountant.setMinLiquidity(uint64(bound(_valueSeed, 0.02e18, 0.08e18)));
+                // Uniform over two to eight percent minimum liquidity. The config guard admits a tightening only
+                // while it stays within the live depth, so an inadmissible raise degrades to a non-worsening re-set
+                uint64 targetMinLiquidity = uint64(bound(_valueSeed, 0.02e18, 0.08e18));
+                uint64 currentMinLiquidity = uint64(accountant.getState().minLiquidityWAD);
+                if (
+                    targetMinLiquidity > currentMinLiquidity
+                        && RoycoTestMath.computeLiquidityUtilization(s.stEffectiveNAV, targetMinLiquidity, s.lptRawNAV) > WAD
+                ) targetMinLiquidity = currentMinLiquidity;
+                accountant.setMinLiquidity(targetMinLiquidity);
             } else if (kind == 1) {
-                // Uniform over ten to thirty percent minimum coverage
-                accountant.setMinCoverage(uint64(bound(_valueSeed, 0.1e18, 0.3e18)));
+                // Uniform over ten to thirty percent minimum coverage, degraded identically when the raise would breach
+                uint64 targetMinCoverage = uint64(bound(_valueSeed, 0.1e18, 0.3e18));
+                uint64 currentMinCoverage = uint64(accountant.getState().minCoverageWAD);
+                if (
+                    targetMinCoverage > currentMinCoverage
+                        && RoycoTestMath.computeCoverageUtilization(s.collateralNAV, targetMinCoverage, s.jtEffectiveNAV) > WAD
+                ) targetMinCoverage = currentMinCoverage;
+                accountant.setMinCoverage(targetMinCoverage);
             } else if (kind == 2) {
-                // Uniform over one-and-a-half to eight liquidation coverage utilization
-                accountant.setLiquidationCoverageUtilization(bound(_valueSeed, 1.5e18, 8e18));
+                // Uniform over one-and-a-half to eight liquidation coverage utilization. The config guard forbids
+                // arming the regime by configuration, so a threshold at or below live utilization lifts to just above
+                // it, and an unbounded live utilization keeps the current threshold (a non-move the guard admits)
+                uint256 targetThreshold = bound(_valueSeed, 1.5e18, 8e18);
+                if (targetThreshold <= s.coverageUtilizationWAD) {
+                    targetThreshold = s.coverageUtilizationWAD == type(uint256).max
+                        ? accountant.getState().coverageLiquidationUtilizationWAD
+                        : s.coverageUtilizationWAD + 1;
+                }
+                accountant.setLiquidationCoverageUtilization(targetThreshold);
             } else if (kind == 3 && !IS_ZERO_LIQUIDITY_PROFILE) {
                 // One of three fixed yield-share cap pairs that always sum below one hundred percent
                 uint256 pick = bound(_valueSeed, 0, 2);

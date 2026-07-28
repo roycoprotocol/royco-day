@@ -438,7 +438,8 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         uint256 shares = _depositSTRaw(lp, ST.maxDeposit(lp));
         _sync();
 
-        // Drop the liquidation threshold below the current coverage utilization so the self-liquidation regime engages.
+        // Arm the self-liquidation regime through losses: the config guard forbids setting the threshold at or below
+        // live utilization, so the threshold is lowered to just above it and the market is drawn down through it.
         uint256 coverageUtilizationWAD = _stSynced().coverageUtilizationWAD;
         if (coverageUtilizationWAD <= WAD) {
             // The deposit gate caps coverageUtilizationWAD at WAD, and the liquidation threshold must be > WAD, so the self-liquidation
@@ -447,7 +448,9 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
             vm.skip(true);
             return;
         }
-        _setLiquidationCoverageUtilization(coverageUtilizationWAD - 1);
+        _setLiquidationCoverageUtilization(coverageUtilizationWAD + 1);
+        _applySTLoss(0.02e18);
+        assertGe(_stSynced().coverageUtilizationWAD, coverageUtilizationWAD + 1, "arrange: the drawdown must arm the liquidation regime");
 
         // The bonus leg no longer has its own claims field: it lands inside the single collateral leg. The
         // base claim is the exact pro-rata effective-NAV slice, so a payout strictly above that hand-derived

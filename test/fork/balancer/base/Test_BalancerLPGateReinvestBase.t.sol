@@ -100,7 +100,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
         vm.recordLogs();
         uint256 bptOut = _externalAddUnbalanced(actor, stShares, quoteAssets, 0);
-        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.TrancheAccountingSynced.selector);
+        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.PreOpTrancheAccountingSynced.selector);
 
         assertEq(syncCount, 1, "the before-add hook must sync the kernel exactly once");
         assertEq(toUint256(KERNEL.getState().totalLPTAssets), lptOwned0, "an external add must not move the kernel's owned-BPT ledger");
@@ -743,7 +743,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 amountOut = _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
         assertGt(amountOut, 0, "an in-term external swap must execute");
 
-        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.TrancheAccountingSynced.selector);
+        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.PreOpTrancheAccountingSynced.selector);
         assertEq(syncCount, 1, "the hook must still sync in-term");
         (uint256 lo, uint256 hi) = _swapFeeTVLBound(_quoteToNAV(amountIn));
         uint256 tvlDelta = _poolTVL() - tvl0;

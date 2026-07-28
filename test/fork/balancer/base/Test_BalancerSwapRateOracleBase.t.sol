@@ -90,7 +90,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
 
         vm.recordLogs();
         _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
-        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.TrancheAccountingSynced.selector);
+        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.PreOpTrancheAccountingSynced.selector);
         assertEq(syncCount, 1, "the before-swap hook must sync the kernel exactly once");
 
         IRoycoDayAccountant.RoycoDayAccountantState memory committed = ACCOUNTANT.getState();
@@ -568,7 +568,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         vm.recordLogs();
         uint256 bptOut = _externalAddUnbalanced(actor, stShares, quoteAssets, 0);
         assertGt(bptOut, 0, "the external add (with its mid-unlock oracle read) must succeed");
-        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.TrancheAccountingSynced.selector);
+        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.PreOpTrancheAccountingSynced.selector);
         assertEq(syncCount, 1, "the hook must have synced (and read the oracle) inside the unlock");
     }
 

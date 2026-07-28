@@ -382,7 +382,9 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     function test_RevertIf_LPTMultiAssetRedeemBonusExceedsTotal() public {
         _seedFlatWithLPT(SEED_LPT_RAW);
         vm.expectRevert(stdError.arithmeticError);
-        kernel.doPostOp(Operation.LPT_MULTI_ASSET_REDEEM, toNAVUnits(SEED_COLLATERAL - 10e18), toNAVUnits(SEED_LPT_RAW - 1e18), toNAVUnits(uint256(11e18)), false);
+        kernel.doPostOp(
+            Operation.LPT_MULTI_ASSET_REDEEM, toNAVUnits(SEED_COLLATERAL - 10e18), toNAVUnits(SEED_LPT_RAW - 1e18), toNAVUnits(uint256(11e18)), false
+        );
     }
 
     /// an in-kind LPT redemption with a nonzero collateral delta violates the shape require in both directions,
@@ -589,7 +591,7 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         assertEq(s.fixedTermEndTimestamp, end, "stored fixed-term end untouched");
         assertEq(jtYDM.yieldShareCallCount(), jtCallsBefore, "no jt accrual in a post-op");
         assertEq(lptYDM.yieldShareCallCount(), lptCallsBefore, "no lt accrual in a post-op");
-        assertEq(_countAccountantLogs(vm.getRecordedLogs(), IRoycoDayAccountant.TrancheAccountingSynced.selector), 0, "post-op emits no sync event");
+        assertEq(_countAccountantLogs(vm.getRecordedLogs(), IRoycoDayAccountant.PreOpTrancheAccountingSynced.selector), 0, "post-op emits no sync event");
     }
 
     /**
@@ -722,7 +724,8 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
      */
     function test_PostOp_liquidityGate_lptRedeemExactBoundary() public {
         _seedFlatWithLPT(SEED_LPT_RAW);
-        SyncedAccountingState memory state = kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(SEED_COLLATERAL), toNAVUnits(uint256(50e18)), ZERO_NAV_UNITS, true);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(SEED_COLLATERAL), toNAVUnits(uint256(50e18)), ZERO_NAV_UNITS, true);
         assertEq(state.liquidityUtilizationWAD, WAD, "liquidity utilization lands exactly on WAD and passes");
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(SEED_COLLATERAL), toNAVUnits(uint256(50e18 - 1)), ZERO_NAV_UNITS, true);

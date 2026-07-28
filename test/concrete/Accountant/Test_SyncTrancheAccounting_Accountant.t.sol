@@ -53,9 +53,9 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     function _runSyncVector(uint256 _collateralNew, ExpectedSync memory _e) internal {
         IRoycoDayAccountant.RoycoDayAccountantState memory pre = accountant.getState();
         SyncedAccountingState memory previewed = accountant.previewSyncTrancheAccounting(toNAVUnits(_collateralNew));
-        // The committed sync must emit TrancheAccountingSynced with the exact hand-derived resulting state
+        // The committed sync must emit PreOpTrancheAccountingSynced with the exact hand-derived resulting state
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.TrancheAccountingSynced(_expectedSyncedState(pre, _collateralNew, _e));
+        emit IRoycoDayAccountant.PreOpTrancheAccountingSynced(_expectedSyncedState(pre, _collateralNew, _e));
         SyncedAccountingState memory executed = kernel.doPreOp(toNAVUnits(_collateralNew));
         assertEq(keccak256(abi.encode(previewed)), keccak256(abi.encode(executed)), "vector: preview must match execution exactly");
 
@@ -87,7 +87,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * @dev Assembles the full SyncedAccountingState the sync must emit in TrancheAccountingSynced, from the
+     * @dev Assembles the full SyncedAccountingState the sync must emit in PreOpTrancheAccountingSynced, from the
      * hand-derived expectation plus the pre-sync config fields. The lt raw NAV and liquidity utilization are
      * zero placeholders on the pre-op path (the kernel commits the fresh LPT mark after the sync)
      */
