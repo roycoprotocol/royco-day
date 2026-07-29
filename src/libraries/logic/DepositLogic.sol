@@ -6,14 +6,14 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
+import { Cache, CacheKey } from "../Cache.sol";
 import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { MarketState, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
-import { Math, NAV_UNIT, TRANCHE_UNIT } from "../Units.sol";
+import { Math, NAV_UNIT, TRANCHE_UNIT, toUint256 } from "../Units.sol";
 import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { AssetLedgerLogic } from "./AssetLedgerLogic.sol";
 import { BlacklistLogic } from "./BlacklistLogic.sol";
 import { DispatchLogic } from "./DispatchLogic.sol";
-import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
@@ -47,7 +47,7 @@ library DepositLogic {
         address _receiver,
         bool _enforceLiquidityRequirement
     )
-        external
+        public
         returns (uint256 trancheSharesMinted)
     {
         // Execute an accounting sync to reconcile underlying PNL
@@ -136,7 +136,7 @@ library DepositLogic {
         TRANCHE_UNIT _assets,
         address _receiver
     )
-        external
+        public
         returns (uint256 trancheSharesMinted)
     {
         // Execute an accounting sync to reconcile underlying PNL
@@ -163,6 +163,60 @@ library DepositLogic {
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
         if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(trancheSharesMinted));
+    }
+
+    /**
+     * @notice Atomically enters the liquidity provider tranche with the LPT assets' constituent assets: deposits collateral (minting senior
+     *         shares), adds (senior shares + quote) into the liquidity venue to mint the LPT tranche assets, then deposits them into the LPT
+     * @dev Composed from the shared deposit primitives: an ST deposit seeding the add's senior shares, the venue add, then an LPT deposit of the minted assets
+     * @dev Assumes the collateral and quote have been transferred to the kernel before this call (by the LPT tranche)
+     * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit that mints no senior shares
+     * @dev The senior leg is gated by the market's coverage requirement, its liquidity requirement is satisfied by the add deploying the minted shares as depth
+     * @dev Prices the shares at the pre-deposit LPT effective NAV cached at the venue's post-add mark and mints them to the receiver
+     * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _collateralAssets The amount of collateral to deposit for the senior leg, denominated in tranche units
+     * @param _quoteAssets The amount of quote asset to add as the second venue leg
+     * @param _minLPTAssetsOut The minimum LPT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
+     * @param _receiver The address that receives the minted tranche shares
+     * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
+     * @return lptAssetsOut The amount of LPT tranche assets minted and credited to the liquidity provider tranche
+     */
+    function lptDepositMultiAsset(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        bool _isPreview,
+        TRANCHE_UNIT _collateralAssets,
+        uint256 _quoteAssets,
+        TRANCHE_UNIT _minLPTAssetsOut,
+        address _receiver
+    )
+        external
+        returns (uint256 trancheSharesMinted, TRANCHE_UNIT lptAssetsOut)
+    {
+        // Collateral leg: an ST deposit minting the add's senior shares to the kernel, waiving only the liquidity requirement the add's deployed depth satisfies below
+        // Both legs run settled in preview and execution alike, this flow's own result revert unwinds them in a preview
+        uint256 stSharesMinted;
+        if (_collateralAssets != ZERO_TRANCHE_UNITS) {
+            stSharesMinted = stDeposit($, _immutables, false, _collateralAssets, address(this), false);
+            require(stSharesMinted != 0, IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES());
+        }
+
+        // Add the minted ST shares and supplied quote assets into the liquidity venue with the specified slippage check
+        // The venue prices 1 whole LPT asset against the post-add pool state in both modes
+        NAV_UNIT lptAssetPrice;
+        (lptAssetsOut, lptAssetPrice) = IRoycoDayKernel(address(this)).addLiquidity(_isPreview, stSharesMinted, _quoteAssets, _minLPTAssetsOut);
+
+        // Refresh the cached LPT asset price at the venue's post-add mark, so the LPT leg prices and enforces at the same post-add state in preview and execution alike
+        Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(lptAssetPrice));
+
+        // LPT leg: an in-kind LPT deposit of the minted assets at the cached price, priced and minted to the receiver by the shared primitive
+        trancheSharesMinted = lptDeposit($, _immutables, false, lptAssetsOut, _receiver);
+
+        // A preview carries its result out via this revert, unwinding every mutation this flow made
+        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(trancheSharesMinted, lptAssetsOut));
     }
 
     // =============================

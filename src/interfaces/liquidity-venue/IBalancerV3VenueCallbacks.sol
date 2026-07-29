@@ -38,8 +38,7 @@ interface IBalancerV3VenueCallbacks {
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
      * @param _minLPTAssetsOut The minimum BPT (LPT assets) that must be minted, bounding the add's slippage at the Vault
      * @return lptAssets The BPT (LPT assets) minted to this kernel by the add
-     * @return depositNAV The value of the minted BPT against the post-add pool state, denominated in the kernel's NAV units
-     * @return postOpLPTRawNAV The post-op LPT raw NAV marked against the post-add pool state, the mark the post-op sync enforces at
+     * @return lptAssetPrice The value of 1 whole BPT against the post-add pool state, the price the caller refreshes the operation's cache with
      */
     function addBalancerV3Liquidity(
         bool _isPreview,
@@ -48,7 +47,7 @@ interface IBalancerV3VenueCallbacks {
         TRANCHE_UNIT _minLPTAssetsOut
     )
         external
-        returns (uint256 lptAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLPTRawNAV);
+        returns (uint256 lptAssets, NAV_UNIT lptAssetPrice);
 
     /**
      * @notice Callback that performs the proportional BPT unwrap inside the unlocked Balancer V3 Vault's context
@@ -62,7 +61,7 @@ interface IBalancerV3VenueCallbacks {
      * @param _quoteAssetsReceiver The recipient of the quote assets withdrawn
      * @return stShares The senior tranche shares withdrawn back to this kernel by the unwrap
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
-     * @return postOpLPTRawNAV The post-op LPT raw NAV marked against the post-remove pool state, the mark the post-op sync enforces at
+     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the price the caller refreshes the operation's cache with
      */
     function removeBalancerV3Liquidity(
         bool _isPreview,
@@ -72,5 +71,5 @@ interface IBalancerV3VenueCallbacks {
         address _quoteAssetsReceiver
     )
         external
-        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT postOpLPTRawNAV);
+        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice);
 }

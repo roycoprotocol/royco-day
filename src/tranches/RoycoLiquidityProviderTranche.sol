@@ -181,7 +181,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
                 _isPreview,
                 abi.encodeCall(
                     IRoycoDayKernel.lptDepositMultiAsset,
-                    (_isPreview, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(_minLPTAssetsOut), _receiver)
+                    (_isPreview, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(_minLPTAssetsOut), msg.sender, _receiver)
                 )
             ),
             (uint256, TRANCHE_UNIT)
@@ -219,7 +219,8 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out
         return abi.decode(
             KERNEL._dispatchAndUnwrap(
-                _isPreview, abi.encodeCall(IRoycoDayKernel.lptRedeemMultiAsset, (_isPreview, _shares, _minSTSharesOut, _minQuoteAssetsOut, msg.sender, _owner, _receiver))
+                _isPreview,
+                abi.encodeCall(IRoycoDayKernel.lptRedeemMultiAsset, (_isPreview, _shares, _minSTSharesOut, _minQuoteAssetsOut, msg.sender, _owner, _receiver))
             ),
             (AssetClaims, uint256)
         );

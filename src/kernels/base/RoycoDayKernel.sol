@@ -17,7 +17,6 @@ import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toNAVUnits, toTrancheUnit
 import { AccountingSyncLogic } from "../../libraries/logic/AccountingSyncLogic.sol";
 import { BlacklistLogic } from "../../libraries/logic/BlacklistLogic.sol";
 import { DepositLogic } from "../../libraries/logic/DepositLogic.sol";
-import { DispatchLogic } from "../../libraries/logic/DispatchLogic.sol";
 import { RedemptionLogic } from "../../libraries/logic/RedemptionLogic.sol";
 
 /**
@@ -35,9 +34,13 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @dev keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayKernelState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_DAY_KERNEL_STORAGE_SLOT = 0xc366ce7b07de4bd3f36c874874355fb088fd2057e716d8a9786c17b22e6fec00;
 
-    /// @dev Value representing the scale factor of one whole collateral asset: 10^(COLLATERAL_ASSET_DECIMALS)
+    /// @dev One whole collateral asset: 10^(COLLATERAL_ASSET_DECIMALS)
     /// @dev A single collateral asset price values the coinvested collateral both the senior and junior tranches deposit
-    uint256 internal immutable COLLATERAL_ASSET_SCALE_FACTOR;
+    uint256 internal immutable ONE_WHOLE_COLLATERAL_ASSET;
+
+    /// @dev One whole LPT asset: 10^(LPT_ASSET_DECIMALS)
+    /// @dev A single LPT asset price values the liquidity provider tranche's market-making position token
+    uint256 internal immutable ONE_WHOLE_LPT_ASSET;
 
     /// @inheritdoc IRoycoDayKernel
     address public immutable override(IRoycoDayKernel) SENIOR_TRANCHE;
@@ -97,16 +100,27 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _;
     }
 
-    /// @dev Initializes the collateral price cache at the start of the call and clears it at the end
-    /// @dev Should be placed on all state mutating functions that use the collateral price
-    modifier withCollateralPriceCached() {
-        // Poke the collateral asset oracle as the operation's first action: can revert as a circuit-breaker
-        IRoycoPriceOracle(_getRoycoDayKernelStorage().collateralAssetOracle).poke();
-        // Cache the collateral asset price for the operation
-        Cache._write(CacheKey.COLLATERAL_ASSET_PRICE, toUint256(_queryCollateralAssetOracle()));
+    /// @dev Screens the specified accounts against the market's blacklist so no blacklisted account can initiate or receive the deposit
+    /// @dev Should be placed on all deposit entrypoints, whose only involved accounts are the caller and the share receiver
+    modifier depositNotBlacklisted(address _caller, address _receiver) {
+        BlacklistLogic._enforceNotBlacklisted(_getRoycoDayKernelStorage(), _caller, _receiver);
         _;
-        // Clear the cached price
-        Cache._delete(CacheKey.COLLATERAL_ASSET_PRICE);
+    }
+
+    /// @dev Screens the specified accounts against the market's blacklist so no blacklisted account can initiate, source, or receive the redemption
+    /// @dev Should be placed on all redemption entrypoints
+    modifier redemptionNotBlacklisted(address _caller, address _owner, address _receiver) {
+        BlacklistLogic._enforceNotBlacklisted(_getRoycoDayKernelStorage(), _caller, _owner, _receiver);
+        _;
+    }
+
+    /// @dev Initializes the operation's price cache at the start of the call and clears it at the end
+    /// @dev Should be placed on all state mutating functions that use the collateral or LPT asset price
+    /// @dev Flows that move the liquidity venue refresh the cached LPT asset price at their fresh mark, so it never goes stale mid-operation
+    modifier withPriceCache() {
+        _cacheAssetPrices();
+        _;
+        _clearAssetPrices();
     }
 
     // =============================
@@ -134,7 +148,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         QUOTE_ASSET = _params.quoteAsset;
         ACCOUNTANT = _params.accountant;
         ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _params.enforceVaultSharesTransferWhitelist;
-        COLLATERAL_ASSET_SCALE_FACTOR = 10 ** IERC20Metadata(_params.collateralAsset).decimals();
+        ONE_WHOLE_COLLATERAL_ASSET = 10 ** IERC20Metadata(_params.collateralAsset).decimals();
+        ONE_WHOLE_LPT_ASSET = 10 ** IERC20Metadata(_params.lptAsset).decimals();
     }
 
     /**
@@ -177,19 +192,23 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT value) {
-        return toNAVUnits(toUint256(_collateralAssets.mulDiv(toUint256(_getCollateralAssetPrice()), COLLATERAL_ASSET_SCALE_FACTOR, Math.Rounding.Floor)));
+        return toNAVUnits(toUint256(_collateralAssets.mulDiv(toUint256(_getCollateralAssetPrice()), ONE_WHOLE_COLLATERAL_ASSET, Math.Rounding.Floor)));
     }
 
     /// @inheritdoc IRoycoDayKernel
     function convertValueToCollateralAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT collateralAssets) {
-        return toTrancheUnits(toUint256(_value.mulDiv(COLLATERAL_ASSET_SCALE_FACTOR, toUint256(_getCollateralAssetPrice()), Math.Rounding.Floor)));
+        return toTrancheUnits(toUint256(_value.mulDiv(ONE_WHOLE_COLLATERAL_ASSET, toUint256(_getCollateralAssetPrice()), Math.Rounding.Floor)));
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function convertLPTAssetsToValue(TRANCHE_UNIT _lptAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
+    function convertLPTAssetsToValue(TRANCHE_UNIT _lptAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT value) {
+        return toNAVUnits(toUint256(_lptAssets.mulDiv(toUint256(_getLPTAssetPrice()), ONE_WHOLE_LPT_ASSET, Math.Rounding.Floor)));
+    }
 
     /// @inheritdoc IRoycoDayKernel
-    function convertValueToLPTAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
+    function convertValueToLPTAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT lptAssets) {
+        return toTrancheUnits(toUint256(_value.mulDiv(ONE_WHOLE_LPT_ASSET, toUint256(_getLPTAssetPrice()), Math.Rounding.Floor)));
+    }
 
     // =============================
     // Tranche Max Deposit and Redeem Functions
@@ -270,7 +289,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         restricted
         nonReentrant
-        withCollateralPriceCached
+        withPriceCache
         returns (SyncedAccountingState memory state)
     {
         return AccountingSyncLogic.syncTrancheAccounting(_getRoycoDayKernelStorage(), getImmutableState());
@@ -284,7 +303,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         restricted
         nonReentrant
-        withCollateralPriceCached
+        withPriceCache
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
         return AccountingSyncLogic.syncTrancheAccountingFor(_getRoycoDayKernelStorage(), getImmutableState(), _trancheType);
@@ -306,15 +325,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function reinvestLiquidityPremium(uint256 _stShares)
-        external
-        virtual
-        override(IRoycoDayKernel)
-        whenNotPaused
-        restricted
-        nonReentrant
-        withCollateralPriceCached
-    {
+    function reinvestLiquidityPremium(uint256 _stShares) external virtual override(IRoycoDayKernel) whenNotPaused restricted nonReentrant withPriceCache {
         AccountingSyncLogic.reinvestLiquidityPremium(_getRoycoDayKernelStorage(), getImmutableState(), _stShares);
     }
 
@@ -327,6 +338,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function stDeposit(
         bool _isPreview,
         TRANCHE_UNIT _assets,
+        address _caller,
         address _receiver
     )
         external
@@ -335,7 +347,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlySeniorTranche
         nonReentrant
-        withCollateralPriceCached
+        depositNotBlacklisted(_caller, _receiver)
+        withPriceCache
         returns (uint256 trancheSharesMinted)
     {
         return DepositLogic.stDeposit(_getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _assets, _receiver, true);
@@ -356,10 +369,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlySeniorTranche
         nonReentrant
-        withCollateralPriceCached
+        redemptionNotBlacklisted(_caller, _owner, _receiver)
+        withPriceCache
         returns (AssetClaims memory userAssetClaims)
     {
-        return RedemptionLogic.stRedeem(_getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _shares, _caller, _owner, _receiver);
+        (userAssetClaims,) = RedemptionLogic.stRedeem(_getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _shares, _owner, _receiver);
     }
 
     // =============================
@@ -371,6 +385,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function jtDeposit(
         bool _isPreview,
         TRANCHE_UNIT _assets,
+        address _caller,
         address _receiver
     )
         external
@@ -379,7 +394,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlyJuniorTranche
         nonReentrant
-        withCollateralPriceCached
+        depositNotBlacklisted(_caller, _receiver)
+        withPriceCache
         returns (uint256 trancheSharesMinted)
     {
         return DepositLogic.jtDeposit(_getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _assets, _receiver);
@@ -400,10 +416,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlyJuniorTranche
         nonReentrant
-        withCollateralPriceCached
+        redemptionNotBlacklisted(_caller, _owner, _receiver)
+        withPriceCache
         returns (AssetClaims memory userAssetClaims)
     {
-        return RedemptionLogic.jtRedeem(_getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _shares, _caller, _owner, _receiver);
+        return RedemptionLogic.jtRedeem(_getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _shares, _owner, _receiver);
     }
 
     // =============================
@@ -415,6 +432,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function lptDeposit(
         bool _isPreview,
         TRANCHE_UNIT _assets,
+        address _caller,
         address _receiver
     )
         external
@@ -423,7 +441,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlyLiquidityProviderTranche
         nonReentrant
-        withCollateralPriceCached
+        depositNotBlacklisted(_caller, _receiver)
+        withPriceCache
         returns (uint256 trancheSharesMinted)
     {
         return DepositLogic.lptDeposit(_getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _assets, _receiver);
@@ -444,10 +463,12 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlyLiquidityProviderTranche
         nonReentrant
-        withCollateralPriceCached
+        redemptionNotBlacklisted(_caller, _owner, _receiver)
+        withPriceCache
         returns (AssetClaims memory userAssetClaims)
     {
-        return RedemptionLogic.lptRedeem(_getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _shares, _caller, _owner, _receiver);
+        // A standalone in-kind redemption removes market-making depth, so the liquidity requirement is always enforced
+        return RedemptionLogic.lptRedeem(_getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _shares, _owner, _receiver, true);
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -458,6 +479,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         TRANCHE_UNIT _collateralAssets,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLPTAssetsOut,
+        address _caller,
         address _receiver
     )
         external
@@ -466,59 +488,14 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlyLiquidityProviderTranche
         nonReentrant
-        withCollateralPriceCached
+        depositNotBlacklisted(_caller, _receiver)
+        withPriceCache
         returns (uint256 trancheSharesMinted, TRANCHE_UNIT lptAssetsOut)
     {
-        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        RoycoDayKernelImmutableState memory immutables = getImmutableState();
-
-        // Collateral leg: an ST deposit minting the add's senior shares to the kernel, waiving only the liquidity requirement the add's deployed depth satisfies below
-        // Both legs run settled in preview and execution alike, a preview unwinds them with this flow's own result revert
-        uint256 stSharesMinted;
-        if (_collateralAssets != ZERO_TRANCHE_UNITS) {
-            stSharesMinted = DepositLogic.stDeposit($, immutables, false, _collateralAssets, address(this), false);
-            require(stSharesMinted != 0, IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES());
-        }
-
-        // Add the minted ST shares and supplied quote assets into the liquidity venue with the specified slippage check
-        // The venue values the minted LPT assets and marks the post-op LPT raw NAV against the post-add pool state in both modes
-        (TRANCHE_UNIT lptAssetsMinted,, NAV_UNIT postOpLPTRawNAV) = _addLiquidity(_isPreview, stSharesMinted, _quoteAssets, _minLPTAssetsOut);
-        lptAssetsOut = lptAssetsMinted;
-
-        // Pin the LPT asset price at the venue's post-add mark, so the LPT leg prices and enforces at the same post-add state in preview and execution alike
-        Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(postOpLPTRawNAV.mulDiv(toTrancheUnits(WAD), ($.totalLPTAssets + lptAssetsOut), Math.Rounding.Floor)));
-
-        // LPT leg: an in-kind LPT deposit of the minted assets at the pinned price, priced and minted to the receiver by the shared primitive
-        trancheSharesMinted = DepositLogic.lptDeposit($, immutables, false, lptAssetsOut, _receiver);
-
-        // Clear the pinned price now that the LPT leg has settled at it
-        Cache._delete(CacheKey.LPT_ASSET_PRICE);
-
-        // A preview carries its result out via this revert, unwinding every mutation this flow made
-        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(trancheSharesMinted, lptAssetsOut));
+        return DepositLogic.lptDepositMultiAsset(
+            _getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _collateralAssets, _quoteAssets, _minLPTAssetsOut, _receiver
+        );
     }
-
-    /**
-     * @notice Adds a senior tranche share and quote asset position into the liquidity venue and returns the liquidity provider tranche assets minted
-     * @dev Implemented by the concrete liquidity venue
-     * @dev A preview computes the amounts under the venue's real semantics and unwinds without settling, so it needs no prior asset possession
-     * @param _isPreview Whether this is a preview of the operation which must not mutate state
-     * @param _seniorShares The exact amount of senior tranche shares to add into the liquidity venue
-     * @param _quoteAssets The exact amount of quote assets to add into the liquidity venue
-     * @param _minLPTAssetsOut The minimum liquidity provider tranche assets that must be minted, bounding the add's slippage
-     * @return lptAssets The liquidity provider tranche assets minted by the add
-     * @return depositNAV The value of the minted liquidity provider tranche assets against the post-add venue state
-     * @return postOpLPTRawNAV The post-op liquidity provider tranche raw NAV marked against the post-add venue state, the mark the post-op sync enforces at
-     */
-    function _addLiquidity(
-        bool _isPreview,
-        uint256 _seniorShares,
-        uint256 _quoteAssets,
-        TRANCHE_UNIT _minLPTAssetsOut
-    )
-        internal
-        virtual
-        returns (TRANCHE_UNIT lptAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLPTRawNAV);
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev LPT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
@@ -537,11 +514,12 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlyLiquidityProviderTranche
         nonReentrant
-        withCollateralPriceCached
+        redemptionNotBlacklisted(_caller, _owner, _receiver)
+        withPriceCache
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
         return RedemptionLogic.lptRedeemMultiAsset(
-            _getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _lptShares, _minSTSharesOut, _minQuoteAssetsOut, _caller, _owner, _receiver
+            _getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _lptShares, _minSTSharesOut, _minQuoteAssetsOut, _owner, _receiver
         );
     }
 
@@ -581,11 +559,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         restricted
     {
         // If specified, sync the tranche accounting to reflect the PNL up to this point in time at the outgoing oracle's price
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithFreshCache();
+        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCache();
         // Update the collateral asset oracle
         _setCollateralAssetOracle(_collateralAssetOracle, _stalenessThresholdSeconds);
         // Sync the tranche accounting to reflect the PNL from the updated oracle's price (the sync re-initializes the price cache to the new price)
-        _preOpSyncTrancheAccountingWithFreshCache();
+        _preOpSyncTrancheAccountingWithPriceCache();
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -604,7 +582,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @dev Uses the price cache since it is called by admin setters outside a cached operation, so it re-initializes the price cache to the live price before syncing
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function _preOpSyncTrancheAccountingWithFreshCache() internal virtual withCollateralPriceCached returns (SyncedAccountingState memory state) {
+    function _preOpSyncTrancheAccountingWithPriceCache() internal virtual withPriceCache returns (SyncedAccountingState memory state) {
         return AccountingSyncLogic._preOpSyncTrancheAccounting(_getRoycoDayKernelStorage(), getImmutableState());
     }
 
@@ -675,28 +653,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function _isTrancheShareCustodian(address _account) internal view virtual returns (bool) { }
 
     // =============================
-    // Collateral Oracle Functions
+    // Asset Pricing Oracle Functions
     // =============================
 
-    /**
-     * @notice Returns the collateral asset's price in NAV units
-     * @dev If the operation's cache slot is populated returns the cached price, otherwise falls back to querying the price live for view function compatibility
-     * @return The value of 1 whole collateral asset in NAV units
-     */
-    function _getCollateralAssetPrice() internal view returns (NAV_UNIT) {
-        // If the cache slot is populated use the cached value
-        (bool cacheHit, uint256 collateralAssetPrice) = Cache._read(CacheKey.COLLATERAL_ASSET_PRICE);
-        if (cacheHit) return toNAVUnits(collateralAssetPrice);
-        // Otherwise fall back to querying the price directly (for view functions)
-        return _queryCollateralAssetOracle();
-    }
-
-    /**
-     * @notice Queries the collateral asset oracle for the value of 1 whole collateral asset in NAV units
-     * @dev The reported price is gated by the L2 sequencer, staleness, and non-zero price checks
-     * @return collateralAssetPrice The value of 1 whole collateral asset in NAV units
-     */
-    function _queryCollateralAssetOracle() internal view returns (NAV_UNIT collateralAssetPrice) {
+    /// @inheritdoc IRoycoDayKernel
+    function queryCollateralAssetOracle() public view override(IRoycoDayKernel) returns (NAV_UNIT collateralAssetPrice) {
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
 
         // If a sequencer uptime feed is set, ensure the L2 sequencer is up and its grace period has elapsed before trusting the price
@@ -718,6 +679,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         require(collateralAssetPrice != ZERO_NAV_UNITS, INVALID_PRICE());
     }
 
+    /// @inheritdoc IRoycoDayKernel
+    function queryLPTAssetOracle() public view virtual override(IRoycoDayKernel) returns (NAV_UNIT lptAssetPrice);
+
     /**
      * @notice Sets the new collateral asset oracle
      * @dev The oracle must price this market's collateral asset
@@ -738,6 +702,32 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /**
+     * @notice Returns the collateral asset's price in NAV units
+     * @dev If the operation's cache slot is populated returns the cached price, otherwise falls back to querying the price live for view function compatibility
+     * @return The value of 1 whole collateral asset in NAV units
+     */
+    function _getCollateralAssetPrice() internal view returns (NAV_UNIT) {
+        // If the cache slot is populated use the cached value
+        (bool cacheHit, uint256 collateralAssetPrice) = Cache._read(CacheKey.COLLATERAL_ASSET_PRICE);
+        if (cacheHit) return toNAVUnits(collateralAssetPrice);
+        // Otherwise fall back to querying the price directly (for view functions)
+        return queryCollateralAssetOracle();
+    }
+
+    /**
+     * @notice Returns the LPT asset's price in NAV units
+     * @dev If the operation's cache slot is populated returns the cached price, otherwise falls back to querying the price live for view function compatibility
+     * @return The value of 1 whole LPT asset in NAV units
+     */
+    function _getLPTAssetPrice() internal view returns (NAV_UNIT) {
+        // If the cache slot is populated use the cached value
+        (bool cacheHit, uint256 lptAssetPrice) = Cache._read(CacheKey.LPT_ASSET_PRICE);
+        if (cacheHit) return toNAVUnits(lptAssetPrice);
+        // Otherwise fall back to querying the price directly (for view functions)
+        return queryLPTAssetOracle();
+    }
+
+    /**
      * @notice Sets the new L2 sequencer uptime feed and grace period
      * @dev A null sequencer uptime feed disables the L2 sequencer check
      *      When a feed is set, the grace period must be a positive
@@ -753,6 +743,23 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         $.gracePeriodSeconds = _gracePeriodSeconds;
 
         emit SequencerUptimeFeedUpdated(_sequencerUptimeFeed, _gracePeriodSeconds);
+    }
+
+    /// @dev Pokes the collateral asset oracle (a circuit-breaker that can revert) and caches the operation's asset prices
+    function _cacheAssetPrices() private {
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
+        // Poke the collateral asset oracle as the operation's first action: can revert as a circuit-breaker
+        IRoycoPriceOracle($.collateralAssetOracle).poke();
+        // Cache the collateral asset price for the operation
+        Cache._write(CacheKey.COLLATERAL_ASSET_PRICE, toUint256(queryCollateralAssetOracle()));
+        // Cache the LPT asset price for the operation when the venue holds inventory to price
+        if ($.totalLPTAssets != ZERO_TRANCHE_UNITS) Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(queryLPTAssetOracle()));
+    }
+
+    /// @dev Clears the operation's cached asset prices
+    function _clearAssetPrices() private {
+        Cache._delete(CacheKey.COLLATERAL_ASSET_PRICE);
+        Cache._delete(CacheKey.LPT_ASSET_PRICE);
     }
 
     // =============================

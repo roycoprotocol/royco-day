@@ -262,6 +262,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     /**
      * @dev Deposits the assets into the Royco market through this tranche's kernel deposit entrypoint
      * @dev The kernel prices the shares at the tranche's pre-deposit effective NAV against the post-sync supply and mints them to the receiver
+     * @dev Forwards msg.sender as the caller the kernel screens with the receiver against the market's blacklist
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _assets The amount of assets to deposit, denominated in the tranche's base asset units
      * @param _receiver The address that receives the minted shares
@@ -270,9 +271,9 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     function _deposit(bool _isPreview, TRANCHE_UNIT _assets, address _receiver) internal virtual returns (uint256 shares) {
         // Deposit the assets into the Royco market through the tranche's kernel entrypoint, which prices and mints the shares
         bytes memory callData;
-        if (TRANCHE_TYPE() == TrancheType.SENIOR) callData = abi.encodeCall(IRoycoDayKernel.stDeposit, (_isPreview, _assets, _receiver));
-        else if (TRANCHE_TYPE() == TrancheType.JUNIOR) callData = abi.encodeCall(IRoycoDayKernel.jtDeposit, (_isPreview, _assets, _receiver));
-        else callData = abi.encodeCall(IRoycoDayKernel.lptDeposit, (_isPreview, _assets, _receiver));
+        if (TRANCHE_TYPE() == TrancheType.SENIOR) callData = abi.encodeCall(IRoycoDayKernel.stDeposit, (_isPreview, _assets, msg.sender, _receiver));
+        else if (TRANCHE_TYPE() == TrancheType.JUNIOR) callData = abi.encodeCall(IRoycoDayKernel.jtDeposit, (_isPreview, _assets, msg.sender, _receiver));
+        else callData = abi.encodeCall(IRoycoDayKernel.lptDeposit, (_isPreview, _assets, msg.sender, _receiver));
         shares = abi.decode(KERNEL._dispatchAndUnwrap(_isPreview, callData), (uint256));
         require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
     }

@@ -125,42 +125,6 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     }
 
     // =============================
-    // Liquidity Venue Functions
-    // =============================
-
-    /**
-     * @inheritdoc RoycoDayKernel
-     * @dev Values the BPT amount at the liquidity venue's manipulation-resistant NAV per BPT (the oracle's total NAV over the BPT
-     *      supply), rounding down so the liquidity provider tranche's NAV is never overstated
-     * @dev The oracle is read live unless the multi-asset LPT deposit has pinned the post-add price: the kernel mints, joins, and exits the
-     *      pool within a single transaction, so a value cached at the start of the operation would be stale by the time it is consumed,
-     *      and only the flow that knows its final mark pins it
-     */
-    function convertLPTAssetsToValue(TRANCHE_UNIT _lptAssets) public view virtual override(RoycoDayKernel) returns (NAV_UNIT) {
-        // Within a multi-asset LPT deposit the price is the pinned post-add mark, so its LPT leg prices and enforces identically in preview and execution
-        (bool cacheHit, uint256 lptAssetPrice) = Cache._read(CacheKey.LPT_ASSET_PRICE);
-        if (cacheHit) return toNAVUnits(lptAssetPrice).mulDiv(_lptAssets, toTrancheUnits(WAD), Math.Rounding.Floor);
-
-        TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply(LPT_ASSET));
-        if (bptTotalSupply == ZERO_TRANCHE_UNITS) return ZERO_NAV_UNITS;
-        NAV_UNIT bptTotalNAV = toNAVUnits(LPOracleBase(_getBalancerV3LiquidityVenueStorage().bptOracle).computeTVL());
-        return bptTotalNAV.mulDiv(_lptAssets, bptTotalSupply, Math.Rounding.Floor);
-    }
-
-    /// @inheritdoc RoycoDayKernel
-    /// @dev Converts the NAV amount to a BPT amount at the same live or pinned, manipulation-resistant NAV per BPT, rounding down
-    function convertValueToLPTAssets(NAV_UNIT _value) public view virtual override(RoycoDayKernel) returns (TRANCHE_UNIT) {
-        // Within a multi-asset LPT deposit the price is the pinned post-add mark, so its LPT leg prices and enforces identically in preview and execution
-        (bool cacheHit, uint256 lptAssetPrice) = Cache._read(CacheKey.LPT_ASSET_PRICE);
-        if (cacheHit) return toTrancheUnits(WAD).mulDiv(_value, toNAVUnits(lptAssetPrice), Math.Rounding.Floor);
-
-        TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply(LPT_ASSET));
-        if (bptTotalSupply == ZERO_TRANCHE_UNITS) return ZERO_TRANCHE_UNITS;
-        NAV_UNIT bptTotalNAV = toNAVUnits(LPOracleBase(_getBalancerV3LiquidityVenueStorage().bptOracle).computeTVL());
-        return bptTotalSupply.mulDiv(_value, bptTotalNAV, Math.Rounding.Floor);
-    }
-
-    // =============================
     // Senior Share Rate Provider Function
     // =============================
 
@@ -199,19 +163,21 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     // =============================
 
     /**
-     * @inheritdoc RoycoDayKernel
-     * @dev Dispatches the add liquidity callback below through the unlocked Vault, the add always settles in preview and execution alike
+     * @inheritdoc IRoycoDayKernel
+     * @dev Dispatches the add liquidity callback below through the unlocked Vault
      * @dev A preview unwinds every transient balance change via the callback's result-carrying revert
+     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
-    function _addLiquidity(
+    function addLiquidity(
         bool _isPreview,
         uint256 _seniorShares,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLPTAssetsOut
     )
-        internal
-        override(RoycoDayKernel)
-        returns (TRANCHE_UNIT lptAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLPTRawNAV)
+        external
+        override(IRoycoDayKernel)
+        onlySelf
+        returns (TRANCHE_UNIT lptAssets, NAV_UNIT lptAssetPrice)
     {
         // Both transports yield the unlock's ABI encoded bytes return byte for byte
         return abi.decode(
@@ -225,7 +191,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
                     ),
                 (bytes)
             ),
-            (TRANCHE_UNIT, NAV_UNIT, NAV_UNIT)
+            (TRANCHE_UNIT, NAV_UNIT)
         );
     }
 
@@ -245,10 +211,10 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         external
         override(IRoycoDayKernel)
         onlySelf
-        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT postOpLPTRawNAV)
+        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice)
     {
         // Both transports yield the unlock's ABI encoded bytes return byte for byte
-        (stShares, quoteAssets, postOpLPTRawNAV) = abi.decode(
+        (stShares, quoteAssets, lptAssetPrice) = abi.decode(
             abi.decode(
                 address(_vault)
                     ._dispatch(
@@ -292,6 +258,21 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         );
     }
 
+    /**
+     * @inheritdoc RoycoDayKernel
+     * @dev Prices one whole LPT asset at the venue's manipulation-resistant NAV per BPT (the oracle's total NAV over the BPT supply),
+     *      rounding down so the liquidity provider tranche's NAV is never overstated
+     * @dev The reported price is gated by a non-zero price check: an initialized pool's permanently burned minimum BPT keeps its supply
+     *      and balances alive, and no flow prices an uninitialized venue
+     */
+    function queryLPTAssetOracle() public view virtual override(RoycoDayKernel) returns (NAV_UNIT lptAssetPrice) {
+        TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply(LPT_ASSET));
+        if (bptTotalSupply == ZERO_TRANCHE_UNITS) return ZERO_NAV_UNITS;
+        NAV_UNIT bptTotalValue = toNAVUnits(LPOracleBase(_getBalancerV3LiquidityVenueStorage().bptOracle).computeTVL());
+        lptAssetPrice = bptTotalValue.mulDiv(toTrancheUnits(ONE_WHOLE_LPT_ASSET), bptTotalSupply, Math.Rounding.Floor);
+        require(lptAssetPrice != ZERO_NAV_UNITS, INVALID_PRICE());
+    }
+
     // =============================
     // Balancer V3 Liquidity Position Callback Functions
     // =============================
@@ -306,11 +287,9 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         external
         override(IBalancerV3VenueCallbacks)
         onlyVault
-        returns (uint256 lptAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLPTRawNAV)
+        returns (uint256 lptAssets, NAV_UNIT lptAssetPrice)
     {
-        return BalancerV3VenueLogic.addBalancerV3Liquidity(
-            _getBalancerV3VenueImmutableState(), _isPreview, _getRoycoDayKernelStorage().totalLPTAssets, _seniorShares, _quoteAssets, _minLPTAssetsOut
-        );
+        return BalancerV3VenueLogic.addBalancerV3Liquidity(_getBalancerV3VenueImmutableState(), _isPreview, _seniorShares, _quoteAssets, _minLPTAssetsOut);
     }
 
     /// @inheritdoc IBalancerV3VenueCallbacks
@@ -324,16 +303,10 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         external
         override(IBalancerV3VenueCallbacks)
         onlyVault
-        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT postOpLPTRawNAV)
+        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice)
     {
         return BalancerV3VenueLogic.removeBalancerV3Liquidity(
-            _getBalancerV3VenueImmutableState(),
-            _isPreview,
-            _getRoycoDayKernelStorage().totalLPTAssets,
-            _lptAssets,
-            _minSTSharesOut,
-            _minQuoteAssetsOut,
-            _quoteAssetsReceiver
+            _getBalancerV3VenueImmutableState(), _isPreview, _lptAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver
         );
     }
 
@@ -348,11 +321,11 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
      */
     function setBPTOracle(address _bptOracle, bool _syncBeforeUpdate) external restricted {
         // If specified, sync the tranche accounting against the outgoing oracle before updating it
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithFreshCache();
+        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCache();
         // Update the BPT oracle
         _setBPTOracle(_bptOracle);
         // Sync the tranche accounting against the incoming oracle so the committed liquidity provider tranche raw NAV reflects it
-        _preOpSyncTrancheAccountingWithFreshCache();
+        _preOpSyncTrancheAccountingWithPriceCache();
     }
 
     /// @notice Sets the maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT

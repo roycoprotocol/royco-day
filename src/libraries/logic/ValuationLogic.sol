@@ -2,8 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { MAX_MINT_DILUTION_WAD, VIRTUAL_SHARES, VIRTUAL_VALUE, WAD, ZERO_NAV_UNITS } from "../Constants.sol";
-import { Math, NAV_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
+import { MAX_MINT_DILUTION_WAD, VIRTUAL_SHARES, VIRTUAL_VALUE, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../Units.sol";
 
 /**
  * @title ValuationLogic
@@ -21,8 +21,11 @@ library ValuationLogic {
      * @return collateralNAV The pure value of the held collateral assets
      */
     function _getCollateralNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT collateralNAV) {
+        // With no holdings there is nothing to price
+        TRANCHE_UNIT totalCollateralAssets = $.totalCollateralAssets;
+        if (totalCollateralAssets == ZERO_TRANCHE_UNITS) return ZERO_NAV_UNITS;
         // Get the held collateral assets and convert them to NAV units via the kernel's pricing
-        return IRoycoDayKernel(address(this)).convertCollateralAssetsToValue($.totalCollateralAssets);
+        return IRoycoDayKernel(address(this)).convertCollateralAssetsToValue(totalCollateralAssets);
     }
 
     /**
@@ -31,8 +34,11 @@ library ValuationLogic {
      * @return lptRawNAV The pure net asset value of the liquidity provider tranche invested assets
      */
     function _getLiquidityProviderTrancheRawNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT lptRawNAV) {
+        // With no holdings there is nothing to price, an uninitialized venue is never queried
+        TRANCHE_UNIT totalLPTAssets = $.totalLPTAssets;
+        if (totalLPTAssets == ZERO_TRANCHE_UNITS) return ZERO_NAV_UNITS;
         // Get the yield bearing assets owned by LPT and convert them to NAV units via the kernel's pricing
-        return IRoycoDayKernel(address(this)).convertLPTAssetsToValue($.totalLPTAssets);
+        return IRoycoDayKernel(address(this)).convertLPTAssetsToValue(totalLPTAssets);
     }
 
     /**

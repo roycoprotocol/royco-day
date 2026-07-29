@@ -268,6 +268,22 @@ interface IRoycoDayKernel {
     function convertValueToLPTAssets(NAV_UNIT _value) external view returns (TRANCHE_UNIT lptAssets);
 
     /**
+     * @notice Queries the collateral asset oracle for the value of 1 whole collateral asset in NAV units
+     * @dev Always prices the oracle live, never through the operation's cache
+     * @dev The reported price is gated by the L2 sequencer, staleness, and non-zero price checks
+     * @return collateralAssetPrice The value of 1 whole collateral asset in NAV units
+     */
+    function queryCollateralAssetOracle() external view returns (NAV_UNIT collateralAssetPrice);
+
+    /**
+     * @notice Queries the liquidity venue for the value of 1 whole LPT asset in NAV units
+     * @dev Always prices the venue live, never through the operation's cache
+     * @dev Implemented by the concrete liquidity venue against its manipulation-resistant venue oracle
+     * @return lptAssetPrice The value of 1 whole LPT asset in NAV units
+     */
+    function queryLPTAssetOracle() external view returns (NAV_UNIT lptAssetPrice);
+
+    /**
      * @notice Returns the maximum amount of assets that can be deposited into the senior tranche
      * @param _receiver The address that will receive the ST shares equating to the deposited assets
      * @return assets The maximum amount of assets that can be deposited into the senior tranche, denominated in the senior tranche's tranche units
@@ -392,10 +408,11 @@ interface IRoycoDayKernel {
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
+     * @param _caller The address that initiated the deposit on the tranche, screened with the receiver against the market's blacklist
      * @param _receiver The address that receives the minted tranche shares
      * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
      */
-    function stDeposit(bool _isPreview, TRANCHE_UNIT _assets, address _receiver) external returns (uint256 trancheSharesMinted);
+    function stDeposit(bool _isPreview, TRANCHE_UNIT _assets, address _caller, address _receiver) external returns (uint256 trancheSharesMinted);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the senior tranche
@@ -409,7 +426,15 @@ interface IRoycoDayKernel {
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function stRedeem(bool _isPreview, uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory userAssetClaims);
+    function stRedeem(
+        bool _isPreview,
+        uint256 _shares,
+        address _caller,
+        address _owner,
+        address _receiver
+    )
+        external
+        returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Processes the deposit of a specified amount of assets into the junior tranche
@@ -418,10 +443,11 @@ interface IRoycoDayKernel {
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _assets The amount of assets to deposit, denominated in the junior tranche's tranche units
+     * @param _caller The address that initiated the deposit on the tranche, screened with the receiver against the market's blacklist
      * @param _receiver The address that receives the minted tranche shares
      * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
      */
-    function jtDeposit(bool _isPreview, TRANCHE_UNIT _assets, address _receiver) external returns (uint256 trancheSharesMinted);
+    function jtDeposit(bool _isPreview, TRANCHE_UNIT _assets, address _caller, address _receiver) external returns (uint256 trancheSharesMinted);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the junior tranche
@@ -435,7 +461,15 @@ interface IRoycoDayKernel {
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function jtRedeem(bool _isPreview, uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory userAssetClaims);
+    function jtRedeem(
+        bool _isPreview,
+        uint256 _shares,
+        address _caller,
+        address _owner,
+        address _receiver
+    )
+        external
+        returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Processes the deposit of a specified amount of assets into the liquidity provider tranche
@@ -444,10 +478,11 @@ interface IRoycoDayKernel {
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _assets The amount of assets (the liquidity venue's position token) to deposit, denominated in the liquidity provider tranche's tranche units
+     * @param _caller The address that initiated the deposit on the tranche, screened with the receiver against the market's blacklist
      * @param _receiver The address that receives the minted tranche shares
      * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
      */
-    function lptDeposit(bool _isPreview, TRANCHE_UNIT _assets, address _receiver) external returns (uint256 trancheSharesMinted);
+    function lptDeposit(bool _isPreview, TRANCHE_UNIT _assets, address _caller, address _receiver) external returns (uint256 trancheSharesMinted);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the liquidity provider tranche
@@ -460,7 +495,15 @@ interface IRoycoDayKernel {
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function lptRedeem(bool _isPreview, uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory userAssetClaims);
+    function lptRedeem(
+        bool _isPreview,
+        uint256 _shares,
+        address _caller,
+        address _owner,
+        address _receiver
+    )
+        external
+        returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Atomically enters the liquidity provider tranche with the LPT assets' constituent assets: deposits collateral (minting senior
@@ -474,6 +517,7 @@ interface IRoycoDayKernel {
      * @param _collateralAssets The amount of collateral to deposit for the senior leg, denominated in tranche units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLPTAssetsOut The minimum LPT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
+     * @param _caller The address that initiated the deposit on the tranche, screened with the receiver against the market's blacklist
      * @param _receiver The address that receives the minted tranche shares
      * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
      * @return lptAssetsOut The amount of LPT tranche assets minted and credited to the liquidity provider tranche
@@ -483,6 +527,7 @@ interface IRoycoDayKernel {
         TRANCHE_UNIT _collateralAssets,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLPTAssetsOut,
+        address _caller,
         address _receiver
     )
         external
@@ -578,7 +623,6 @@ interface IRoycoDayKernel {
     /**
      * @notice Reverts if the specified account is blacklisted on this market
      * @dev No-op when no blacklist is configured (the null address disables screening)
-     * @dev Single-account overload so periphery screens avoid the array allocation
      * @param _account The address of the account to screen
      */
     function enforceNotBlacklisted(address _account) external view;
@@ -596,6 +640,24 @@ interface IRoycoDayKernel {
     // =============================
 
     /**
+     * @notice Adds a senior tranche share and quote asset position into the liquidity venue and returns the liquidity provider tranche assets minted
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _seniorShares The exact amount of senior tranche shares to add into the liquidity venue
+     * @param _quoteAssets The exact amount of quote assets to add into the liquidity venue
+     * @param _minLPTAssetsOut The minimum liquidity provider tranche assets that must be minted, bounding the add's slippage
+     * @return lptAssets The liquidity provider tranche assets minted by the add
+     * @return lptAssetPrice The value of 1 whole LPT asset against the post-add venue state, the price the caller refreshes the operation's cache with
+     */
+    function addLiquidity(
+        bool _isPreview,
+        uint256 _seniorShares,
+        uint256 _quoteAssets,
+        TRANCHE_UNIT _minLPTAssetsOut
+    )
+        external
+        returns (TRANCHE_UNIT lptAssets, NAV_UNIT lptAssetPrice);
+
+    /**
      * @notice Proportionally removes a slice of liquidity provider tranche assets from the liquidity venue into its senior tranche share and quote asset constituents
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _lptAssets The exact liquidity provider tranche assets to burn
@@ -604,7 +666,7 @@ interface IRoycoDayKernel {
      * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets, the withdrawn senior shares are returned to the kernel for the combined senior unwind
      * @return stShares The senior tranche shares withdrawn by the removal
      * @return quoteAssets The quote assets withdrawn by the removal
-     * @return postOpLPTRawNAV The post-op liquidity provider tranche raw NAV marked against the post-remove venue state, the mark the post-op sync enforces at
+     * @return lptAssetPrice The value of 1 whole LPT asset against the post-remove venue state, the price the caller refreshes the operation's cache with
      */
     function removeLiquidity(
         bool _isPreview,
@@ -614,7 +676,7 @@ interface IRoycoDayKernel {
         address _quoteAssetsReceiver
     )
         external
-        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT postOpLPTRawNAV);
+        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice);
 
     /**
      * @notice Attempts to reinvest the liquidity provider tranche's idle liquidity-premium senior shares into its market-making inventory

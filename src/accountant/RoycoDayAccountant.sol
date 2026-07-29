@@ -227,34 +227,32 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             require(deltaCollateralNAV > 0 && deltaLPTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             // New ST deposits are treated as an addition to the future ST exposure
             stEffectiveNAV = (stEffectiveNAV + toNAVUnits(deltaCollateralNAV));
+        } else if (_op == Operation.ST_REDEEM) {
+            // Compute the total value redeemed from the collateral
+            NAV_UNIT collateralRedemptionNAV = toNAVUnits(-deltaCollateralNAV);
+            // A senior redemption leaves the liquidity provider tranche mark untouched and always redeems collateral value
+            require(deltaLPTRawNAV == 0 && collateralRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+            // Reduce JT effective NAV by the bonus provided from its assets
+            jtEffectiveNAV = (jtEffectiveNAV - _stSelfLiquidationBonusNAV);
+            // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
+            stEffectiveNAV = (stEffectiveNAV - (collateralRedemptionNAV - _stSelfLiquidationBonusNAV));
         } else if (_op == Operation.JT_DEPOSIT) {
             require(deltaCollateralNAV > 0 && deltaLPTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             // New JT deposits are treated as an addition to the future loss-absorption buffer
             jtEffectiveNAV = (jtEffectiveNAV + toNAVUnits(deltaCollateralNAV));
+        } else if (_op == Operation.JT_REDEEM) {
+            // Compute the total value redeemed from the collateral
+            NAV_UNIT collateralRedemptionNAV = toNAVUnits(-deltaCollateralNAV);
+            // JT cannot get a bonus from its own NAV, and a junior redemption leaves the senior exposure and supply untouched so it cannot move the liquidity provider tranche mark
+            require(deltaLPTRawNAV == 0 && collateralRedemptionNAV > ZERO_NAV_UNITS && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+            // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
+            jtEffectiveNAV = (jtEffectiveNAV - collateralRedemptionNAV);
         } else if (_op == Operation.LPT_DEPOSIT) {
             // An in-kind LPT deposit only adds market-making inventory, the collateral cannot move
             require(deltaLPTRawNAV > 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
         } else if (_op == Operation.LPT_REDEEM) {
             // An in-kind LPT redemption only transfers out market-making inventory and idle premium shares, the collateral cannot move and no bonus is paid
             require(deltaLPTRawNAV <= 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-        } else {
-            // Compute the total value redeemed from the collateral
-            NAV_UNIT collateralRedemptionNAV = toNAVUnits(-deltaCollateralNAV);
-            if (_op == Operation.ST_REDEEM || _op == Operation.LPT_MULTI_ASSET_REDEEM) {
-                if (_op == Operation.ST_REDEEM) require(deltaLPTRawNAV == 0 && collateralRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-                else require(deltaLPTRawNAV <= 0, INVALID_POST_OP_STATE(_op));
-                // Reduce JT effective NAV by the bonus provided from its assets
-                jtEffectiveNAV = (jtEffectiveNAV - _stSelfLiquidationBonusNAV);
-                // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
-                stEffectiveNAV = (stEffectiveNAV - (collateralRedemptionNAV - _stSelfLiquidationBonusNAV));
-            } else if (_op == Operation.JT_REDEEM) {
-                // JT cannot get a bonus from its own NAV, and a junior redemption leaves the senior exposure and supply untouched so it cannot move the liquidity provider tranche mark
-                require(
-                    deltaLPTRawNAV == 0 && collateralRedemptionNAV > ZERO_NAV_UNITS && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op)
-                );
-                // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
-                jtEffectiveNAV = (jtEffectiveNAV - collateralRedemptionNAV);
-            }
         }
 
         // Enforce the NAV conservation invariant
@@ -290,7 +288,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             coverageLiquidationUtilizationWAD: $.coverageLiquidationUtilizationWAD,
             minLiquidityWAD: minLiquidityWAD
         });
-
     }
 
     // =============================

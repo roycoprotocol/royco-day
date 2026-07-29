@@ -4,9 +4,10 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { WAD } from "../Constants.sol";
+import { Cache, CacheKey } from "../Cache.sol";
+import { WAD, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { AssetClaims, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
-import { Math, NAV_UNIT } from "../Units.sol";
+import { Math, NAV_UNIT, toUint256 } from "../Units.sol";
 import { AssetLedgerLogic } from "./AssetLedgerLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { UtilizationLogic } from "./UtilizationLogic.sol";
@@ -84,7 +85,8 @@ library AccountingSyncLogic {
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting($, _immutables);
         // Reinvest the requested idle premium shares (type(uint256).max reinvests the entire idle balance) at this sync's post-mint senior share rate
         IRoycoDayKernel(address(this)).attemptLiquidityPremiumReinvestment(_stShares, state.stEffectiveNAV, IERC20(_immutables.seniorTranche).totalSupply());
-        // Re-commit the LPT raw NAV: the reinvestment settled after the sync's commit, so the committed depth must reflect the freshly deployed LPT assets
+        // Refresh the cached LPT asset price at the venue's fresh mark and re-commit the LPT raw NAV: the reinvestment settled after the sync's commit, so the committed depth must reflect the freshly deployed LPT assets
+        _refreshLPTAssetPrice($);
         _commitLPTRawNAV($, _immutables, state);
     }
 
@@ -229,42 +231,14 @@ library AccountingSyncLogic {
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _op The operation being executed in between the pre and post synchronizations
-     * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only nonzero if _op == ST_REDEEM || LPT_MULTI_ASSET_REDEEM)
-     * @param _enforceLiquidityRequirement Whether to enforce the liquidity requirement on an operation that can worsen it, waived only by the multi-asset LPT deposit's senior leg
+     * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only nonzero if _op == ST_REDEEM)
+     * @param _enforceLiquidityRequirement Whether to enforce the liquidity requirement on an operation that can worsen it, waived only by the multi-asset flows' intermediate legs
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function _postOpSyncTrancheAccounting(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         Operation _op,
-        NAV_UNIT _stSelfLiquidationBonusNAV,
-        bool _enforceLiquidityRequirement
-    )
-        internal
-        returns (SyncedAccountingState memory state)
-    {
-        return _postOpSyncTrancheAccounting(
-            $, _immutables, _op, ValuationLogic._getLiquidityProviderTrancheRawNAV($), _stSelfLiquidationBonusNAV, _enforceLiquidityRequirement
-        );
-    }
-
-    /**
-     * @notice Executes a post-operation sync at a caller-marked liquidity provider tranche raw NAV
-     * @dev Used by flows whose venue interaction marked the post-op LPT raw NAV inside the venue frame, so preview and
-     *      execution enforce against the same mark
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _op The operation being executed in between the pre and post synchronizations
-     * @param _lptRawNAV The post-op liquidity provider tranche raw NAV, marked by the caller at the venue's post-op state
-     * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only nonzero if _op == ST_REDEEM || LPT_MULTI_ASSET_REDEEM)
-     * @param _enforceLiquidityRequirement Whether to enforce the liquidity requirement on an operation that can worsen it, waived only by the multi-asset LPT deposit's senior leg
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     */
-    function _postOpSyncTrancheAccounting(
-        IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        Operation _op,
-        NAV_UNIT _lptRawNAV,
         NAV_UNIT _stSelfLiquidationBonusNAV,
         bool _enforceLiquidityRequirement
     )
@@ -272,7 +246,11 @@ library AccountingSyncLogic {
         returns (SyncedAccountingState memory state)
     {
         // Execute the post-op sync on the accountant, committing the final state of the accounting
-        state = IRoycoDayAccountant(_immutables.accountant).postOpSyncTrancheAccounting(_op, ValuationLogic._getCollateralNAV($), _lptRawNAV, _stSelfLiquidationBonusNAV);
+        // The LPT depth is priced at the operation's cached price, which venue-moving flows refreshed at their fresh mark
+        state = IRoycoDayAccountant(_immutables.accountant)
+            .postOpSyncTrancheAccounting(
+                _op, ValuationLogic._getCollateralNAV($), ValuationLogic._getLiquidityProviderTrancheRawNAV($), _stSelfLiquidationBonusNAV
+            );
 
         // Enforce the coverage requirement for operations that can worsen coverage (add senior exposure or remove the junior loss-absorption buffer)
         if (_op == Operation.ST_DEPOSIT || _op == Operation.JT_REDEEM) {
@@ -280,17 +258,20 @@ library AccountingSyncLogic {
         }
         // Enforce the liquidity requirement for operations that can worsen liquidity (raise the senior exposure or reduce the venue's market-making depth)
         // The multi-asset LPT deposit waives it on its senior leg alone, whose minted shares the venue add immediately deploys as depth
-        if (_enforceLiquidityRequirement && (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_REDEEM || _op == Operation.LPT_MULTI_ASSET_REDEEM)) {
+        // The multi-asset LPT redemption waives it on its LPT leg and gates its own final settled state, after the in-flow senior unwind shrank the requirement
+        if (_enforceLiquidityRequirement && (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_REDEEM)) {
             require(state.liquidityUtilizationWAD <= WAD, IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED());
         }
 
         // Deploy the accumulated idle liquidity-premium senior shares now that the operation has settled and its requirements are enforced
         if ($.lptOwnedSeniorTrancheShares != 0) {
+            uint256 totalSTShares = IERC20(_immutables.seniorTranche).totalSupply();
+            // Refresh the cached senior share rate at the settled post-op state, the venue prices its senior leg at this rate during the deployment
+            Cache._write(CacheKey.ST_SHARE_PRICE, toUint256(ValuationLogic._computeTrancheShareRate(totalSTShares, state.stEffectiveNAV)));
             // Value the pile at the settled post-op senior state, a gated or unpriceable deployment defers inside the attempt and leaves the shares idle
-            // The venue's senior-leg mark stays the pre-op cached rate, which the frozen collateral price and at-rate mints keep exact through the operation
-            IRoycoDayKernel(address(this))
-                .attemptLiquidityPremiumReinvestment(type(uint256).max, state.stEffectiveNAV, IERC20(_immutables.seniorTranche).totalSupply());
-            // Re-commit the LPT raw NAV: the deployment settled after the post-op's commit, so the committed depth must reflect the freshly deployed LPT assets
+            IRoycoDayKernel(address(this)).attemptLiquidityPremiumReinvestment(type(uint256).max, state.stEffectiveNAV, totalSTShares);
+            // Refresh the cached LPT asset price at the venue's fresh mark and re-commit the LPT raw NAV: the deployment settled after the post-op's commit, so the committed depth must reflect the freshly deployed LPT assets
+            _refreshLPTAssetPrice($);
             _commitLPTRawNAV($, _immutables, state);
         }
 
@@ -299,9 +280,22 @@ library AccountingSyncLogic {
     }
 
     /**
+     * @notice Refreshes the cached LPT asset price at the venue's fresh mark
+     * @dev Called after a venue deployment moved the pool under the operation's cached price
+     * @dev The deployment settles in preview and execution alike, so both modes refresh to the identical fresh price
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     */
+    function _refreshLPTAssetPrice(IRoycoDayKernel.RoycoDayKernelState storage $) internal {
+        // With no holdings there is nothing to price, an uninitialized venue is never queried
+        if ($.totalLPTAssets == ZERO_TRANCHE_UNITS) return;
+        Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(IRoycoDayKernel(address(this)).queryLPTAssetOracle()));
+    }
+
+    /**
      * @notice Marks and commits the liquidity provider tranche's fresh raw NAV and refreshes the in-memory state packet
      * @dev Called wherever the depth may have moved under the committed mark: after a sync's fee and premium mints, or a reinvestment
      *      The committed liquidity provider tranche raw NAV stays out of the P&L waterfall and the senior share rate provider's dependency loop
+     * @dev Prices the depth at the operation's cached LPT asset price and never re-prices it: flows that move the liquidity venue refresh the cache at their own fresh mark before this runs
      * @dev Refreshes the state packet in place so every downstream consumer reads the most up-to-date values
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function

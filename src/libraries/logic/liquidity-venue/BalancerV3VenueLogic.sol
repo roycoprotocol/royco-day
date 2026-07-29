@@ -13,7 +13,7 @@ import { SafeERC20 } from "../../../../lib/openzeppelin-contracts/contracts/toke
 import { IRoycoDayKernel } from "../../../interfaces/IRoycoDayKernel.sol";
 import { IBalancerV3VenueCallbacks } from "../../../interfaces/liquidity-venue/IBalancerV3VenueCallbacks.sol";
 import { WAD, ZERO_TRANCHE_UNITS } from "../../Constants.sol";
-import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../Units.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../../Units.sol";
 import { DispatchLogic } from "../DispatchLogic.sol";
 import { ValuationLogic } from "../ValuationLogic.sol";
 
@@ -34,24 +34,21 @@ library BalancerV3VenueLogic {
      * @dev The kernel supplies the senior tranche shares and quote assets it already holds and receives the minted BPT for the liquidity provider tranche
      * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
      * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
-     * @param _totalLPTAssets The kernel's current LPT-owned BPT holdings, the basis of the post-op LPT mark
      * @param _seniorShares The exact amount of senior tranche shares to add into the pool from this kernel's balance
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
      * @param _minLPTAssetsOut The minimum BPT (LPT assets) that must be minted, bounding the add's slippage at the Vault
      * @return lptAssets The BPT (LPT assets) minted to this kernel by the add
-     * @return depositNAV The value of the minted BPT against the post-add pool state, denominated in the kernel's NAV units
-     * @return postOpLPTRawNAV The post-op LPT raw NAV marked against the post-add pool state, the mark the post-op sync enforces at
+     * @return lptAssetPrice The value of 1 whole BPT against the post-add pool state, the price the caller refreshes the operation's cache with
      */
     function addBalancerV3Liquidity(
         IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
         bool _isPreview,
-        TRANCHE_UNIT _totalLPTAssets,
         uint256 _seniorShares,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLPTAssetsOut
     )
         external
-        returns (uint256 lptAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLPTRawNAV)
+        returns (uint256 lptAssets, NAV_UNIT lptAssetPrice)
     {
         // The exact senior tranche share and quote asset amounts to add, ordered by the pool's token registration
         uint256[] memory exactAmountsIn = new uint256[](2);
@@ -91,13 +88,12 @@ library BalancerV3VenueLogic {
                 );
         }
 
-        // Value the minted BPT and the post-op LPT holdings against the post-add pool state both modes price and enforce at
-        depositNAV = IRoycoDayKernel(address(this)).convertLPTAssetsToValue(toTrancheUnits(lptAssets));
-        postOpLPTRawNAV = IRoycoDayKernel(address(this)).convertLPTAssetsToValue(_totalLPTAssets + toTrancheUnits(lptAssets));
+        // Price 1 whole BPT live against the post-add pool state both modes price and enforce at
+        lptAssetPrice = IRoycoDayKernel(address(this)).queryLPTAssetOracle();
 
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement
         // NOTE: The error's offset and length prefix mirrors the unlock's bytes return so either mode decodes identically
-        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(lptAssets, depositNAV, postOpLPTRawNAV));
+        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(lptAssets, lptAssetPrice));
 
         // Settle the senior tranche shares and quote assets this kernel owes the Vault for the add by transferring them in and cancelling the debt
         if (_seniorShares > 0) {
@@ -118,26 +114,24 @@ library BalancerV3VenueLogic {
      * @dev The kernel receives any ST shares withdrawn and is responsible for converting them to the base assets before remitting them to the user
      * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
      * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
-     * @param _totalLPTAssets The kernel's remaining LPT-owned BPT holdings (already debited by the flow), the basis of the post-op LPT mark
      * @param _lptAssets The exact BPT amount (LPT assets) to burn from this kernel's balance
      * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage at the Vault
      * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage at the Vault
      * @param _quoteAssetsReceiver The recipient of the quote assets withdrawn
      * @return stShares The senior tranche shares withdrawn back to this kernel by the unwrap
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
-     * @return postOpLPTRawNAV The post-op LPT raw NAV marked against the post-remove pool state, the mark the post-op sync enforces at
+     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the price the caller refreshes the operation's cache with
      */
     function removeBalancerV3Liquidity(
         IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
         bool _isPreview,
-        TRANCHE_UNIT _totalLPTAssets,
         TRANCHE_UNIT _lptAssets,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
         address _quoteAssetsReceiver
     )
         external
-        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT postOpLPTRawNAV)
+        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice)
     {
         // The minimum senior tranche share and quote asset amounts out, ordered by the pool's token registration
         uint256[] memory minAmountsOut = new uint256[](2);
@@ -161,12 +155,12 @@ library BalancerV3VenueLogic {
         stShares = amountsOut[_immutables.stSharePoolIndex];
         quoteAssets = amountsOut[_immutables.quoteAssetPoolIndex];
 
-        // Value the post-op LPT holdings after the removal, which can mutate the invariant, so both modes enforce at the same post-remove state
-        postOpLPTRawNAV = IRoycoDayKernel(address(this)).convertLPTAssetsToValue(_totalLPTAssets);
+        // Price 1 whole BPT live against the post-remove pool state both modes price and enforce at
+        lptAssetPrice = IRoycoDayKernel(address(this)).queryLPTAssetOracle();
 
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement
         // NOTE: The error's offset and length prefix mirrors the unlock's bytes return so either mode decodes identically
-        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(stShares, quoteAssets, postOpLPTRawNAV));
+        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(stShares, quoteAssets, lptAssetPrice));
 
         // Credit the ST shares withdrawn to the kernel for downstream redemption before remitting assets to the user
         if (stShares > 0) _immutables.vault.sendTo(IERC20(_immutables.seniorTranche), address(this), stShares);
