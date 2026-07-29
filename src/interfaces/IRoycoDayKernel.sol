@@ -285,24 +285,21 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Returns the maximum amount of assets that can be deposited in-kind into the specified tranche
-     * @param _trancheType An enumerator indicating which tranche to return the max deposit for
+     * @dev Only callable by one of the market's tranches: the queried tranche is the calling tranche
      * @param _receiver The address that will receive the tranche shares equating to the deposited assets
-     * @return assets The maximum amount of assets that can be deposited into the specified tranche, denominated in its tranche units
+     * @return assets The maximum amount of assets that can be deposited into the calling tranche, denominated in its tranche units
      */
-    function inkindMaxDeposit(TrancheType _trancheType, address _receiver) external view returns (TRANCHE_UNIT assets);
+    function inkindMaxDeposit(address _receiver) external view returns (TRANCHE_UNIT assets);
 
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn in-kind from the specified tranche
-     * @param _trancheType An enumerator indicating which tranche to return the max withdrawable for
+     * @dev Only callable by one of the market's tranches: the queried tranche is the calling tranche
      * @param _owner The address that is withdrawing the assets
-     * @return claimNAV The specified tranche's total notional claim on its assets, denominated in the kernel's NAV units
-     * @return maxWithdrawableNAV The maximum amount of assets that can be withdrawn from the specified tranche, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares
+     * @return claimNAV The calling tranche's total notional claim on its assets, denominated in the kernel's NAV units
+     * @return maxWithdrawableNAV The maximum amount of assets that can be withdrawn from the calling tranche, denominated in the kernel's NAV units
+     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the calling tranche after the post-sync mint of its accrued shares
      */
-    function inkindMaxWithdrawable(
-        TrancheType _trancheType,
-        address _owner
-    )
+    function inkindMaxWithdrawable(address _owner)
         external
         view
         returns (NAV_UNIT claimNAV, NAV_UNIT maxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);

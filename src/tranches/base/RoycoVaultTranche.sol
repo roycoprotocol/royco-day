@@ -206,13 +206,13 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
 
     /// @inheritdoc IRoycoVaultTranche
     function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
-        return IRoycoDayKernel(KERNEL).inkindMaxDeposit(TRANCHE_TYPE(), _receiver);
+        return IRoycoDayKernel(KERNEL).inkindMaxDeposit(_receiver);
     }
 
     /// @inheritdoc IRoycoVaultTranche
     function maxRedeem(address _owner) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
         // Query the tranche's total claim on the market's NAV and its global maximum withdrawable NAV
-        (NAV_UNIT claimNAV, NAV_UNIT maxWithdrawableNAV, uint256 totalTrancheShares) = IRoycoDayKernel(KERNEL).inkindMaxWithdrawable(TRANCHE_TYPE(), _owner);
+        (NAV_UNIT claimNAV, NAV_UNIT maxWithdrawableNAV, uint256 totalTrancheShares) = IRoycoDayKernel(KERNEL).inkindMaxWithdrawable(_owner);
 
         // We do not allow redemptions if the tranche has no claim on the assets
         if (claimNAV == ZERO_NAV_UNITS) return 0;
