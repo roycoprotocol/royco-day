@@ -186,39 +186,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     // =============================
-    // Tranche Max Deposit and Redeem Functions
-    // =============================
-
-    /// @inheritdoc IRoycoDayKernel
-    /// @dev ST and JT deposits are allowed only in a PERPETUAL market state, the ST deposit granted that the market's coverage and liquidity requirements are satisfied post-deposit
-    /// @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and unbounded
-    function inkindMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT) {
-        return DepositLogic.inkindMaxDeposit(_getRoycoDayKernelStorage(), getImmutableState(), _getInvokingTranche(), _receiver);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    /// @dev Redemptions are allowed only in a PERPETUAL market state, the JT withdrawal bounded by the market's coverage requirement and the LPT withdrawal by its liquidity requirement
-    function inkindMaxWithdrawable(address _owner)
-        public
-        view
-        virtual
-        override(IRoycoDayKernel)
-        returns (NAV_UNIT claimNAV, NAV_UNIT maxWithdrawableNAV, uint256 totalTrancheShares)
-    {
-        return RedemptionLogic.inkindMaxWithdrawable(_getRoycoDayKernelStorage(), getImmutableState(), _getInvokingTranche(), _owner);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function lptMaxWithdrawableMultiAsset(address _owner)
-        public
-        virtual
-        override(IRoycoDayKernel)
-        returns (NAV_UNIT claimOnLPTNAV, NAV_UNIT lptMaxWithdrawableNAV, uint256 totalTrancheShares)
-    {
-        return RedemptionLogic.lptMaxWithdrawableMultiAsset(_getRoycoDayKernelStorage(), getImmutableState(), _owner);
-    }
-
-    // =============================
     // Tranche Accounting and Synchronization Functions
     // =============================
 
@@ -300,7 +267,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withCollateralPriceCached
         returns (uint256 trancheSharesMinted)
     {
-        return DepositLogic.inkindDeposit(_getRoycoDayKernelStorage(), getImmutableState(), _getInvokingTranche(), _mode, _assets, _caller, _receiver);
+        return DepositLogic.inkindDeposit(_getRoycoDayKernelStorage(), getImmutableState(), _mode, _getInvokingTranche(), _assets, _caller, _receiver);
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -322,7 +289,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (AssetClaims memory userAssetClaims)
     {
         userAssetClaims =
-            RedemptionLogic.inkindRedeem(_getRoycoDayKernelStorage(), getImmutableState(), _getInvokingTranche(), _mode, _shares, _caller, _owner, _receiver);
+            RedemptionLogic.inkindRedeem(_getRoycoDayKernelStorage(), getImmutableState(), _mode, _getInvokingTranche(), _shares, _caller, _owner, _receiver);
     }
 
     // =============================
@@ -377,6 +344,41 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         return RedemptionLogic.lptRedeemMultiAsset(
             _getRoycoDayKernelStorage(), getImmutableState(), _mode, _lptShares, _minSTSharesOut, _minQuoteAssetsOut, _caller, _owner, _receiver
         );
+    }
+
+    // =============================
+    // Tranche Max Deposit and Redeem Functions
+    // =============================
+
+    /// @inheritdoc IRoycoDayKernel
+    /// @dev ST and JT deposits are allowed only in a PERPETUAL market state, the ST deposit granted that the market's coverage and liquidity requirements are satisfied post-deposit
+    /// @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and unbounded
+    function inkindMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernel) onlyTranche returns (TRANCHE_UNIT) {
+        return DepositLogic.inkindMaxDeposit(_getRoycoDayKernelStorage(), getImmutableState(), _getInvokingTranche(), _receiver);
+    }
+
+    /// @inheritdoc IRoycoDayKernel
+    /// @dev Redemptions are allowed only in a PERPETUAL market state, the JT withdrawal bounded by the market's coverage requirement and the LPT withdrawal by its liquidity requirement
+    function inkindMaxWithdrawable(address _owner)
+        public
+        view
+        virtual
+        override(IRoycoDayKernel)
+        onlyTranche
+        returns (NAV_UNIT claimNAV, NAV_UNIT maxWithdrawableNAV, uint256 totalTrancheShares)
+    {
+        return RedemptionLogic.inkindMaxWithdrawable(_getRoycoDayKernelStorage(), getImmutableState(), _getInvokingTranche(), _owner);
+    }
+
+    /// @inheritdoc IRoycoDayKernel
+    function lptMaxWithdrawableMultiAsset(address _owner)
+        public
+        virtual
+        override(IRoycoDayKernel)
+        onlyLiquidityProviderTranche
+        returns (NAV_UNIT claimOnLPTNAV, NAV_UNIT lptMaxWithdrawableNAV, uint256 totalTrancheShares)
+    {
+        return RedemptionLogic.lptMaxWithdrawableMultiAsset(_getRoycoDayKernelStorage(), getImmutableState(), _owner);
     }
 
     // =============================

@@ -34,8 +34,8 @@ library DepositLogic {
      * @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state (including fixed-term) and enforces no requirements
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _trancheType An enumerator indicating which tranche to deposit into
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
+     * @param _trancheType An enumerator indicating which tranche to deposit into
      * @param _assets The amount of assets to deposit, denominated in the specified tranche's tranche units
      * @param _caller The address that initiated the deposit
      * @param _receiver The address that receives the minted tranche shares
@@ -44,8 +44,8 @@ library DepositLogic {
     function inkindDeposit(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        TrancheType _trancheType,
         DispatchMode _mode,
+        TrancheType _trancheType,
         TRANCHE_UNIT _assets,
         address _caller,
         address _receiver
@@ -127,7 +127,7 @@ library DepositLogic {
         // Both legs run settled in preview and execution alike, this flow's own result revert unwinds them in a preview
         uint256 stSharesMinted;
         if (_collateralAssets != ZERO_TRANCHE_UNITS) {
-            stSharesMinted = inkindDeposit($, _immutables, TrancheType.SENIOR, DispatchMode.EXECUTE, _collateralAssets, _caller, address(this));
+            stSharesMinted = inkindDeposit($, _immutables, DispatchMode.EXECUTE, TrancheType.SENIOR, _collateralAssets, _caller, address(this));
         }
 
         // Add the minted ST shares and supplied quote assets into the liquidity venue with the specified slippage check
@@ -140,7 +140,7 @@ library DepositLogic {
 
         // LPT leg: an in-kind LPT deposit of the minted assets at the post-add price, priced and minted to the receiver by the shared primitive
         // Its in-flow post-op enforces the liquidity requirement against this flow's settled state
-        trancheSharesMinted = inkindDeposit($, _immutables, TrancheType.LIQUIDITY_PROVIDER, DispatchMode.EXECUTE, lptAssetsOut, _caller, _receiver);
+        trancheSharesMinted = inkindDeposit($, _immutables, DispatchMode.EXECUTE, TrancheType.LIQUIDITY_PROVIDER, lptAssetsOut, _caller, _receiver);
 
         // Unmark the settled multi-asset flow and enforce a liquidity check an intermediate leg deferred that the flow's final settled state never healed
         // Checked before the preview revert so a simulation of a violating flow reverts exactly like an execution

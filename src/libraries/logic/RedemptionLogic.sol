@@ -41,8 +41,8 @@ library RedemptionLogic {
      *      and the LPT redemption granted that the market's liquidity requirement are satisfied post-redemption
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _trancheType An enumerator indicating which tranche to redeem from
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
+     * @param _trancheType An enumerator indicating which tranche to redeem from
      * @param _shares The number of shares to redeem
      * @param _caller The address that initiated the redemption
      * @param _owner The address whose tranche shares are burned for the redemption, the null address for a simulation's synthetic owner
@@ -52,8 +52,8 @@ library RedemptionLogic {
     function inkindRedeem(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        TrancheType _trancheType,
         DispatchMode _mode,
+        TrancheType _trancheType,
         uint256 _shares,
         address _caller,
         address _owner,
@@ -143,7 +143,7 @@ library RedemptionLogic {
         // Its in-flow post-op waives the liquidity requirement the ST leg's post-op enforces on this flow's final settled state
         // All legs run settled in preview and execution alike, this flow's own result revert unwinds them in a preview
         AssetClaims memory lptAssetClaims =
-            inkindRedeem($, _immutables, TrancheType.LIQUIDITY_PROVIDER, DispatchMode.EXECUTE, _lptShares, _caller, _owner, address(this));
+            inkindRedeem($, _immutables, DispatchMode.EXECUTE, TrancheType.LIQUIDITY_PROVIDER, _lptShares, _caller, _owner, address(this));
 
         // Remove the redeemed LPT assets from the liquidity venue: the senior shares return to the kernel and the quote goes to the receiver
         // The removal settles in both modes since the kernel custodies the BPT, so the ST leg redeems really delivered senior shares even in a preview
@@ -160,7 +160,7 @@ library RedemptionLogic {
         // Its in-flow post-op enforces the liquidity requirement against this flow's final settled state, after the senior unwind shrank the requirement the removal's depth exit raised
         stSharesWithdrawn += lptAssetClaims.stShares;
         if (stSharesWithdrawn != 0) {
-            stClaims = inkindRedeem($, _immutables, TrancheType.SENIOR, DispatchMode.EXECUTE, stSharesWithdrawn, _caller, address(this), _receiver);
+            stClaims = inkindRedeem($, _immutables, DispatchMode.EXECUTE, TrancheType.SENIOR, stSharesWithdrawn, _caller, address(this), _receiver);
         }
 
         // Unmark the settled multi-asset flow and enforce a liquidity check an intermediate leg deferred that the flow's final settled state never healed
