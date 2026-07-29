@@ -5,7 +5,7 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { Cache, CacheKey } from "../Cache.sol";
-import { WAD, ZERO_TRANCHE_UNITS } from "../Constants.sol";
+import { WAD } from "../Constants.sol";
 import { AssetClaims, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
 import { Math, NAV_UNIT, toUint256 } from "../Units.sol";
 import { AssetLedgerLogic } from "./AssetLedgerLogic.sol";
@@ -85,8 +85,7 @@ library AccountingSyncLogic {
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting($, _immutables);
         // Reinvest the requested idle premium shares (type(uint256).max reinvests the entire idle balance) at this sync's post-mint senior share rate
         IRoycoDayKernel(address(this)).attemptLiquidityPremiumReinvestment(_stShares, state.stEffectiveNAV, IERC20(_immutables.seniorTranche).totalSupply());
-        // Refresh the cached LPT asset price at the venue's fresh mark and re-commit the LPT raw NAV: the reinvestment settled after the sync's commit, so the committed depth must reflect the freshly deployed LPT assets
-        _refreshLPTAssetPrice($);
+        // Re-commit the LPT raw NAV: the reinvestment settled after the sync's commit, so the committed depth must reflect the freshly deployed LPT assets
         _commitLPTRawNAV($, _immutables, state);
     }
 
@@ -217,9 +216,7 @@ library AccountingSyncLogic {
         emit IRoycoDayKernel.PreOpTrancheAccountingSynced(state);
 
         // Read the requested tranche's total supply after all shares (fees and premium) have been minted
-        if (_trancheType == TrancheType.SENIOR) totalTrancheShares = IERC20(_immutables.seniorTranche).totalSupply();
-        else if (_trancheType == TrancheType.JUNIOR) totalTrancheShares = IERC20(_immutables.juniorTranche).totalSupply();
-        else totalTrancheShares = IERC20(_immutables.liquidityProviderTranche).totalSupply();
+        totalTrancheShares = IERC20(AssetLedgerLogic._getTrancheAddress(_immutables, _trancheType)).totalSupply();
 
         // Derive the asset claims for the specified tranche
         claims = AssetLedgerLogic._deriveTrancheAssetClaims($, _immutables, _trancheType, state);
@@ -232,21 +229,19 @@ library AccountingSyncLogic {
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _op The operation being executed in between the pre and post synchronizations
      * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only nonzero if _op == ST_REDEEM)
-     * @param _enforceLiquidityRequirement Whether to enforce the liquidity requirement on an operation that can worsen it, waived only by the multi-asset flows' intermediate legs
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function _postOpSyncTrancheAccounting(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         Operation _op,
-        NAV_UNIT _stSelfLiquidationBonusNAV,
-        bool _enforceLiquidityRequirement
+        NAV_UNIT _stSelfLiquidationBonusNAV
     )
         internal
         returns (SyncedAccountingState memory state)
     {
         // Execute the post-op sync on the accountant, committing the final state of the accounting
-        // The LPT depth is priced at the operation's cached price, which venue-moving flows refreshed at their fresh mark
+        // The LPT depth is priced live at the settled venue, a multi-asset preview prices at the frame mark it pinned for its venue operation
         state = IRoycoDayAccountant(_immutables.accountant)
             .postOpSyncTrancheAccounting(
                 _op, ValuationLogic._getCollateralNAV($), ValuationLogic._getLiquidityProviderTrancheRawNAV($), _stSelfLiquidationBonusNAV
@@ -257,21 +252,30 @@ library AccountingSyncLogic {
             require(state.coverageUtilizationWAD <= WAD, IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED());
         }
         // Enforce the liquidity requirement for operations that can worsen liquidity (raise the senior exposure or reduce the venue's market-making depth)
-        // The multi-asset LPT deposit waives it on its senior leg alone, whose minted shares the venue add immediately deploys as depth
-        // The multi-asset LPT redemption waives it on its LPT leg and gates its own final settled state, after the in-flow senior unwind shrank the requirement
-        if (_enforceLiquidityRequirement && (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_REDEEM)) {
-            require(state.liquidityUtilizationWAD <= WAD, IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED());
+        // A multi-asset composite flow inverts the standalone arms: its intermediate legs (the deposit's ST leg, the redemption's LPT leg) are waived
+        // and its final leg's post-op (the deposit's LPT leg, the redemption's ST leg) enforces against the flow's settled state
+        (bool inMultiAssetFlow,) = Cache._read(CacheKey.IN_MULTI_ASSET_FLOW);
+        bool liquidityRequirementSatisfied = (state.liquidityUtilizationWAD <= WAD);
+        if (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_REDEEM) {
+            if (inMultiAssetFlow && !liquidityRequirementSatisfied) {
+                Cache._write(CacheKey.LIQUIDITY_CHECK_DEFERRED, 1);
+            } else {
+                require(liquidityRequirementSatisfied, IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED());
+            }
         }
+        if (inMultiAssetFlow && liquidityRequirementSatisfied && (_op == Operation.LPT_DEPOSIT || _op == Operation.ST_REDEEM)) {
+            Cache._delete(CacheKey.LIQUIDITY_CHECK_DEFERRED);
+        }
+
+        // Refresh the cached senior share rate at the settled post-op state
+        uint256 totalSTShares = IERC20(_immutables.seniorTranche).totalSupply();
+        Cache._write(CacheKey.ST_SHARE_PRICE, toUint256(ValuationLogic._computeTrancheShareRate(totalSTShares, state.stEffectiveNAV)));
 
         // Deploy the accumulated idle liquidity-premium senior shares now that the operation has settled and its requirements are enforced
         if ($.lptOwnedSeniorTrancheShares != 0) {
-            uint256 totalSTShares = IERC20(_immutables.seniorTranche).totalSupply();
-            // Refresh the cached senior share rate at the settled post-op state, the venue prices its senior leg at this rate during the deployment
-            Cache._write(CacheKey.ST_SHARE_PRICE, toUint256(ValuationLogic._computeTrancheShareRate(totalSTShares, state.stEffectiveNAV)));
             // Value the pile at the settled post-op senior state, a gated or unpriceable deployment defers inside the attempt and leaves the shares idle
             IRoycoDayKernel(address(this)).attemptLiquidityPremiumReinvestment(type(uint256).max, state.stEffectiveNAV, totalSTShares);
-            // Refresh the cached LPT asset price at the venue's fresh mark and re-commit the LPT raw NAV: the deployment settled after the post-op's commit, so the committed depth must reflect the freshly deployed LPT assets
-            _refreshLPTAssetPrice($);
+            // Re-commit the LPT raw NAV: the deployment settled after the post-op's commit, so the committed depth must reflect the freshly deployed LPT assets
             _commitLPTRawNAV($, _immutables, state);
         }
 
@@ -280,22 +284,10 @@ library AccountingSyncLogic {
     }
 
     /**
-     * @notice Refreshes the cached LPT asset price at the venue's fresh mark
-     * @dev Called after a venue deployment moved the pool under the operation's cached price
-     * @dev The deployment settles in preview and execution alike, so both modes refresh to the identical fresh price
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     */
-    function _refreshLPTAssetPrice(IRoycoDayKernel.RoycoDayKernelState storage $) internal {
-        // With no holdings there is nothing to price, an uninitialized venue is never queried
-        if ($.totalLPTAssets == ZERO_TRANCHE_UNITS) return;
-        Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(IRoycoDayKernel(address(this)).queryLPTAssetOracle()));
-    }
-
-    /**
      * @notice Marks and commits the liquidity provider tranche's fresh raw NAV and refreshes the in-memory state packet
      * @dev Called wherever the depth may have moved under the committed mark: after a sync's fee and premium mints, or a reinvestment
      *      The committed liquidity provider tranche raw NAV stays out of the P&L waterfall and the senior share rate provider's dependency loop
-     * @dev Prices the depth at the operation's cached LPT asset price and never re-prices it: flows that move the liquidity venue refresh the cache at their own fresh mark before this runs
+     * @dev Prices the depth live at the venue oracle, a multi-asset deposit or redemption preview reads the frame mark it pinned for its venue operation instead
      * @dev Refreshes the state packet in place so every downstream consumer reads the most up-to-date values
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function

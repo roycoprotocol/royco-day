@@ -13,6 +13,7 @@ import { IBaseTemplate } from "../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoFactoryGatekeeper } from "../interfaces/factory/IRoycoFactoryGatekeeper.sol";
 import { IRoycoProtocolTemplate } from "../interfaces/factory/IRoycoProtocolTemplate.sol";
+import { DispatchMode } from "../libraries/Types.sol";
 import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
 
 /**
@@ -242,7 +243,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         require(_target != authority() && _target != ROYCO_FACTORY_GATEKEEPER, FACTORY_CALL_TARGET_FORBIDDEN());
 
         // Forward as an execution dispatch
-        return _target._dispatch(false, _data);
+        return _target._dispatch(DispatchMode.EXECUTE, _data);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -13,6 +13,7 @@ import { SafeERC20 } from "../../../../lib/openzeppelin-contracts/contracts/toke
 import { IRoycoDayKernel } from "../../../interfaces/IRoycoDayKernel.sol";
 import { IBalancerV3VenueCallbacks } from "../../../interfaces/liquidity-venue/IBalancerV3VenueCallbacks.sol";
 import { WAD, ZERO_TRANCHE_UNITS } from "../../Constants.sol";
+import { DispatchMode } from "../../Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../../Units.sol";
 import { DispatchLogic } from "../DispatchLogic.sol";
 import { ValuationLogic } from "../ValuationLogic.sol";
@@ -33,16 +34,16 @@ library BalancerV3VenueLogic {
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel supplies the senior tranche shares and quote assets it already holds and receives the minted BPT for the liquidity provider tranche
      * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
-     * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
+     * @param _mode The dispatch mode: SIMULATE computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling, EXECUTE settles
      * @param _seniorShares The exact amount of senior tranche shares to add into the pool from this kernel's balance
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
      * @param _minLPTAssetsOut The minimum BPT (LPT assets) that must be minted, bounding the add's slippage at the Vault
      * @return lptAssets The BPT (LPT assets) minted to this kernel by the add
-     * @return lptAssetPrice The value of 1 whole BPT against the post-add pool state, the price the caller refreshes the operation's cache with
+     * @return lptAssetPrice The value of 1 whole BPT against the post-add pool state, produced only for a preview to pin the operation's cache with (zero when settling)
      */
     function addBalancerV3Liquidity(
         IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
-        bool _isPreview,
+        DispatchMode _mode,
         uint256 _seniorShares,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLPTAssetsOut
@@ -88,12 +89,12 @@ library BalancerV3VenueLogic {
                 );
         }
 
-        // Price 1 whole BPT live against the post-add pool state both modes price and enforce at
-        lptAssetPrice = IRoycoDayKernel(address(this)).queryLPTAssetOracle();
-
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement
+        // The post-add price is produced only here: the preview's unwind discards the post-add pool state, so this frame is the only place to capture its mark
         // NOTE: The error's offset and length prefix mirrors the unlock's bytes return so either mode decodes identically
-        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(lptAssets, lptAssetPrice));
+        if (_mode == DispatchMode.SIMULATE) {
+            revert DispatchLogic.SIMULATION_RESULT(abi.encode(lptAssets, IRoycoDayKernel(address(this)).queryLPTAssetOracle()));
+        }
 
         // Settle the senior tranche shares and quote assets this kernel owes the Vault for the add by transferring them in and cancelling the debt
         if (_seniorShares > 0) {
@@ -113,18 +114,18 @@ library BalancerV3VenueLogic {
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel receives any ST shares withdrawn and is responsible for converting them to the base assets before remitting them to the user
      * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
-     * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
+     * @param _mode The dispatch mode: SIMULATE computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling, EXECUTE settles
      * @param _lptAssets The exact BPT amount (LPT assets) to burn from this kernel's balance
      * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage at the Vault
      * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage at the Vault
      * @param _quoteAssetsReceiver The recipient of the quote assets withdrawn
      * @return stShares The senior tranche shares withdrawn back to this kernel by the unwrap
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
-     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the price the caller refreshes the operation's cache with
+     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the mark a caller's preview pins the operation's cache with
      */
     function removeBalancerV3Liquidity(
         IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
-        bool _isPreview,
+        DispatchMode _mode,
         TRANCHE_UNIT _lptAssets,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
@@ -155,12 +156,13 @@ library BalancerV3VenueLogic {
         stShares = amountsOut[_immutables.stSharePoolIndex];
         quoteAssets = amountsOut[_immutables.quoteAssetPoolIndex];
 
-        // Price 1 whole BPT live against the post-remove pool state both modes price and enforce at
+        // Price 1 whole BPT against the post-remove pool state in both modes: the removal settles either way, so a caller's preview
+        // can pin this mark without assuming the venue leaves live-priceable post-remove state
         lptAssetPrice = IRoycoDayKernel(address(this)).queryLPTAssetOracle();
 
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement
         // NOTE: The error's offset and length prefix mirrors the unlock's bytes return so either mode decodes identically
-        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(stShares, quoteAssets, lptAssetPrice));
+        if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(stShares, quoteAssets, lptAssetPrice));
 
         // Credit the ST shares withdrawn to the kernel for downstream redemption before remitting assets to the user
         if (stShares > 0) _immutables.vault.sendTo(IERC20(_immutables.seniorTranche), address(this), stShares);
@@ -209,7 +211,7 @@ library BalancerV3VenueLogic {
             .call(
                 abi.encodeCall(
                     _immutables.vault.unlock,
-                    (abi.encodeCall(IBalancerV3VenueCallbacks.addBalancerV3Liquidity, (false, stSharesToReinvest, uint256(0), minLPTAssetsOut)))
+                    (abi.encodeCall(IBalancerV3VenueCallbacks.addBalancerV3Liquidity, (DispatchMode.EXECUTE, stSharesToReinvest, uint256(0), minLPTAssetsOut)))
                 )
             );
         // On a breached gate, the premium shares remain idle: no state mutated here, the inner frame rolled back

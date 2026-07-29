@@ -27,6 +27,17 @@ enum MarketState {
 }
 
 /**
+ * @title DispatchMode
+ * @dev Defines how a dispatched operation runs
+ * @custom:type SIMULATE - Computes the operation's result under real execution semantics, then unwinds every mutation by reverting with the ABI encoded result
+ * @custom:type EXECUTE - Executes and settles the operation
+ */
+enum DispatchMode {
+    SIMULATE,
+    EXECUTE
+}
+
+/**
  * @title AssetClaims
  * @dev A struct representing claims on collateral assets, liquidity provider tranche assets, senior tranche shares, and NAV
  * @custom:field collateralAssets - The claim on the coinvested collateral assets denominated in tranche units (only applicable for the ST and JT)
@@ -118,5 +129,27 @@ enum TrancheType {
     SENIOR,
     JUNIOR,
     LIQUIDITY_PROVIDER
+}
+
+/**
+ * @notice Maps the specified tranche to its deposit operation
+ * @param _trancheType The tranche to return the deposit operation for
+ * @return The deposit operation committed by the specified tranche's in-kind deposit
+ */
+function toDepositOperation(TrancheType _trancheType) pure returns (Operation) {
+    if (_trancheType == TrancheType.SENIOR) return Operation.ST_DEPOSIT;
+    else if (_trancheType == TrancheType.JUNIOR) return Operation.JT_DEPOSIT;
+    else return Operation.LPT_DEPOSIT;
+}
+
+/**
+ * @notice Maps the specified tranche to its redemption operation
+ * @param _trancheType The tranche to return the redemption operation for
+ * @return The redemption operation committed by the specified tranche's in-kind redemption
+ */
+function toRedeemOperation(TrancheType _trancheType) pure returns (Operation) {
+    if (_trancheType == TrancheType.SENIOR) return Operation.ST_REDEEM;
+    else if (_trancheType == TrancheType.JUNIOR) return Operation.JT_REDEEM;
+    else return Operation.LPT_REDEEM;
 }
 

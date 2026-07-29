@@ -7,7 +7,7 @@ import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityProviderTranche } from "../interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { ZERO_NAV_UNITS } from "../libraries/Constants.sol";
-import { AssetClaims, TrancheType } from "../libraries/Types.sol";
+import { AssetClaims, DispatchMode, TrancheType } from "../libraries/Types.sol";
 import { Math, NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
 import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
 import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
@@ -67,7 +67,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
 
         // Deposit the constituent assets into the Royco market, the kernel prices the shares and mints them to the receiver
         TRANCHE_UNIT lptAssetsMinted;
-        (shares, lptAssetsMinted) = _depositMultiAsset(false, _collateralAssets, _quoteAssets, _minLPTAssetsOut, _receiver);
+        (shares, lptAssetsMinted) = _depositMultiAsset(DispatchMode.EXECUTE, _collateralAssets, _quoteAssets, _minLPTAssetsOut, _receiver);
         lptAssetsOut = toUint256(lptAssetsMinted);
 
         emit MultiAssetDeposit(msg.sender, _receiver, _collateralAssets, _quoteAssets, lptAssetsOut, shares);
@@ -95,7 +95,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         }
 
         // Redeem the shares through the tranche's kernel entrypoint, the kernel burns the owner's shares after scaling their claims
-        (stClaims, quoteAssets) = _redeemMultiAsset(false, _shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver, _owner);
+        (stClaims, quoteAssets) = _redeemMultiAsset(DispatchMode.EXECUTE, _shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver, _owner);
 
         emit MultiAssetRedeem(msg.sender, _receiver, _owner, _shares, stClaims, quoteAssets);
     }
@@ -116,7 +116,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         returns (uint256 shares, uint256 lptAssetsOut)
     {
         TRANCHE_UNIT lptAssetsMinted;
-        (shares, lptAssetsMinted) = _depositMultiAsset(true, _collateralAssets, _quoteAssets, 0, KERNEL);
+        (shares, lptAssetsMinted) = _depositMultiAsset(DispatchMode.SIMULATE, _collateralAssets, _quoteAssets, 0, KERNEL);
         lptAssetsOut = toUint256(lptAssetsMinted);
     }
 
@@ -128,7 +128,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         override(IRoycoLiquidityProviderTranche)
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
-        (stClaims, quoteAssets) = _redeemMultiAsset(true, _shares, 0, 0, KERNEL, KERNEL);
+        (stClaims, quoteAssets) = _redeemMultiAsset(DispatchMode.SIMULATE, _shares, 0, 0, KERNEL, address(0));
     }
 
     // =============================
@@ -156,7 +156,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
     /**
      * @dev Deposits the constituent assets into the Royco market through the kernel's multi-asset deposit entrypoint
      * @dev The kernel prices the shares at the pre-deposit LPT effective NAV against the venue's settled post-add state and mints them to the receiver
-     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _collateralAssets The amount of collateral to deposit, in the collateral asset's native units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLPTAssetsOut The minimum LPT tranche assets the liquidity add must mint
@@ -165,7 +165,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
      * @return lptAssetsOut The LPT tranche assets minted by the add
      */
     function _depositMultiAsset(
-        bool _isPreview,
+        DispatchMode _mode,
         uint256 _collateralAssets,
         uint256 _quoteAssets,
         uint256 _minLPTAssetsOut,
@@ -178,22 +178,21 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         // Orchestrate the multi-asset deposit in the kernel, bounding the liquidity add's slippage by the caller's minimum LPT assets out
         (shares, lptAssetsOut) = abi.decode(
             KERNEL._dispatchAndUnwrap(
-                _isPreview,
+                _mode,
                 abi.encodeCall(
                     IRoycoDayKernel.lptDepositMultiAsset,
-                    (_isPreview, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(_minLPTAssetsOut), msg.sender, _receiver)
+                    (_mode, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(_minLPTAssetsOut), msg.sender, _receiver)
                 )
             ),
             (uint256, TRANCHE_UNIT)
         );
-        require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
     }
 
     /**
      * @dev Redeems the shares through the kernel's multi-asset redemption entrypoint, the kernel transfers the constituents directly to the receiver
      *      and burns the owner's shares after scaling their claims
      * @dev Forwards msg.sender as the caller the kernel screens with the owner and receiver against the market's blacklist
-     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _shares The number of LPT shares to redeem
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must yield (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to receive (slippage bound)
@@ -203,7 +202,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
      * @return quoteAssets The quote transferred to the receiver
      */
     function _redeemMultiAsset(
-        bool _isPreview,
+        DispatchMode _mode,
         uint256 _shares,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
@@ -214,13 +213,11 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         virtual
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
-        require(_shares != 0, MUST_REDEEM_NON_ZERO_SHARES());
-
         // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out
+        // The kernel rejects a zero-share redemption at its LPT redemption leg
         return abi.decode(
             KERNEL._dispatchAndUnwrap(
-                _isPreview,
-                abi.encodeCall(IRoycoDayKernel.lptRedeemMultiAsset, (_isPreview, _shares, _minSTSharesOut, _minQuoteAssetsOut, msg.sender, _owner, _receiver))
+                _mode, abi.encodeCall(IRoycoDayKernel.lptRedeemMultiAsset, (_mode, _shares, _minSTSharesOut, _minQuoteAssetsOut, msg.sender, _owner, _receiver))
             ),
             (AssetClaims, uint256)
         );

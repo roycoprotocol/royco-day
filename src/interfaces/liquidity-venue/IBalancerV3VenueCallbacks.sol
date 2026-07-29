@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
+import { DispatchMode } from "../../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
 
 /**
@@ -33,15 +34,15 @@ interface IBalancerV3VenueCallbacks {
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel supplies the senior tranche shares and quote assets it already holds and receives the minted BPT for the liquidity provider tranche
-     * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
+     * @param _mode The dispatch mode: SIMULATE computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling, EXECUTE settles
      * @param _seniorShares The exact amount of senior tranche shares to add into the pool from this kernel's balance
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
      * @param _minLPTAssetsOut The minimum BPT (LPT assets) that must be minted, bounding the add's slippage at the Vault
      * @return lptAssets The BPT (LPT assets) minted to this kernel by the add
-     * @return lptAssetPrice The value of 1 whole BPT against the post-add pool state, the price the caller refreshes the operation's cache with
+     * @return lptAssetPrice The value of 1 whole BPT against the post-add pool state, produced only for a preview to pin the operation's cache with (zero when settling)
      */
     function addBalancerV3Liquidity(
-        bool _isPreview,
+        DispatchMode _mode,
         uint256 _seniorShares,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLPTAssetsOut
@@ -54,17 +55,17 @@ interface IBalancerV3VenueCallbacks {
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel receives any ST shares withdrawn and is responsible for converting them to the base assets before remitting them to the user
-     * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
+     * @param _mode The dispatch mode: SIMULATE computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling, EXECUTE settles
      * @param _lptAssets The exact BPT amount (LPT assets) to burn from this kernel's balance
      * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage at the Vault
      * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage at the Vault
      * @param _quoteAssetsReceiver The recipient of the quote assets withdrawn
      * @return stShares The senior tranche shares withdrawn back to this kernel by the unwrap
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
-     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the price the caller refreshes the operation's cache with
+     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the mark a caller's preview pins the operation's cache with
      */
     function removeBalancerV3Liquidity(
-        bool _isPreview,
+        DispatchMode _mode,
         TRANCHE_UNIT _lptAssets,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,

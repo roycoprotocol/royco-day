@@ -248,7 +248,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             require(deltaLPTRawNAV > 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
         } else if (_op == Operation.LPT_REDEEM) {
             // An in-kind LPT redemption only transfers out market-making inventory and idle premium shares, the collateral cannot move and no bonus is paid
-            require(deltaLPTRawNAV <= 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+            require(deltaLPTRawNAV < 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
         }
 
         // Enforce the NAV conservation invariant

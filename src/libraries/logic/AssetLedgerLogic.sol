@@ -23,6 +23,18 @@ library AssetLedgerLogic {
     using Math for uint256;
 
     /**
+     * @notice Resolves the specified tranche's contract address from the kernel's immutables
+     * @param _immutables The kernel's immutables carrier resolving the tranche addresses
+     * @param _trancheType An enumerator indicating which tranche's address to resolve
+     * @return The specified tranche's contract address
+     */
+    function _getTrancheAddress(IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, TrancheType _trancheType) internal pure returns (address) {
+        if (_trancheType == TrancheType.SENIOR) return _immutables.seniorTranche;
+        else if (_trancheType == TrancheType.JUNIOR) return _immutables.juniorTranche;
+        else return _immutables.liquidityProviderTranche;
+    }
+
+    /**
      * @notice Derives the cumulative asset claims that the specified tranche is entitled to
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
@@ -48,7 +60,7 @@ library AssetLedgerLogic {
             );
         } else {
             // A tranche's claim is its effective NAV, granted in the coinvested collateral asset
-            claims.nav = _trancheType == TrancheType.SENIOR ? _state.stEffectiveNAV : _state.jtEffectiveNAV;
+            claims.nav = (_trancheType == TrancheType.SENIOR ? _state.stEffectiveNAV : _state.jtEffectiveNAV);
             if (claims.nav != ZERO_NAV_UNITS) claims.collateralAssets = IRoycoDayKernel(address(this)).convertValueToCollateralAssets(claims.nav);
         }
     }

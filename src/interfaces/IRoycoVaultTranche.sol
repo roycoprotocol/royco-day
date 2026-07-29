@@ -48,12 +48,6 @@ interface IRoycoVaultTranche is IERC20Metadata {
      */
     event ProtocolFeeSharesMinted(address indexed protocolFeeRecipient, uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
 
-    /// @notice Thrown when a deposit would mint zero tranche shares (a dust amount that prices to zero shares)
-    error MUST_MINT_NON_ZERO_SHARES();
-
-    /// @notice Thrown when a redemption is requested with zero shares
-    error MUST_REDEEM_NON_ZERO_SHARES();
-
     /// @notice Thrown when the caller of a permissioned function is not the tranche's configured kernel
     error ONLY_KERNEL();
 

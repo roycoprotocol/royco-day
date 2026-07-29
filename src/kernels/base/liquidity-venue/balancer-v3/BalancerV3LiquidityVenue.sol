@@ -14,6 +14,7 @@ import { IRoycoPriceOracle } from "../../../../interfaces/IRoycoPriceOracle.sol"
 import { IBalancerV3VenueCallbacks } from "../../../../interfaces/liquidity-venue/IBalancerV3VenueCallbacks.sol";
 import { Cache, CacheKey } from "../../../../libraries/Cache.sol";
 import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../../libraries/Constants.sol";
+import { DispatchMode } from "../../../../libraries/Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../libraries/Units.sol";
 import { DispatchLogic } from "../../../../libraries/logic/DispatchLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "../../../../libraries/logic/FeeAndLiquidityPremiumLogic.sol";
@@ -163,20 +164,18 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     // =============================
 
     /**
-     * @inheritdoc IRoycoDayKernel
+     * @inheritdoc RoycoDayKernel
      * @dev Dispatches the add liquidity callback below through the unlocked Vault
      * @dev A preview unwinds every transient balance change via the callback's result-carrying revert
-     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
-    function addLiquidity(
-        bool _isPreview,
+    function _addLiquidity(
+        DispatchMode _mode,
         uint256 _seniorShares,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLPTAssetsOut
     )
-        external
-        override(IRoycoDayKernel)
-        onlySelf
+        internal
+        override
         returns (TRANCHE_UNIT lptAssets, NAV_UNIT lptAssetPrice)
     {
         // Both transports yield the unlock's ABI encoded bytes return byte for byte
@@ -184,10 +183,8 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
             abi.decode(
                 address(_vault)
                     ._dispatch(
-                        _isPreview,
-                        abi.encodeCall(
-                            _vault.unlock, (abi.encodeCall(this.addBalancerV3Liquidity, (_isPreview, _seniorShares, _quoteAssets, _minLPTAssetsOut)))
-                        )
+                        _mode,
+                        abi.encodeCall(_vault.unlock, (abi.encodeCall(this.addBalancerV3Liquidity, (_mode, _seniorShares, _quoteAssets, _minLPTAssetsOut))))
                     ),
                 (bytes)
             ),
@@ -196,21 +193,19 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     }
 
     /**
-     * @inheritdoc IRoycoDayKernel
+     * @inheritdoc RoycoDayKernel
      * @dev Dispatches the remove liquidity callback below through the unlocked Vault
      * @dev A preview unwinds every transient balance change via the callback's result-carrying revert
-     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
-    function removeLiquidity(
-        bool _isPreview,
+    function _removeLiquidity(
+        DispatchMode _mode,
         TRANCHE_UNIT _lptAssets,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
         address _quoteAssetsReceiver
     )
-        external
-        override(IRoycoDayKernel)
-        onlySelf
+        internal
+        override
         returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice)
     {
         // Both transports yield the unlock's ABI encoded bytes return byte for byte
@@ -218,12 +213,10 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
             abi.decode(
                 address(_vault)
                     ._dispatch(
-                        _isPreview,
+                        _mode,
                         abi.encodeCall(
                             _vault.unlock,
-                            (abi.encodeCall(
-                                    this.removeBalancerV3Liquidity, (_isPreview, _lptAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver)
-                                ))
+                            (abi.encodeCall(this.removeBalancerV3Liquidity, (_mode, _lptAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver)))
                         )
                     ),
                 (bytes)
@@ -279,7 +272,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
 
     /// @inheritdoc IBalancerV3VenueCallbacks
     function addBalancerV3Liquidity(
-        bool _isPreview,
+        DispatchMode _mode,
         uint256 _seniorShares,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLPTAssetsOut
@@ -289,12 +282,12 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         onlyVault
         returns (uint256 lptAssets, NAV_UNIT lptAssetPrice)
     {
-        return BalancerV3VenueLogic.addBalancerV3Liquidity(_getBalancerV3VenueImmutableState(), _isPreview, _seniorShares, _quoteAssets, _minLPTAssetsOut);
+        return BalancerV3VenueLogic.addBalancerV3Liquidity(_getBalancerV3VenueImmutableState(), _mode, _seniorShares, _quoteAssets, _minLPTAssetsOut);
     }
 
     /// @inheritdoc IBalancerV3VenueCallbacks
     function removeBalancerV3Liquidity(
-        bool _isPreview,
+        DispatchMode _mode,
         TRANCHE_UNIT _lptAssets,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
@@ -306,7 +299,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice)
     {
         return BalancerV3VenueLogic.removeBalancerV3Liquidity(
-            _getBalancerV3VenueImmutableState(), _isPreview, _lptAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver
+            _getBalancerV3VenueImmutableState(), _mode, _lptAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver
         );
     }
 

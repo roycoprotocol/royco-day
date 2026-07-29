@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
+import { DispatchMode } from "../Types.sol";
+
 /**
  * @title DispatchLogic
  * @author Waymont
@@ -18,31 +20,28 @@ library DispatchLogic {
     /// @param result The simulated operation's ABI encoded result
     error SIMULATION_RESULT(bytes result);
 
-    /// @notice The SIMULATION_RESULT selector a simulation's revert data is validated against
-    bytes4 internal constant SIMULATION_RESULT_SELECTOR = 0x9d59ef49;
-
     /**
      * @notice Dispatches an operation that returns bytes for execution or simulation
      * @dev Should be used by any call site whose target function is declared to return bytes: their result is prefixed with its own offset and length words
      * @param _target The address the operation is dispatched into
-     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _callData The ABI encoded call to the operation
      * @return result The operation's ABI encoded return bytes
      */
-    function _dispatch(address _target, bool _isPreview, bytes memory _callData) internal returns (bytes memory result) {
-        return (_isPreview ? _simulate(_target, _callData, false) : _execute(_target, _callData));
+    function _dispatch(address _target, DispatchMode _mode, bytes memory _callData) internal returns (bytes memory result) {
+        return ((_mode == DispatchMode.SIMULATE) ? _simulate(_target, _callData, false) : _execute(_target, _callData));
     }
 
     /**
      * @notice Dispatches an operation that returns a value tuple for execution or simulation
      * @dev Should be used by any call site whose target function is declared to return value types: their result is the bare encoded values with no prefix
      * @param _target The address the operation is dispatched into
-     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _callData The ABI encoded call to the operation
      * @return result The operation's ABI encoded return values
      */
-    function _dispatchAndUnwrap(address _target, bool _isPreview, bytes memory _callData) internal returns (bytes memory result) {
-        return (_isPreview ? _simulate(_target, _callData, true) : _execute(_target, _callData));
+    function _dispatchAndUnwrap(address _target, DispatchMode _mode, bytes memory _callData) internal returns (bytes memory result) {
+        return ((_mode == DispatchMode.SIMULATE) ? _simulate(_target, _callData, true) : _execute(_target, _callData));
     }
 
     /**
@@ -60,10 +59,11 @@ library DispatchLogic {
         require(!success, SIMULATION_CANNOT_MUTATE_STATE());
 
         // Ensure that the exception has the correct selector for the simulate operation (indicating a successful simulation) and propagate the result upstream
+        bytes4 expectedErrorSelector = SIMULATION_RESULT.selector;
         assembly ("memory-safe") {
             // Revert with any genuine operation failure, mimicking the operation exactly
             let errorSelectorPtr := add(revertData, 0x20)
-            if iszero(eq(shr(224, mload(errorSelectorPtr)), shr(224, SIMULATION_RESULT_SELECTOR))) {
+            if iszero(eq(shr(224, mload(errorSelectorPtr)), shr(224, expectedErrorSelector))) {
                 revert(errorSelectorPtr, mload(revertData))
             }
 
