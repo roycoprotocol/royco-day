@@ -8,7 +8,7 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { Cache, CacheKey } from "../Cache.sol";
 import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
-import { AssetClaims, DispatchMode, MarketState, SyncedAccountingState, TrancheType, toRedeemOperation } from "../Types.sol";
+import { AssetClaims, DispatchMode, MarketState, SyncedAccountingState, TrancheType, toRedemptionOperation } from "../Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
 import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { AssetLedgerLogic } from "./AssetLedgerLogic.sol";
@@ -63,7 +63,7 @@ library RedemptionLogic {
         returns (AssetClaims memory userAssetClaims)
     {
         // Reject a zero-share redemption before any work
-        require(_shares != 0, IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES());
+        require(_shares != 0, IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES());
 
         // Screen the redemption's involved accounts against the market's blacklist so no blacklisted account can initiate, source, or receive the redemption
         BlacklistLogic._enforceNotBlacklisted($, _caller, _owner, _receiver);
@@ -94,7 +94,7 @@ library RedemptionLogic {
         if (_owner != address(0)) IRoycoVaultTranche(AssetLedgerLogic._getTrancheAddress(_immutables, _trancheType)).kernelBurn(_owner, _shares);
 
         // Execute a post-redeem sync on accounting, enforcing the market's requirements against the redemption's settled state
-        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, toRedeemOperation(_trancheType), stSelfLiquidationBonusNAV);
+        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, toRedemptionOperation(_trancheType), stSelfLiquidationBonusNAV);
 
         // Remit the asset claims to the receiver
         AssetLedgerLogic._remitClaims(_immutables, userAssetClaims, _receiver);

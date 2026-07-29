@@ -229,7 +229,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             require(deltaCollateralNAV > 0 && deltaLPTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             // New ST deposits are treated as an addition to the future ST exposure
             stEffectiveNAV = (stEffectiveNAV + toNAVUnits(deltaCollateralNAV));
-        } else if (_op == Operation.ST_REDEEM) {
+        } else if (_op == Operation.ST_REDEMPTION) {
             // A senior redemption leaves the liquidity provider tranche mark untouched and always redeems collateral value
             require(deltaCollateralNAV < 0 && deltaLPTRawNAV == 0, INVALID_POST_OP_STATE(_op));
             // Reduce JT effective NAV by the bonus provided from its assets
@@ -240,7 +240,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             require(deltaCollateralNAV > 0 && deltaLPTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             // New JT deposits are treated as an addition to the future loss-absorption buffer
             jtEffectiveNAV = (jtEffectiveNAV + toNAVUnits(deltaCollateralNAV));
-        } else if (_op == Operation.JT_REDEEM) {
+        } else if (_op == Operation.JT_REDEMPTION) {
             // JT cannot get a bonus from its own NAV, and a junior redemption leaves the senior exposure and supply untouched so it cannot move the liquidity provider tranche mark
             require(deltaCollateralNAV < 0 && deltaLPTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
@@ -248,7 +248,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         } else if (_op == Operation.LPT_DEPOSIT) {
             // An in-kind LPT deposit only adds market-making inventory, the collateral cannot move
             require(deltaLPTRawNAV > 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-        } else if (_op == Operation.LPT_REDEEM) {
+        } else if (_op == Operation.LPT_REDEMPTION) {
             // An in-kind LPT redemption only transfers out market-making inventory and idle premium shares, the collateral cannot move and no bonus is paid
             require(deltaLPTRawNAV < 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
         }

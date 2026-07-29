@@ -57,7 +57,7 @@ library DepositLogic {
         BlacklistLogic._enforceNotBlacklisted($, _caller, _receiver);
 
         // Execute an accounting sync to reconcile underlying PNL and read the deposited tranche's post-mint claims and supply
-        // The claim NAV is the tranche's pre-deposit effective NAV and the supply includes the sync's premium and protocol fee mints, the pair the shares price against
+        // The claim NAV is the tranche's pre-deposit effective NAV and the supply includes the sync's premium and protocol fee mints
         (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares) =
             AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, _trancheType);
 
@@ -119,12 +119,11 @@ library DepositLogic {
         external
         returns (uint256 trancheSharesMinted, TRANCHE_UNIT lptAssetsOut)
     {
-        // Mark the multi-asset flow: the post-op sync waives the liquidity requirement on its intermediate legs, deferring it to the final leg's settled state
+        // Mark this process in the multi-asset flow: the post-op sync waives the liquidity requirement on its intermediate legs, deferring it to the final leg's settled state
         Cache._write(CacheKey.IN_MULTI_ASSET_FLOW, 1);
 
         // Collateral leg: an ST deposit minting the add's senior shares to the kernel
-        // Its in-flow post-op waives the liquidity requirement the add satisfies below with the deployed depth
-        // Both legs run settled in preview and execution alike, this flow's own result revert unwinds them in a preview
+        // Its post-op waives the liquidity requirement that this operation may satisfy below with the added liquidity
         uint256 stSharesMinted;
         if (_collateralAssets != ZERO_TRANCHE_UNITS) {
             stSharesMinted = inkindDeposit($, _immutables, DispatchMode.EXECUTE, TrancheType.SENIOR, _collateralAssets, _caller, address(this));

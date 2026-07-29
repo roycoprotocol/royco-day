@@ -166,7 +166,7 @@ interface IRoycoDayKernel {
     error MUST_MINT_NON_ZERO_SHARES();
 
     /// @notice Thrown when a redemption is requested with zero shares
-    error MUST_REDEEM_NON_ZERO_SHARES();
+    error MUST_REDEMPTION_NON_ZERO_SHARES();
 
     /// @notice Thrown when the caller of a permissioned function isn't the market's senior, junior, or liquidity provider tranche
     error ONLY_TRANCHE();

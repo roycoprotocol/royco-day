@@ -103,19 +103,19 @@ struct SyncedAccountingState {
  * @title Operation
  * @dev Defines the type of operation being executed by the user
  * @custom:type ST_DEPOSIT - A senior tranche deposit that increases ST's effective NAV
- * @custom:type ST_REDEEM - A senior tranche redemption that decreases ST's effective NAV
+ * @custom:type ST_REDEMPTION - A senior tranche redemption that decreases ST's effective NAV
  * @custom:type JT_DEPOSIT - A junior tranche deposit that increases JT's effective NAV
- * @custom:type JT_REDEEM - A junior tranche redemption that decreases JT's effective NAV
+ * @custom:type JT_REDEMPTION - A junior tranche redemption that decreases JT's effective NAV
  * @custom:type LPT_DEPOSIT - An in-kind liquidity provider tranche deposit that only adds market-making inventory
- * @custom:type LPT_REDEEM - An in-kind liquidity provider tranche redemption that only removes market-making inventory and idle premium shares
+ * @custom:type LPT_REDEMPTION - An in-kind liquidity provider tranche redemption that only removes market-making inventory and idle premium shares
  */
 enum Operation {
     ST_DEPOSIT,
-    ST_REDEEM,
+    ST_REDEMPTION,
     JT_DEPOSIT,
-    JT_REDEEM,
+    JT_REDEMPTION,
     LPT_DEPOSIT,
-    LPT_REDEEM
+    LPT_REDEMPTION
 }
 
 /**
@@ -147,9 +147,9 @@ function toDepositOperation(TrancheType _trancheType) pure returns (Operation) {
  * @param _trancheType The tranche to return the redemption operation for
  * @return The redemption operation committed by the specified tranche's in-kind redemption
  */
-function toRedeemOperation(TrancheType _trancheType) pure returns (Operation) {
-    if (_trancheType == TrancheType.SENIOR) return Operation.ST_REDEEM;
-    else if (_trancheType == TrancheType.JUNIOR) return Operation.JT_REDEEM;
-    else return Operation.LPT_REDEEM;
+function toRedemptionOperation(TrancheType _trancheType) pure returns (Operation) {
+    if (_trancheType == TrancheType.SENIOR) return Operation.ST_REDEMPTION;
+    else if (_trancheType == TrancheType.JUNIOR) return Operation.JT_REDEMPTION;
+    else return Operation.LPT_REDEMPTION;
 }
 

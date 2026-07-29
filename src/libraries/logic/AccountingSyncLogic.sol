@@ -228,7 +228,7 @@ library AccountingSyncLogic {
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _op The operation being executed in between the pre and post synchronizations
-     * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only nonzero if _op == ST_REDEEM)
+     * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only nonzero if _op == ST_REDEMPTION)
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function _postOpSyncTrancheAccounting(
@@ -248,7 +248,7 @@ library AccountingSyncLogic {
             );
 
         // Enforce the coverage requirement for operations that can worsen coverage (add senior exposure or remove the junior loss-absorption buffer)
-        if (_op == Operation.ST_DEPOSIT || _op == Operation.JT_REDEEM) {
+        if (_op == Operation.ST_DEPOSIT || _op == Operation.JT_REDEMPTION) {
             require(state.coverageUtilizationWAD <= WAD, IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED());
         }
         // Enforce the liquidity requirement for operations that can worsen liquidity (raise the senior exposure or reduce the venue's market-making depth)
@@ -256,14 +256,14 @@ library AccountingSyncLogic {
         // and its final leg's post-op (the deposit's LPT leg, the redemption's ST leg) enforces against the flow's settled state
         (bool inMultiAssetFlow,) = Cache._read(CacheKey.IN_MULTI_ASSET_FLOW);
         bool liquidityRequirementSatisfied = (state.liquidityUtilizationWAD <= WAD);
-        if (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_REDEEM) {
+        if (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_REDEMPTION) {
             if (inMultiAssetFlow && !liquidityRequirementSatisfied) {
                 Cache._write(CacheKey.LIQUIDITY_CHECK_DEFERRED, 1);
             } else {
                 require(liquidityRequirementSatisfied, IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED());
             }
         }
-        if (inMultiAssetFlow && liquidityRequirementSatisfied && (_op == Operation.LPT_DEPOSIT || _op == Operation.ST_REDEEM)) {
+        if (inMultiAssetFlow && liquidityRequirementSatisfied && (_op == Operation.LPT_DEPOSIT || _op == Operation.ST_REDEMPTION)) {
             Cache._delete(CacheKey.LIQUIDITY_CHECK_DEFERRED);
         }
 
