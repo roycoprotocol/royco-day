@@ -6,8 +6,9 @@ import { IRoycoDayAccountant } from "../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
 import { MAX_NAV_UNITS, MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
-import { MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
+import { DispatchMode, MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
 import { Math, RoycoUnitsMath, toNAVUnits } from "../libraries/Units.sol";
+import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
 import { UtilizationLogic } from "../libraries/logic/UtilizationLogic.sol";
 
 /**
@@ -19,6 +20,7 @@ import { UtilizationLogic } from "../libraries/logic/UtilizationLogic.sol";
 contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for uint256;
+    using DispatchLogic for address;
 
     /// @dev Storage slot for RoycoDayAccountantState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayAccountantState")) - 1)) & ~bytes32(uint256(0xff))
@@ -674,7 +676,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         require(_jtYDM != $.lptYDM, YDMS_CANNOT_BE_IDENTICAL());
         // Best-effort sync to settle unrealized PNL under the outgoing JT YDM
         // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking JT YDM
-        KERNEL.call(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
+        KERNEL._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
         // Initialize and set the new JT YDM for this market
         _initializeYDM(_jtYDM, _jtYDMInitializationData);
         $.jtYDM = _jtYDM;
@@ -688,7 +690,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         require(_lptYDM != $.jtYDM, YDMS_CANNOT_BE_IDENTICAL());
         // Best-effort sync to settle unrealized PNL under the outgoing LPT YDM
         // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking LPT YDM
-        KERNEL.call(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
+        KERNEL._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
         // Initialize and set the new LPT YDM for this market
         _initializeYDM(_lptYDM, _lptYDMInitializationData);
         $.lptYDM = _lptYDM;
@@ -805,6 +807,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
     /**
      * @notice Initializes the YDM (Yield Distribution Model) if required for this market
+     * @dev A failing initialization bubbles the YDM's revert verbatim through the shared dispatch primitive
      * @param _ydm The new YDM address to set
      * @param _ydmInitializationData The data used to initialize the new YDM for this market
      */
@@ -812,10 +815,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Ensure that the YDM is not null
         require(_ydm != address(0), NULL_ADDRESS());
         // Initialize the YDM if required
-        if (_ydmInitializationData.length != 0) {
-            (bool success, bytes memory data) = _ydm.call(_ydmInitializationData);
-            require(success, FAILED_TO_INITIALIZE_YDM(data));
-        }
+        if (_ydmInitializationData.length != 0) _ydm._dispatch(DispatchMode.EXECUTE, _ydmInitializationData);
     }
 
     // =============================

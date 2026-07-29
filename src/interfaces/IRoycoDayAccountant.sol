@@ -202,7 +202,6 @@ interface IRoycoDayAccountant {
 
     /// @notice Thrown when the YDM failed to initialize
     /// @param data The return data of the reverting YDM initialization
-    error FAILED_TO_INITIALIZE_YDM(bytes data);
 
     /// @notice Thrown when the collateral NAV doesn't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();

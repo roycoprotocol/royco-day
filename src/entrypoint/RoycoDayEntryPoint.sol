@@ -15,6 +15,7 @@ import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../l
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../libraries/Types.sol";
 import { NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
 import { AssetLedgerLogic } from "../libraries/logic/AssetLedgerLogic.sol";
+import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
 import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
 
 /**
@@ -781,7 +782,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      * @return maxRedeemMultiAsset The shares redeemable via the multi-asset exit (zero if the probe reverted)
      */
     function _maxRedeemMultiAsset(address _tranche) internal returns (uint256 maxRedeemMultiAsset) {
-        (bool probeSucceeded, bytes memory probeReturnData) = _tranche.call(abi.encodeCall(IRoycoLiquidityProviderTranche.maxRedeemMultiAsset, (address(this))));
+        (bool probeSucceeded, bytes memory probeReturnData) =
+            DispatchLogic._tryExecute(_tranche, abi.encodeCall(IRoycoLiquidityProviderTranche.maxRedeemMultiAsset, (address(this))));
         assembly ("memory-safe") {
             if probeSucceeded { maxRedeemMultiAsset := mload(add(probeReturnData, 0x20)) }
         }

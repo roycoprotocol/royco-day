@@ -207,13 +207,13 @@ library BalancerV3VenueLogic {
 
         // Single-sided add the ST shares through a low-level call into the Vault's callback
         // The inner unlock dispatches addBalancerV3Liquidity, which mints the BPT bounded by minLPTAssetsOut and settles the shares in
-        (bool reinvestmentSucceeded, bytes memory callbackReturnData) = address(_immutables.vault)
-            .call(
-                abi.encodeCall(
-                    _immutables.vault.unlock,
-                    (abi.encodeCall(IBalancerV3VenueCallbacks.addBalancerV3Liquidity, (DispatchMode.EXECUTE, stSharesToReinvest, uint256(0), minLPTAssetsOut)))
-                )
-            );
+        (bool reinvestmentSucceeded, bytes memory callbackReturnData) = DispatchLogic._tryExecute(
+            address(_immutables.vault),
+            abi.encodeCall(
+                _immutables.vault.unlock,
+                (abi.encodeCall(IBalancerV3VenueCallbacks.addBalancerV3Liquidity, (DispatchMode.EXECUTE, stSharesToReinvest, uint256(0), minLPTAssetsOut)))
+            )
+        );
         // On a breached gate, the premium shares remain idle: no state mutated here, the inner frame rolled back
         if (!reinvestmentSucceeded) {
             emit IRoycoDayKernel.LiquidityPremiumReinvestmentFailed(stSharesToReinvest, minLPTAssetsOut, callbackReturnData);

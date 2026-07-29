@@ -121,8 +121,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         QUOTE_ASSET = _params.quoteAsset;
         ACCOUNTANT = _params.accountant;
         ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _params.enforceVaultSharesTransferWhitelist;
-        ONE_WHOLE_COLLATERAL_ASSET = 10 ** IERC20Metadata(_params.collateralAsset).decimals();
-        ONE_WHOLE_LPT_ASSET = 10 ** IERC20Metadata(_params.lptAsset).decimals();
+        ONE_WHOLE_COLLATERAL_ASSET = (10 ** IERC20Metadata(_params.collateralAsset).decimals());
+        ONE_WHOLE_LPT_ASSET = (10 ** IERC20Metadata(_params.lptAsset).decimals());
     }
 
     /**
@@ -224,6 +224,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         virtual
         override(IRoycoDayKernel)
         whenNotPaused
+        nonReentrantView
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
@@ -288,8 +289,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withCollateralPriceCached
         returns (AssetClaims memory userAssetClaims)
     {
-        userAssetClaims =
-            RedemptionLogic.inkindRedeem(_getRoycoDayKernelStorage(), getImmutableState(), _mode, _getInvokingTranche(), _shares, _caller, _owner, _receiver);
+        return RedemptionLogic.inkindRedeem(_getRoycoDayKernelStorage(), getImmutableState(), _mode, _getInvokingTranche(), _shares, _caller, _owner, _receiver);
     }
 
     // =============================
