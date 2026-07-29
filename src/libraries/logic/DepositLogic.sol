@@ -5,9 +5,10 @@ import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgrade
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
+import { Cache, CacheKey } from "../Cache.sol";
 import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { AssetClaims, DispatchMode, MarketState, SyncedAccountingState, TrancheType, toDepositOperation } from "../Types.sol";
-import { Math, NAV_UNIT, TRANCHE_UNIT } from "../Units.sol";
+import { Math, NAV_UNIT, TRANCHE_UNIT, toUint256 } from "../Units.sol";
 import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { AssetLedgerLogic } from "./AssetLedgerLogic.sol";
 import { BlacklistLogic } from "./BlacklistLogic.sol";
@@ -17,7 +18,7 @@ import { ValuationLogic } from "./ValuationLogic.sol";
 /**
  * @title DepositLogic
  * @author Waymont
- * @notice The in-kind tranche deposit flow and max-deposit reads for a Royco market
+ * @notice The in-kind and multi-asset tranche deposit flows and max-deposit reads for a Royco market
  * @dev Invoked by the kernel via delegatecall
  */
 library DepositLogic {
@@ -83,6 +84,72 @@ library DepositLogic {
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
         if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(trancheSharesMinted));
+    }
+
+    /**
+     * @notice Atomically enters the liquidity provider tranche with the LPT assets' constituent assets: deposits collateral (minting senior
+     *         shares), adds (senior shares + quote) into the liquidity venue to mint the LPT tranche assets, then deposits them into the LPT
+     * @dev Composed from the shared deposit primitives: an ST deposit seeding the add's senior shares, the venue add, then an LPT deposit of the minted assets
+     * @dev Assumes the collateral and quote have been transferred to the kernel before this call (by the LPT tranche)
+     * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit that mints no senior shares
+     * @dev The flow's intermediate legs defer the liquidity requirement to the final leg's settled state, whose unhealed violation the end-of-flow gate reverts on
+     * @dev Prices the shares at the pre-deposit LPT effective NAV against the venue's post-add mark and mints them to the receiver
+     * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
+     * @param _collateralAssets The amount of collateral to deposit for the senior leg, denominated in tranche units
+     * @param _quoteAssets The amount of quote asset to add as the second venue leg
+     * @param _minLPTAssetsOut The minimum LPT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
+     * @param _caller The address that initiated the deposit
+     * @param _receiver The address that receives the minted tranche shares
+     * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
+     * @return lptAssetsOut The amount of LPT tranche assets minted and credited to the liquidity provider tranche
+     */
+    function lptDepositMultiAsset(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        DispatchMode _mode,
+        TRANCHE_UNIT _collateralAssets,
+        uint256 _quoteAssets,
+        TRANCHE_UNIT _minLPTAssetsOut,
+        address _caller,
+        address _receiver
+    )
+        external
+        returns (uint256 trancheSharesMinted, TRANCHE_UNIT lptAssetsOut)
+    {
+        // Mark the multi-asset flow: the post-op sync waives the liquidity requirement on its intermediate legs, deferring it to the final leg's settled state
+        Cache._write(CacheKey.IN_MULTI_ASSET_FLOW, 1);
+
+        // Collateral leg: an ST deposit minting the add's senior shares to the kernel
+        // Its in-flow post-op waives the liquidity requirement the add satisfies below with the deployed depth
+        // Both legs run settled in preview and execution alike, this flow's own result revert unwinds them in a preview
+        uint256 stSharesMinted;
+        if (_collateralAssets != ZERO_TRANCHE_UNITS) {
+            stSharesMinted = inkindDeposit($, _immutables, TrancheType.SENIOR, DispatchMode.EXECUTE, _collateralAssets, _caller, address(this));
+        }
+
+        // Add the minted ST shares and supplied quote assets into the liquidity venue with the specified slippage check
+        NAV_UNIT lptAssetPrice;
+        (lptAssetsOut, lptAssetPrice) = IRoycoDayKernel(address(this)).addLiquidity(_mode, stSharesMinted, _quoteAssets, _minLPTAssetsOut);
+
+        // Pin the venue's post-add price for a preview, whose unwound add would otherwise price the pre-add pool live
+        // Execution pins nothing: the LPT leg prices the settled post-add pool live at the same mark
+        if (_mode == DispatchMode.SIMULATE) Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(lptAssetPrice));
+
+        // LPT leg: an in-kind LPT deposit of the minted assets at the post-add price, priced and minted to the receiver by the shared primitive
+        // Its in-flow post-op enforces the liquidity requirement against this flow's settled state
+        trancheSharesMinted = inkindDeposit($, _immutables, TrancheType.LIQUIDITY_PROVIDER, DispatchMode.EXECUTE, lptAssetsOut, _caller, _receiver);
+
+        // Unmark the settled multi-asset flow and enforce a liquidity check an intermediate leg deferred that the flow's final settled state never healed
+        // Checked before the preview revert so a simulation of a violating flow reverts exactly like an execution
+        Cache._delete(CacheKey.IN_MULTI_ASSET_FLOW);
+        (bool isLiquidityRequirementViolated,) = Cache._read(CacheKey.LIQUIDITY_CHECK_DEFERRED);
+        require(!isLiquidityRequirementViolated, IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED());
+
+        // A preview carries its result out via this revert, unwinding every mutation this flow made
+        if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(trancheSharesMinted, lptAssetsOut));
     }
 
     // =============================

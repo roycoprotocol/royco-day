@@ -2,25 +2,31 @@
 pragma solidity ^0.8.28;
 
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
+import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { ZERO_NAV_UNITS } from "../Constants.sol";
+import { Cache, CacheKey } from "../Cache.sol";
+import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { AssetClaims, DispatchMode, MarketState, SyncedAccountingState, TrancheType, toRedeemOperation } from "../Types.sol";
-import { NAV_UNIT } from "../Units.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
 import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { AssetLedgerLogic } from "./AssetLedgerLogic.sol";
 import { BlacklistLogic } from "./BlacklistLogic.sol";
 import { DispatchLogic } from "./DispatchLogic.sol";
+import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { SelfLiquidationLogic } from "./SelfLiquidationLogic.sol";
+import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
  * @title RedemptionLogic
  * @author Waymont
- * @notice The in-kind tranche redemption flow and max-withdrawable reads for a Royco market
+ * @notice The in-kind and multi-asset tranche redemption flows and max-withdrawable reads for a Royco market
  * @dev Invoked by the kernel via delegatecall
  */
 library RedemptionLogic {
+    using RoycoUnitsMath for NAV_UNIT;
+
     // =============================
     // Tranche Redeem Functions
     // =============================
@@ -97,6 +103,76 @@ library RedemptionLogic {
         if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(userAssetClaims));
     }
 
+    /**
+     * @notice Atomically exits the liquidity provider tranche to the LPT assets' constituent assets: proportionally removes the LPT-asset slice,
+     *         redeems the venue-held senior shares to collateral, and returns (collateral + quote) to the receiver
+     * @dev Composes the shared redemption legs: an in-kind LPT redemption to the kernel, the proportional venue removal of the redeemed slice, and a senior redemption of the withdrawn and idle premium shares
+     * @dev Burns the owner's LPT shares after scaling their claims against the pre-burn supply
+     * @dev The flow's intermediate legs defer the liquidity requirement to the final leg's settled state, whose unhealed violation the end-of-flow gate reverts on
+     * @dev LPT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
+     * @param _lptShares The number of LPT shares being redeemed (used to size the proportional LPT-asset slice)
+     * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
+     * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
+     * @param _caller The address that initiated the redemption
+     * @param _owner The address whose LPT shares are burned for the redemption, the null address for a simulation's synthetic owner
+     * @param _receiver The address that receives the collateral and quote
+     * @return stClaims The ST redemption asset claims transferred to the receiver (its collateral asset leg)
+     * @return quoteAssets The quote assets returned to the receiver
+     */
+    function lptRedeemMultiAsset(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        DispatchMode _mode,
+        uint256 _lptShares,
+        uint256 _minSTSharesOut,
+        uint256 _minQuoteAssetsOut,
+        address _caller,
+        address _owner,
+        address _receiver
+    )
+        external
+        returns (AssetClaims memory stClaims, uint256 quoteAssets)
+    {
+        // Mark the multi-asset flow: the post-op sync waives the liquidity requirement on its intermediate legs, deferring it to the final leg's settled state
+        Cache._write(CacheKey.IN_MULTI_ASSET_FLOW, 1);
+
+        // LPT leg: an in-kind LPT redemption of the owner's shares to the kernel itself, leaving the redeemed LPT assets and idle premium senior shares in its custody
+        // Its in-flow post-op waives the liquidity requirement the ST leg's post-op enforces on this flow's final settled state
+        // All legs run settled in preview and execution alike, this flow's own result revert unwinds them in a preview
+        AssetClaims memory lptAssetClaims =
+            inkindRedeem($, _immutables, TrancheType.LIQUIDITY_PROVIDER, DispatchMode.EXECUTE, _lptShares, _caller, _owner, address(this));
+
+        // Remove the redeemed LPT assets from the liquidity venue: the senior shares return to the kernel and the quote goes to the receiver
+        // The removal settles in both modes since the kernel custodies the BPT, so the ST leg redeems really delivered senior shares even in a preview
+        uint256 stSharesWithdrawn;
+        NAV_UNIT lptAssetPrice;
+        (stSharesWithdrawn, quoteAssets, lptAssetPrice) =
+            IRoycoDayKernel(address(this)).removeLiquidity(DispatchMode.EXECUTE, lptAssetClaims.lptAssets, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
+
+        // Pin the venue's post-remove price for a preview, the generic flow never assumes the venue leaves live-priceable post-remove state
+        // Execution pins nothing: the downstream legs price the settled post-remove venue live at the same mark
+        if (_mode == DispatchMode.SIMULATE) Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(lptAssetPrice));
+
+        // ST leg: a senior redemption of the venue-withdrawn and idle premium shares the kernel holds to collateral for the receiver, skipped when it holds none
+        // Its in-flow post-op enforces the liquidity requirement against this flow's final settled state, after the senior unwind shrank the requirement the removal's depth exit raised
+        stSharesWithdrawn += lptAssetClaims.stShares;
+        if (stSharesWithdrawn != 0) {
+            stClaims = inkindRedeem($, _immutables, TrancheType.SENIOR, DispatchMode.EXECUTE, stSharesWithdrawn, _caller, address(this), _receiver);
+        }
+
+        // Unmark the settled multi-asset flow and enforce a liquidity check an intermediate leg deferred that the flow's final settled state never healed
+        // Checked before the preview revert so a simulation of a violating flow reverts exactly like an execution
+        Cache._delete(CacheKey.IN_MULTI_ASSET_FLOW);
+        (bool isLiquidityRequirementViolated,) = Cache._read(CacheKey.LIQUIDITY_CHECK_DEFERRED);
+        require(!isLiquidityRequirementViolated, IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED());
+
+        // A preview carries its result out via this revert, unwinding every mutation this flow made
+        if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(stClaims, quoteAssets));
+    }
+
     // =============================
     // Tranche Max Withdrawable Functions
     // =============================
@@ -148,6 +224,80 @@ library RedemptionLogic {
             claimNAV = state.lptRawNAV;
             // The withdrawal is bounded by the market's liquidity requirement
             maxWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxLPTWithdrawal(state);
+        }
+    }
+
+    /**
+     * @notice Returns the maximum amount of assets that can be withdrawn from the liquidity provider tranche via a multi-asset redemption
+     * @dev A multi-asset redemption redeems the withdrawn and idle premium senior shares in-flow, reducing the liquidity requirement alongside the withdrawal
+     *
+     * @dev Liquidity Requirement: LPT_RAW_NAV >= (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
+     * @dev Senior share redemption NAV per unit of LPT raw NAV withdrawn, r: SENIOR_SHARE_REDEMPTION_NAV / LPT_RAW_NAV
+     * @dev Max assets withdrawable from LPT multi-asset, z: (LPT_RAW_NAV - z) = ((ST_EFFECTIVE_NAV - (z * r)) * MIN_LIQUIDITY)
+     *      Isolate z: z = (LPT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)) * LPT_RAW_NAV / (LPT_RAW_NAV - (SENIOR_SHARE_REDEMPTION_NAV * MIN_LIQUIDITY))
+     *
+     * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _owner The address that is withdrawing the assets
+     * @return claimOnLPTNAV The notional claims on LPT assets that the liquidity provider tranche has denominated in kernel's NAV units
+     * @return lptMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
+     * @return totalTrancheShares The total number of shares that exist in the liquidity provider tranche
+     */
+    function lptMaxWithdrawableMultiAsset(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        address _owner
+    )
+        external
+        returns (NAV_UNIT claimOnLPTNAV, NAV_UNIT lptMaxWithdrawableNAV, uint256 totalTrancheShares)
+    {
+        // If the owner is blacklisted or the kernel is currently paused, return zero claims
+        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+
+        // Get the total claims the liquidity provider tranche has on its own assets
+        SyncedAccountingState memory state;
+        AssetClaims memory lptClaims;
+        (state, lptClaims, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
+
+        // LPT redemptions are disabled during a fixed-term market state
+        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+
+        // Compute the senior tranche shares a proportional removal of the entire LPT asset holding would withdraw
+        uint256 stSharesWithdrawn;
+        if (lptClaims.lptAssets != ZERO_TRANCHE_UNITS) {
+            NAV_UNIT lptAssetPrice;
+            (stSharesWithdrawn,, lptAssetPrice) = IRoycoDayKernel(address(this)).removeLiquidity(DispatchMode.SIMULATE, lptClaims.lptAssets, 0, 0, address(0));
+
+            // Re-mark the depth at the removal's post-remove mark, the mark the real flow's final settled gate enforces at
+            // Pin the mark only around this conversion so no price leaks into the rest of the transaction
+            Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(lptAssetPrice));
+            state.lptRawNAV = ValuationLogic._getLiquidityProviderTrancheRawNAV($);
+            Cache._delete(CacheKey.LPT_ASSET_PRICE);
+        }
+
+        // A multi-asset redemption pulls a proportional slice of both LPT legs
+        // The claim and the withdrawal bound share the post-remove mark so their ratio sizes the withdrawable share fraction exactly
+        claimOnLPTNAV = state.lptRawNAV;
+        // The withdrawal is bounded by the market's liquidity requirement
+        NAV_UNIT lptWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxLPTWithdrawal(state);
+
+        // Value the withdrawn and idle premium senior shares at the post-sync senior share rate, rounding down so the requirement reduction is never overstated
+        (,, uint256 totalSTShares) =
+            FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
+        NAV_UNIT stSharesRedeemedNAV =
+            ValuationLogic._convertToValue((stSharesWithdrawn + lptClaims.stShares), totalSTShares, state.stEffectiveNAV, Math.Rounding.Floor);
+        // Compute the reduction in the market's liquidity requirement from redeeming the senior shares in-flow
+        NAV_UNIT liquidityRequirementReductionNAV = stSharesRedeemedNAV.mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Floor);
+
+        // If the requirement reduction outpaces the withdrawal itself, the entire holding is withdrawable unless nothing is withdrawable in kind
+        if (liquidityRequirementReductionNAV >= state.lptRawNAV) {
+            lptMaxWithdrawableNAV = (lptWithdrawableNAV == ZERO_NAV_UNITS) ? ZERO_NAV_UNITS : state.lptRawNAV;
+        } else {
+            // Scale the in-kind withdrawable NAV by the requirement reduction, capped at the entire holding
+            lptMaxWithdrawableNAV = RoycoUnitsMath.min(
+                lptWithdrawableNAV.mulDiv(state.lptRawNAV, (state.lptRawNAV - liquidityRequirementReductionNAV), Math.Rounding.Floor), state.lptRawNAV
+            );
         }
     }
 }

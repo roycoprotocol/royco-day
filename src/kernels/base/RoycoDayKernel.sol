@@ -5,22 +5,18 @@ import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
-import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoPriceOracle } from "../../interfaces/IRoycoPriceOracle.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { AggregatorV3Interface } from "../../interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { Cache, CacheKey } from "../../libraries/Cache.sol";
 import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
-import { AssetClaims, DispatchMode, MarketState, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
+import { AssetClaims, DispatchMode, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../libraries/Units.sol";
 import { AccountingSyncLogic } from "../../libraries/logic/AccountingSyncLogic.sol";
 import { BlacklistLogic } from "../../libraries/logic/BlacklistLogic.sol";
 import { DepositLogic } from "../../libraries/logic/DepositLogic.sol";
-import { DispatchLogic } from "../../libraries/logic/DispatchLogic.sol";
-import { FeeAndLiquidityPremiumLogic } from "../../libraries/logic/FeeAndLiquidityPremiumLogic.sol";
 import { RedemptionLogic } from "../../libraries/logic/RedemptionLogic.sol";
-import { ValuationLogic } from "../../libraries/logic/ValuationLogic.sol";
 
 /**
  * @title RoycoDayKernel
@@ -98,16 +94,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         Cache._write(CacheKey.COLLATERAL_ASSET_PRICE, toUint256(queryCollateralAssetOracle()));
         _;
         Cache._delete(CacheKey.COLLATERAL_ASSET_PRICE);
-    }
-
-    /// @dev Marks a multi-asset composite flow for the operation's span
-    /// @dev The post-op sync reads the mark to waive the liquidity requirement on the flow's intermediate legs and enforce it on the final leg's settled state
-    modifier inMultiAssetFlow() {
-        Cache._write(CacheKey.IN_MULTI_ASSET_FLOW, 1);
-        _;
-        Cache._delete(CacheKey.IN_MULTI_ASSET_FLOW);
-        (bool isLiquidityRequirementSatisfied,) = Cache._read(CacheKey.LIQUIDITY_CHECK_DEFERRED);
-        require(isLiquidityRequirementSatisfied, IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED());
     }
 
     // =============================
@@ -194,7 +180,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function convertValueToLPTAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT lptAssets) {
-        return toTrancheUnits(toUint256(_value.mulDiv(ONE_WHOLE_LPT_ASSET, toUint256(_getLPTAssetPrice()), Math.Rounding.Floor)));
+        NAV_UNIT lptAssetPrice = _getLPTAssetPrice();
+        if (lptAssetPrice == ZERO_NAV_UNITS) return ZERO_TRANCHE_UNITS;
+        return toTrancheUnits(toUint256(_value.mulDiv(ONE_WHOLE_LPT_ASSET, toUint256(lptAssetPrice), Math.Rounding.Floor)));
     }
 
     // =============================
@@ -227,55 +215,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         override(IRoycoDayKernel)
         returns (NAV_UNIT claimOnLPTNAV, NAV_UNIT lptMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
-        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-
-        // If the owner is blacklisted or the kernel is currently paused, return zero claims
-        if (BlacklistLogic._isBlacklisted($, _owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
-
-        // Get the total claims the liquidity provider tranche has on its own assets
-        SyncedAccountingState memory state;
-        AssetClaims memory lptClaims;
-        (state, lptClaims, totalTrancheShares) = previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
-
-        // LPT redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
-
-        // Compute the senior tranche shares a proportional removal of the entire LPT asset holding would withdraw
-        uint256 stSharesWithdrawn;
-        if (lptClaims.lptAssets != ZERO_TRANCHE_UNITS) {
-            NAV_UNIT lptAssetPrice;
-            (stSharesWithdrawn,, lptAssetPrice) = _removeLiquidity(DispatchMode.SIMULATE, lptClaims.lptAssets, 0, 0, address(0));
-
-            // Re-mark the depth at the removal's post-remove mark, the mark the real flow's final settled gate enforces at
-            // Pin the mark only around this conversion so no price leaks into the rest of the transaction
-            Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(lptAssetPrice));
-            state.lptRawNAV = ValuationLogic._getLiquidityProviderTrancheRawNAV($);
-            Cache._delete(CacheKey.LPT_ASSET_PRICE);
-        }
-
-        // A multi-asset redemption pulls a proportional slice of both LPT legs
-        // The claim and the withdrawal bound share the post-remove mark so their ratio sizes the withdrawable share fraction exactly
-        claimOnLPTNAV = state.lptRawNAV;
-        // The withdrawal is bounded by the market's liquidity requirement
-        NAV_UNIT lptWithdrawableNAV = IRoycoDayAccountant(ACCOUNTANT).maxLPTWithdrawal(state);
-
-        // Value the withdrawn and idle premium senior shares at the post-sync senior share rate, rounding down so the requirement reduction is never overstated
-        (,, uint256 totalSTShares) =
-            FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IRoycoVaultTranche(SENIOR_TRANCHE).totalSupply());
-        NAV_UNIT stSharesRedeemedNAV =
-            ValuationLogic._convertToValue((stSharesWithdrawn + lptClaims.stShares), totalSTShares, state.stEffectiveNAV, Math.Rounding.Floor);
-        // Compute the reduction in the market's liquidity requirement from redeeming the senior shares in-flow
-        NAV_UNIT liquidityRequirementReductionNAV = stSharesRedeemedNAV.mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Floor);
-
-        // If the requirement reduction outpaces the withdrawal itself, the entire holding is withdrawable unless nothing is withdrawable in kind
-        if (liquidityRequirementReductionNAV >= state.lptRawNAV) {
-            lptMaxWithdrawableNAV = (lptWithdrawableNAV == ZERO_NAV_UNITS) ? ZERO_NAV_UNITS : state.lptRawNAV;
-        } else {
-            // Scale the in-kind withdrawable NAV by the requirement reduction, capped at the entire holding
-            lptMaxWithdrawableNAV = RoycoUnitsMath.min(
-                lptWithdrawableNAV.mulDiv(state.lptRawNAV, (state.lptRawNAV - liquidityRequirementReductionNAV), Math.Rounding.Floor), state.lptRawNAV
-            );
-        }
+        return RedemptionLogic.lptMaxWithdrawableMultiAsset(_getRoycoDayKernelStorage(), getImmutableState(), _owner);
     }
 
     // =============================
@@ -407,35 +347,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyLiquidityProviderTranche
         nonReentrant
         withCollateralPriceCached
-        inMultiAssetFlow
         returns (uint256 trancheSharesMinted, TRANCHE_UNIT lptAssetsOut)
     {
-        // Collateral leg: an ST deposit minting the add's senior shares to the kernel
-        // Its in-flow post-op waives the liquidity requirement the add satisfies below with the deployed depth
-        // Both legs run settled in preview and execution alike, this flow's own result revert unwinds them in a preview
-        uint256 stSharesMinted;
-        if (_collateralAssets != ZERO_TRANCHE_UNITS) {
-            stSharesMinted = DepositLogic.inkindDeposit(
-                _getRoycoDayKernelStorage(), getImmutableState(), TrancheType.SENIOR, DispatchMode.EXECUTE, _collateralAssets, _caller, address(this)
-            );
-        }
-
-        // Add the minted ST shares and supplied quote assets into the liquidity venue with the specified slippage check
-        NAV_UNIT lptAssetPrice;
-        (lptAssetsOut, lptAssetPrice) = _addLiquidity(_mode, stSharesMinted, _quoteAssets, _minLPTAssetsOut);
-
-        // Pin the venue's post-add price for a preview, whose unwound add would otherwise price the pre-add pool live
-        // Execution pins nothing: the LPT leg prices the settled post-add pool live at the same mark
-        if (_mode == DispatchMode.SIMULATE) Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(lptAssetPrice));
-
-        // LPT leg: an in-kind LPT deposit of the minted assets at the post-add price, priced and minted to the receiver by the shared primitive
-        // Its in-flow post-op enforces the liquidity requirement against this flow's settled state
-        trancheSharesMinted = DepositLogic.inkindDeposit(
-            _getRoycoDayKernelStorage(), getImmutableState(), TrancheType.LIQUIDITY_PROVIDER, DispatchMode.EXECUTE, lptAssetsOut, _caller, _receiver
+        return DepositLogic.lptDepositMultiAsset(
+            _getRoycoDayKernelStorage(), getImmutableState(), _mode, _collateralAssets, _quoteAssets, _minLPTAssetsOut, _caller, _receiver
         );
-
-        // A preview carries its result out via this revert, unwinding every mutation this flow made
-        if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(trancheSharesMinted, lptAssetsOut));
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -456,86 +372,12 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyLiquidityProviderTranche
         nonReentrant
         withCollateralPriceCached
-        inMultiAssetFlow
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
-        // LPT leg: an in-kind LPT redemption of the owner's shares to the kernel itself, leaving the redeemed LPT assets and idle premium senior shares in its custody
-        // Its in-flow post-op waives the liquidity requirement the ST leg's post-op enforces on this flow's final settled state
-        // All legs run settled in preview and execution alike, this flow's own result revert unwinds them in a preview
-        AssetClaims memory lptAssetClaims = RedemptionLogic.inkindRedeem(
-            _getRoycoDayKernelStorage(), getImmutableState(), TrancheType.LIQUIDITY_PROVIDER, DispatchMode.EXECUTE, _lptShares, _caller, _owner, address(this)
+        return RedemptionLogic.lptRedeemMultiAsset(
+            _getRoycoDayKernelStorage(), getImmutableState(), _mode, _lptShares, _minSTSharesOut, _minQuoteAssetsOut, _caller, _owner, _receiver
         );
-
-        // Remove the redeemed LPT assets from the liquidity venue: the senior shares return to the kernel and the quote goes to the receiver
-        // The removal settles in both modes since the kernel custodies the BPT, so the ST leg redeems really delivered senior shares even in a preview
-        uint256 stSharesWithdrawn;
-        NAV_UNIT lptAssetPrice;
-        (stSharesWithdrawn, quoteAssets, lptAssetPrice) =
-            _removeLiquidity(DispatchMode.EXECUTE, lptAssetClaims.lptAssets, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
-
-        // Pin the venue's post-remove price for a preview, the generic flow never assumes the venue leaves live-priceable post-remove state
-        // Execution pins nothing: the downstream legs price the settled post-remove venue live at the same mark
-        if (_mode == DispatchMode.SIMULATE) Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(lptAssetPrice));
-
-        // ST leg: a senior redemption of the venue-withdrawn and idle premium shares the kernel holds to collateral for the receiver
-        // Its in-flow post-op enforces the liquidity requirement against this flow's final settled state, after the senior unwind shrank the requirement the removal's depth exit raised
-        stSharesWithdrawn += lptAssetClaims.stShares;
-        if (stSharesWithdrawn != 0) {
-            stClaims = RedemptionLogic.inkindRedeem(
-                _getRoycoDayKernelStorage(), getImmutableState(), TrancheType.SENIOR, DispatchMode.EXECUTE, stSharesWithdrawn, _caller, address(this), _receiver
-            );
-        }
-
-        // A preview carries its result out via this revert, unwinding every mutation this flow made
-        if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(stClaims, quoteAssets));
     }
-
-    // =============================
-    // Liquidity Provider Tranche Venue Hooks
-    // =============================
-
-    /**
-     * @notice Adds a senior tranche share and quote asset position into the liquidity venue and returns the liquidity provider tranche assets minted
-     * @dev Implemented by the concrete liquidity venue mixin
-     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
-     * @param _seniorShares The exact amount of senior tranche shares to add into the liquidity venue
-     * @param _quoteAssets The exact amount of quote assets to add into the liquidity venue
-     * @param _minLPTAssetsOut The minimum liquidity provider tranche assets that must be minted, bounding the add's slippage
-     * @return lptAssets The liquidity provider tranche assets minted by the add
-     * @return lptAssetPrice The value of 1 whole LPT asset against the post-add venue state, produced only for a preview to pin the operation's cache with (zero when settling)
-     */
-    function _addLiquidity(
-        DispatchMode _mode,
-        uint256 _seniorShares,
-        uint256 _quoteAssets,
-        TRANCHE_UNIT _minLPTAssetsOut
-    )
-        internal
-        virtual
-        returns (TRANCHE_UNIT lptAssets, NAV_UNIT lptAssetPrice);
-
-    /**
-     * @notice Proportionally removes a slice of liquidity provider tranche assets from the liquidity venue into its senior tranche share and quote asset constituents
-     * @dev Implemented by the concrete liquidity venue mixin
-     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
-     * @param _lptAssets The exact liquidity provider tranche assets to burn
-     * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage
-     * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage
-     * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets, the withdrawn senior shares are returned to the kernel for the combined senior unwind
-     * @return stShares The senior tranche shares withdrawn by the removal
-     * @return quoteAssets The quote assets withdrawn by the removal
-     * @return lptAssetPrice The value of 1 whole LPT asset against the post-remove venue state, the mark a caller's preview pins the operation's cache with
-     */
-    function _removeLiquidity(
-        DispatchMode _mode,
-        TRANCHE_UNIT _lptAssets,
-        uint256 _minSTSharesOut,
-        uint256 _minQuoteAssetsOut,
-        address _quoteAssetsReceiver
-    )
-        internal
-        virtual
-        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice);
 
     // =============================
     // Admin Functions

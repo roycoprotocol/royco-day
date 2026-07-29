@@ -164,18 +164,20 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     // =============================
 
     /**
-     * @inheritdoc RoycoDayKernel
+     * @inheritdoc IRoycoDayKernel
      * @dev Dispatches the add liquidity callback below through the unlocked Vault
      * @dev A preview unwinds every transient balance change via the callback's result-carrying revert
+     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
-    function _addLiquidity(
+    function addLiquidity(
         DispatchMode _mode,
         uint256 _seniorShares,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLPTAssetsOut
     )
-        internal
-        override
+        external
+        override(IRoycoDayKernel)
+        onlySelf
         returns (TRANCHE_UNIT lptAssets, NAV_UNIT lptAssetPrice)
     {
         // Both transports yield the unlock's ABI encoded bytes return byte for byte
@@ -193,19 +195,21 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     }
 
     /**
-     * @inheritdoc RoycoDayKernel
+     * @inheritdoc IRoycoDayKernel
      * @dev Dispatches the remove liquidity callback below through the unlocked Vault
      * @dev A preview unwinds every transient balance change via the callback's result-carrying revert
+     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
-    function _removeLiquidity(
+    function removeLiquidity(
         DispatchMode _mode,
         TRANCHE_UNIT _lptAssets,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
         address _quoteAssetsReceiver
     )
-        internal
-        override
+        external
+        override(IRoycoDayKernel)
+        onlySelf
         returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice)
     {
         // Both transports yield the unlock's ABI encoded bytes return byte for byte

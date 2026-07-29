@@ -541,6 +541,47 @@ interface IRoycoDayKernel {
     // =============================
 
     /**
+     * @notice Adds a senior tranche share and quote asset position into the liquidity venue and returns the liquidity provider tranche assets minted
+     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
+     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
+     * @param _seniorShares The exact amount of senior tranche shares to add into the liquidity venue
+     * @param _quoteAssets The exact amount of quote assets to add into the liquidity venue
+     * @param _minLPTAssetsOut The minimum liquidity provider tranche assets that must be minted, bounding the add's slippage
+     * @return lptAssets The liquidity provider tranche assets minted by the add
+     * @return lptAssetPrice The value of 1 whole LPT asset against the post-add venue state, produced only for a preview to pin the operation's cache with (zero when settling)
+     */
+    function addLiquidity(
+        DispatchMode _mode,
+        uint256 _seniorShares,
+        uint256 _quoteAssets,
+        TRANCHE_UNIT _minLPTAssetsOut
+    )
+        external
+        returns (TRANCHE_UNIT lptAssets, NAV_UNIT lptAssetPrice);
+
+    /**
+     * @notice Proportionally removes a slice of liquidity provider tranche assets from the liquidity venue into its senior tranche share and quote asset constituents
+     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
+     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
+     * @param _lptAssets The exact liquidity provider tranche assets to burn
+     * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage
+     * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage
+     * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets, the withdrawn senior shares are returned to the kernel for the combined senior unwind
+     * @return stShares The senior tranche shares withdrawn by the removal
+     * @return quoteAssets The quote assets withdrawn by the removal
+     * @return lptAssetPrice The value of 1 whole LPT asset against the post-remove venue state, the mark a caller's preview pins the operation's cache with
+     */
+    function removeLiquidity(
+        DispatchMode _mode,
+        TRANCHE_UNIT _lptAssets,
+        uint256 _minSTSharesOut,
+        uint256 _minQuoteAssetsOut,
+        address _quoteAssetsReceiver
+    )
+        external
+        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice);
+
+    /**
      * @notice Attempts to reinvest the liquidity provider tranche's idle liquidity-premium senior shares into its market-making inventory
      * @dev Tolerates reversions gracefully so it is non-blocking for the tranche operation that invokes it
      * @param _stSharesToReinvest The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
