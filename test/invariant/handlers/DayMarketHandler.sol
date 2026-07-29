@@ -231,8 +231,7 @@ contract DayMarketHandler is DayMarketTestBase {
     bytes4 internal constant SEL_COVERAGE = IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector;
     bytes4 internal constant SEL_LIQUIDITY = IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
     bytes4 internal constant SEL_INVALID_POST_OP = IRoycoDayAccountant.INVALID_POST_OP_STATE.selector;
-    bytes4 internal constant SEL_ZERO_SHARES = IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector;
-    bytes4 internal constant SEL_ZERO_VALUE = IRoycoVaultTranche.INVALID_DEPOSIT_NAV.selector;
+    bytes4 internal constant SEL_ZERO_SHARES = IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector;
     bytes4 internal constant SEL_ERC20_BALANCE = IERC20Errors.ERC20InsufficientBalance.selector;
     bytes4 internal constant SEL_AMOUNT_OUT_BELOW_MIN = IVaultErrors.AmountOutBelowMin.selector;
     bytes4 internal constant SEL_PANIC = bytes4(0x4e487b71);
@@ -361,10 +360,8 @@ contract DayMarketHandler is DayMarketTestBase {
                 _expect(p, SEL_DISABLED_FT);
             } else {
                 uint256 collateralAfter = _quoteCollateralUnits(s.collateralOwned + assets);
-                if (collateralAfter == s.collateralNAV || value == 0) {
-                    _expect(p, SEL_INVALID_POST_OP);
-                    _expect(p, SEL_ZERO_VALUE);
-                }
+                // A zero-value deposit prices to zero shares before the post-op delta requirement can fire
+                if (value != 0 && collateralAfter == s.collateralNAV) _expect(p, SEL_INVALID_POST_OP);
                 bool mintPanics;
                 (predShares, mintPanics) = _mirrorMintShares(value, s.jtEffectiveNAV, s.jtSupply);
                 // Past the supply-inflation cliff the clamped mint's cap computation itself overflows: mirror
@@ -421,10 +418,8 @@ contract DayMarketHandler is DayMarketTestBase {
             Pred memory p;
             uint256 value = _quoteLPTUnits(bptAmt);
             uint256 navAt = RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(s.lptRawNAV, s.lptOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
-            if (_quoteLPTUnits(s.lptOwned + bptAmt) == s.lptRawNAV || value == 0) {
-                _expect(p, SEL_INVALID_POST_OP);
-                _expect(p, SEL_ZERO_VALUE);
-            }
+            // A zero-value deposit prices to zero shares before the post-op delta requirement can fire
+            if (value != 0 && _quoteLPTUnits(s.lptOwned + bptAmt) == s.lptRawNAV) _expect(p, SEL_INVALID_POST_OP);
             (uint256 predShares, bool mintPanics) = _mirrorMintShares(value, navAt, s.lptSupply);
             // The mint-dilution clamp's residual overflow cliff: past the supply-inflation point the mint itself must panic
             if (mintPanics) _expect(p, SEL_PANIC);
@@ -828,10 +823,8 @@ contract DayMarketHandler is DayMarketTestBase {
             _expect(p, SEL_DISABLED_FT);
         } else {
             uint256 collateralAfter = _quoteCollateralUnits(s.collateralOwned + _assets);
-            if (collateralAfter == s.collateralNAV || value == 0) {
-                _expect(p, SEL_INVALID_POST_OP);
-                _expect(p, SEL_ZERO_VALUE);
-            }
+            // A zero-value deposit prices to zero shares before the post-op delta requirement can fire
+            if (value != 0 && collateralAfter == s.collateralNAV) _expect(p, SEL_INVALID_POST_OP);
             uint256 stEffAfter = s.stEffectiveNAV + (collateralAfter - s.collateralNAV);
             if (RoycoTestMath.computeCoverageUtilization(collateralAfter, s.minCoverageWAD, s.jtEffectiveNAV) > WAD) _expect(p, SEL_COVERAGE);
             if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, s.lptRawNAV) > WAD) _expect(p, SEL_LIQUIDITY);
@@ -960,11 +953,7 @@ contract DayMarketHandler is DayMarketTestBase {
             // The residual overflow cliff on the senior leg: past the supply-inflation point the ST mint panics
             if (v.stMintPanics) _expect(p, SEL_PANIC);
             if (_collateralAssets > 0 && !v.stMintPanics && v.stSharesMinted == 0) _expect(p, SEL_ZERO_SHARES);
-            if (v.valueAllocated == 0) {
-                _expect(p, SEL_ZERO_VALUE);
-                _expect(p, SEL_INVALID_POST_OP);
-            }
-            if (v.lptRawAfter <= s.lptRawNAV) _expect(p, SEL_INVALID_POST_OP);
+            if (v.valueAllocated == 0 || v.lptRawAfter <= s.lptRawNAV) _expect(p, SEL_INVALID_POST_OP);
             uint256 navAt = RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(s.lptRawNAV, s.lptOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
             (uint256 predLptShares, bool lptMintPanics) = _mirrorMintShares(v.valueAllocated, navAt, s.lptSupply);
             if (lptMintPanics) _expect(p, SEL_PANIC);

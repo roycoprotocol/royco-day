@@ -14,7 +14,7 @@ import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../libraries/Types.sol";
 import { NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
-import { TrancheClaimsLogic } from "../libraries/logic/TrancheClaimsLogic.sol";
+import { AssetLedgerLogic } from "../libraries/logic/AssetLedgerLogic.sol";
 import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
 
 /**
@@ -745,7 +745,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      * @return value The escrowed shares' pro-rata claim on the synced claims
      */
     function _redemptionValueReference(uint256 _shares, AssetClaims memory _trancheClaims, uint256 _totalTrancheShares) internal pure returns (NAV_UNIT value) {
-        return TrancheClaimsLogic._scaleAssetClaims(_trancheClaims, _shares, _totalTrancheShares, true).nav;
+        return AssetLedgerLogic._scaleAssetClaims(_trancheClaims, _shares, _totalTrancheShares, true).nav;
     }
 
     /**
@@ -789,9 +789,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
     /**
      * @dev Splits a redemption's claims into the executor's bonus and the receiver's portion, then remits both
-     *      Transfers are gated on the receiver's post-bonus legs alone: the bonus floors every leg and the bonus
-     *      percentage is strictly under WAD, so a nonzero bonus leg implies a nonzero receiver leg, and a zero
-     *      receiver leg proves the whole leg is empty, so no bonus can be stranded behind the gate
      * @param _kernel The kernel of the market that the redeemed tranche belongs to, used to resolve the claim assets
      * @param _userClaims The redemption's total asset claims, reduced in place to the receiver's post-bonus portion
      * @param _quoteAssets The redemption's total quote leg (zero unless a liquidity provider tranche redemption exits multi-asset)
@@ -811,37 +808,24 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         returns (AssetClaims memory bonusClaims, uint256 bonusQuoteAssets)
     {
         // Scale the asset claims to compute the executor bonus and the receiver's portion
-        bonusClaims = TrancheClaimsLogic._scaleAssetClaims(_userClaims, _executorBonusWAD, WAD, false);
+        bonusClaims = AssetLedgerLogic._scaleAssetClaims(_userClaims, _executorBonusWAD, WAD, false);
         // Deduct the NAV of the bonus claims from the user's claims
         _userClaims.collateralAssets = _userClaims.collateralAssets - bonusClaims.collateralAssets;
         _userClaims.lptAssets = _userClaims.lptAssets - bonusClaims.lptAssets;
         _userClaims.stShares = _userClaims.stShares - bonusClaims.stShares;
         _userClaims.nav = _userClaims.nav - bonusClaims.nav;
 
-        // Transfer the collateral asset claims to the executor and receiver respectively
-        if (_userClaims.collateralAssets != ZERO_TRANCHE_UNITS) {
-            address collateralAsset = IRoycoDayKernel(_kernel).COLLATERAL_ASSET();
-            IERC20(collateralAsset).safeTransfer(_receiver, toUint256(_userClaims.collateralAssets));
-            if (bonusClaims.collateralAssets != ZERO_TRANCHE_UNITS) IERC20(collateralAsset).safeTransfer(msg.sender, toUint256(bonusClaims.collateralAssets));
-        }
-        // Transfer the LPT asset claims to the executor and receiver respectively
-        if (_userClaims.lptAssets != ZERO_TRANCHE_UNITS) {
-            address lptAsset = IRoycoDayKernel(_kernel).LPT_ASSET();
-            IERC20(lptAsset).safeTransfer(_receiver, toUint256(_userClaims.lptAssets));
-            if (bonusClaims.lptAssets != ZERO_TRANCHE_UNITS) IERC20(lptAsset).safeTransfer(msg.sender, toUint256(bonusClaims.lptAssets));
-        }
-        // Transfer the senior tranche share claims to the executor and receiver respectively
-        if (_userClaims.stShares != 0) {
-            address seniorTranche = IRoycoDayKernel(_kernel).SENIOR_TRANCHE();
-            IERC20(seniorTranche).safeTransfer(_receiver, _userClaims.stShares);
-            if (bonusClaims.stShares != 0) IERC20(seniorTranche).safeTransfer(msg.sender, bonusClaims.stShares);
-        }
+        // Resolve the market's assets from the kernel's immutables carrier
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory immutables = IRoycoDayKernel(_kernel).getImmutableState();
+
+        // Remit the receiver's and the executor's asset claims respectively
+        AssetLedgerLogic._remitClaims(immutables, _userClaims, _receiver);
+        AssetLedgerLogic._remitClaims(immutables, bonusClaims, msg.sender);
         // Transfer the quote leg to the executor and receiver respectively
         if (_quoteAssets != 0) {
             bonusQuoteAssets = Math.mulDiv(_quoteAssets, _executorBonusWAD, WAD, Math.Rounding.Floor);
-            address quoteAsset = IRoycoDayKernel(_kernel).QUOTE_ASSET();
-            IERC20(quoteAsset).safeTransfer(_receiver, (_quoteAssets - bonusQuoteAssets));
-            if (bonusQuoteAssets != 0) IERC20(quoteAsset).safeTransfer(msg.sender, bonusQuoteAssets);
+            IERC20(immutables.quoteAsset).safeTransfer(_receiver, (_quoteAssets - bonusQuoteAssets));
+            if (bonusQuoteAssets != 0) IERC20(immutables.quoteAsset).safeTransfer(msg.sender, bonusQuoteAssets);
         }
     }
 

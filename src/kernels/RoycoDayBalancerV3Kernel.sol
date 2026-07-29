@@ -14,7 +14,7 @@ import { BalancerV3LiquidityVenue } from "./base/liquidity-venue/balancer-v3/Bal
  * @dev LPT NAV computations value the pool position (BPT) using a manipulation-resistant Balancer V3 oracle, and the pool prices the senior share leg via this kernel's senior share rate provider
  */
 contract RoycoDayBalancerV3Kernel is BalancerV3LiquidityVenue {
-    /// @notice Constructs the kernel state and resolves the quote asset from the liquidity provider tranche's Balancer V3 pool
+    /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco Day kernel
     constructor(IRoycoDayKernel.RoycoDayKernelConstructionParams memory _params)
         RoycoDayKernel(_params)

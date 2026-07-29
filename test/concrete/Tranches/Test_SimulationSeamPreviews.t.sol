@@ -324,40 +324,40 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
     /**
      * @notice A zero-asset deposit preview bubbles the exact error the zero-asset execution raises on all three
      *         tranches, and a zero-share redeem preview bubbles the exact zero-share execution error
-     * @dev A zero deposit moves its tranche's raw NAV by zero, so the kernel's post-operation validation rejects
-     *      it with the op-tagged INVALID_POST_OP_STATE before any tranche-level guard. The zero-share redemption
-     *      trips the tranche's own MUST_REQUEST_NON_ZERO_SHARES inside the simulated frame. Exec is pinned first
+     * @dev A zero deposit prices to zero shares, so the kernel rejects it with MUST_MINT_NON_ZERO_SHARES right
+     *      after share pricing. The zero-share redemption trips the kernel's MUST_REDEEM_NON_ZERO_SHARES upfront,
+     *      which runs in preview and execution alike. Exec is pinned first
      *      so the parity claim is against the live exec error, not a hardcoded expectation
      */
     function test_RevertIf_ZeroAmounts_PreviewsBubbleExactExecErrors() public {
-        // Exec side: the zero-asset deposits raise the op-tagged post-op validation error
+        // Exec side: the zero-asset deposits raise the kernel's zero-share mint guard
         vm.prank(ST_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         seniorTranche.deposit(toTrancheUnits(0), ST_PROVIDER);
         vm.prank(JT_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         juniorTranche.deposit(toTrancheUnits(0), JT_PROVIDER);
         vm.prank(LPT_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LPT_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.deposit(toTrancheUnits(0), LPT_PROVIDER);
 
         // Preview side: the identical errors bubble verbatim through the simulation seam
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         seniorTranche.previewDeposit(toTrancheUnits(0));
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         juniorTranche.previewDeposit(toTrancheUnits(0));
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LPT_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.previewDeposit(toTrancheUnits(0));
 
-        // Zero-share redemptions: exec and preview raise the identical tranche-level guard
+        // Zero-share redemptions: exec and preview raise the identical kernel-level guard
         vm.prank(ST_PROVIDER);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
         seniorTranche.redeem(0, ST_PROVIDER, ST_PROVIDER);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
         seniorTranche.previewRedeem(0);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
         juniorTranche.previewRedeem(0);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.previewRedeem(0);
     }
 

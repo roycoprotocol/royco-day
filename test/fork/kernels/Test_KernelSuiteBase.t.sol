@@ -1313,11 +1313,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertCommittedConservation();
     }
 
-    /// @notice A zero-asset ST deposit reverts with the accountant's exact-arg `INVALID_POST_OP_STATE(ST_DEPOSIT)`.
-    /// @dev The post-op sync's `deltaCollateralNAV > 0` requirement fires before the tranche's `INVALID_DEPOSIT_NAV` check can.
+    /// @notice A zero-asset ST deposit reverts with the kernel's `MUST_MINT_NON_ZERO_SHARES`.
+    /// @dev The kernel's zero-share check fires right after share pricing, before the post-op sync's `deltaCollateralNAV > 0` requirement can.
     function test_RevertIf_STDepositZeroAssets() public {
         vm.prank(ST_ALICE_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         ST.deposit(ZERO_TRANCHE_UNITS, ST_ALICE_ADDRESS);
     }
 
@@ -1609,11 +1609,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertCommittedConservation();
     }
 
-    /// @notice A zero-asset JT deposit reverts with the accountant's exact-arg `INVALID_POST_OP_STATE(JT_DEPOSIT)`.
-    /// @dev The post-op sync's `deltaCollateralNAV > 0` requirement fires before the tranche's `INVALID_DEPOSIT_NAV` check can.
+    /// @notice A zero-asset JT deposit reverts with the kernel's `MUST_MINT_NON_ZERO_SHARES`.
+    /// @dev The kernel's zero-share check fires right after share pricing, before the post-op sync's `deltaCollateralNAV > 0` requirement can.
     function test_RevertIf_JTDepositZeroAssets() public {
         vm.prank(JT_ALICE_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         JT.deposit(ZERO_TRANCHE_UNITS, JT_ALICE_ADDRESS);
     }
 
@@ -1959,7 +1959,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice Derives a tranche's cumulative asset claims independently from the committed checkpoint plus pricing
-     *         conversions, mirroring `TrancheClaimsLogic._deriveTrancheAssetClaims`.
+     *         conversions, mirroring `AssetLedgerLogic._deriveTrancheAssetClaims`.
      * @dev A tranche's claim IS its effective NAV converted once into the collateral asset, no raw-leg
      *      decomposition exists. The pricing conversions of the claim NAVs are inputs, not the function under test.
      *      Callers must have synced in the same block so the committed checkpoint equals the live state.
@@ -1977,7 +1977,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice Floor-scales every claims field by `_shares / (_totalShares + VIRTUAL_SHARES)`, mirroring
-    ///         `TrancheClaimsLogic._scaleAssetClaims`, which now divides by the effective supply so a sole holder
+    ///         `AssetLedgerLogic._scaleAssetClaims`, which now divides by the effective supply so a sole holder
     ///         can never redeem the whole tranche 1:1 (the virtual-share sliver stays behind). The NAV numerator
     ///         carries the matching VIRTUAL_VALUE offset (the convertToValue shape).
     function _scaleExpectedClaims(AssetClaims memory _claims, uint256 _shares, uint256 _totalShares) internal pure returns (AssetClaims memory scaled) {
@@ -2138,10 +2138,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertCommittedConservation();
     }
 
-    /// @notice A zero-share ST redemption reverts with `MUST_REQUEST_NON_ZERO_SHARES`.
+    /// @notice A zero-share ST redemption reverts with the kernel's `MUST_REDEEM_NON_ZERO_SHARES`.
     function test_RevertIf_STRedeemZeroShares() public {
         vm.prank(ST_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
         ST.redeem(0, ST_ALICE_ADDRESS, ST_ALICE_ADDRESS);
     }
 
@@ -2678,16 +2678,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertMarketUnchanged(preBreach);
     }
 
-    /// @notice A zero-share LPT redemption reverts with `MUST_REQUEST_NON_ZERO_SHARES` on both the in-kind and the
-    ///         multi-asset flow.
+    /// @notice A zero-share LPT redemption reverts with the kernel's `MUST_REDEEM_NON_ZERO_SHARES` on both the
+    ///         in-kind and the multi-asset flow.
     function test_RevertIf_LPTRedeemZeroShares() public whenLPT {
         _setupLPTProviders();
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
         LPT.redeem(0, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
 
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
         IRoycoLiquidityProviderTranche(address(LPT)).redeemMultiAsset(0, 0, 0, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
     }
 
@@ -4503,23 +4503,23 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice Every kernel and accountant inter-contract entrypoint rejects a direct EOA caller with its exact
-    ///         caller-gate error, and the tranche mint surface is kernel-only.
+    ///         caller-gate error, and the tranche mint and burn surfaces are kernel-only.
     function test_KernelAndAccountant_callerGates() public {
         address outsider = _randomOutsider();
         vm.startPrank(outsider);
         vm.expectRevert(IRoycoDayKernel.ONLY_SENIOR_TRANCHE.selector);
-        KERNEL.stDeposit(false, toTrancheUnits(1));
+        KERNEL.stDeposit(false, toTrancheUnits(1), outsider);
         vm.expectRevert(IRoycoDayKernel.ONLY_SENIOR_TRANCHE.selector);
-        KERNEL.stRedeem(false, 1, outsider);
+        KERNEL.stRedeem(false, 1, outsider, outsider);
         vm.expectRevert(IRoycoDayKernel.ONLY_JUNIOR_TRANCHE.selector);
-        KERNEL.jtDeposit(false, toTrancheUnits(1));
+        KERNEL.jtDeposit(false, toTrancheUnits(1), outsider);
         vm.expectRevert(IRoycoDayKernel.ONLY_JUNIOR_TRANCHE.selector);
-        KERNEL.jtRedeem(false, 1, outsider);
+        KERNEL.jtRedeem(false, 1, outsider, outsider);
         if (testConfig.hasLiquidityProviderTranche) {
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptDeposit(false, toTrancheUnits(1));
+            KERNEL.lptDeposit(false, toTrancheUnits(1), outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptRedeem(false, 1, outsider);
+            KERNEL.lptRedeem(false, 1, outsider, outsider);
             // The multi-asset pair in both preview modes: a direct call with _isPreview true would commit the
             // flow's mutations with no outer preview revert to unwind them, so this gate is the sole defense
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
@@ -4527,9 +4527,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
             KERNEL.lptDepositMultiAsset(true, toTrancheUnits(1), 1, ZERO_TRANCHE_UNITS);
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptRedeemMultiAsset(false, 1, 0, 0, outsider);
+            KERNEL.lptRedeemMultiAsset(false, 1, 0, 0, outsider, outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptRedeemMultiAsset(true, 1, 0, 0, outsider);
+            KERNEL.lptRedeemMultiAsset(true, 1, 0, 0, outsider, outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
             KERNEL.addLiquidity(false, 1, 1, ZERO_TRANCHE_UNITS);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
@@ -4544,11 +4544,15 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
         ACCOUNTANT.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
-        ST.mint(outsider, 1);
+        ST.kernelMint(outsider, 1);
+        vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
+        ST.kernelBurn(outsider, 1);
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
         ST.mintProtocolFeeShares(outsider, 1);
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
-        JT.mint(outsider, 1);
+        JT.kernelMint(outsider, 1);
+        vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
+        JT.kernelBurn(outsider, 1);
         vm.stopPrank();
     }
 

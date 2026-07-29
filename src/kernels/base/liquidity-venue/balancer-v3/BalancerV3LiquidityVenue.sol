@@ -43,10 +43,6 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     /// @notice Index of the quote asset in the pool's token registration order
     uint256 internal immutable QUOTE_ASSET_POOL_INDEX;
 
-    /// @inheritdoc RoycoDayKernel
-    /// @dev Resolved from this kernel's BPT registration
-    address public immutable override(RoycoDayKernel) QUOTE_ASSET;
-
     /**
      * @notice The namespaced storage for the BalancerV3LiquidityVenue
      * @custom:storage-location erc7201:Royco.storage.BalancerV3LiquidityVenueState
@@ -87,6 +83,9 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     /// @notice Thrown when neither of the pool's two tokens is the senior tranche share
     error INVALID_POOL_TOKEN_CONFIGURATION();
 
+    /// @notice Thrown when the kernel's configured quote asset is not the pool's non-senior constituent token
+    error QUOTE_ASSET_MISMATCH();
+
     /// @notice Thrown when the configured maximum reinvestment slippage is not strictly less than WAD (100%)
     error INVALID_MAX_REINVESTMENT_SLIPPAGE();
 
@@ -114,8 +113,8 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         else if (address(tokens[1]) == SENIOR_TRANCHE) ST_SHARE_POOL_INDEX = 1;
         else revert INVALID_POOL_TOKEN_CONFIGURATION();
 
-        // Immutable set the quote asset address from the pool registration
-        QUOTE_ASSET = address(tokens[QUOTE_ASSET_POOL_INDEX]);
+        // Ensure the kernel's configured quote asset is the pool's non-senior constituent token
+        require(address(tokens[QUOTE_ASSET_POOL_INDEX]) == QUOTE_ASSET, QUOTE_ASSET_MISMATCH());
     }
 
     /// @notice Initializes the Balancer V3 liquidity venue

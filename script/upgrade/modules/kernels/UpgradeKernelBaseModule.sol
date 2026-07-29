@@ -100,6 +100,8 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         cp.accountant = k.ACCOUNTANT();
         cp.liquidityProviderTranche = k.LIQUIDITY_PROVIDER_TRANCHE();
         cp.lptAsset = k.LPT_ASSET();
+        cp.quoteAsset = k.QUOTE_ASSET();
+        cp.enforceVaultSharesTransferWhitelist = k.ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

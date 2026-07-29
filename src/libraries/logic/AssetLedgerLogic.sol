@@ -11,11 +11,11 @@ import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../Unit
 import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
- * @title TrancheClaimsLogic
+ * @title AssetLedgerLogic
  * @author Waymont
- * @notice Tranche asset-claim math for a Royco market: claim derivation, proportional scaling, and withdrawal
+ * @notice Tranche asset-ledger accounting for a Royco market: claim derivation, proportional scaling, ledger credits and debits, and remittance
  */
-library TrancheClaimsLogic {
+library AssetLedgerLogic {
     using SafeERC20 for IERC20;
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for TRANCHE_UNIT;
@@ -54,39 +54,43 @@ library TrancheClaimsLogic {
     }
 
     /**
-     * @notice Withdraws any specified assets from each tranche and transfer them to the receiver
+     * @notice Credits deposited assets to the specified tranche's ledger
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _claims The collateral assets, LPT assets, and ST shares to withdraw and transfer to the specified receiver
-     * @param _receiver The receiver of the tranche asset claims
+     * @param _trancheType An enumerator indicating which tranche's ledger to credit
+     * @param _assets The amount of assets to credit, denominated in the tranche's tranche units
      */
-    function _withdrawAssets(
-        IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        AssetClaims memory _claims,
-        address _receiver
-    )
-        internal
-    {
-        // Cache the individual claims
-        TRANCHE_UNIT collateralAssetsToClaim = _claims.collateralAssets;
-        TRANCHE_UNIT lptAssetsToClaim = _claims.lptAssets;
-        uint256 stSharesToClaim = _claims.stShares;
+    function _creditAssets(IRoycoDayKernel.RoycoDayKernelState storage $, TrancheType _trancheType, TRANCHE_UNIT _assets) internal {
+        // The senior and junior tranches share the coinvested collateral ledger, the liquidity provider tranche holds the LPT asset ledger
+        if (_trancheType == TrancheType.LIQUIDITY_PROVIDER) $.totalLPTAssets = $.totalLPTAssets + _assets;
+        else $.totalCollateralAssets = $.totalCollateralAssets + _assets;
+    }
 
+    /**
+     * @notice Debits the specified asset claims from the kernel's tranche ledgers
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _claims The collateral assets, LPT assets, and ST shares to debit from the ledgers
+     */
+    function _debitAssets(IRoycoDayKernel.RoycoDayKernelState storage $, AssetClaims memory _claims) internal {
         // Debit the collateral assets, LPT assets, and/or ST shares being withdrawn if non-zero
-        if (collateralAssetsToClaim != ZERO_TRANCHE_UNITS) $.totalCollateralAssets = $.totalCollateralAssets - collateralAssetsToClaim;
-        if (lptAssetsToClaim != ZERO_TRANCHE_UNITS) $.totalLPTAssets = $.totalLPTAssets - lptAssetsToClaim;
-        if (stSharesToClaim != 0) $.lptOwnedSeniorTrancheShares -= stSharesToClaim;
+        if (_claims.collateralAssets != ZERO_TRANCHE_UNITS) $.totalCollateralAssets = $.totalCollateralAssets - _claims.collateralAssets;
+        if (_claims.lptAssets != ZERO_TRANCHE_UNITS) $.totalLPTAssets = $.totalLPTAssets - _claims.lptAssets;
+        if (_claims.stShares != 0) $.lptOwnedSeniorTrancheShares -= _claims.stShares;
+    }
 
-        // No need to execute the asset transfers if the caller is the receiver
-        if (_receiver != address(this)) {
-            // Credit the collateral assets being withdrawn to the receiver
-            if (collateralAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(_immutables.collateralAsset).safeTransfer(_receiver, toUint256(collateralAssetsToClaim));
-            // Credit the LPT assets being withdrawn to the receiver
-            if (lptAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(_immutables.lptAsset).safeTransfer(_receiver, toUint256(lptAssetsToClaim));
-            // Credit the senior tranche shares being withdrawn to the receiver
-            if (stSharesToClaim != 0) IERC20(_immutables.seniorTranche).safeTransfer(_receiver, stSharesToClaim);
-        }
+    /**
+     * @notice Remits the specified asset claims to the receiver via direct transfers
+     * @dev Holds no accounting effects, callers debit the claims from their ledgers first so the transfers can run last (CEI)
+     * @param _immutables The kernel's immutables carrier resolving the claim assets
+     * @param _claims The collateral assets, LPT assets, and ST shares to transfer to the specified receiver
+     * @param _receiver The receiver of the asset claims
+     */
+    function _remitClaims(IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, AssetClaims memory _claims, address _receiver) internal {
+        // Transfer the collateral assets being remitted to the receiver
+        if (_claims.collateralAssets != ZERO_TRANCHE_UNITS) IERC20(_immutables.collateralAsset).safeTransfer(_receiver, toUint256(_claims.collateralAssets));
+        // Transfer the LPT assets being remitted to the receiver
+        if (_claims.lptAssets != ZERO_TRANCHE_UNITS) IERC20(_immutables.lptAsset).safeTransfer(_receiver, toUint256(_claims.lptAssets));
+        // Transfer the senior tranche shares being remitted to the receiver
+        if (_claims.stShares != 0) IERC20(_immutables.seniorTranche).safeTransfer(_receiver, _claims.stShares);
     }
 
     /**

@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
@@ -209,7 +210,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         try liquidityProviderTranche.depositMultiAsset(1, quoteAssets, 0, actor) returns (uint256, uint256) {
             fail("the deposit must revert when its senior leg floors to zero senior shares");
         } catch (bytes memory err) {
-            assertEq(bytes4(err), IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector, "expected the zero-share senior mint guard to reject the whole flow");
+            assertEq(bytes4(err), IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector, "expected the zero-share senior mint guard to reject the whole flow");
         }
 
         // The revert must roll back the pre-mint 1-wei owned-asset credit along with everything else,

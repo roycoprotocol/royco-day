@@ -18,6 +18,7 @@ interface IRoycoDayKernel {
      * @custom:field accountant - The address of the accountant for the Royco market
      * @custom:field liquidityProviderTranche - The address of the Royco liquidity provider tranche associated with this kernel
      * @custom:field lptAsset - The base asset of the liquidity provider tranche (the liquidity venue's market-making position token)
+     * @custom:field quoteAsset - The quote asset paired against the senior share in the liquidity venue, validated against the venue's registration
      * @custom:field enforceVaultSharesTransferWhitelist Whether to enforce the vault shares transfer whitelist
      */
     struct RoycoDayKernelConstructionParams {
@@ -27,6 +28,7 @@ interface IRoycoDayKernel {
         address accountant;
         address liquidityProviderTranche;
         address lptAsset;
+        address quoteAsset;
         bool enforceVaultSharesTransferWhitelist;
     }
 
@@ -80,13 +82,13 @@ interface IRoycoDayKernel {
     }
 
     /**
-     * @notice Immutables carrier passed to the kernel's delegatecall logic libraries so a moved body can reach the six
-     *         kernel-level addresses it would otherwise read from an immutable (which a delegatecalled library cannot see)
+     * @notice Immutable state variables for the Royco Day Kernel
      * @custom:field seniorTranche - The address of the Royco senior tranche associated with the kernel
      * @custom:field juniorTranche - The address of the Royco junior tranche associated with the kernel
      * @custom:field collateralAsset - The address of the coinvested collateral asset both the senior and junior tranches deposit
      * @custom:field liquidityProviderTranche - The address of the Royco liquidity provider tranche associated with the kernel
      * @custom:field lptAsset - The base asset of the liquidity provider tranche (the liquidity venue's market-making position token)
+     * @custom:field quoteAsset - The quote asset paired against the senior share in the liquidity venue
      * @custom:field accountant - The address of the accountant for the Royco market
      */
     struct RoycoDayKernelImmutableState {
@@ -95,6 +97,7 @@ interface IRoycoDayKernel {
         address collateralAsset;
         address liquidityProviderTranche;
         address lptAsset;
+        address quoteAsset;
         address accountant;
     }
 
@@ -382,70 +385,79 @@ interface IRoycoDayKernel {
     /**
      * @notice Processes the deposit of a specified amount of assets into the senior tranche
      * @dev Assumes that the funds are transferred to the kernel before the deposit call is made
+     * @dev Prices the shares at the tranche's pre-deposit effective NAV against the post-sync supply and mints them to the receiver
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
-     * @return depositNAV The value of the assets deposited, denominated in the kernel's NAV units
-     * @return effectiveNAV The NAV at which the shares will be minted, exclusive of depositNAV
-     * @return totalTrancheShares The tranche's total share supply after the sync's premium and protocol fee mints, the supply the shares price against
+     * @param _receiver The address that receives the minted tranche shares
+     * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
      */
-    function stDeposit(bool _isPreview, TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, uint256 totalTrancheShares);
+    function stDeposit(bool _isPreview, TRANCHE_UNIT _assets, address _receiver) external returns (uint256 trancheSharesMinted);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the senior tranche
      * @dev The function is expected to transfer the collateral assets directly to the receiver, based on the redemption claims
+     * @dev Burns the owner's shares after scaling their claims against the pre-burn supply (a preview skips only the burn)
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
+     * @param _caller The address that initiated the redemption on the tranche, screened with the owner and receiver against the market's blacklist
+     * @param _owner The address whose tranche shares are burned for the redemption
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function stRedeem(bool _isPreview, uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
+    function stRedeem(bool _isPreview, uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Processes the deposit of a specified amount of assets into the junior tranche
      * @dev Assumes that the funds are transferred to the kernel before the deposit call is made
+     * @dev Prices the shares at the tranche's pre-deposit effective NAV against the post-sync supply and mints them to the receiver
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _assets The amount of assets to deposit, denominated in the junior tranche's tranche units
-     * @return depositNAV The value of the assets deposited, denominated in the kernel's NAV units
-     * @return effectiveNAV The NAV at which the shares will be minted, exclusive of depositNAV
-     * @return totalTrancheShares The tranche's total share supply after the sync's premium and protocol fee mints, the supply the shares price against
+     * @param _receiver The address that receives the minted tranche shares
+     * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
      */
-    function jtDeposit(bool _isPreview, TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, uint256 totalTrancheShares);
+    function jtDeposit(bool _isPreview, TRANCHE_UNIT _assets, address _receiver) external returns (uint256 trancheSharesMinted);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the junior tranche
      * @dev The function is expected to transfer the collateral assets directly to the receiver, based on the redemption claims
+     * @dev Burns the owner's shares after scaling their claims against the pre-burn supply (a preview skips only the burn)
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
+     * @param _caller The address that initiated the redemption on the tranche, screened with the owner and receiver against the market's blacklist
+     * @param _owner The address whose tranche shares are burned for the redemption
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function jtRedeem(bool _isPreview, uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
+    function jtRedeem(bool _isPreview, uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Processes the deposit of a specified amount of assets into the liquidity provider tranche
      * @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state (including fixed-term)
+     * @dev Prices the shares at the tranche's pre-deposit effective NAV against the post-sync supply and mints them to the receiver
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _assets The amount of assets (the liquidity venue's position token) to deposit, denominated in the liquidity provider tranche's tranche units
-     * @return depositNAV The value of the assets deposited, denominated in the kernel's NAV units
-     * @return effectiveNAV The NAV at which the shares will be minted, exclusive of depositNAV
-     * @return totalTrancheShares The tranche's total share supply after the sync's premium and protocol fee mints, the supply the shares price against
+     * @param _receiver The address that receives the minted tranche shares
+     * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
      */
-    function lptDeposit(bool _isPreview, TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, uint256 totalTrancheShares);
+    function lptDeposit(bool _isPreview, TRANCHE_UNIT _assets, address _receiver) external returns (uint256 trancheSharesMinted);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the liquidity provider tranche
+     * @dev Burns the owner's shares after scaling their claims against the pre-burn supply (a preview skips only the burn)
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
+     * @param _caller The address that initiated the redemption on the tranche, screened with the owner and receiver against the market's blacklist
+     * @param _owner The address whose tranche shares are burned for the redemption
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function lptRedeem(bool _isPreview, uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
+    function lptRedeem(bool _isPreview, uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Atomically enters the liquidity provider tranche with the LPT assets' constituent assets: deposits collateral (minting senior
@@ -474,11 +486,14 @@ interface IRoycoDayKernel {
     /**
      * @notice Atomically exits the liquidity provider tranche to the LPT assets' constituent assets: proportionally removes the LPT-asset slice,
      *         redeems the venue-held senior shares to collateral, and returns (collateral + quote) to the receiver
+     * @dev Burns the owner's LPT shares after scaling their claims against the pre-burn supply (a preview skips only the burn)
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _lptShares The number of LPT shares being redeemed (used to size the proportional LPT-asset slice)
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
+     * @param _caller The address that initiated the redemption on the tranche, screened with the owner and receiver against the market's blacklist
+     * @param _owner The address whose LPT shares are burned for the redemption
      * @param _receiver The address that receives the collateral and quote
      * @return stClaims The ST redemption asset claims transferred to the receiver (its collateral asset leg)
      * @return quoteAssets The quote assets returned to the receiver
@@ -488,6 +503,8 @@ interface IRoycoDayKernel {
         uint256 _lptShares,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
+        address _caller,
+        address _owner,
         address _receiver
     )
         external
@@ -560,6 +577,10 @@ interface IRoycoDayKernel {
      * @param _account The address of the account to screen
      */
     function enforceNotBlacklisted(address _account) external view;
+
+    /// @notice Retrieves the kernel's immutables carrier
+    /// @return immutables The kernel-level addresses the kernel passes to its delegatecalled logic libraries
+    function getImmutableState() external view returns (RoycoDayKernelImmutableState memory immutables);
 
     /// @notice Retrieves the state of the Royco kernel
     /// @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets

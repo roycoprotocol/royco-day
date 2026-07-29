@@ -354,7 +354,7 @@ library RoycoTestMath {
         value = Math.mulDiv(totalValue + VIRTUAL_VALUE, shares, supply + VIRTUAL_SHARES);
     }
 
-    /// @notice The pro-rata NAV claim of shares on a tranche's post-sync claims, mirrors TrancheClaimsLogic._scaleAssetClaims.nav (virtual shares, no virtual value)
+    /// @notice The pro-rata NAV claim of shares on a tranche's post-sync claims, mirrors AssetLedgerLogic._scaleAssetClaims.nav (virtual shares, no virtual value)
     function scaleClaimNav(uint256 shares, uint256 claimNav, uint256 supply) internal pure returns (uint256 value) {
         value = Math.mulDiv(claimNav, shares, supply + VIRTUAL_SHARES);
     }
@@ -431,7 +431,7 @@ library RoycoTestMath {
     /**
      * @notice Claim scaling: the three asset fields scale as ⌊claim · shares / (totalShares + VIRTUAL_SHARES)⌋ and the
      *         NAV field as ⌊(nav + VIRTUAL_VALUE) · shares / (totalShares + VIRTUAL_SHARES)⌋ (the full convertToValue shape).
-     * @dev Mirrors src TrancheClaimsLogic._scaleAssetClaims (the includeVirtualShares == true branch).
+     * @dev Mirrors src AssetLedgerLogic._scaleAssetClaims (the includeVirtualShares == true branch).
      *      Virtual shares: the redeemer's slice is priced against the effective supply (totalShares + VIRTUAL_SHARES),
      *      so a sole holder can never redeem the whole tranche 1:1 — the virtual-share sliver stays behind, closing the
      *      donation/premium extraction vector on the redemption side. The NAV numerator carries the matching

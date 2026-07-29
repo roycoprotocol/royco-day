@@ -507,11 +507,10 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         else (s, r) = (_p.collateralAssetOracleBindingSelectors, _p.collateralAssetOracleBindingRoleIds);
         targetBindings[8] = TargetBinding({ target: targets[8], selectors: s, roleIds: r });
 
-        // Post-init grants: accountant SYNC, kernel BURNER, and (hooked markets only) hook SYNC (all zero execution delay)
-        RoleGrant[] memory grants = new RoleGrant[](_p.deployPoolHook ? 3 : 2);
+        // Post-init grants: accountant SYNC and (hooked markets only) hook SYNC (all zero execution delay)
+        RoleGrant[] memory grants = new RoleGrant[](_p.deployPoolHook ? 2 : 1);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
-        grants[1] = RoleGrant({ roleId: BURNER_ROLE, account: _r.kernel, executionDelay: 0 });
-        if (_p.deployPoolHook) grants[2] = RoleGrant({ roleId: SYNC_ROLE, account: _balancerHook, executionDelay: 0 });
+        if (_p.deployPoolHook) grants[1] = RoleGrant({ roleId: SYNC_ROLE, account: _balancerHook, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targetBindings, postInitGrants: grants });
     }

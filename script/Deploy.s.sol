@@ -984,6 +984,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             accountant: _factory.predictDeterministicAddress(_salt(_marketId, TAG_ACCOUNTANT_PROXY)),
             liquidityProviderTranche: _factory.predictDeterministicAddress(_salt(_marketId, TAG_LPT_PROXY)),
             lptAsset: _balancerPool,
+            quoteAsset: _config.gyroECLPPoolParams.quoteAsset,
             enforceVaultSharesTransferWhitelist: _config.enforceVaultSharesTransferWhitelist
         });
 

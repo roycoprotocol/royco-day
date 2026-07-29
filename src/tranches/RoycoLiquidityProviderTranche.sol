@@ -91,17 +91,14 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
-        require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
 
         // Spend allowance if msg.sender is not the owner
         if (msg.sender != _owner) {
             _spendAllowance(_owner, msg.sender, _shares);
         }
 
-        (stClaims, quoteAssets) = _redeemMultiAsset(false, _shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
-
-        // Burn shares after the kernel processes the redemption (kernel depends on pre-burn total supply)
-        _burn(_owner, _shares);
+        // Redeem the shares through the tranche's kernel entrypoint, the kernel burns the owner's shares after scaling their claims
+        (stClaims, quoteAssets) = _redeemMultiAsset(false, _shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver, _owner);
 
         emit MultiAssetRedeem(msg.sender, _receiver, _owner, _shares, stClaims, quoteAssets);
     }
@@ -134,7 +131,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         override(IRoycoLiquidityProviderTranche)
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
-        (stClaims, quoteAssets) = _redeemMultiAsset(true, _shares, 0, 0, KERNEL);
+        (stClaims, quoteAssets) = _redeemMultiAsset(true, _shares, 0, 0, KERNEL, KERNEL);
     }
 
     // =============================
@@ -192,9 +189,6 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
             (NAV_UNIT, NAV_UNIT, TRANCHE_UNIT)
         );
 
-        // effectiveNAV can be zero when the tranche is freshly deployed
-        require(depositNAV != ZERO_NAV_UNITS, INVALID_DEPOSIT_NAV());
-
         // Price the LPT shares at the pre-deposit LPT effective NAV per share
         shares = ValuationLogic._convertToShares(depositNAV, effectiveNAV, totalSupply(), Math.Rounding.Floor);
         require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
@@ -202,11 +196,14 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
 
     /**
      * @dev Redeems the shares through the kernel's multi-asset redemption entrypoint, the kernel transfers the constituents directly to the receiver
+     *      and burns the owner's shares after scaling their claims
+     * @dev Forwards msg.sender as the caller the kernel screens with the owner and receiver against the market's blacklist
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of LPT shares to redeem
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must yield (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to receive (slippage bound)
      * @param _receiver The address that receives the collateral and quote
+     * @param _owner The address whose LPT shares are burned for the redemption
      * @return stClaims The ST redemption asset claims transferred to the receiver
      * @return quoteAssets The quote transferred to the receiver
      */
@@ -215,16 +212,19 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         uint256 _shares,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
-        address _receiver
+        address _receiver,
+        address _owner
     )
         internal
         virtual
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
+        require(_shares != 0, MUST_REDEEM_NON_ZERO_SHARES());
+
         // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out
         return abi.decode(
             KERNEL._dispatchAndUnwrap(
-                _isPreview, abi.encodeCall(IRoycoDayKernel.lptRedeemMultiAsset, (_isPreview, _shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver))
+                _isPreview, abi.encodeCall(IRoycoDayKernel.lptRedeemMultiAsset, (_isPreview, _shares, _minSTSharesOut, _minQuoteAssetsOut, msg.sender, _owner, _receiver))
             ),
             (AssetClaims, uint256)
         );

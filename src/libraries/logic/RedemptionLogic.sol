@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
-import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
+import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath } from "../Units.sol";
 import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
+import { AssetLedgerLogic } from "./AssetLedgerLogic.sol";
 import { BlacklistLogic } from "./BlacklistLogic.sol";
 import { DispatchLogic } from "./DispatchLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { SelfLiquidationLogic } from "./SelfLiquidationLogic.sol";
-import { TrancheClaimsLogic } from "./TrancheClaimsLogic.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
@@ -33,9 +33,12 @@ library RedemptionLogic {
     /**
      * @notice Processes the redemption of a specified number of shares from the senior tranche
      * @dev The function is expected to transfer the collateral assets directly to the receiver, based on the redemption claims
+     * @dev Burns the owner's shares after scaling their claims against the pre-burn supply (a preview skips only the burn)
      * @dev ST redemptions are enabled if the market is in a PERPETUAL state
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
+     * @param _caller The address that initiated the redemption on the tranche
+     * @param _owner The address whose tranche shares are burned for the redemption
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
@@ -44,13 +47,15 @@ library RedemptionLogic {
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         bool _isPreview,
         uint256 _shares,
+        address _caller,
+        address _owner,
         address _receiver
     )
         external
         returns (AssetClaims memory userAssetClaims)
     {
-        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
-        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+        // Screen the caller, owner, and receiver so no blacklisted account can initiate, source, or receive the redemption
+        BlacklistLogic._enforceNotBlacklisted($, _caller, _owner, _receiver);
 
         SyncedAccountingState memory state;
         uint256 totalTrancheShares;
@@ -61,17 +66,24 @@ library RedemptionLogic {
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares, true);
+        userAssetClaims = AssetLedgerLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares, true);
 
         // Apply any ST self-liquidation bonus to the redeeming user's asset claims and retrieve the bonus NAV applied
         NAV_UNIT stSelfLiquidationBonusNAV;
         (userAssetClaims, stSelfLiquidationBonusNAV) = SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus($, state, userAssetClaims);
 
-        // Withdraw the asset claims from each tranche with the self-liquidation bonus applied and transfer them to the receiver
-        TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
+        // Debit the withdrawn asset claims with the self-liquidation bonus applied from the tranche ledgers
+        AssetLedgerLogic._debitAssets($, userAssetClaims);
+
+        // Burn the owner's redeemed shares, their claims were scaled against the pre-burn supply above
+        // A preview skips only the burn: it carries no real owner and the burn feeds no downstream input in this flow
+        if (!_isPreview) IRoycoVaultTranche(_immutables.seniorTranche).kernelBurn(_owner, _shares);
 
         // Execute a post-redeem sync on accounting
         AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.ST_REDEEM, stSelfLiquidationBonusNAV, false);
+
+        // Remit the asset claims to the receiver
+        AssetLedgerLogic._remitClaims(_immutables, userAssetClaims, _receiver);
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
         if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(userAssetClaims));
@@ -80,9 +92,12 @@ library RedemptionLogic {
     /**
      * @notice Processes the redemption of a specified number of shares from the junior tranche
      * @dev The function is expected to transfer the collateral assets directly to the receiver, based on the redemption claims
+     * @dev Burns the owner's shares after scaling their claims against the pre-burn supply (a preview skips only the burn)
      * @dev JT redemptions are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
+     * @param _caller The address that initiated the redemption on the tranche
+     * @param _owner The address whose tranche shares are burned for the redemption
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
@@ -91,13 +106,15 @@ library RedemptionLogic {
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         bool _isPreview,
         uint256 _shares,
+        address _caller,
+        address _owner,
         address _receiver
     )
         external
         returns (AssetClaims memory userAssetClaims)
     {
-        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
-        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+        // Screen the caller, owner, and receiver so no blacklisted account can initiate, source, or receive the redemption
+        BlacklistLogic._enforceNotBlacklisted($, _caller, _owner, _receiver);
 
         // Execute a pre-op sync on accounting
         SyncedAccountingState memory state;
@@ -108,13 +125,20 @@ library RedemptionLogic {
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares, true);
+        userAssetClaims = AssetLedgerLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares, true);
 
-        // Withdraw the asset claims from each tranche and transfer them to the receiver
-        TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
+        // Debit the withdrawn asset claims from the tranche ledgers
+        AssetLedgerLogic._debitAssets($, userAssetClaims);
+
+        // Burn the owner's redeemed shares, their claims were scaled against the pre-burn supply above
+        // A preview skips only the burn: it carries no real owner and the burn feeds no downstream input in this flow
+        if (!_isPreview) IRoycoVaultTranche(_immutables.juniorTranche).kernelBurn(_owner, _shares);
 
         // Execute a post-redeem sync on accounting, enforcing the market's coverage requirement post-redemption
         AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.JT_REDEEM, ZERO_NAV_UNITS, true);
+
+        // Remit the asset claims to the receiver
+        AssetLedgerLogic._remitClaims(_immutables, userAssetClaims, _receiver);
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
         if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(userAssetClaims));
@@ -122,9 +146,12 @@ library RedemptionLogic {
 
     /**
      * @notice Processes the redemption of a specified number of shares from the liquidity provider tranche
+     * @dev Burns the owner's shares after scaling their claims against the pre-burn supply (a preview skips only the burn)
      * @dev LPT redemptions are enabled only in a PERPETUAL market state, granted that the market's liquidity requirement is satisfied post-redemption
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
+     * @param _caller The address that initiated the redemption on the tranche
+     * @param _owner The address whose tranche shares are burned for the redemption
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
@@ -133,13 +160,15 @@ library RedemptionLogic {
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         bool _isPreview,
         uint256 _shares,
+        address _caller,
+        address _owner,
         address _receiver
     )
         external
         returns (AssetClaims memory userAssetClaims)
     {
-        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
-        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+        // Screen the caller, owner, and receiver so no blacklisted account can initiate, source, or receive the redemption
+        BlacklistLogic._enforceNotBlacklisted($, _caller, _owner, _receiver);
 
         // Execute a pre-op sync on accounting
         SyncedAccountingState memory state;
@@ -150,13 +179,20 @@ library RedemptionLogic {
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares, true);
+        userAssetClaims = AssetLedgerLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares, true);
 
-        // Withdraw the asset claims from each tranche and transfer them to the receiver
-        TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
+        // Debit the withdrawn asset claims from the tranche ledgers
+        AssetLedgerLogic._debitAssets($, userAssetClaims);
+
+        // Burn the owner's redeemed shares, their claims were scaled against the pre-burn supply above
+        // A preview skips only the burn: it carries no real owner and the burn feeds no downstream input in this flow
+        if (!_isPreview) IRoycoVaultTranche(_immutables.liquidityProviderTranche).kernelBurn(_owner, _shares);
 
         // Execute a post-redeem sync on accounting, enforcing the market's liquidity requirement post-redemption
         AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LPT_REDEEM, ZERO_NAV_UNITS, true);
+
+        // Remit the asset claims to the receiver
+        AssetLedgerLogic._remitClaims(_immutables, userAssetClaims, _receiver);
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
         if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(userAssetClaims));
@@ -165,11 +201,14 @@ library RedemptionLogic {
     /**
      * @notice Atomically exits the liquidity provider tranche to the LPT assets' constituent assets: proportionally removes the LPT-asset slice,
      *         redeems the venue-held senior shares to collateral, and returns (collateral + quote) to the receiver
+     * @dev Burns the owner's LPT shares after scaling their claims against the pre-burn supply (a preview skips only the burn)
      * @dev LPT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _lptShares The number of LPT shares being redeemed (used to size the proportional LPT-asset slice)
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
+     * @param _caller The address that initiated the redemption on the tranche
+     * @param _owner The address whose LPT shares are burned for the redemption
      * @param _receiver The address that receives the collateral and quote
      * @return stClaims The ST redemption asset claims transferred to the receiver (its collateral asset leg)
      * @return quoteAssets The quote assets returned to the receiver
@@ -181,13 +220,15 @@ library RedemptionLogic {
         uint256 _lptShares,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
+        address _caller,
+        address _owner,
         address _receiver
     )
         external
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
-        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account, before any venue interaction
-        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+        // Screen the caller, owner, and receiver so no blacklisted account can initiate, source, or receive the redemption, before any venue interaction
+        BlacklistLogic._enforceNotBlacklisted($, _caller, _owner, _receiver);
 
         // Execute a pre-op sync, minting this period's liquidity premium into the kernel's held senior shares so the held pile and the LPT supply are consistent for sizing the redeemer's slice
         (SyncedAccountingState memory state, AssetClaims memory lptClaims, uint256 totalLPTShares) =
@@ -197,9 +238,14 @@ library RedemptionLogic {
 
         // An LPT share claims both LPT effective-NAV legs: the deployed LPT assets and the idle liquidity-premium senior shares
         // Compute the LPT assets
-        AssetClaims memory userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(lptClaims, _lptShares, totalLPTShares, true);
-        // Mark the user's LPT asset claims as withdrawn
-        TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, address(this));
+        AssetClaims memory userAssetClaims = AssetLedgerLogic._scaleAssetClaims(lptClaims, _lptShares, totalLPTShares, true);
+
+        // Debit the user's LPT asset claims from the tranche ledgers
+        AssetLedgerLogic._debitAssets($, userAssetClaims);
+
+        // Burn the owner's redeemed LPT shares, their claims were scaled against the pre-burn supply above
+        // A preview skips only the burn: it carries no real owner and the burn feeds no downstream input in this flow
+        if (!_isPreview) IRoycoVaultTranche(_immutables.liquidityProviderTranche).kernelBurn(_owner, _lptShares);
 
         // Remove the liquidity equivalent to the LPT assets the user has a claim on
         uint256 stSharesWithdrawn;
@@ -209,8 +255,8 @@ library RedemptionLogic {
 
         // Redeem all of the redeemer's senior shares from the venue and from the uninvested liquidity premium
         uint256 stSharesToRedeem = stSharesWithdrawn + userAssetClaims.stShares;
-        stClaims = TrancheClaimsLogic._scaleAssetClaims(
-            TrancheClaimsLogic._deriveTrancheAssetClaims($, _immutables, TrancheType.SENIOR, state),
+        stClaims = AssetLedgerLogic._scaleAssetClaims(
+            AssetLedgerLogic._deriveTrancheAssetClaims($, _immutables, TrancheType.SENIOR, state),
             stSharesToRedeem,
             IERC20(_immutables.seniorTranche).totalSupply(),
             true
@@ -220,15 +266,15 @@ library RedemptionLogic {
         NAV_UNIT stSelfLiquidationBonusNAV;
         (stClaims, stSelfLiquidationBonusNAV) = SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus($, state, stClaims);
 
-        // Burn the redeemed senior shares and withdraw the bonus-adjusted ST claims to the receiver
-        // The quote assets were remitted in the liquidity removal above
-        // A preview skips only the burn: the withdrawn senior shares never settled to this kernel and the burn feeds no post-op input
-        // NOTE: The final post-op accounts for this ST redemption in addition to the preceding LPT redemption in one batch call
-        if (!_isPreview) ERC20BurnableUpgradeable(_immutables.seniorTranche).burn(stSharesToRedeem);
-        TrancheClaimsLogic._withdrawAssets($, _immutables, stClaims, _receiver);
+        // Debit the bonus-adjusted ST claims from the tranche ledgers and burn the redeemed senior shares
+        AssetLedgerLogic._debitAssets($, stClaims);
+        if (!_isPreview) IRoycoVaultTranche(_immutables.seniorTranche).kernelBurn(address(this), stSharesToRedeem);
 
         // Execute a post-redeem sync on accounting at the venue-marked LPT raw NAV with the applied ST liquidation bonus
         AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LPT_MULTI_ASSET_REDEEM, postOpLPTRawNAV, stSelfLiquidationBonusNAV, true);
+
+        // Remit the ST asset claims to the receiver
+        AssetLedgerLogic._remitClaims(_immutables, stClaims, _receiver);
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
         if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(stClaims, quoteAssets));
@@ -348,11 +394,11 @@ library RedemptionLogic {
      * @dev Max assets withdrawable from LPT multi-asset, z: (LPT_RAW_NAV - z) = ((ST_EFFECTIVE_NAV - (z * r)) * MIN_LIQUIDITY)
      *      Isolate z: z = (LPT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)) * LPT_RAW_NAV / (LPT_RAW_NAV - (SENIOR_SHARE_REDEMPTION_NAV * MIN_LIQUIDITY))
      *
+     * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net
      * @param _owner The address that is withdrawing the assets
      * @return claimOnLPTNAV The notional claims on LPT assets that the liquidity provider tranche has denominated in kernel's NAV units
      * @return lptMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
      * @return totalTrancheShares The total number of shares that exist in the liquidity provider tranche
-     * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net
      */
     function lptMaxWithdrawableMultiAsset(
         IRoycoDayKernel.RoycoDayKernelState storage $,

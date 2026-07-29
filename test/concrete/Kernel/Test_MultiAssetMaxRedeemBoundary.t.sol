@@ -550,7 +550,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         uint256 quoteAssets = 100 * QUOTE_UNIT;
 
         // The preview bubbles the zero-share senior mint's revert, quoting nothing for a deposit that deterministically reverts
-        vm.expectRevert(IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.previewDepositMultiAsset(dustSTLeg, quoteAssets);
 
         // The execution reverts on the same zero-share senior mint
@@ -559,7 +559,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         vm.startPrank(LPT_PROVIDER);
         stJtVault.approve(address(liquidityProviderTranche), dustSTLeg);
         quoteToken.approve(address(liquidityProviderTranche), quoteAssets);
-        vm.expectRevert(IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.depositMultiAsset(dustSTLeg, quoteAssets, 0, LPT_PROVIDER);
         vm.stopPrank();
 

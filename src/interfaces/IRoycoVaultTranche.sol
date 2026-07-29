@@ -48,17 +48,14 @@ interface IRoycoVaultTranche is IERC20Metadata {
      */
     event ProtocolFeeSharesMinted(address indexed protocolFeeRecipient, uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
 
-    /// @notice Thrown when a deposit would mint zero tranche shares (either zero assets or dust amount that rounds to zero shares)
+    /// @notice Thrown when a deposit would mint zero tranche shares (a dust amount that prices to zero shares)
     error MUST_MINT_NON_ZERO_SHARES();
 
     /// @notice Thrown when a redemption is requested with zero shares
-    error MUST_REQUEST_NON_ZERO_SHARES();
+    error MUST_REDEEM_NON_ZERO_SHARES();
 
     /// @notice Thrown when the caller of a permissioned function is not the tranche's configured kernel
     error ONLY_KERNEL();
-
-    /// @notice Thrown when a deposit renders a zero deposit NAV
-    error INVALID_DEPOSIT_NAV();
 
     /// @notice Returns the address of the kernel that this tranche is associated with
     /// @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
@@ -96,13 +93,21 @@ interface IRoycoVaultTranche is IERC20Metadata {
 
     /**
      * @notice Mints tranche shares to the specified account
-     * @dev Authorized via the AccessManager `restricted` modifier, the deploy template grants the market's kernel the role
-     *      for this selector so the kernel can mint senior shares to itself when seeding the LPT's liquidity venue
+     * @dev Only callable by the kernel, which prices every mint inside a synchronized operation
      * @dev Takes a raw share count: the caller (kernel) is responsible for computing a fair, non-diluting amount
      * @param _to The account to mint the shares to
      * @param _shares The number of shares to mint
      */
-    function mint(address _to, uint256 _shares) external;
+    function kernelMint(address _to, uint256 _shares) external;
+
+    /**
+     * @notice Burns the specified number of tranche shares from the specified owner
+     * @dev Only callable by the kernel during a redemption flow, after the owner's claims have been scaled against the pre-burn supply
+     * @dev Takes a raw share count: redemption inputs are validated upstream by the tranche, so a derived zero share burn is a permitted no-op
+     * @param _from The address whose tranche shares are burned
+     * @param _shares The number of tranche shares to burn
+     */
+    function kernelBurn(address _from, uint256 _shares) external;
 
     /**
      * @notice Previews the number of shares that would be minted for a given deposit amount

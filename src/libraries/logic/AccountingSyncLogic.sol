@@ -6,16 +6,15 @@ import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { AssetClaims, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
 import { Math, NAV_UNIT } from "../Units.sol";
+import { AssetLedgerLogic } from "./AssetLedgerLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
-import { TrancheClaimsLogic } from "./TrancheClaimsLogic.sol";
 import { UtilizationLogic } from "./UtilizationLogic.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
  * @title AccountingSyncLogic
  * @author Waymont
- * @notice Tranche-accounting synchronization for a Royco market: the pre-op and post-op sync, protocol fee and liquidity-premium
- *         processing, the idle liquidity-premium reinvestment, and the sync preview
+ * @notice Tranche-accounting synchronization for a Royco market: the pre-op and post-op sync, protocol fee and liquidity-premium processing, the idle liquidity-premium reinvestment, and the sync preview
  */
 library AccountingSyncLogic {
     // =============================
@@ -111,7 +110,7 @@ library AccountingSyncLogic {
         state = _previewSyncTrancheAccounting($, _immutables);
 
         // Derive the asset claims for this tranche
-        claims = TrancheClaimsLogic._deriveTrancheAssetClaims($, _immutables, _trancheType, state);
+        claims = AssetLedgerLogic._deriveTrancheAssetClaims($, _immutables, _trancheType, state);
 
         // Return the requested tranche claims and total shares after the sync mints its premium and protocol fee shares
         if (_trancheType == TrancheType.SENIOR) {
@@ -220,7 +219,7 @@ library AccountingSyncLogic {
         else totalTrancheShares = IERC20(_immutables.liquidityProviderTranche).totalSupply();
 
         // Derive the asset claims for the specified tranche
-        claims = TrancheClaimsLogic._deriveTrancheAssetClaims($, _immutables, _trancheType, state);
+        claims = AssetLedgerLogic._deriveTrancheAssetClaims($, _immutables, _trancheType, state);
     }
 
     /**

@@ -228,12 +228,12 @@ interface IRoycoDayAccountant {
      * @dev Must be called before any NAV mutating operation
      * @dev Accrues the JT and LPT yield shares over time based on the market's JT and LPT YDM outputs
      * @dev Persists updated NAV and impermanent loss checkpoints for the next sync to use as reference
-     * @param _collateralNAV The current pure value of the coinvested collateral backing the senior and junior tranches
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @dev The returned state's lptRawNAV and liquidityUtilizationWAD are zero placeholders: this sync does not mark the liquidity
      *      tranche
      *      The kernel commits the freshly marked liquidity provider tranche raw NAV via commitLiquidityProviderTrancheRawNAV after minting the
      *      fee shares, then refreshes both fields in the state packet in memory
+     * @param _collateralNAV The current pure value of the coinvested collateral backing the senior and junior tranches
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function preOpSyncTrancheAccounting(NAV_UNIT _collateralNAV) external returns (SyncedAccountingState memory state);
 
@@ -254,9 +254,9 @@ interface IRoycoDayAccountant {
 
     /**
      * @notice Previews a synchronization of the effective NAVs and impermanent losses of both tranches by marking them to market
+     * @dev The returned state's lptRawNAV and liquidityUtilizationWAD are zero placeholders (this sync does not mark the liquidity provider tranche), the kernel preview refreshes them in memory
      * @param _collateralNAV The current pure value of the coinvested collateral backing the senior and junior tranches
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     * @dev The returned state's lptRawNAV and liquidityUtilizationWAD are zero placeholders (this sync does not mark the liquidity provider tranche), the kernel preview refreshes them in memory
      */
     function previewSyncTrancheAccounting(NAV_UNIT _collateralNAV) external view returns (SyncedAccountingState memory state);
 

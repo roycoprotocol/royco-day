@@ -332,7 +332,7 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
     }
 
     /// @dev The redemption value reference: the shares' claim on the post-sync full tranche claims at the virtual-shares
-    ///      rate (mirrors _redemptionValueReference via TrancheClaimsLogic._scaleAssetClaims, post-sync supply and claims)
+    ///      rate (mirrors _redemptionValueReference via AssetLedgerLogic._scaleAssetClaims, post-sync supply and claims)
     function _valueOf(address _tranche, uint256 _shares) internal returns (uint256 value) {
         (AssetClaims memory claims, uint256 supply) = _probeSyncedClaims(_tranche);
         return RoycoTestMath.scaleClaimNav(_shares, toUint256(claims.nav), supply);

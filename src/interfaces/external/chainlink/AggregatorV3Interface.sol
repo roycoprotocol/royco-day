@@ -21,24 +21,24 @@ interface AggregatorV3Interface {
 
     /**
      * @notice Gets the round data for a specific round ID
+     * @dev This function should raise "No data present" if no data is available for the given round ID
      * @param _roundId - The round ID to get the data for
      * @return roundId - The round ID
      * @return answer - The answer for the round
      * @return startedAt - The timestamp when the round started
      * @return updatedAt - The timestamp when the round was updated
      * @return answeredInRound - The round ID in which the answer was computed
-     * @dev This function should raise "No data present" if no data is available for the given round ID
      */
     function getRoundData(uint80 _roundId) external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
 
     /**
      * @notice Gets the latest round data
+     * @dev This function should raise "No data present" if no data is available
      * @return roundId - The latest round ID
      * @return answer - The latest answer
      * @return startedAt - The timestamp when the latest round started
      * @return updatedAt - The timestamp when the latest round was updated
      * @return answeredInRound - The round ID in which the latest answer was computed
-     * @dev This function should raise "No data present" if no data is available
      */
     function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
 }

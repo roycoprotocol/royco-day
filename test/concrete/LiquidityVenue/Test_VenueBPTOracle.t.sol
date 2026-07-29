@@ -313,7 +313,7 @@ contract Test_SeniorShareRateProvider_LiquidityVenue is DayMarketTestBase {
 
         // Senior mint doubles the supply (through the tranche's kernel-only mint gate) and adds no backing NAV
         vm.prank(address(kernel));
-        seniorTranche.mint(makeAddr("INLINE_MINT_RECIPIENT"), 100e18);
+        seniorTranche.kernelMint(makeAddr("INLINE_MINT_RECIPIENT"), 100e18);
 
         // Still uncached, so the read previews live: floor((100e18 + 1) x 1e18 / (200e18 + 1e6)) = 499999999999997500
         assertEq(kernel.getRate(), 499_999_999_999_997_500, "an uncached read previews live, halving the rate on a doubled senior supply");
@@ -368,7 +368,7 @@ contract InlineSeniorMintRateHarness {
 
         // Inline senior mint doubles the supply within this same transaction, through the tranche's kernel-only mint gate
         vm.prank(address(_kernel));
-        _seniorTranche.mint(_mintRecipient, _mintShares);
+        _seniorTranche.kernelMint(_mintRecipient, _mintShares);
 
         // The transient cache still pins the rate: same transaction, so the supply move cannot shift it
         rateAfterInlineMint = _kernel.getRate();

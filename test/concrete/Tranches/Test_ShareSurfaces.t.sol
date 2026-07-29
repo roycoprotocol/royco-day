@@ -6,6 +6,7 @@ import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
 import { LPT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
@@ -65,15 +66,29 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         assertEq(seniorTranche.totalSupply(), supplyBefore - 10e18, "the supply must drop by exactly the burned 10e18");
     }
 
-    /// @notice Only the kernel can mint tranche shares, and a kernel mint rejects the null receiver and the zero amount
+    /// @notice Only the kernel can mint tranche shares, and a kernel mint rejects the null receiver
+    /// @dev The zero-share guard lives in the kernel's deposit flows: the kernel mint takes the raw kernel-computed count
     function test_RevertIf_MintGatesViolated() public {
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
-        seniorTranche.mint(address(this), 1e18);
-        vm.startPrank(address(kernel));
+        seniorTranche.kernelMint(address(this), 1e18);
+        vm.prank(address(kernel));
         vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InvalidReceiver.selector, address(0)));
-        seniorTranche.mint(address(0), 1e18);
-        vm.expectRevert(IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector);
-        seniorTranche.mint(address(this), 0);
+        seniorTranche.kernelMint(address(0), 1e18);
+    }
+
+    /// @notice Only the kernel can burn tranche shares through the kernel burn, and a zero-share kernel burn is a supply-preserving no-op
+    function test_RevertIf_KernelBurnCallerNotKernel_andZeroShareBurnIsNoOp() public {
+        vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
+        seniorTranche.kernelBurn(ST_PROVIDER, 1e18);
+
+        uint256 supplyBefore = seniorTranche.totalSupply();
+        uint256 balanceBefore = seniorTranche.balanceOf(ST_PROVIDER);
+        vm.startPrank(address(kernel));
+        seniorTranche.kernelBurn(ST_PROVIDER, 10e18);
+        assertEq(seniorTranche.balanceOf(ST_PROVIDER), balanceBefore - 10e18, "the kernel burn must burn exactly the requested shares");
+        assertEq(seniorTranche.totalSupply(), supplyBefore - 10e18, "the supply must drop by exactly the burned shares");
+        seniorTranche.kernelBurn(ST_PROVIDER, 0);
+        assertEq(seniorTranche.totalSupply(), supplyBefore - 10e18, "a zero-share kernel burn must not move the supply");
         vm.stopPrank();
     }
 
@@ -135,18 +150,18 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         seniorTranche.mintLiquidityPremiumShares(1e18);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        seniorTranche.mint(address(this), 1e18);
+        seniorTranche.kernelMint(address(this), 1e18);
         vm.stopPrank();
     }
 
     /**
      * @notice While the kernel is paused, the ZERO-share fee and premium mints still succeed (returning the
-     *         unchanged supply and emitting their mint events), while the plain mint reverts on its zero-shares guard
+     *         unchanged supply and emitting their mint events), while the kernel mint reverts on the paused hook
      * @dev The fee and premium mints only reach the kernel's whenNotPaused hook when they actually move shares, which
-     *      a zero-share call never does, so they sail through a paused market. The plain mint reverts before any
-     *      balance update, on its own MUST_MINT_NON_ZERO_SHARES guard. Nothing of value escapes: no balance or supply moves
+     *      a zero-share call never does, so they sail through a paused market. The kernel mint always routes its
+     *      balance update through the hook, so even a zero-share call reverts. Nothing of value escapes: no balance or supply moves
      */
-    function test_ZeroShareFeeAndPremiumMintsSucceedWhileKernelPaused_PlainMintReverts() public {
+    function test_ZeroShareFeeAndPremiumMintsSucceedWhileKernelPaused_KernelMintReverts() public {
         vm.prank(PAUSER);
         kernel.pause();
 
@@ -162,9 +177,9 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         vm.expectEmit(address(seniorTranche));
         emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), 0, supplyBefore);
         uint256 premiumReportedSupply = seniorTranche.mintLiquidityPremiumShares(0);
-        // The plain mint refuses the same zero-share call on its own zero-shares guard, before any balance update
-        vm.expectRevert(IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector);
-        seniorTranche.mint(address(this), 0);
+        // The kernel mint routes even a zero-share balance update through the kernel's screening hook, which the pause bricks
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        seniorTranche.kernelMint(address(this), 0);
         vm.stopPrank();
 
         assertEq(feeReportedSupply, supplyBefore, "the paused zero-share fee mint must report the unchanged supply");
@@ -227,7 +242,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         seniorTranche.deposit(toTrancheUnits(1e18), address(0));
         vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InvalidReceiver.selector, address(0)));
         seniorTranche.redeem(1e18, address(0), ST_PROVIDER);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
         seniorTranche.redeem(0, ST_PROVIDER, ST_PROVIDER);
         vm.stopPrank();
     }

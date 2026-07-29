@@ -59,8 +59,8 @@ interface IRoycoLiquidityProviderTranche is IRoycoVaultTranche {
 
     /**
      * @notice Exits the LPT to the LP token's constituent assets: collateral + quote
-     * @dev The kernel proportionally removes the LP-token slice, redeems the pooled senior shares to collateral, and
-     *      transfers the collateral and quote directly to the receiver, the LPT shares are burned afterwards
+     * @dev The kernel proportionally removes the LP-token slice, redeems the pooled senior shares to collateral,
+     *      transfers the collateral and quote directly to the receiver, and burns the owner's shares after scaling their claims
      * @param _shares The number of LPT shares to redeem
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must yield (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to receive (slippage bound)
