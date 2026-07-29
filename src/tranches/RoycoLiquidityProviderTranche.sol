@@ -65,13 +65,10 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         if (_collateralAssets != 0) IERC20(IRoycoDayKernel(kernel).COLLATERAL_ASSET()).safeTransferFrom(msg.sender, kernel, _collateralAssets);
         if (_quoteAssets != 0) IERC20(IRoycoDayKernel(kernel).QUOTE_ASSET()).safeTransferFrom(msg.sender, kernel, _quoteAssets);
 
-        // Deposit the constituent assets into the Royco market and price the shares to mint
+        // Deposit the constituent assets into the Royco market, the kernel prices the shares and mints them to the receiver
         TRANCHE_UNIT lptAssetsMinted;
-        (shares, lptAssetsMinted) = _depositMultiAsset(false, _collateralAssets, _quoteAssets, _minLPTAssetsOut);
+        (shares, lptAssetsMinted) = _depositMultiAsset(false, _collateralAssets, _quoteAssets, _minLPTAssetsOut, _receiver);
         lptAssetsOut = toUint256(lptAssetsMinted);
-
-        // Mint the shares to the receiver
-        _mint(_receiver, shares);
 
         emit MultiAssetDeposit(msg.sender, _receiver, _collateralAssets, _quoteAssets, lptAssetsOut, shares);
     }
@@ -119,7 +116,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         returns (uint256 shares, uint256 lptAssetsOut)
     {
         TRANCHE_UNIT lptAssetsMinted;
-        (shares, lptAssetsMinted) = _depositMultiAsset(true, _collateralAssets, _quoteAssets, 0);
+        (shares, lptAssetsMinted) = _depositMultiAsset(true, _collateralAssets, _quoteAssets, 0, KERNEL);
         lptAssetsOut = toUint256(lptAssetsMinted);
     }
 
@@ -157,40 +154,38 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
     // =============================
 
     /**
-     * @dev Deposits the constituent assets into the Royco market through the kernel's multi-asset deposit entrypoint and prices the shares to mint
-     * @dev Shares are priced at the pre-deposit LPT effective NAV per share (the sync mints no LPT shares, so the pre-mint supply is current)
+     * @dev Deposits the constituent assets into the Royco market through the kernel's multi-asset deposit entrypoint
+     * @dev The kernel prices the shares at the pre-deposit LPT effective NAV against the venue's settled post-add state and mints them to the receiver
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _collateralAssets The amount of collateral to deposit, in the collateral asset's native units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLPTAssetsOut The minimum LPT tranche assets the liquidity add must mint
-     * @return shares The number of shares to mint for the deposit
+     * @param _receiver The address that receives the minted shares
+     * @return shares The number of shares minted for the deposit
      * @return lptAssetsOut The LPT tranche assets minted by the add
      */
     function _depositMultiAsset(
         bool _isPreview,
         uint256 _collateralAssets,
         uint256 _quoteAssets,
-        uint256 _minLPTAssetsOut
+        uint256 _minLPTAssetsOut,
+        address _receiver
     )
         internal
         virtual
         returns (uint256 shares, TRANCHE_UNIT lptAssetsOut)
     {
         // Orchestrate the multi-asset deposit in the kernel, bounding the liquidity add's slippage by the caller's minimum LPT assets out
-        NAV_UNIT depositNAV;
-        NAV_UNIT effectiveNAV;
-        (depositNAV, effectiveNAV, lptAssetsOut) = abi.decode(
+        (shares, lptAssetsOut) = abi.decode(
             KERNEL._dispatchAndUnwrap(
                 _isPreview,
                 abi.encodeCall(
-                    IRoycoDayKernel.lptDepositMultiAsset, (_isPreview, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(_minLPTAssetsOut))
+                    IRoycoDayKernel.lptDepositMultiAsset,
+                    (_isPreview, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(_minLPTAssetsOut), _receiver)
                 )
             ),
-            (NAV_UNIT, NAV_UNIT, TRANCHE_UNIT)
+            (uint256, TRANCHE_UNIT)
         );
-
-        // Price the LPT shares at the pre-deposit LPT effective NAV per share
-        shares = ValuationLogic._convertToShares(depositNAV, effectiveNAV, totalSupply(), Math.Rounding.Floor);
         require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
     }
 

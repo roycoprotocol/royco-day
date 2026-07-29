@@ -204,8 +204,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         Operation _op,
         NAV_UNIT _collateralNAV,
         NAV_UNIT _lptRawNAV,
-        NAV_UNIT _stSelfLiquidationBonusNAV,
-        bool _enforceCoverageAndLiquidityRequirements
+        NAV_UNIT _stSelfLiquidationBonusNAV
     )
         public
         override(IRoycoDayAccountant)
@@ -235,10 +234,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         } else if (_op == Operation.LPT_DEPOSIT) {
             // An in-kind LPT deposit only adds market-making inventory, the collateral cannot move
             require(deltaLPTRawNAV > 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-        } else if (_op == Operation.LPT_MULTI_ASSET_DEPOSIT) {
-            // A multi-asset LPT deposit adds market-making inventory and can mint and deploy new ST shares for its senior leg
-            require(deltaLPTRawNAV > 0 && deltaCollateralNAV >= 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-            stEffectiveNAV = (stEffectiveNAV + toNAVUnits(deltaCollateralNAV));
         } else if (_op == Operation.LPT_REDEEM) {
             // An in-kind LPT redemption only transfers out market-making inventory and idle premium shares, the collateral cannot move and no bonus is paid
             require(deltaLPTRawNAV <= 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
@@ -296,20 +291,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             minLiquidityWAD: minLiquidityWAD
         });
 
-        // Preemptively return if the kernel specified that the market's requirements don't need to be enforced
-        if (!_enforceCoverageAndLiquidityRequirements) return state;
-
-        // Enforce the coverage requirement for operations that can violate it (add senior exposure or remove the junior loss-absorption buffer)
-        // An in-kind LPT deposit cannot add senior exposure, only the multi-asset variant mints a senior leg
-        if (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_MULTI_ASSET_DEPOSIT || _op == Operation.JT_REDEEM) {
-            require(state.coverageUtilizationWAD <= WAD, COVERAGE_REQUIREMENT_VIOLATED());
-        }
-
-        // Enforce the liquidity requirement for operations that can violate it (raise the senior exposure or reduce the depth of the liquidity provider tranche)
-        // An in-kind LPT deposit only deepens liquidity so it is exempt, both LPT redemption variants remove depth
-        if (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_MULTI_ASSET_DEPOSIT || _op == Operation.LPT_REDEEM || _op == Operation.LPT_MULTI_ASSET_REDEEM) {
-            require(state.liquidityUtilizationWAD <= WAD, LIQUIDITY_REQUIREMENT_VIOLATED());
-        }
     }
 
     // =============================

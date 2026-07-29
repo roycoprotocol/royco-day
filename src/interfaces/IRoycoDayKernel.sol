@@ -201,8 +201,11 @@ interface IRoycoDayKernel {
     /// @notice Thrown when the L2 sequencer's grace period has not fully elapsed since it was last restored
     error GRACE_PERIOD_NOT_OVER();
 
-    /// @notice Thrown when an LPT multi-asset deposit is made with zero of both constituent assets (collateral and quote)
-    error MUST_DEPOSIT_NON_ZERO_ASSETS();
+    /// @notice Thrown when the market's coverage requirement is violated
+    error COVERAGE_REQUIREMENT_VIOLATED();
+
+    /// @notice Thrown when the market's liquidity requirement is violated
+    error LIQUIDITY_REQUIREMENT_VIOLATED();
 
     /// @notice Retrieves the senior tranche address
     /// @return seniorTranche The address of the senior tranche for this Royco market
@@ -464,24 +467,26 @@ interface IRoycoDayKernel {
      *         shares), adds (senior shares + quote) into the liquidity venue to mint the LPT tranche assets, then deposits them into the LPT
      * @dev Assumes the collateral and quote have been transferred to the kernel before this call (by the LPT tranche)
      * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit (_collateralAssets == 0) that mints no senior shares, an ST-leg deposit reverts in a fixed-term market
-     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements, reverts if either is unsatisfied
+     * @dev The senior leg is gated by the market's coverage requirement, its liquidity requirement is satisfied by the add deploying the minted shares as depth
+     * @dev Prices the shares at the pre-deposit LPT effective NAV against the venue's settled post-add state and mints them to the receiver
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _collateralAssets The amount of collateral to deposit for the senior leg, denominated in tranche units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLPTAssetsOut The minimum LPT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
-     * @return depositNAV The value of the minted LPT tranche assets, denominated in the kernel's NAV units
-     * @return effectiveNAV The LPT effective NAV at which the LPT shares will be minted (pre-deposit)
+     * @param _receiver The address that receives the minted tranche shares
+     * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
      * @return lptAssetsOut The amount of LPT tranche assets minted and credited to the liquidity provider tranche
      */
     function lptDepositMultiAsset(
         bool _isPreview,
         TRANCHE_UNIT _collateralAssets,
         uint256 _quoteAssets,
-        TRANCHE_UNIT _minLPTAssetsOut
+        TRANCHE_UNIT _minLPTAssetsOut,
+        address _receiver
     )
         external
-        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT lptAssetsOut);
+        returns (uint256 trancheSharesMinted, TRANCHE_UNIT lptAssetsOut);
 
     /**
      * @notice Atomically exits the liquidity provider tranche to the LPT assets' constituent assets: proportionally removes the LPT-asset slice,
@@ -589,25 +594,6 @@ interface IRoycoDayKernel {
     // =============================
     // Liquidity Provider Tranche Venue Drivers
     // =============================
-
-    /**
-     * @notice Adds a senior tranche share and quote asset position into the liquidity venue and returns the liquidity provider tranche assets minted
-     * @param _isPreview Whether this is a preview of the operation which must not mutate state
-     * @param _seniorShares The exact amount of senior tranche shares to add into the liquidity venue
-     * @param _quoteAssets The exact amount of quote assets to add into the liquidity venue
-     * @param _minLPTAssetsOut The minimum liquidity provider tranche assets that must be minted, bounding the add's slippage
-     * @return lptAssets The liquidity provider tranche assets minted by the add
-     * @return depositNAV The value of the minted liquidity provider tranche assets against the post-add venue state
-     * @return postOpLPTRawNAV The post-op liquidity provider tranche raw NAV marked against the post-add venue state, the mark the post-op sync enforces at
-     */
-    function addLiquidity(
-        bool _isPreview,
-        uint256 _seniorShares,
-        uint256 _quoteAssets,
-        TRANCHE_UNIT _minLPTAssetsOut
-    )
-        external
-        returns (TRANCHE_UNIT lptAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLPTRawNAV);
 
     /**
      * @notice Proportionally removes a slice of liquidity provider tranche assets from the liquidity venue into its senior tranche share and quote asset constituents

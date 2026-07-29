@@ -11,12 +11,13 @@ import { IRoycoPriceOracle } from "../../interfaces/IRoycoPriceOracle.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { AggregatorV3Interface } from "../../interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { Cache, CacheKey } from "../../libraries/Cache.sol";
-import { WAD, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
+import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../libraries/Units.sol";
 import { AccountingSyncLogic } from "../../libraries/logic/AccountingSyncLogic.sol";
 import { BlacklistLogic } from "../../libraries/logic/BlacklistLogic.sol";
 import { DepositLogic } from "../../libraries/logic/DepositLogic.sol";
+import { DispatchLogic } from "../../libraries/logic/DispatchLogic.sol";
 import { RedemptionLogic } from "../../libraries/logic/RedemptionLogic.sol";
 
 /**
@@ -337,7 +338,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withCollateralPriceCached
         returns (uint256 trancheSharesMinted)
     {
-        return DepositLogic.stDeposit(_getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _assets, _receiver);
+        return DepositLogic.stDeposit(_getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _assets, _receiver, true);
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -451,11 +452,13 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev LPT multi-asset deposits are enabled in a PERPETUAL market state (granted the market's coverage and liquidity requirements are satisfied against the new senior exposure), and in a fixed-term market only for a quote-only deposit that mints no senior shares
+    /// @dev Composed from the shared deposit primitives: an ST deposit seeding the add's senior shares, the venue add, then an LPT deposit of the minted assets
     function lptDepositMultiAsset(
         bool _isPreview,
         TRANCHE_UNIT _collateralAssets,
         uint256 _quoteAssets,
-        TRANCHE_UNIT _minLPTAssetsOut
+        TRANCHE_UNIT _minLPTAssetsOut,
+        address _receiver
     )
         external
         virtual
@@ -464,12 +467,58 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyLiquidityProviderTranche
         nonReentrant
         withCollateralPriceCached
-        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT lptAssetsOut)
+        returns (uint256 trancheSharesMinted, TRANCHE_UNIT lptAssetsOut)
     {
-        return DepositLogic.lptDepositMultiAsset(
-            _getRoycoDayKernelStorage(), getImmutableState(), _isPreview, _collateralAssets, _quoteAssets, _minLPTAssetsOut
-        );
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
+        RoycoDayKernelImmutableState memory immutables = getImmutableState();
+
+        // Collateral leg: an ST deposit minting the add's senior shares to the kernel, waiving only the liquidity requirement the add's deployed depth satisfies below
+        // Both legs run settled in preview and execution alike, a preview unwinds them with this flow's own result revert
+        uint256 stSharesMinted;
+        if (_collateralAssets != ZERO_TRANCHE_UNITS) {
+            stSharesMinted = DepositLogic.stDeposit($, immutables, false, _collateralAssets, address(this), false);
+            require(stSharesMinted != 0, IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES());
+        }
+
+        // Add the minted ST shares and supplied quote assets into the liquidity venue with the specified slippage check
+        // The venue values the minted LPT assets and marks the post-op LPT raw NAV against the post-add pool state in both modes
+        (TRANCHE_UNIT lptAssetsMinted,, NAV_UNIT postOpLPTRawNAV) = _addLiquidity(_isPreview, stSharesMinted, _quoteAssets, _minLPTAssetsOut);
+        lptAssetsOut = lptAssetsMinted;
+
+        // Pin the LPT asset price at the venue's post-add mark, so the LPT leg prices and enforces at the same post-add state in preview and execution alike
+        Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(postOpLPTRawNAV.mulDiv(toTrancheUnits(WAD), ($.totalLPTAssets + lptAssetsOut), Math.Rounding.Floor)));
+
+        // LPT leg: an in-kind LPT deposit of the minted assets at the pinned price, priced and minted to the receiver by the shared primitive
+        trancheSharesMinted = DepositLogic.lptDeposit($, immutables, false, lptAssetsOut, _receiver);
+
+        // Clear the pinned price now that the LPT leg has settled at it
+        Cache._delete(CacheKey.LPT_ASSET_PRICE);
+
+        // A preview carries its result out via this revert, unwinding every mutation this flow made
+        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(trancheSharesMinted, lptAssetsOut));
     }
+
+    /**
+     * @notice Adds a senior tranche share and quote asset position into the liquidity venue and returns the liquidity provider tranche assets minted
+     * @dev Implemented by the concrete liquidity venue
+     * @dev A preview computes the amounts under the venue's real semantics and unwinds without settling, so it needs no prior asset possession
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _seniorShares The exact amount of senior tranche shares to add into the liquidity venue
+     * @param _quoteAssets The exact amount of quote assets to add into the liquidity venue
+     * @param _minLPTAssetsOut The minimum liquidity provider tranche assets that must be minted, bounding the add's slippage
+     * @return lptAssets The liquidity provider tranche assets minted by the add
+     * @return depositNAV The value of the minted liquidity provider tranche assets against the post-add venue state
+     * @return postOpLPTRawNAV The post-op liquidity provider tranche raw NAV marked against the post-add venue state, the mark the post-op sync enforces at
+     */
+    function _addLiquidity(
+        bool _isPreview,
+        uint256 _seniorShares,
+        uint256 _quoteAssets,
+        TRANCHE_UNIT _minLPTAssetsOut
+    )
+        internal
+        virtual
+        returns (TRANCHE_UNIT lptAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLPTRawNAV);
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev LPT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption

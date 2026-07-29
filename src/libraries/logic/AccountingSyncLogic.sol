@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
+import { WAD } from "../Constants.sol";
 import { AssetClaims, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
 import { Math, NAV_UNIT } from "../Units.sol";
 import { AssetLedgerLogic } from "./AssetLedgerLogic.sol";
@@ -229,7 +230,7 @@ library AccountingSyncLogic {
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _op The operation being executed in between the pre and post synchronizations
      * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only nonzero if _op == ST_REDEEM || LPT_MULTI_ASSET_REDEEM)
-     * @param _enforceCoverageAndLiquidityRequirements Whether to enforce the market's coverage and liquidity requirements applicable to the operation
+     * @param _enforceLiquidityRequirement Whether to enforce the liquidity requirement on an operation that can worsen it, waived only by the multi-asset LPT deposit's senior leg
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function _postOpSyncTrancheAccounting(
@@ -237,13 +238,13 @@ library AccountingSyncLogic {
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         Operation _op,
         NAV_UNIT _stSelfLiquidationBonusNAV,
-        bool _enforceCoverageAndLiquidityRequirements
+        bool _enforceLiquidityRequirement
     )
         internal
         returns (SyncedAccountingState memory state)
     {
         return _postOpSyncTrancheAccounting(
-            $, _immutables, _op, ValuationLogic._getLiquidityProviderTrancheRawNAV($), _stSelfLiquidationBonusNAV, _enforceCoverageAndLiquidityRequirements
+            $, _immutables, _op, ValuationLogic._getLiquidityProviderTrancheRawNAV($), _stSelfLiquidationBonusNAV, _enforceLiquidityRequirement
         );
     }
 
@@ -256,7 +257,7 @@ library AccountingSyncLogic {
      * @param _op The operation being executed in between the pre and post synchronizations
      * @param _lptRawNAV The post-op liquidity provider tranche raw NAV, marked by the caller at the venue's post-op state
      * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only nonzero if _op == ST_REDEEM || LPT_MULTI_ASSET_REDEEM)
-     * @param _enforceCoverageAndLiquidityRequirements Whether to enforce the market's coverage and liquidity requirements applicable to the operation
+     * @param _enforceLiquidityRequirement Whether to enforce the liquidity requirement on an operation that can worsen it, waived only by the multi-asset LPT deposit's senior leg
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function _postOpSyncTrancheAccounting(
@@ -265,16 +266,23 @@ library AccountingSyncLogic {
         Operation _op,
         NAV_UNIT _lptRawNAV,
         NAV_UNIT _stSelfLiquidationBonusNAV,
-        bool _enforceCoverageAndLiquidityRequirements
+        bool _enforceLiquidityRequirement
     )
         internal
         returns (SyncedAccountingState memory state)
     {
-        // Execute the post-op sync on the accountant, committing the final state of the accounting and enforcing the market's requirements if specified
-        state = IRoycoDayAccountant(_immutables.accountant)
-            .postOpSyncTrancheAccounting(
-                _op, ValuationLogic._getCollateralNAV($), _lptRawNAV, _stSelfLiquidationBonusNAV, _enforceCoverageAndLiquidityRequirements
-            );
+        // Execute the post-op sync on the accountant, committing the final state of the accounting
+        state = IRoycoDayAccountant(_immutables.accountant).postOpSyncTrancheAccounting(_op, ValuationLogic._getCollateralNAV($), _lptRawNAV, _stSelfLiquidationBonusNAV);
+
+        // Enforce the coverage requirement for operations that can worsen coverage (add senior exposure or remove the junior loss-absorption buffer)
+        if (_op == Operation.ST_DEPOSIT || _op == Operation.JT_REDEEM) {
+            require(state.coverageUtilizationWAD <= WAD, IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED());
+        }
+        // Enforce the liquidity requirement for operations that can worsen liquidity (raise the senior exposure or reduce the venue's market-making depth)
+        // The multi-asset LPT deposit waives it on its senior leg alone, whose minted shares the venue add immediately deploys as depth
+        if (_enforceLiquidityRequirement && (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_REDEEM || _op == Operation.LPT_MULTI_ASSET_REDEEM)) {
+            require(state.liquidityUtilizationWAD <= WAD, IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED());
+        }
 
         // Deploy the accumulated idle liquidity-premium senior shares now that the operation has settled and its requirements are enforced
         if ($.lptOwnedSeniorTrancheShares != 0) {

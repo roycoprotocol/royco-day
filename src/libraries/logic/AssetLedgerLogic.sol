@@ -85,6 +85,8 @@ library AssetLedgerLogic {
      * @param _receiver The receiver of the asset claims
      */
     function _remitClaims(IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, AssetClaims memory _claims, address _receiver) internal {
+        // Preemptively return if this is a self-remittance
+        if (_receiver == address(this)) return;
         // Transfer the collateral assets being remitted to the receiver
         if (_claims.collateralAssets != ZERO_TRANCHE_UNITS) IERC20(_immutables.collateralAsset).safeTransfer(_receiver, toUint256(_claims.collateralAssets));
         // Transfer the LPT assets being remitted to the receiver

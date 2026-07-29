@@ -132,10 +132,15 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
      * @inheritdoc RoycoDayKernel
      * @dev Values the BPT amount at the liquidity venue's manipulation-resistant NAV per BPT (the oracle's total NAV over the BPT
      *      supply), rounding down so the liquidity provider tranche's NAV is never overstated
-     * @dev The oracle is read live on every call rather than through the price cache: the kernel mints, joins, and exits the pool
-     *      within a single transaction, so a value cached at the start of the operation would be stale by the time it is consumed
+     * @dev The oracle is read live unless the multi-asset LPT deposit has pinned the post-add price: the kernel mints, joins, and exits the
+     *      pool within a single transaction, so a value cached at the start of the operation would be stale by the time it is consumed,
+     *      and only the flow that knows its final mark pins it
      */
     function convertLPTAssetsToValue(TRANCHE_UNIT _lptAssets) public view virtual override(RoycoDayKernel) returns (NAV_UNIT) {
+        // Within a multi-asset LPT deposit the price is the pinned post-add mark, so its LPT leg prices and enforces identically in preview and execution
+        (bool cacheHit, uint256 lptAssetPrice) = Cache._read(CacheKey.LPT_ASSET_PRICE);
+        if (cacheHit) return toNAVUnits(lptAssetPrice).mulDiv(_lptAssets, toTrancheUnits(WAD), Math.Rounding.Floor);
+
         TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply(LPT_ASSET));
         if (bptTotalSupply == ZERO_TRANCHE_UNITS) return ZERO_NAV_UNITS;
         NAV_UNIT bptTotalNAV = toNAVUnits(LPOracleBase(_getBalancerV3LiquidityVenueStorage().bptOracle).computeTVL());
@@ -143,8 +148,12 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     }
 
     /// @inheritdoc RoycoDayKernel
-    /// @dev Converts the NAV amount to a BPT amount at the same live, manipulation-resistant NAV per BPT, rounding down
+    /// @dev Converts the NAV amount to a BPT amount at the same live or pinned, manipulation-resistant NAV per BPT, rounding down
     function convertValueToLPTAssets(NAV_UNIT _value) public view virtual override(RoycoDayKernel) returns (TRANCHE_UNIT) {
+        // Within a multi-asset LPT deposit the price is the pinned post-add mark, so its LPT leg prices and enforces identically in preview and execution
+        (bool cacheHit, uint256 lptAssetPrice) = Cache._read(CacheKey.LPT_ASSET_PRICE);
+        if (cacheHit) return toTrancheUnits(WAD).mulDiv(_value, toNAVUnits(lptAssetPrice), Math.Rounding.Floor);
+
         TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply(LPT_ASSET));
         if (bptTotalSupply == ZERO_TRANCHE_UNITS) return ZERO_TRANCHE_UNITS;
         NAV_UNIT bptTotalNAV = toNAVUnits(LPOracleBase(_getBalancerV3LiquidityVenueStorage().bptOracle).computeTVL());
@@ -190,24 +199,22 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     // =============================
 
     /**
-     * @inheritdoc IRoycoDayKernel
-     * @dev Dispatches the add liquidity callback below through the unlocked Vault
+     * @inheritdoc RoycoDayKernel
+     * @dev Dispatches the add liquidity callback below through the unlocked Vault, the add always settles in preview and execution alike
      * @dev A preview unwinds every transient balance change via the callback's result-carrying revert
-     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
-    function addLiquidity(
+    function _addLiquidity(
         bool _isPreview,
         uint256 _seniorShares,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLPTAssetsOut
     )
-        external
-        override(IRoycoDayKernel)
-        onlySelf
+        internal
+        override(RoycoDayKernel)
         returns (TRANCHE_UNIT lptAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLPTRawNAV)
     {
         // Both transports yield the unlock's ABI encoded bytes return byte for byte
-        (lptAssets, depositNAV, postOpLPTRawNAV) = abi.decode(
+        return abi.decode(
             abi.decode(
                 address(_vault)
                     ._dispatch(

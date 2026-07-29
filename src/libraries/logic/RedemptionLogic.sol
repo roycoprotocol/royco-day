@@ -80,7 +80,7 @@ library RedemptionLogic {
         if (!_isPreview) IRoycoVaultTranche(_immutables.seniorTranche).kernelBurn(_owner, _shares);
 
         // Execute a post-redeem sync on accounting
-        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.ST_REDEEM, stSelfLiquidationBonusNAV, false);
+        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.ST_REDEEM, stSelfLiquidationBonusNAV, true);
 
         // Remit the asset claims to the receiver
         AssetLedgerLogic._remitClaims(_immutables, userAssetClaims, _receiver);

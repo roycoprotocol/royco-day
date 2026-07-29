@@ -97,7 +97,6 @@ struct SyncedAccountingState {
  * @custom:type JT_REDEEM - A junior tranche redemption that decreases JT's effective NAV
  * @custom:type LPT_DEPOSIT - An in-kind liquidity provider tranche deposit that only adds market-making inventory
  * @custom:type LPT_REDEEM - An in-kind liquidity provider tranche redemption that only removes market-making inventory and idle premium shares
- * @custom:type LPT_MULTI_ASSET_DEPOSIT - A multi-asset liquidity provider tranche deposit that can also mint and deploy senior exposure via its senior leg
  * @custom:type LPT_MULTI_ASSET_REDEEM - A multi-asset liquidity provider tranche redemption that also unwinds senior exposure and can pay a self-liquidation bonus
  */
 enum Operation {
@@ -107,7 +106,6 @@ enum Operation {
     JT_REDEEM,
     LPT_DEPOSIT,
     LPT_REDEEM,
-    LPT_MULTI_ASSET_DEPOSIT,
     LPT_MULTI_ASSET_REDEEM
 }
 
