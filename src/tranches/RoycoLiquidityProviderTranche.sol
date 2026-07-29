@@ -6,11 +6,9 @@ import { SafeERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityProviderTranche } from "../interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
-import { ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims, DispatchMode, TrancheType } from "../libraries/Types.sol";
-import { Math, NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
+import { Math, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
 import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
-import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
 import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
 /**
@@ -90,9 +88,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
 
         // Spend allowance if msg.sender is not the owner
-        if (msg.sender != _owner) {
-            _spendAllowance(_owner, msg.sender, _shares);
-        }
+        if (msg.sender != _owner) _spendAllowance(_owner, msg.sender, _shares);
 
         // Redeem the shares through the tranche's kernel entrypoint, the kernel burns the owner's shares after scaling their claims
         (stClaims, quoteAssets) = _redeemMultiAsset(DispatchMode.EXECUTE, _shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver, _owner);
@@ -137,16 +133,8 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
 
     /// @inheritdoc IRoycoLiquidityProviderTranche
     function maxRedeemMultiAsset(address _owner) external virtual override(IRoycoLiquidityProviderTranche) returns (uint256 shares) {
-        // The liquidity provider tranche has claims only on its own RAW NAV, bounded here by the multi-asset liquidity requirement
-        (NAV_UNIT claimOnLPTNAV, NAV_UNIT lptMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees) =
-            IRoycoDayKernel(KERNEL).lptMaxWithdrawableMultiAsset(_owner);
-
-        // We do not allow redemptions if the tranche has no claim on the assets
-        if (claimOnLPTNAV == ZERO_NAV_UNITS) return 0;
-
-        shares = Math.min(
-            balanceOf(_owner), ValuationLogic._convertToShares(lptMaxWithdrawableNAV, claimOnLPTNAV, totalTrancheSharesAfterMintingFees, Math.Rounding.Floor)
-        );
+        // The maximum redeemable shares are the minimum of the owner's share balance and the globally redeemable shares the kernel prices
+        return Math.min(balanceOf(_owner), IRoycoDayKernel(KERNEL).lptMaxRedeemableMultiAsset(_owner));
     }
 
     // =============================

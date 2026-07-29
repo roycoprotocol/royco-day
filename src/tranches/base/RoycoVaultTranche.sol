@@ -108,51 +108,19 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         emit Redeem(msg.sender, _receiver, claims, _shares);
     }
 
-    /// @inheritdoc IRoycoVaultTranche
-    function mintProtocolFeeShares(
-        address _protocolFeeRecipient,
-        uint256 _protocolFeeShares
-    )
-        external
-        virtual
-        override(IRoycoVaultTranche)
-        onlyKernel
-        returns (uint256 totalTrancheShares)
-    {
-        // Mint the precomputed protocol fee shares to the recipient (the kernel prices them jointly with the liquidity premium)
-        if (_protocolFeeShares != 0) _mint(_protocolFeeRecipient, _protocolFeeShares);
-
-        totalTrancheShares = totalSupply();
-        emit ProtocolFeeSharesMinted(_protocolFeeRecipient, _protocolFeeShares, totalTrancheShares);
-    }
-
     // =============================
-    // Kernel Mint and Burn Entrypoints
+    // Tranche Max Deposit and Redeem Functions
     // =============================
 
     /// @inheritdoc IRoycoVaultTranche
-    function kernelMint(address _to, uint256 _shares) external virtual override(IRoycoVaultTranche) onlyKernel {
-        require(_to != address(0), ERC20InvalidReceiver(address(0)));
-        _mint(_to, _shares);
+    function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
+        return IRoycoDayKernel(KERNEL).inkindMaxDeposit(_receiver);
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function kernelBurn(address _from, uint256 _shares) external virtual override(IRoycoVaultTranche) onlyKernel {
-        _burn(_from, _shares);
-    }
-
-    // =============================
-    // Public Burn Functions
-    // =============================
-
-    /// @inheritdoc ERC20BurnableUpgradeable
-    function burn(uint256 _shares) public virtual override(ERC20BurnableUpgradeable) restricted {
-        super.burn(_shares);
-    }
-
-    /// @inheritdoc ERC20BurnableUpgradeable
-    function burnFrom(address _account, uint256 _shares) public virtual override(ERC20BurnableUpgradeable) restricted {
-        super.burnFrom(_account, _shares);
+    function maxRedeem(address _owner) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
+        // The maximum redeemable shares are the minimum of the owner's share balance and the globally redeemable shares the kernel prices
+        return Math.min(balanceOf(_owner), IRoycoDayKernel(KERNEL).inkindMaxRedeemable(_owner));
     }
 
     // =============================
@@ -201,28 +169,6 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     }
 
     // =============================
-    // Tranche Max Deposit and Redeem Functions
-    // =============================
-
-    /// @inheritdoc IRoycoVaultTranche
-    function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
-        return IRoycoDayKernel(KERNEL).inkindMaxDeposit(_receiver);
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function maxRedeem(address _owner) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
-        // Query the tranche's total claim on the market's NAV and its global maximum withdrawable NAV
-        (NAV_UNIT claimNAV, NAV_UNIT maxWithdrawableNAV, uint256 totalTrancheShares) = IRoycoDayKernel(KERNEL).inkindMaxWithdrawable(_owner);
-
-        // We do not allow redemptions if the tranche has no claim on the assets
-        if (claimNAV == ZERO_NAV_UNITS) return 0;
-
-        // The maximum redeemable shares are the minimum of the owner's share balance and the globally redeemable
-        // shares, priced through the same virtual shares primitive as deposits and _scaleAssetClaims
-        shares = Math.min(balanceOf(_owner), ValuationLogic._convertToShares(maxWithdrawableNAV, claimNAV, totalTrancheShares, Math.Rounding.Floor));
-    }
-
-    // =============================
     // General Tranche View Functions
     // =============================
 
@@ -247,6 +193,53 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
 
     /// @dev Returns the type of the tranche (Senior, Junior, or Liquidity)
     function TRANCHE_TYPE() public pure virtual returns (TrancheType);
+
+    // =============================
+    // Kernel Mint and Burn Entrypoints
+    // =============================
+
+    /// @inheritdoc IRoycoVaultTranche
+    function mintProtocolFeeShares(
+        address _protocolFeeRecipient,
+        uint256 _protocolFeeShares
+    )
+        external
+        virtual
+        override(IRoycoVaultTranche)
+        onlyKernel
+        returns (uint256 totalTrancheShares)
+    {
+        // Mint the precomputed protocol fee shares to the recipient (the kernel prices them jointly with the liquidity premium)
+        if (_protocolFeeShares != 0) _mint(_protocolFeeRecipient, _protocolFeeShares);
+
+        totalTrancheShares = totalSupply();
+        emit ProtocolFeeSharesMinted(_protocolFeeRecipient, _protocolFeeShares, totalTrancheShares);
+    }
+
+    /// @inheritdoc IRoycoVaultTranche
+    function kernelMint(address _to, uint256 _shares) external virtual override(IRoycoVaultTranche) onlyKernel {
+        require(_to != address(0), ERC20InvalidReceiver(address(0)));
+        _mint(_to, _shares);
+    }
+
+    /// @inheritdoc IRoycoVaultTranche
+    function kernelBurn(address _from, uint256 _shares) external virtual override(IRoycoVaultTranche) onlyKernel {
+        _burn(_from, _shares);
+    }
+
+    // =============================
+    // Public Burn Functions
+    // =============================
+
+    /// @inheritdoc ERC20BurnableUpgradeable
+    function burn(uint256 _shares) public virtual override(ERC20BurnableUpgradeable) restricted {
+        super.burn(_shares);
+    }
+
+    /// @inheritdoc ERC20BurnableUpgradeable
+    function burnFrom(address _account, uint256 _shares) public virtual override(ERC20BurnableUpgradeable) restricted {
+        super.burnFrom(_account, _shares);
+    }
 
     // =============================
     // Internal Utility Functions

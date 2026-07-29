@@ -292,33 +292,24 @@ interface IRoycoDayKernel {
     function inkindMaxDeposit(address _receiver) external view returns (TRANCHE_UNIT assets);
 
     /**
-     * @notice Returns the maximum amount of assets that can be withdrawn in-kind from the specified tranche
+     * @notice Returns the maximum number of shares that can be redeemed in-kind from the calling tranche, unbounded by any owner's balance
      * @dev Only callable by one of the market's tranches: the queried tranche is the calling tranche
-     * @param _owner The address that is withdrawing the assets
-     * @return claimNAV The calling tranche's total notional claim on its assets, denominated in the kernel's NAV units
-     * @return maxWithdrawableNAV The maximum amount of assets that can be withdrawn from the calling tranche, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the calling tranche after the post-sync mint of its accrued shares
+     * @param _owner The address that is redeeming the shares
+     * @return maxRedeemableShares The maximum number of shares that can be redeemed from the calling tranche
      */
-    function inkindMaxWithdrawable(address _owner)
-        external
-        view
-        returns (NAV_UNIT claimNAV, NAV_UNIT maxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
+    function inkindMaxRedeemable(address _owner) external view returns (uint256 maxRedeemableShares);
 
     /**
-     * @notice Returns the maximum amount of assets that can be withdrawn from the liquidity provider tranche via a multi-asset redemption
+     * @notice Returns the maximum number of shares that can be redeemed from the liquidity provider tranche via a multi-asset redemption, unbounded by any owner's balance
      * @dev A multi-asset redemption redeems its senior tranche share legs (the proportional removal's ST leg and the idle liquidity
      *      premium pile) in-flow, shrinking the liquidity requirement alongside the withdrawal, so its bound is at least the
      *      in-kind bound, and strictly exceeds it whenever the liquidity requirement binds and the removal's senior-share
      *      legs carry value
      * @dev NON-VIEW: sizes the requirement reduction through the venue removal's execute-and-revert preview, which mutates no state net
-     * @param _owner The address that is withdrawing the assets
-     * @return claimOnLPTNAV The notional claims on LPT assets that the liquidity provider tranche has denominated in kernel's NAV units
-     * @return lptMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity provider tranche post-sync (the liquidity provider tranche mints no protocol fee shares on a sync)
+     * @param _owner The address that is redeeming the shares
+     * @return maxRedeemableShares The maximum number of shares that can be redeemed multi-asset from the liquidity provider tranche
      */
-    function lptMaxWithdrawableMultiAsset(address _owner)
-        external
-        returns (NAV_UNIT claimOnLPTNAV, NAV_UNIT lptMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
+    function lptMaxRedeemableMultiAsset(address _owner) external returns (uint256 maxRedeemableShares);
 
     /**
      * @notice Synchronizes and persists the raw and effective NAVs of all tranches

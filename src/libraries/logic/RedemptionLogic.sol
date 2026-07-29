@@ -178,19 +178,17 @@ library RedemptionLogic {
     // =============================
 
     /**
-     * @notice Returns the maximum amount of assets that can be withdrawn in-kind from the specified tranche
+     * @notice Returns the maximum number of shares that can be redeemed in-kind from the specified tranche, unbounded by any owner's balance
      * @dev Redemptions are allowed only in a PERPETUAL market state
      * @dev ST redemptions are otherwise unrestricted: the senior claim never exceeds the collateral NAV under conservation, so its entire effective NAV is withdrawable
      * @dev JT withdrawals are bounded by the market's coverage requirement and LPT withdrawals by its liquidity requirement
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _trancheType An enumerator indicating which tranche to return the max withdrawable for
-     * @param _owner The address that is withdrawing the assets
-     * @return claimNAV The specified tranche's total notional claim on its assets, denominated in the kernel's NAV units
-     * @return maxWithdrawableNAV The maximum amount of assets that can be withdrawn from the specified tranche, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares
+     * @param _trancheType An enumerator indicating which tranche to return the max redeemable shares for
+     * @param _owner The address that is redeeming the shares
+     * @return maxRedeemableShares The maximum number of shares that can be redeemed from the specified tranche
      */
-    function inkindMaxWithdrawable(
+    function inkindMaxRedeemable(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         TrancheType _trancheType,
@@ -198,18 +196,21 @@ library RedemptionLogic {
     )
         external
         view
-        returns (NAV_UNIT claimNAV, NAV_UNIT maxWithdrawableNAV, uint256 totalTrancheShares)
+        returns (uint256 maxRedeemableShares)
     {
-        // If the owner is blacklisted or the kernel is currently paused, return zero claims
-        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        // If the owner is blacklisted or the kernel is currently paused, nothing is redeemable
+        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) return 0;
 
         // Get the specified tranche's total claim on the market's assets
         SyncedAccountingState memory state;
+        uint256 totalTrancheShares;
         (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccountingFor(_trancheType);
 
         // Redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        if (state.marketState == MarketState.FIXED_TERM) return 0;
 
+        NAV_UNIT claimNAV;
+        NAV_UNIT maxWithdrawableNAV;
         if (_trancheType == TrancheType.SENIOR) {
             // ST redemptions are otherwise unrestricted in a PERPETUAL state: the senior claim never exceeds the collateral NAV under conservation, so its entire effective NAV is withdrawable
             claimNAV = state.stEffectiveNAV;
@@ -225,10 +226,16 @@ library RedemptionLogic {
             // The withdrawal is bounded by the market's liquidity requirement
             maxWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxLPTWithdrawal(state);
         }
+
+        // With no claim on the assets nothing is redeemable
+        if (claimNAV == ZERO_NAV_UNITS) return 0;
+
+        // Price the withdrawable NAV into shares through the same virtual shares primitive as deposits and _scaleAssetClaims
+        maxRedeemableShares = ValuationLogic._convertToShares(maxWithdrawableNAV, claimNAV, totalTrancheShares, Math.Rounding.Floor);
     }
 
     /**
-     * @notice Returns the maximum amount of assets that can be withdrawn from the liquidity provider tranche via a multi-asset redemption
+     * @notice Returns the maximum number of shares that can be redeemed from the liquidity provider tranche via a multi-asset redemption, unbounded by any owner's balance
      * @dev A multi-asset redemption redeems the withdrawn and idle premium senior shares in-flow, reducing the liquidity requirement alongside the withdrawal
      *
      * @dev Liquidity Requirement: LPT_RAW_NAV >= (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
@@ -239,29 +246,28 @@ library RedemptionLogic {
      * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _owner The address that is withdrawing the assets
-     * @return claimOnLPTNAV The notional claims on LPT assets that the liquidity provider tranche has denominated in kernel's NAV units
-     * @return lptMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the liquidity provider tranche
+     * @param _owner The address that is redeeming the shares
+     * @return maxRedeemableShares The maximum number of shares that can be redeemed multi-asset from the liquidity provider tranche
      */
-    function lptMaxWithdrawableMultiAsset(
+    function lptMaxRedeemableMultiAsset(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         address _owner
     )
         external
-        returns (NAV_UNIT claimOnLPTNAV, NAV_UNIT lptMaxWithdrawableNAV, uint256 totalTrancheShares)
+        returns (uint256 maxRedeemableShares)
     {
-        // If the owner is blacklisted or the kernel is currently paused, return zero claims
-        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        // If the owner is blacklisted or the kernel is currently paused, nothing is redeemable
+        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) return 0;
 
         // Get the total claims the liquidity provider tranche has on its own assets
         SyncedAccountingState memory state;
         AssetClaims memory lptClaims;
+        uint256 totalTrancheShares;
         (state, lptClaims, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
 
         // LPT redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        if (state.marketState == MarketState.FIXED_TERM) return 0;
 
         // Compute the senior tranche shares a proportional removal of the entire LPT asset holding would withdraw
         uint256 stSharesWithdrawn;
@@ -277,8 +283,8 @@ library RedemptionLogic {
         }
 
         // A multi-asset redemption pulls a proportional slice of both LPT legs
-        // The claim and the withdrawal bound share the post-remove mark so their ratio sizes the withdrawable share fraction exactly
-        claimOnLPTNAV = state.lptRawNAV;
+        // The claim and the withdrawal bound share the post-remove mark so their ratio sizes the redeemable share fraction exactly
+        NAV_UNIT claimOnLPTNAV = state.lptRawNAV;
         // The withdrawal is bounded by the market's liquidity requirement
         NAV_UNIT lptWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxLPTWithdrawal(state);
 
@@ -291,6 +297,7 @@ library RedemptionLogic {
         NAV_UNIT liquidityRequirementReductionNAV = stSharesRedeemedNAV.mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Floor);
 
         // If the requirement reduction outpaces the withdrawal itself, the entire holding is withdrawable unless nothing is withdrawable in kind
+        NAV_UNIT lptMaxWithdrawableNAV;
         if (liquidityRequirementReductionNAV >= state.lptRawNAV) {
             lptMaxWithdrawableNAV = (lptWithdrawableNAV == ZERO_NAV_UNITS) ? ZERO_NAV_UNITS : state.lptRawNAV;
         } else {
@@ -299,5 +306,11 @@ library RedemptionLogic {
                 lptWithdrawableNAV.mulDiv(state.lptRawNAV, (state.lptRawNAV - liquidityRequirementReductionNAV), Math.Rounding.Floor), state.lptRawNAV
             );
         }
+
+        // With no claim on the assets nothing is redeemable
+        if (claimOnLPTNAV == ZERO_NAV_UNITS) return 0;
+
+        // Price the withdrawable NAV into shares through the same virtual shares primitive as deposits and _scaleAssetClaims
+        maxRedeemableShares = ValuationLogic._convertToShares(lptMaxWithdrawableNAV, claimOnLPTNAV, totalTrancheShares, Math.Rounding.Floor);
     }
 }
