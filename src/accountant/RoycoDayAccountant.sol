@@ -229,7 +229,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             stEffectiveNAV = (stEffectiveNAV + toNAVUnits(deltaCollateralNAV));
         } else if (_op == Operation.ST_REDEEM) {
             // A senior redemption leaves the liquidity provider tranche mark untouched and always redeems collateral value
-            require(deltaLPTRawNAV == 0 && deltaCollateralNAV < 0, INVALID_POST_OP_STATE(_op));
+            require(deltaCollateralNAV < 0 && deltaLPTRawNAV == 0, INVALID_POST_OP_STATE(_op));
             // Reduce JT effective NAV by the bonus provided from its assets
             jtEffectiveNAV = (jtEffectiveNAV - _stSelfLiquidationBonusNAV);
             // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
@@ -240,7 +240,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             jtEffectiveNAV = (jtEffectiveNAV + toNAVUnits(deltaCollateralNAV));
         } else if (_op == Operation.JT_REDEEM) {
             // JT cannot get a bonus from its own NAV, and a junior redemption leaves the senior exposure and supply untouched so it cannot move the liquidity provider tranche mark
-            require(deltaLPTRawNAV == 0 && deltaCollateralNAV < 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+            require(deltaCollateralNAV < 0 && deltaLPTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
             jtEffectiveNAV = (jtEffectiveNAV - toNAVUnits(-deltaCollateralNAV));
         } else if (_op == Operation.LPT_DEPOSIT) {
