@@ -10,9 +10,6 @@ import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
-import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
-import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -39,11 +36,11 @@ import {
     DEPLOYER_ROLE,
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
+import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
+import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { TAG_JT_PROXY } from "../../../src/factory/templates/base/Constants.sol";
-import {
-    RoycoDayBalancerV3MarketDeploymentTemplate
-} from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/EntryPointConfigurer.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
@@ -55,6 +52,7 @@ import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOr
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
+import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 
 /// @title Test_RoycoFactory
 /// @notice Fork tests for `RoycoFactory` driven by the REAL Day market template
@@ -610,11 +608,12 @@ contract Test_RoycoFactory is Test {
 
     /// @dev Asserts `getMarket(key)` returns exactly the deployed market's full component set.
     function _assertGetMarketResolves(IRoycoProtocolTemplate.DeploymentResult memory _r, address _key, string memory _ctx) internal view {
-        (address st, address jt, address lt, address kernel) = factory.getMarket(_key);
+        (address st, address jt, address lt, address kernel, address accountant) = factory.getMarket(_key);
         assertEq(st, _r.seniorTranche, string.concat(_ctx, ": senior"));
         assertEq(jt, _r.juniorTranche, string.concat(_ctx, ": junior"));
         assertEq(lt, _r.liquidityProviderTranche, string.concat(_ctx, ": liquidity"));
         assertEq(kernel, _r.kernel, string.concat(_ctx, ": kernel"));
+        assertEq(accountant, _r.accountant, string.concat(_ctx, ": accountant"));
     }
 
     /// Only DEPLOYER_ROLE may execute a market deployment
@@ -698,11 +697,12 @@ contract Test_RoycoFactory is Test {
     /// Unknown tranches resolve to the zero market: the registry never fabricates a mapping
     function test_GetMarket_ZeroForUnknownTranche() external {
         assertEq(factory.trancheToKernel(makeAddr("UNKNOWN")), address(0), "unknown tranche->kernel");
-        (address st, address jt, address lt, address kernel) = factory.getMarket(makeAddr("UNKNOWN"));
+        (address st, address jt, address lt, address kernel, address accountant) = factory.getMarket(makeAddr("UNKNOWN"));
         assertEq(st, address(0), "unknown senior");
         assertEq(jt, address(0), "unknown junior");
         assertEq(lt, address(0), "unknown liquidity");
         assertEq(kernel, address(0), "unknown kernel");
+        assertEq(accountant, address(0), "unknown accountant");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -257,14 +257,14 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         external
         view
         override(IRoycoFactory)
-        returns (address seniorTranche, address juniorTranche, address liquidityProviderTranche, address kernel)
+        returns (address seniorTranche, address juniorTranche, address liquidityProviderTranche, address kernel, address accountant)
     {
         kernel = _getRoycoFactoryStorage().trancheToKernel[_tranche];
         // Unknown tranche: every component resolves to zero
-        if (kernel == address(0)) return (address(0), address(0), address(0), address(0));
-        // The kernel's immutables are the single source of truth for the market's tranche set
+        if (kernel == address(0)) return (address(0), address(0), address(0), address(0), address(0));
+        // The kernel's immutables are the single source of truth for the market's contract set
         IRoycoDayKernel dayKernel = IRoycoDayKernel(kernel);
-        return (dayKernel.SENIOR_TRANCHE(), dayKernel.JUNIOR_TRANCHE(), dayKernel.LIQUIDITY_PROVIDER_TRANCHE(), kernel);
+        return (dayKernel.SENIOR_TRANCHE(), dayKernel.JUNIOR_TRANCHE(), dayKernel.LIQUIDITY_PROVIDER_TRANCHE(), kernel, dayKernel.ACCOUNTANT());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

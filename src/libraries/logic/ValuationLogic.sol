@@ -114,8 +114,8 @@ library ValuationLogic {
      */
     function _convertToShares(NAV_UNIT _value, NAV_UNIT _totalValue, uint256 _totalSupply, Math.Rounding _rounding) internal pure returns (uint256 shares) {
         // The effective supply is the total supply plus the virtual shares
-        uint256 effectiveSupply = _totalSupply + VIRTUAL_SHARES;
-        NAV_UNIT denominator = _totalValue + VIRTUAL_VALUE;
+        uint256 effectiveSupply = (_totalSupply + VIRTUAL_SHARES);
+        NAV_UNIT denominator = (_totalValue + VIRTUAL_VALUE);
         // Arm the clamp only in the collapsed-price regime where fair pricing itself mints massive share counts
         uint256 clampedShares = type(uint256).max;
         if (effectiveSupply.mulDiv((WAD - MAX_MINT_DILUTION_WAD), MAX_MINT_DILUTION_WAD, Math.Rounding.Ceil) > toUint256(denominator)) {
