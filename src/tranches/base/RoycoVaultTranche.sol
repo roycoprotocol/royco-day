@@ -248,7 +248,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     /**
      * @dev Deposits the assets into the Royco market through the kernel's in-kind deposit entrypoint
      * @dev The kernel resolves the deposited tranche from this calling tranche, prices the shares at its pre-deposit effective NAV against the post-sync supply, and mints them to the receiver
-     * @dev Forwards msg.sender as the caller the kernel screens with the receiver against the market's blacklist
+     * @dev Forwards msg.sender as the caller for an execution, a simulation carries the null synthetic caller so previews never vary by caller
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _assets The amount of assets to deposit, denominated in the tranche's base asset units
      * @param _receiver The address that receives the minted shares
@@ -257,13 +257,15 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     function _deposit(DispatchMode _mode, TRANCHE_UNIT _assets, address _receiver) internal virtual returns (uint256 shares) {
         // Deposit the assets into the Royco market through the kernel's in-kind deposit entrypoint, which prices and mints the shares
         // The kernel rejects a deposit that prices to zero shares
-        shares = abi.decode(KERNEL._dispatchAndUnwrap(_mode, abi.encodeCall(IRoycoDayKernel.inkindDeposit, (_mode, _assets, msg.sender, _receiver))), (uint256));
+        return abi.decode(
+            KERNEL._dispatchAndUnwrap(_mode, abi.encodeCall(IRoycoDayKernel.inkindDeposit, (_mode, _assets, _resolveCaller(_mode), _receiver))), (uint256)
+        );
     }
 
     /**
      * @dev Redeems the shares from the Royco market through the kernel's in-kind redemption entrypoint
      * @dev The kernel resolves the redeemed tranche from this calling tranche, transfers the redeemed assets directly to the receiver, and burns the owner's shares after scaling their claims
-     * @dev Forwards msg.sender as the caller the kernel screens with the owner and receiver against the market's blacklist
+     * @dev Forwards msg.sender as the caller for an execution, a simulation carries the null synthetic caller so previews never vary by caller
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _shares The number of shares to redeem
      * @param _receiver The address that receives the redeemed assets
@@ -274,8 +276,14 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         // Redeem the shares through the kernel's in-kind redemption entrypoint, the kernel transfers the redeemed assets directly to the receiver
         // The kernel rejects a zero-share redemption
         return abi.decode(
-            KERNEL._dispatchAndUnwrap(_mode, abi.encodeCall(IRoycoDayKernel.inkindRedeem, (_mode, _shares, msg.sender, _owner, _receiver))), (AssetClaims)
+            KERNEL._dispatchAndUnwrap(_mode, abi.encodeCall(IRoycoDayKernel.inkindRedeem, (_mode, _shares, _resolveCaller(_mode), _owner, _receiver))),
+            (AssetClaims)
         );
+    }
+
+    /// @dev Resolves the caller forwarded to the kernel: an execution forwards msg.sender and a simulation carries the null address so previews never vary by caller
+    function _resolveCaller(DispatchMode _mode) internal view returns (address) {
+        return (_mode == DispatchMode.SIMULATE) ? address(0) : msg.sender;
     }
 
     /**

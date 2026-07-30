@@ -164,12 +164,12 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         returns (uint256 shares, TRANCHE_UNIT lptAssetsOut)
     {
         // Orchestrate the multi-asset deposit in the kernel, bounding the liquidity add's slippage by the caller's minimum LPT assets out
-        (shares, lptAssetsOut) = abi.decode(
+        return abi.decode(
             KERNEL._dispatchAndUnwrap(
                 _mode,
                 abi.encodeCall(
                     IRoycoDayKernel.lptDepositMultiAsset,
-                    (_mode, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(_minLPTAssetsOut), msg.sender, _receiver)
+                    (_mode, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(_minLPTAssetsOut), _resolveCaller(_mode), _receiver)
                 )
             ),
             (uint256, TRANCHE_UNIT)
@@ -179,7 +179,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
     /**
      * @dev Redeems the shares through the kernel's multi-asset redemption entrypoint, the kernel transfers the constituents directly to the receiver
      *      and burns the owner's shares after scaling their claims
-     * @dev Forwards msg.sender as the caller the kernel screens with the owner and receiver against the market's blacklist
+     * @dev Forwards msg.sender as the caller for an execution, a simulation carries the null synthetic caller so previews never vary by caller
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _shares The number of LPT shares to redeem
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must yield (slippage bound)
@@ -205,7 +205,10 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         // The kernel rejects a zero-share redemption at its LPT redemption leg
         return abi.decode(
             KERNEL._dispatchAndUnwrap(
-                _mode, abi.encodeCall(IRoycoDayKernel.lptRedeemMultiAsset, (_mode, _shares, _minSTSharesOut, _minQuoteAssetsOut, msg.sender, _owner, _receiver))
+                _mode,
+                abi.encodeCall(
+                    IRoycoDayKernel.lptRedeemMultiAsset, (_mode, _shares, _minSTSharesOut, _minQuoteAssetsOut, _resolveCaller(_mode), _owner, _receiver)
+                )
             ),
             (AssetClaims, uint256)
         );

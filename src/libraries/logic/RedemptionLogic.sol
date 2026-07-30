@@ -146,7 +146,7 @@ library RedemptionLogic {
             inkindRedeem($, _immutables, DispatchMode.EXECUTE, TrancheType.LIQUIDITY_PROVIDER, _lptShares, _caller, _owner, address(this));
 
         // Remove the redeemed LPT assets from the liquidity venue: the senior shares return to the kernel and the quote goes to the receiver
-        // The removal settles in both modes since the kernel custodies the BPT, so the ST leg redeems really delivered senior shares even in a preview
+        // The removal settles in both modes since the kernel custodies the BPT, so the ST leg delivers senior shares even in a preview
         uint256 stSharesWithdrawn;
         NAV_UNIT lptAssetPrice;
         (stSharesWithdrawn, quoteAssets, lptAssetPrice) =
