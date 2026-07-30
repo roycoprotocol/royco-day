@@ -39,7 +39,7 @@ interface IBalancerV3VenueCallbacks {
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
      * @param _minLPTAssetsOut The minimum BPT (LPT assets) that must be minted, bounding the add's slippage at the Vault
      * @return lptAssets The BPT (LPT assets) minted to this kernel by the add
-     * @return lptAssetPrice The value of 1 whole BPT against the post-add pool state, produced only for a preview to pin the operation's cache with (zero when settling)
+     * @return lptAssetPrice The value of 1 whole BPT against the post-add pool state, produced only for a preview to cache for the operation (zero when settling)
      */
     function addBalancerV3Liquidity(
         DispatchMode _mode,
@@ -62,7 +62,7 @@ interface IBalancerV3VenueCallbacks {
      * @param _quoteAssetsReceiver The recipient of the quote assets withdrawn
      * @return stShares The senior tranche shares withdrawn back to this kernel by the unwrap
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
-     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the mark a caller's preview pins the operation's cache with
+     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the mark a caller's preview caches for the operation
      */
     function removeBalancerV3Liquidity(
         DispatchMode _mode,

@@ -241,7 +241,7 @@ library AccountingSyncLogic {
         returns (SyncedAccountingState memory state)
     {
         // Execute the post-op sync on the accountant, committing the final state of the accounting
-        // The LPT depth is priced live at the settled venue, a multi-asset preview prices at the frame mark it pinned for its venue operation
+        // The LPT depth is priced live at the settled venue, a multi-asset preview prices at the frame mark it cached for its venue operation
         state = IRoycoDayAccountant(_immutables.accountant)
             .postOpSyncTrancheAccounting(
                 _op, ValuationLogic._getCollateralNAV($), ValuationLogic._getLiquidityProviderTrancheRawNAV($), _stSelfLiquidationBonusNAV
@@ -252,19 +252,21 @@ library AccountingSyncLogic {
             require(state.coverageUtilizationWAD <= WAD, IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED());
         }
         // Enforce the liquidity requirement for operations that can worsen liquidity (raise the senior exposure or reduce the venue's market-making depth)
-        // A multi-asset composite flow inverts the standalone arms: its intermediate legs (the deposit's ST leg, the redemption's LPT leg) are waived
-        // and its final leg's post-op (the deposit's LPT leg, the redemption's ST leg) enforces against the flow's settled state
         (bool inMultiAssetFlow,) = Cache._read(CacheKey.IN_MULTI_ASSET_FLOW);
         bool liquidityRequirementSatisfied = (state.liquidityUtilizationWAD <= WAD);
         if (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_REDEMPTION) {
             if (inMultiAssetFlow && !liquidityRequirementSatisfied) {
-                Cache._write(CacheKey.LIQUIDITY_CHECK_DEFERRED, 1);
+                // Record the worsening leg's violation for the flow's exit instead of reverting, a later leg heals it
+                Cache._write(CacheKey.PENDING_LIQUIDITY_VIOLATION, 1);
             } else {
+                // A standalone operation has no downstream leg to heal a violation, so it enforces at its own settled state
                 require(liquidityRequirementSatisfied, IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED());
             }
         }
+        // A final leg that settles satisfied heals the recorded violation
+        // An operation that only improves liquidity never records one, so a partial heal of an already violated market always completes
         if (inMultiAssetFlow && liquidityRequirementSatisfied && (_op == Operation.LPT_DEPOSIT || _op == Operation.ST_REDEMPTION)) {
-            Cache._delete(CacheKey.LIQUIDITY_CHECK_DEFERRED);
+            Cache._delete(CacheKey.PENDING_LIQUIDITY_VIOLATION);
         }
 
         // Refresh the cached senior share rate at the settled post-op state
@@ -287,7 +289,7 @@ library AccountingSyncLogic {
      * @notice Marks and commits the liquidity provider tranche's fresh raw NAV and refreshes the in-memory state packet
      * @dev Called wherever the depth may have moved under the committed mark: after a sync's fee and premium mints, or a reinvestment
      *      The committed liquidity provider tranche raw NAV stays out of the P&L waterfall and the senior share rate provider's dependency loop
-     * @dev Prices the depth live at the venue oracle, a multi-asset deposit or redemption preview reads the frame mark it pinned for its venue operation instead
+     * @dev Prices the depth live at the venue oracle, a multi-asset deposit or redemption preview reads the frame mark it cached for its venue operation instead
      * @dev Refreshes the state packet in place so every downstream consumer reads the most up-to-date values
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
@@ -306,5 +308,19 @@ library AccountingSyncLogic {
         IRoycoDayAccountant(_immutables.accountant).commitLiquidityProviderTrancheRawNAV(lptRawNAV);
         _state.lptRawNAV = lptRawNAV;
         _state.liquidityUtilizationWAD = UtilizationLogic._computeLiquidityUtilization(_state.stEffectiveNAV, _state.minLiquidityWAD, lptRawNAV);
+    }
+
+    /// @notice Marks the start of a multi-asset composite flow so a worsening leg's post-op records a liquidity violation instead of enforcing it
+    /// @dev Must be paired with _exitMultiAssetFlow, which unmarks the flow and enforces the requirement on the flow's final settled state
+    function _enterMultiAssetFlow() internal {
+        Cache._write(CacheKey.IN_MULTI_ASSET_FLOW, 1);
+    }
+
+    /// @notice Unmarks the settled multi-asset composite flow and enforces any recorded liquidity violation its later legs never healed
+    /// @dev Must be called before the composite's preview revert so the requirement is enforced in preview and execution alike
+    function _exitMultiAssetFlow() internal {
+        Cache._delete(CacheKey.IN_MULTI_ASSET_FLOW);
+        (bool pendingLiquidityViolation,) = Cache._read(CacheKey.PENDING_LIQUIDITY_VIOLATION);
+        require(!pendingLiquidityViolation, IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED());
     }
 }

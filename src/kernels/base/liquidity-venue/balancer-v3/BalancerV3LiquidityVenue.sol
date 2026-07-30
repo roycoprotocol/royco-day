@@ -156,7 +156,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         }
 
         // Floor the ST share rate to 1 wei so the Balancer pool never receives a zero rate, which it would reject
-        return (rate == 0 ? WAD : rate);
+        return (rate == 0 ? 1 : rate);
     }
 
     // =============================
@@ -318,11 +318,11 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
      */
     function setBPTOracle(address _bptOracle, bool _syncBeforeUpdate) external restricted {
         // If specified, sync the tranche accounting against the outgoing oracle before updating it
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCache();
+        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCached();
         // Update the BPT oracle
         _setBPTOracle(_bptOracle);
         // Sync the tranche accounting against the incoming oracle so the committed liquidity provider tranche raw NAV reflects it
-        _preOpSyncTrancheAccountingWithPriceCache();
+        _preOpSyncTrancheAccountingWithPriceCached();
     }
 
     /// @notice Sets the maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT

@@ -38,7 +38,7 @@ library BalancerV3VenueLogic {
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
      * @param _minLPTAssetsOut The minimum BPT (LPT assets) that must be minted, bounding the add's slippage at the Vault
      * @return lptAssets The BPT (LPT assets) minted to this kernel by the add
-     * @return lptAssetPrice The value of 1 whole BPT against the post-add pool state, produced only for a preview to pin the operation's cache with (zero when settling)
+     * @return lptAssetPrice The value of 1 whole BPT against the post-add pool state, produced only for a preview to cache for the operation (zero when settling)
      */
     function addBalancerV3Liquidity(
         IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
@@ -120,7 +120,7 @@ library BalancerV3VenueLogic {
      * @param _quoteAssetsReceiver The recipient of the quote assets withdrawn
      * @return stShares The senior tranche shares withdrawn back to this kernel by the unwrap
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
-     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the mark a caller's preview pins the operation's cache with
+     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the mark a caller's preview caches for the operation
      */
     function removeBalancerV3Liquidity(
         IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
@@ -156,7 +156,7 @@ library BalancerV3VenueLogic {
         quoteAssets = amountsOut[_immutables.quoteAssetPoolIndex];
 
         // Price 1 whole BPT against the post-remove pool state in both modes: the removal settles either way, so a caller's preview
-        // can pin this mark without assuming the venue leaves live-priceable post-remove state
+        // can cache this mark without assuming the venue leaves live-priceable post-remove state
         lptAssetPrice = IRoycoDayKernel(address(this)).queryLPTAssetOracle();
 
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement

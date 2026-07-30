@@ -539,7 +539,7 @@ interface IRoycoDayKernel {
      * @param _quoteAssets The exact amount of quote assets to add into the liquidity venue
      * @param _minLPTAssetsOut The minimum liquidity provider tranche assets that must be minted, bounding the add's slippage
      * @return lptAssets The liquidity provider tranche assets minted by the add
-     * @return lptAssetPrice The value of 1 whole LPT asset against the post-add venue state, produced only for a preview to pin the operation's cache with (zero when settling)
+     * @return lptAssetPrice The value of 1 whole LPT asset against the post-add venue state, produced only for a preview to cache for the operation (zero when settling)
      */
     function addLiquidity(
         DispatchMode _mode,
@@ -560,7 +560,7 @@ interface IRoycoDayKernel {
      * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets, the withdrawn senior shares are returned to the kernel for the combined senior unwind
      * @return stShares The senior tranche shares withdrawn by the removal
      * @return quoteAssets The quote assets withdrawn by the removal
-     * @return lptAssetPrice The value of 1 whole LPT asset against the post-remove venue state, the mark a caller's preview pins the operation's cache with
+     * @return lptAssetPrice The value of 1 whole LPT asset against the post-remove venue state, the mark a caller's preview caches for the operation
      */
     function removeLiquidity(
         DispatchMode _mode,

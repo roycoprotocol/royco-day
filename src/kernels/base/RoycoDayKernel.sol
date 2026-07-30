@@ -411,11 +411,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         restricted
     {
         // If specified, sync the tranche accounting to reflect the PNL up to this point in time at the outgoing oracle's price
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCache();
+        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCached();
         // Update the collateral asset oracle
         _setCollateralAssetOracle(_collateralAssetOracle, _stalenessThresholdSeconds);
         // Sync the tranche accounting to reflect the PNL from the updated oracle's price (the sync re-initializes the price cache to the new price)
-        _preOpSyncTrancheAccountingWithPriceCache();
+        _preOpSyncTrancheAccountingWithPriceCached();
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -527,7 +527,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @dev Uses the price cache since it is called by admin setters outside a cached operation, so it re-initializes the price cache to the live price before syncing
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function _preOpSyncTrancheAccountingWithPriceCache() internal virtual withCollateralPriceCached returns (SyncedAccountingState memory state) {
+    function _preOpSyncTrancheAccountingWithPriceCached() internal virtual withCollateralPriceCached returns (SyncedAccountingState memory state) {
         return AccountingSyncLogic._preOpSyncTrancheAccounting(_getRoycoDayKernelStorage(), getImmutableState());
     }
 

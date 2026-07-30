@@ -119,8 +119,8 @@ library DepositLogic {
         external
         returns (uint256 trancheSharesMinted, TRANCHE_UNIT lptAssetsOut)
     {
-        // Mark this process in the multi-asset flow: the post-op sync waives the liquidity requirement on its intermediate legs, deferring it to the final leg's settled state
-        Cache._write(CacheKey.IN_MULTI_ASSET_FLOW, 1);
+        // Mark the multi-asset flow, whose exit below judges the liquidity requirement at the flow's final settled state
+        AccountingSyncLogic._enterMultiAssetFlow();
 
         // Collateral leg: an ST deposit minting the add's senior shares to the kernel
         // Its post-op waives the liquidity requirement that this operation may satisfy below with the added liquidity
@@ -133,19 +133,16 @@ library DepositLogic {
         NAV_UNIT lptAssetPrice;
         (lptAssetsOut, lptAssetPrice) = IRoycoDayKernel(address(this)).addLiquidity(_mode, stSharesMinted, _quoteAssets, _minLPTAssetsOut);
 
-        // Pin the venue's post-add price for a preview, whose unwound add would otherwise price the pre-add pool live
-        // Execution pins nothing: the LPT leg prices the settled post-add pool live at the same mark
+        // Cache the venue's post-add price for a preview, whose unwound add would otherwise price the pre-add pool live
+        // Execution caches nothing: the LPT leg prices the settled post-add pool live at the same mark
         if (_mode == DispatchMode.SIMULATE) Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(lptAssetPrice));
 
         // LPT leg: an in-kind LPT deposit of the minted assets at the post-add price, priced and minted to the receiver by the shared primitive
         // Its in-flow post-op enforces the liquidity requirement against this flow's settled state
         trancheSharesMinted = inkindDeposit($, _immutables, DispatchMode.EXECUTE, TrancheType.LIQUIDITY_PROVIDER, lptAssetsOut, _caller, _receiver);
 
-        // Unmark the settled multi-asset flow and enforce a liquidity check an intermediate leg deferred that the flow's final settled state never healed
-        // Checked before the preview revert so a simulation of a violating flow reverts exactly like an execution
-        Cache._delete(CacheKey.IN_MULTI_ASSET_FLOW);
-        (bool isLiquidityRequirementViolated,) = Cache._read(CacheKey.LIQUIDITY_CHECK_DEFERRED);
-        require(!isLiquidityRequirementViolated, IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED());
+        // Exit the settled multi-asset flow, reverting on a pending liquidity violation its final settled state never healed
+        AccountingSyncLogic._exitMultiAssetFlow();
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
         if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(trancheSharesMinted, lptAssetsOut));
