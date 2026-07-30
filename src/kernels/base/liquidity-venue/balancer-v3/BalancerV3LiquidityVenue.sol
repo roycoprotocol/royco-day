@@ -100,8 +100,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     error VAULT_ALREADY_UNLOCKED();
 
     /// @dev Requires the Vault to be locked so the operation opens the outermost unlock and settles against a session no other party has touched
-    /// @dev Should be placed on every venue operation that unlocks the Vault: an inherited session charges the pool's round-trip fee on a
-    ///      proportional removal and waives the settlement check Balancer runs only on the outermost frame
+    /// @dev Should be placed on every venue operation that unlocks the Vault
     modifier whenVaultLocked() {
         require(!_vault.isUnlocked(), VAULT_ALREADY_UNLOCKED());
         _;

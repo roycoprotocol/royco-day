@@ -2,12 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { AccessManagedUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
-import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
-import { IRoycoAuth } from "../interfaces/IRoycoAuth.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";

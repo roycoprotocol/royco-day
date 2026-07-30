@@ -10,7 +10,7 @@ import { IRoycoPriceOracle } from "../../interfaces/IRoycoPriceOracle.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { AggregatorV3Interface } from "../../interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { Cache, CacheKey } from "../../libraries/Cache.sol";
-import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
+import { WAD, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, DispatchMode, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../libraries/Units.sol";
 import { AccountingSyncLogic } from "../../libraries/logic/AccountingSyncLogic.sol";

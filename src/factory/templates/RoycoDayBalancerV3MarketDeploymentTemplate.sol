@@ -24,7 +24,6 @@ import { BalancerV3LiquidityVenue } from "../../kernels/base/liquidity-venue/bal
 import { RoycoDayBalancerV3Hooks } from "../../kernels/base/liquidity-venue/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
 import { RoycoDayBalancerV3HooksStandIn } from "../../kernels/base/liquidity-venue/balancer-v3/hooks/RoycoDayBalancerV3HooksStandIn.sol";
 import { TrancheType } from "../../libraries/Types.sol";
-import { OracleClockBase } from "../../oracle/base/clock/OracleClockBase.sol";
 import { RoycoLiquidityProviderTranche } from "../../tranches/RoycoLiquidityProviderTranche.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,

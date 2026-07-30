@@ -9,7 +9,7 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { WAD_DECIMALS, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
+import { WAD_DECIMALS } from "../../libraries/Constants.sol";
 import { AssetClaims, DispatchMode, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../../libraries/Units.sol";
 import { AssetLedgerLogic } from "../../libraries/logic/AssetLedgerLogic.sol";
