@@ -35,11 +35,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @dev One whole collateral asset: 10^(COLLATERAL_ASSET_DECIMALS)
     /// @dev A single collateral asset price values the coinvested collateral both the senior and junior tranches deposit
-    uint256 internal immutable ONE_WHOLE_COLLATERAL_ASSET;
+    TRANCHE_UNIT internal immutable ONE_WHOLE_COLLATERAL_ASSET;
 
     /// @dev One whole LPT asset: 10^(LPT_ASSET_DECIMALS)
     /// @dev A single LPT asset price values the liquidity provider tranche's market-making position token
-    uint256 internal immutable ONE_WHOLE_LPT_ASSET;
+    TRANCHE_UNIT internal immutable ONE_WHOLE_LPT_ASSET;
 
     /// @inheritdoc IRoycoDayKernel
     address public immutable override(IRoycoDayKernel) SENIOR_TRANCHE;
@@ -121,8 +121,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         QUOTE_ASSET = _params.quoteAsset;
         ACCOUNTANT = _params.accountant;
         ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _params.enforceVaultSharesTransferWhitelist;
-        ONE_WHOLE_COLLATERAL_ASSET = (10 ** IERC20Metadata(_params.collateralAsset).decimals());
-        ONE_WHOLE_LPT_ASSET = (10 ** IERC20Metadata(_params.lptAsset).decimals());
+        ONE_WHOLE_COLLATERAL_ASSET = toTrancheUnits(10 ** IERC20Metadata(_params.collateralAsset).decimals());
+        ONE_WHOLE_LPT_ASSET = toTrancheUnits(10 ** IERC20Metadata(_params.lptAsset).decimals());
     }
 
     /**
@@ -165,24 +165,25 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT value) {
-        return toNAVUnits(toUint256(_collateralAssets.mulDiv(toUint256(_getCollateralAssetPrice()), ONE_WHOLE_COLLATERAL_ASSET, Math.Rounding.Floor)));
+        return _collateralAssets.mulDiv(_getCollateralAssetPrice(), ONE_WHOLE_COLLATERAL_ASSET, Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoDayKernel
     function convertValueToCollateralAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT collateralAssets) {
-        return toTrancheUnits(toUint256(_value.mulDiv(ONE_WHOLE_COLLATERAL_ASSET, toUint256(_getCollateralAssetPrice()), Math.Rounding.Floor)));
+        return _value.mulDiv(ONE_WHOLE_COLLATERAL_ASSET, _getCollateralAssetPrice(), Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoDayKernel
     function convertLPTAssetsToValue(TRANCHE_UNIT _lptAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT value) {
-        return toNAVUnits(toUint256(_lptAssets.mulDiv(toUint256(_getLPTAssetPrice()), ONE_WHOLE_LPT_ASSET, Math.Rounding.Floor)));
+        return _lptAssets.mulDiv(_getLPTAssetPrice(), ONE_WHOLE_LPT_ASSET, Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoDayKernel
     function convertValueToLPTAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT lptAssets) {
+        // An uninitialized venue reports a zero price, which converts to zero LPT assets instead of a division revert
         NAV_UNIT lptAssetPrice = _getLPTAssetPrice();
         if (lptAssetPrice == ZERO_NAV_UNITS) return ZERO_TRANCHE_UNITS;
-        return toTrancheUnits(toUint256(_value.mulDiv(ONE_WHOLE_LPT_ASSET, toUint256(lptAssetPrice), Math.Rounding.Floor)));
+        return _value.mulDiv(ONE_WHOLE_LPT_ASSET, lptAssetPrice, Math.Rounding.Floor);
     }
 
     // =============================

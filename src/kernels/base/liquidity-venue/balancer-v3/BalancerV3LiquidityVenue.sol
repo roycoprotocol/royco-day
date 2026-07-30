@@ -266,7 +266,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply(LPT_ASSET));
         if (bptTotalSupply == ZERO_TRANCHE_UNITS) return ZERO_NAV_UNITS;
         NAV_UNIT bptTotalValue = toNAVUnits(LPOracleBase(_getBalancerV3LiquidityVenueStorage().bptOracle).computeTVL());
-        lptAssetPrice = bptTotalValue.mulDiv(toTrancheUnits(ONE_WHOLE_LPT_ASSET), bptTotalSupply, Math.Rounding.Floor);
+        lptAssetPrice = ONE_WHOLE_LPT_ASSET.mulDiv(bptTotalValue, bptTotalSupply, Math.Rounding.Floor);
         require(lptAssetPrice != ZERO_NAV_UNITS, INVALID_PRICE());
     }
 

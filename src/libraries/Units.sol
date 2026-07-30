@@ -60,6 +60,16 @@ library RoycoUnitsMath {
         return toTrancheUnits(Math.mulDiv(toUint256(_a), toUint256(_b), toUint256(_c), _rounding));
     }
 
+    /// @notice Returns `(_a * _b) / _c` where `_a`/`_c` are tranche-denominated and `_b` is NAV-denominated, with explicit rounding
+    function mulDiv(TRANCHE_UNIT _a, NAV_UNIT _b, TRANCHE_UNIT _c, Math.Rounding _rounding) internal pure returns (NAV_UNIT) {
+        return toNAVUnits(Math.mulDiv(toUint256(_a), toUint256(_b), toUint256(_c), _rounding));
+    }
+
+    /// @notice Returns `(_a * _b) / _c` where `_a`/`_c` are NAV-denominated and `_b` is tranche-denominated, with explicit rounding
+    function mulDiv(NAV_UNIT _a, TRANCHE_UNIT _b, NAV_UNIT _c, Math.Rounding _rounding) internal pure returns (TRANCHE_UNIT) {
+        return toTrancheUnits(Math.mulDiv(toUint256(_a), toUint256(_b), toUint256(_c), _rounding));
+    }
+
     /// @notice Returns `(_a * _b) / _c` where `_a` is tranche-denominated and `_b`/`_c` are scalars, with explicit rounding
     function mulDiv(TRANCHE_UNIT _a, uint256 _b, uint256 _c, Math.Rounding _rounding) internal pure returns (TRANCHE_UNIT) {
         return toTrancheUnits(Math.mulDiv(toUint256(_a), _b, _c, _rounding));
