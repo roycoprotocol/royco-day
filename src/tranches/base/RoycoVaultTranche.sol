@@ -282,6 +282,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     }
 
     /// @dev Resolves the caller forwarded to the kernel: an execution forwards msg.sender and a simulation carries the null address so previews never vary by caller
+    /// @param _mode The dispatch mode used to resolve the caller
     function _resolveCaller(DispatchMode _mode) internal view returns (address) {
         return (_mode == DispatchMode.SIMULATE) ? address(0) : msg.sender;
     }

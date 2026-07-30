@@ -26,6 +26,7 @@ library BalancerV3VenueLogic {
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for TRANCHE_UNIT;
     using SafeERC20 for IERC20;
+    using DispatchLogic for address;
 
     /**
      * @notice Callback that performs the unbalanced BPT mint inside the unlocked Balancer V3 Vault's context
@@ -199,8 +200,10 @@ library BalancerV3VenueLogic {
         // Value the ST shares that need to be reinvested in NAV units at the synced senior share rate (effective NAV over the post-mint supply)
         NAV_UNIT stSharesToReinvestNAV = ValuationLogic._convertToValue(stSharesToReinvest, _totalSTShares, _stEffectiveNAV, Math.Rounding.Ceil);
         // Mark that senior NAV to its fair BPT at the manipulation-resistant oracle, discounted by the max tolerated slippage
-        TRANCHE_UNIT minLPTAssetsOut =
-            IRoycoDayKernel(address(this)).convertValueToLPTAssets(stSharesToReinvestNAV).mulDiv((WAD - _maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);
+        (bool priceExists, bytes memory returnData) = address(this)._tryExecute(abi.encodeCall(IRoycoDayKernel.convertValueToLPTAssets, stSharesToReinvestNAV));
+        if (!priceExists) return;
+        TRANCHE_UNIT equivalentLPTAssetsForValue = abi.decode(returnData, (TRANCHE_UNIT));
+        TRANCHE_UNIT minLPTAssetsOut = equivalentLPTAssetsForValue.mulDiv((WAD - _maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);
         // Preemptively return if there exists no floor on the reinvested value
         if (minLPTAssetsOut == ZERO_TRANCHE_UNITS) return;
 
@@ -220,13 +223,13 @@ library BalancerV3VenueLogic {
         }
 
         // Decode the BPT minted from the single-sided provision
-        TRANCHE_UNIT lptAssetsMinted;
-        assembly ("memory-safe") { lptAssetsMinted := mload(add(callbackReturnData, 0x60)) }
+        TRANCHE_UNIT lptAssetsOut;
+        assembly ("memory-safe") { lptAssetsOut := mload(add(callbackReturnData, 0x60)) }
 
         // Debit the reinvested ST shares and credit the BPT minted from/to the LPT
         $.lptOwnedSeniorTrancheShares = lptOwnedSeniorTrancheShares - stSharesToReinvest;
-        $.totalLPTAssets = $.totalLPTAssets + lptAssetsMinted;
+        $.totalLPTAssets = $.totalLPTAssets + lptAssetsOut;
 
-        emit IRoycoDayKernel.LiquidityPremiumReinvested(stSharesToReinvest, lptAssetsMinted);
+        emit IRoycoDayKernel.LiquidityPremiumReinvested(stSharesToReinvest, lptAssetsOut);
     }
 }

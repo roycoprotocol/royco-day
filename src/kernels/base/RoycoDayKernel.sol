@@ -180,10 +180,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function convertValueToLPTAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT lptAssets) {
-        // An uninitialized venue reports a zero price, which converts to zero LPT assets instead of a division revert
-        NAV_UNIT lptAssetPrice = _getLPTAssetPrice();
-        if (lptAssetPrice == ZERO_NAV_UNITS) return ZERO_TRANCHE_UNITS;
-        return _value.mulDiv(ONE_WHOLE_LPT_ASSET, lptAssetPrice, Math.Rounding.Floor);
+        return _value.mulDiv(ONE_WHOLE_LPT_ASSET, _getLPTAssetPrice(), Math.Rounding.Floor);
     }
 
     // =============================
