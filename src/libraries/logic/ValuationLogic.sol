@@ -102,10 +102,9 @@ library ValuationLogic {
      * @notice Returns the number of shares that have a claim on the specified value, clamped by the protocol's max mint dilution
      * @dev The mint-sizing share conversion, shared by the tranches and the kernel-side mint sizing so both resolve identical share counts
      * @dev See _convertToSharesUnclamped for the clamp-free variant, used only as a valuation reference and never to size a real mint
-     * @dev The mint-dilution clamp: a single mint may own at most MAX_MINT_DILUTION_WAD / WAD of the post-mint effective supply, so the
-     *      minted shares never exceed supply · MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD), the ownership bound restated as a max supply-growth ratio
-     * @dev The clamp arms only when the effective share price sits below (WAD − MAX_MINT_DILUTION_WAD) / MAX_MINT_DILUTION_WAD, the collapsed-price
-     *      regime a supply-inflation attack needs, so a mint into a healthily priced tranche always prices fairly
+     * @dev The mint-dilution clamp caps the share of the post-mint supply a single mint can own, bounding the share count any one mint can create
+     * @dev The clamp arms only in the collapsed-price regime where fair pricing itself mints runaway share counts, the state a
+     *      supply-inflation attack needs, so a mint into a healthily priced tranche always prices fairly
      * @dev With no shares outstanding the conversion stays 1:1 (a bootstrap mint dilutes nobody, so the clamp is exempt)
      * @param _value The value to convert in NAV units
      * @param _totalValue The total tranche controlled value in NAV units
@@ -117,12 +116,10 @@ library ValuationLogic {
         // The effective supply is the total supply plus the virtual shares
         uint256 effectiveSupply = _totalSupply + VIRTUAL_SHARES;
         NAV_UNIT denominator = _totalValue + VIRTUAL_VALUE;
-        // Arm the clamp only in the collapsed-price regime:
-        // price < (WAD − MAX_MINT_DILUTION_WAD) / MAX_MINT_DILUTION_WAD ⟺ ⌈supply · (WAD − MAX_MINT_DILUTION_WAD) / MAX_MINT_DILUTION_WAD⌉ > denominator
-        // The ceil keeps the strict integer comparison exact against the fractional threshold
+        // Arm the clamp only in the collapsed-price regime where fair pricing itself mints massive share counts
         uint256 clampedShares = type(uint256).max;
         if (effectiveSupply.mulDiv((WAD - MAX_MINT_DILUTION_WAD), MAX_MINT_DILUTION_WAD, Math.Rounding.Ceil) > toUint256(denominator)) {
-            // Cap the mint at owning MAX_MINT_DILUTION_WAD of the post-mint effective supply
+            // Cap the mint at the max share of the post-mint effective supply a single mint may own
             clampedShares = effectiveSupply.mulDiv(MAX_MINT_DILUTION_WAD, (WAD - MAX_MINT_DILUTION_WAD), _rounding);
         }
         // Below the cap the mint takes the fair, unclamped virtual-shares price

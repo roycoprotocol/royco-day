@@ -96,6 +96,17 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     /// @notice Thrown when setting a BPT oracle configured to revert while the vault is unlocked, the venue reads it through the unlocked vault (previews and hooks)
     error BPT_ORACLE_CANNOT_REVERT_WHILE_VAULT_UNLOCKED();
 
+    /// @notice Thrown when a venue liquidity operation is dispatched into a Vault another party already unlocked
+    error VAULT_ALREADY_UNLOCKED();
+
+    /// @dev Requires the Vault to be locked so the operation opens the outermost unlock and settles against a session no other party has touched
+    /// @dev Should be placed on every venue operation that unlocks the Vault: an inherited session charges the pool's round-trip fee on a
+    ///      proportional removal and waives the settlement check Balancer runs only on the outermost frame
+    modifier whenVaultLocked() {
+        require(!_vault.isUnlocked(), VAULT_ALREADY_UNLOCKED());
+        _;
+    }
+
     /// @notice Constructs the Balancer V3 liquidity venue
     /// @param _balancerV3Vault The instance of the singleton Balancer V3 Vault
     constructor(IVault _balancerV3Vault) VaultGuard(_balancerV3Vault) {
@@ -166,6 +177,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     /**
      * @inheritdoc IRoycoDayKernel
      * @dev Dispatches the add liquidity callback below through the unlocked Vault
+     * @dev Requires the Vault to be locked so this operation opens the outermost unlock, never inheriting another party's session
      * @dev A preview unwinds every transient balance change via the callback's result-carrying revert
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
@@ -178,6 +190,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         external
         override(IRoycoDayKernel)
         onlySelf
+        whenVaultLocked
         returns (TRANCHE_UNIT lptAssets, NAV_UNIT lptAssetPrice)
     {
         // Both transports yield the unlock's ABI encoded bytes return byte for byte
@@ -197,6 +210,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     /**
      * @inheritdoc IRoycoDayKernel
      * @dev Dispatches the remove liquidity callback below through the unlocked Vault
+     * @dev Requires the Vault to be locked so this operation opens the outermost unlock, never inheriting another party's session
      * @dev A preview unwinds every transient balance change via the callback's result-carrying revert
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
@@ -210,6 +224,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         external
         override(IRoycoDayKernel)
         onlySelf
+        whenVaultLocked
         returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice)
     {
         // Both transports yield the unlock's ABI encoded bytes return byte for byte
@@ -234,6 +249,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
      * @dev Deploys the idle liquidity-premium senior share balance the kernel holds into the BPT via a gated single-sided add
      * @dev The min-BPT-out floors the add at the manipulation-resistant oracle's fair value (not the pool spot) less the max reinvestment slippage, so a manipulated pool cannot widen the tolerance
      * @dev Tolerates reversions to ensure a tranche operation doesn't revert on a failing reinvestment
+     * @dev Requires the Vault to be locked so this deployment opens the outermost unlock, never inheriting another party's session
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
     function attemptLiquidityPremiumReinvestment(
@@ -244,6 +260,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         external
         override(IRoycoDayKernel)
         onlySelf
+        whenVaultLocked
     {
         BalancerV3VenueLogic.attemptLiquidityPremiumReinvestment(
             _getRoycoDayKernelStorage(),
