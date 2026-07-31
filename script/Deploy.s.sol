@@ -634,7 +634,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // alongside the market's other role bindings (the factory only binds roles for an active template)
         (params.collateralAssetOracleBindingSelectors, params.collateralAssetOracleBindingRoleIds) =
             _collateralAssetOracleRoleBindings(_config.collateralAssetOracleType);
-        params.enforceVaultSharesTransferWhitelist = _config.enforceVaultSharesTransferWhitelist;
         // Per-tranche entry point configs applied by the template (via the factory) after the market is deployed.
         params.entryPointTrancheConfigs = RoycoDayBalancerV3MarketDeploymentTemplate.EntryPointTrancheConfigs({
             st: _config.stEntryPointConfig, jt: _config.jtEntryPointConfig, lt: _config.lptEntryPointConfig
@@ -984,8 +983,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             accountant: _factory.predictDeterministicAddress(_salt(_marketId, TAG_ACCOUNTANT_PROXY)),
             liquidityProviderTranche: _factory.predictDeterministicAddress(_salt(_marketId, TAG_LPT_PROXY)),
             lptAsset: _balancerPool,
-            quoteAsset: _config.gyroECLPPoolParams.quoteAsset,
-            enforceVaultSharesTransferWhitelist: _config.enforceVaultSharesTransferWhitelist
+            quoteAsset: _config.gyroECLPPoolParams.quoteAsset
         });
 
         bytes memory creationCode;
@@ -1119,8 +1117,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         _accessManager.setTargetFunctionRole(_entryPoint, _sel(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
         _accessManager.setTargetFunctionRole(_entryPoint, _sel(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
 
-        // The entry point itself needs the LP roles to call tranche.deposit/redeem (and to receive escrowed shares
-        // on whitelist-enforcing markets). MUST run while the LP roles' admin is still ADMIN_ROLE (the deployer).
+        // The entry point itself needs the LP roles to call tranche.deposit/redeem on behalf of its users.
+        // MUST run while the LP roles' admin is still ADMIN_ROLE (the deployer).
         _accessManager.grantRole(ST_LP_ROLE, _entryPoint, 0);
         _accessManager.grantRole(JT_LP_ROLE, _entryPoint, 0);
         _accessManager.grantRole(LPT_LP_ROLE, _entryPoint, 0);

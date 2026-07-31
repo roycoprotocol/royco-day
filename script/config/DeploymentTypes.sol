@@ -254,7 +254,6 @@ struct MarketConfig {
     KernelType kernelType;
     bytes kernelSpecificParams;
     uint64 stSelfLiquidationBonusWAD;
-    bool enforceVaultSharesTransferWhitelist;
     // Accountant
     uint64 stProtocolFeeWAD;
     uint64 jtProtocolFeeWAD;

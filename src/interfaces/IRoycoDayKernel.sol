@@ -20,7 +20,6 @@ interface IRoycoDayKernel {
      * @custom:field lptAsset - The base asset of the liquidity provider tranche (the liquidity venue's market-making position token)
      * @custom:field quoteAsset - The quote asset paired against the senior share in the liquidity venue, validated against the venue's registration
      * @custom:field accountant - The address of the accountant for the Royco market
-     * @custom:field enforceVaultSharesTransferWhitelist - Whether to enforce the vault shares transfer whitelist
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
@@ -38,7 +37,6 @@ interface IRoycoDayKernel {
         address lptAsset;
         address quoteAsset;
         address accountant;
-        bool enforceVaultSharesTransferWhitelist;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         address roycoBlacklist;
@@ -53,7 +51,6 @@ interface IRoycoDayKernel {
      * @custom:storage-location erc7201:Royco.storage.RoycoDayKernelState
      * @custom:field seniorTranche - The address of the Royco senior tranche associated with the kernel
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
-     * @custom:field enforceTrancheWhitelistOnTransfer - Whether the market enforces the vault-shares transfer whitelist on tranche balance updates
      * @custom:field juniorTranche - The address of the Royco junior tranche associated with the kernel
      * @custom:field liquidityProviderTranche - The address of the Royco liquidity provider tranche associated with the kernel
      * @custom:field collateralAsset - The address of the coinvested collateral asset both the senior and junior tranches deposit
@@ -76,7 +73,6 @@ interface IRoycoDayKernel {
         // Slot 0
         address seniorTranche;
         uint64 stSelfLiquidationBonusWAD;
-        bool enforceTrancheWhitelistOnTransfer;
         // Slot 1
         address juniorTranche;
         // Slot 2
@@ -200,9 +196,6 @@ interface IRoycoDayKernel {
     /// @notice Thrown when a venue driver restricted to kernel self-calls is invoked by any other caller
     error ONLY_SELF();
 
-    /// @notice Thrown when the to address is not whitelisted on the tranche
-    error ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(address to);
-
     /// @notice Thrown when the senior tranche self-liquidation bonus is set above 100% (WAD)
     error INVALID_SELF_LIQUIDATION_BONUS();
 
@@ -260,10 +253,6 @@ interface IRoycoDayKernel {
     /// @notice Retrieves the accountant address
     /// @return accountant The accountant responsible for maintaining this Royco market's accounting state and marking tranche NAVs to market
     function accountant() external view returns (address accountant);
-
-    /// @notice Whether the market enforces the vault-shares transfer whitelist on tranche balance updates
-    /// @return enforced True if transfer-whitelist screening is enforced for this market
-    function enforceTrancheWhitelistOnTransfer() external view returns (bool enforced);
 
     /**
      * @notice Converts the specified collateral assets denominated in tranche units to their value in the kernel's NAV units

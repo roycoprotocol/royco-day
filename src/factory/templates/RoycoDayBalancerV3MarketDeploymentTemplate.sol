@@ -119,7 +119,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @custom:field collateralAssetOracleBindingSelectors - The oracle's restricted selectors to bind, declared per oracle kind by the deployer (empty when the kind has no restricted surface)
      * @custom:field collateralAssetOracleBindingRoleIds - The role ids bound to the oracle's restricted selectors, index-aligned with the selectors
      * @custom:field kernelSpecificParams - ABI-encoded liquidity venue initialization params
-     * @custom:field enforceVaultSharesTransferWhitelist - Whether to enforce the vault shares transfer whitelist (verified against the kernel's immutable)
      * @custom:field entryPointTrancheConfigs - The per-tranche entry point configurations applied after the market is deployed (any oracle clock is deployed externally and passed by address)
      * @dev The senior tranche proxy is pre-deployed by the deployer via `factory.deployDeterministicProxy` (the pool
      *      needs the ST share as a token before the wiring transaction), so `stTranche`'s init data is built
@@ -143,7 +142,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         bytes4[] collateralAssetOracleBindingSelectors;
         uint64[] collateralAssetOracleBindingRoleIds;
         bytes kernelSpecificParams;
-        bool enforceVaultSharesTransferWhitelist;
         EntryPointTrancheConfigs entryPointTrancheConfigs;
     }
 
@@ -326,7 +324,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
             lptAsset: _p.marketContracts.balancerPool,
             quoteAsset: _p.quoteAsset,
             accountant: _accountant,
-            enforceVaultSharesTransferWhitelist: _p.enforceVaultSharesTransferWhitelist,
             protocolFeeRecipient: _p.protocolFeeRecipient,
             stSelfLiquidationBonusWAD: _p.stSelfLiquidationBonusWAD,
             roycoBlacklist: _p.roycoBlacklist,
@@ -401,7 +398,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         require(IRoycoVaultTranche(_r.liquidityProviderTranche).kernel() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityProviderTranche));
         require(IRoycoVaultTranche(_r.liquidityProviderTranche).asset() == pool, MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityProviderTranche));
 
-        // Kernel: full tranche set, assets, accountant, and the whitelist-enforcement flag
+        // Kernel: full tranche set, assets, and accountant
         IRoycoDayKernel kernel = IRoycoDayKernel(_r.kernel);
         require(kernel.seniorTranche() == _r.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
         require(kernel.juniorTranche() == _r.juniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
@@ -409,7 +406,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         require(kernel.accountant() == _r.accountant, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
         require(kernel.collateralAsset() == _p.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
         require(kernel.lptAsset() == pool, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.enforceTrancheWhitelistOnTransfer() == _p.enforceVaultSharesTransferWhitelist, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
 
         // The market id should guarantee that the deployed ST share is "less" than the quote token
         IERC20[] memory tokens = BALANCER_V3_VAULT.getPoolTokens(pool);

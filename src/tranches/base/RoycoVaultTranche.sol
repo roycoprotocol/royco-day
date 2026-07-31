@@ -290,7 +290,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     /**
      * @inheritdoc ERC20Upgradeable
      * @dev Routes every balance update through the kernel's screening hook, which enforces the market's blacklist and
-     *      whitelist policy and reverts when the kernel is paused: transfers, mints, and burns are all gated by the kernel
+     *      reverts when the kernel is paused: transfers, mints, and burns are all gated by the kernel
      */
     function _update(address _from, address _to, uint256 _value) internal override(ERC20Upgradeable) {
         // Call the kernel's pre-balance update hook to assert that the balance update is valid

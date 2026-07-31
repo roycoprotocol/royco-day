@@ -59,8 +59,7 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
                 accountant: address(accountant),
                 liquidityProviderTranche: address(liquidityProviderTranche),
                 lptAsset: address(bpt),
-                quoteAsset: address(quoteToken),
-                enforceVaultSharesTransferWhitelist: params.enforceWhitelistOnTransfer
+                quoteAsset: address(quoteToken)
             })
         );
     }

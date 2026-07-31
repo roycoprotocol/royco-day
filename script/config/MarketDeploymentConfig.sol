@@ -293,7 +293,6 @@ abstract contract MarketDeploymentConfig {
                     maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
                 })
             ),
-            enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.005e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,

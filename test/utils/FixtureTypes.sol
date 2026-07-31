@@ -42,7 +42,6 @@ struct MarketParamsConfig {
     // kernel
     uint64 stSelfLiquidationBonusWAD;
     uint64 maxReinvestmentSlippageWAD;
-    bool enforceWhitelistOnTransfer;
     // ydm wiring
     uint8 jtYdmKind;
     uint8 lptYdmKind;

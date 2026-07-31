@@ -31,7 +31,6 @@ library InitializationLogic {
 
         // Set the market's wiring: the tranche set, its assets, and the accountant
         $.seniorTranche = _params.seniorTranche;
-        $.enforceTrancheWhitelistOnTransfer = _params.enforceVaultSharesTransferWhitelist;
         $.juniorTranche = _params.juniorTranche;
         $.liquidityProviderTranche = _params.liquidityProviderTranche;
         $.collateralAsset = _params.collateralAsset;

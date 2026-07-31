@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
-import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoPriceOracle } from "../../interfaces/IRoycoPriceOracle.sol";
-import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { AggregatorV3Interface } from "../../interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { Cache, CacheKey } from "../../libraries/Cache.sol";
 import { WAD, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
@@ -505,18 +503,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Batch screen the involved accounts against the market's blacklist
         BlacklistLogic._enforceNotBlacklisted($, _caller, _from, _to);
 
-        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
-        // The kernel, the protocol fee recipient, and any market-specific tranche share custodian are exempt from this check
-        if ($.enforceTrancheWhitelistOnTransfer && _to != address(0) && _to != address(this) && _to != $.protocolFeeRecipient && !_isTrancheShareCustodian(_to))
-        {
-            // It is assumed that the sender is already a whitelisted LP
-            address authority = authority();
-            // Check if the to address can call the deposit function on the tranche
-            /// @dev msg.sender is the tranche address
-            (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
-            require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
-        }
-
         // Call the market specific pre-balance update hook
         _preTrancheBalanceUpdate(_caller, _from, _to, _value);
     }
@@ -543,14 +529,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @param _value The amount of the balance being updated
      */
     function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256 _value) internal virtual { }
-
-    /**
-     * @notice Returns whether an account is a market-specific custodian of tranche shares such as the LPT venue
-     * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function
-     * @param _account The account to check
-     * @return True if the account is a market-specific tranche share custodian
-     */
-    function _isTrancheShareCustodian(address _account) internal view virtual returns (bool) { }
 
     // =============================
     // State Accessor Functions
@@ -599,11 +577,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @inheritdoc IRoycoDayKernel
     function accountant() external view override(IRoycoDayKernel) returns (address accountant) {
         return _getRoycoDayKernelStorage().accountant;
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function enforceTrancheWhitelistOnTransfer() external view override(IRoycoDayKernel) returns (bool enforced) {
-        return _getRoycoDayKernelStorage().enforceTrancheWhitelistOnTransfer;
     }
 
     /// @inheritdoc IRoycoDayKernel

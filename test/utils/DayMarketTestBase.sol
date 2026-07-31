@@ -334,8 +334,7 @@ abstract contract DayMarketTestBase is Assertions {
                 accountant: address(accountant),
                 liquidityProviderTranche: address(liquidityProviderTranche),
                 lptAsset: address(bpt),
-                quoteAsset: address(quoteToken),
-                enforceVaultSharesTransferWhitelist: _params.enforceWhitelistOnTransfer
+                quoteAsset: address(quoteToken)
             })
         );
 
@@ -845,8 +844,7 @@ abstract contract DayMarketTestBase is Assertions {
 
         // The kernel (premium senior-share mint recipient) and the protocol fee recipient (fee-share mint
         // recipient) are intentionally NOT granted the tranche LP roles, mirroring the deployment template which
-        // no longer grants them: the kernel whitelist hook exempts both by address (_to == address(this) and
-        // _to == protocolFeeRecipient), so a fee/premium mint never bricks a whitelist-enforcing market
+        // does not grant them: share receipt is unconditional, so a fee/premium mint never needs them
 
         // Dedicated admin wallets
         PAUSER = _generateActor("PAUSER", ADMIN_PAUSER_ROLE);

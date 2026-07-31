@@ -362,12 +362,6 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     // Internal Utility Functions
     // =============================
 
-    /// @inheritdoc RoycoDayKernel
-    /// @dev The Balancer V3 Vault escrows every pool's constituent assets, making the vault the custodian of the senior tranche shares backing the BPT
-    function _isTrancheShareCustodian(address _account) internal view virtual override(RoycoDayKernel) returns (bool) {
-        return (_account == address(_vault));
-    }
-
     /// @notice Sets the new BPT oracle
     /// @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
     function _setBPTOracle(address _bptOracle) internal {

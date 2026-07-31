@@ -291,7 +291,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(s.fixedTermDurationSeconds, 0, "fixedTerm");
     }
 
-    /// @notice The kernel fee recipient, senior tranche self-liquidation bonus, tranche names/symbols, and whitelist flag match the config
+    /// @notice The kernel fee recipient, senior tranche self-liquidation bonus, and tranche names/symbols match the config
     function test_KernelAndTranches_ParamsMatchMarketConfigFile() public view {
         IRoycoDayKernel.RoycoDayKernelState memory ks = KERNEL.getState();
         assertEq(ks.protocolFeeRecipient, PROTOCOL_FEE_RECIPIENT_ADDRESS, "protocolFeeRecipient");
@@ -300,8 +300,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(ST.name(), "Royco Senior Tranche snUSD", "ST name");
         assertEq(ST.symbol(), "ROY-ST-snUSD", "ST symbol");
         assertEq(LPT.symbol(), "ROY-LPT-snUSD", "LPT symbol");
-        // The transfer-whitelist gate is a kernel immutable now (enforced in kernel.preTrancheBalanceUpdateHook), not per-tranche.
-        assertFalse(RoycoDayKernel(address(KERNEL)).ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER(), "kernel enforce flag");
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
