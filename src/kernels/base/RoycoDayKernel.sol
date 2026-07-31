@@ -96,11 +96,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         Cache._delete(CacheKey.COLLATERAL_ASSET_PRICE);
     }
 
-    /**
-     * @dev Deploys the accumulated idle liquidity-premium senior shares once the operation has settled and enforced its requirements
-     * @dev Placed as the innermost modifier so the tail fires at the operation's settled state and inside its reentrancy guard, the deployment prices the pile off the cached senior share rate and the venue oracle, never the collateral price
-     * @dev A simulation never reaches this tail: the operation's result-carrying revert exits the body first
-     */
+    /// @dev Deploys the accumulated idle liquidity-premium senior shares once the operation has settled and enforced its requirements
+    /// @dev A simulation never reaches this tail: the operation's result-carrying revert exits the body first
     modifier withLiquidityPremiumReinvestment() {
         _;
         // Skip the deployment outright when the tranche holds no idle premium

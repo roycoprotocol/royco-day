@@ -4530,7 +4530,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
             KERNEL.removeLiquidity(DispatchMode.EXECUTE, toTrancheUnits(1), 0, 0, outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-            KERNEL.attemptLiquidityPremiumReinvestment(1, ZERO_NAV_UNITS, 0);
+            KERNEL.attemptLiquidityPremiumReinvestment(1, ZERO_NAV_UNITS);
         }
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
         ACCOUNTANT.preOpSyncTrancheAccounting(ZERO_NAV_UNITS);

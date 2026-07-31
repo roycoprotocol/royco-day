@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
@@ -123,13 +124,23 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertGt(maxShares, 0, "the fixture must leave multi-asset redemption capacity");
 
         // The advertised maximum executes even though the redemption's own sync could have deployed the pile pre-fix
+        vm.recordLogs();
         vm.prank(LPT_PROVIDER);
         liquidityProviderTranche.redeemMultiAsset(maxShares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
+
+        // The reinvestment tail fires exactly once for the settled operation, never per intermediate leg
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 reinvestCount;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter == address(kernel) && logs[i].topics[0] == IRoycoDayKernel.LiquidityPremiumReinvested.selector) reinvestCount++;
+        }
+        assertEq(reinvestCount, 1, "the reinvestment tail must emit LiquidityPremiumReinvested exactly once for the operation");
+
         _sync();
         assertLe(_liquidityUtilization(), WAD, "the executed maximum must respect the liquidity requirement");
 
-        // The post-op deployed the entire remaining pile through the open gate once the redemption settled
-        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the post-op must deploy the whole pile through the open gate");
+        // The tail deployed the entire remaining pile through the open gate once the redemption settled
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the reinvestment tail must deploy the whole pile through the open gate");
     }
 
     /// @notice The reported maximum is a true maximum at the liquidity gate: it executes, and a hair more reverts

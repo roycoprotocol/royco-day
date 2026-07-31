@@ -540,12 +540,13 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             uint256 fixedTermDurationSeconds = $.fixedTermDurationSeconds;
             // The market must be in a perpetual state if any of the following hold:
             // 1. The market is permanently perpetual (fixed-term duration 0), so it never enters a JT observation period
-            // 2. The junior buffer is wiped (partially collateralized or a total wipe), so its dead restoration claim is extinguished, ST needs to be able to withdraw to avoid/book losses, and the YDM needs to kick in to reinstate proper collateralization
-            // 3. The JT impermanent loss is within the dust tolerance (fully repaid or dust-sized), so JT provides its loss-absorption buffer and needs no observation period: dust ST or JT losses (eg. rounding in the underlying NAVs) never lock or keep locking the market
-            // 4. The current fixed-term has elapsed, so the transient JT observation period is complete
-            // 5. The coverage utilization breached the liquidation threshold, so the market forces open senior exits
+            // 2. There is no senior capital to protect in this market
+            // 3. The junior buffer is wiped (partially collateralized or a total wipe), so its dead restoration claim is extinguished, ST needs to be able to withdraw to avoid/book losses, and the YDM needs to kick in to reinstate proper collateralization
+            // 4. The JT impermanent loss is within the dust tolerance (fully repaid or dust-sized), so JT provides its loss-absorption buffer and needs no observation period: dust ST or JT losses (eg. rounding in the underlying NAVs) never lock or keep locking the market
+            // 5. The current fixed-term has elapsed, so the transient JT observation period is complete
+            // 6. The coverage utilization breached the liquidation threshold, so the market forces open senior exits
             if (
-                fixedTermDurationSeconds == 0 || jtEffectiveNAV == ZERO_NAV_UNITS || jtImpermanentLoss <= dustTolerance
+                fixedTermDurationSeconds == 0 || stEffectiveNAV == ZERO_NAV_UNITS || jtEffectiveNAV == ZERO_NAV_UNITS || jtImpermanentLoss <= dustTolerance
                     || (initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp)
                     || coverageUtilizationWAD >= coverageLiquidationUtilizationWAD
             ) {
