@@ -270,13 +270,7 @@ library RedemptionLogic {
         uint256 stSharesWithdrawn;
         if (lptClaims.lptAssets != ZERO_TRANCHE_UNITS) {
             NAV_UNIT lptAssetPrice;
-            (stSharesWithdrawn,, lptAssetPrice) = IRoycoDayKernel(address(this)).removeLiquidity(DispatchMode.SIMULATE, lptClaims.lptAssets, 0, 0, address(0));
-
-            // Re-mark the depth at the removal's post-remove mark, the mark the real flow's final settled gate enforces at
-            // Cache the mark only around this conversion so no price leaks into the rest of the transaction
-            Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(lptAssetPrice));
-            state.lptRawNAV = ValuationLogic._getLiquidityProviderTrancheRawNAV($);
-            Cache._delete(CacheKey.LPT_ASSET_PRICE);
+            (stSharesWithdrawn,,) = IRoycoDayKernel(address(this)).removeLiquidity(DispatchMode.SIMULATE, lptClaims.lptAssets, 0, 0, address(0));
         }
 
         // A multi-asset redemption pulls a proportional slice of both LPT legs
