@@ -226,6 +226,12 @@ contract MockBalancerVault {
         return returnData;
     }
 
+    /// @notice Returns whether the vault is currently unlocked, true while a transient accounting session is open
+    /// @dev Mirrors the real vault's transient VaultIsUnlocked flag (IVaultExtension.isUnlocked), read by the venue's whenVaultLocked guard
+    function isUnlocked() external view returns (bool) {
+        return _unlockDepth > 0;
+    }
+
     /**
      * @notice Credits the caller for tokens transferred into the vault, closing open debt
      * @dev credit = min(live balance - tracked reserves, hint), and the reserves snap to the live balance, mirroring the real vault

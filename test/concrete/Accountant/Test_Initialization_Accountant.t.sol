@@ -226,27 +226,23 @@ contract Test_Initialization_Accountant is AccountantTestBase {
         assertEq(MockRecordingYDM(p.lptYDM).initializeCallCount(), 0, "lt ydm never called");
     }
 
-    /// a reverting JT YDM initialization bubbles the exact revert payload inside FAILED_TO_INITIALIZE_YDM
+    /// a reverting JT YDM initialization bubbles the YDM's exact revert verbatim
     function test_RevertIf_InitializeJTYDMInitReverts() public {
         RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         MockRecordingYDM(p.jtYDM).setRevertOnInitialize(true);
         p.jtYDMInitializationData = abi.encodeCall(MockRecordingYDM.initializeModel, (hex""));
-        vm.expectRevert(
-            abi.encodeWithSelector(IRoycoDayAccountant.FAILED_TO_INITIALIZE_YDM.selector, abi.encodeWithSelector(MockRecordingYDM.YDM_INIT_REVERTED.selector))
-        );
+        vm.expectRevert(MockRecordingYDM.YDM_INIT_REVERTED.selector);
         acct.initialize(p, address(authority));
     }
 
-    /// a reverting LPT YDM initialization bubbles the exact revert payload inside FAILED_TO_INITIALIZE_YDM
+    /// a reverting LPT YDM initialization bubbles the YDM's exact revert verbatim
     function test_RevertIf_InitializeLPTYDMInitReverts() public {
         RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         MockRecordingYDM(p.lptYDM).setRevertOnInitialize(true);
         p.lptYDMInitializationData = abi.encodeCall(MockRecordingYDM.initializeModel, (hex""));
-        vm.expectRevert(
-            abi.encodeWithSelector(IRoycoDayAccountant.FAILED_TO_INITIALIZE_YDM.selector, abi.encodeWithSelector(MockRecordingYDM.YDM_INIT_REVERTED.selector))
-        );
+        vm.expectRevert(MockRecordingYDM.YDM_INIT_REVERTED.selector);
         acct.initialize(p, address(authority));
     }
 

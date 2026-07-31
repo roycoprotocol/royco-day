@@ -46,6 +46,7 @@ contract Test_Construction_Kernel is DayMarketTestBase {
             accountant: address(accountant),
             liquidityProviderTranche: address(liquidityProviderTranche),
             lptAsset: address(bpt),
+            quoteAsset: address(quoteToken),
             enforceVaultSharesTransferWhitelist: false
         });
     }

@@ -335,7 +335,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(testConfig.stAsset).approve(address(ST), breachAssets);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
 
@@ -358,14 +358,14 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         // Depth-reducing LPT redemption: blocked.
         uint256 shares = LPT.balanceOf(LPT_ALICE_ADDRESS) / 10;
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
 
         // Senior entry: blocked while under-provisioned.
         uint256 stAssets = testConfig.initialFunding / 1000;
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(testConfig.stAsset).approve(address(ST), stAssets);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(stAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
 
@@ -836,7 +836,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         assertGt(_committedLiquidityUtilization(), WAD, "doubling the real depth does not move the committed utilization");
         uint256 shares = LPT.balanceOf(LPT_ALICE_ADDRESS) / 10;
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
     }
 }

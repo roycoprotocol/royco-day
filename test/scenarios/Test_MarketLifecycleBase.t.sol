@@ -637,7 +637,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         // lptRawNAV = 5e18 - 1, and ceil(5e36 / (5e18 - 1)) = 1e18 + 1 > 100% (a single share claims 0 BPT and is
         // inert). ceil rounding favors the senior floor, so it must revert
         vm.prank(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.redeem(2, LPT_PROVIDER, LPT_PROVIDER);
 
         // The failed probe must have moved nothing

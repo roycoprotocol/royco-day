@@ -3,18 +3,21 @@ pragma solidity ^0.8.28;
 
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { VIRTUAL_SHARES } from "../../../src/libraries/Constants.sol";
+import { Operation } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title Test_OrganicIdleShareRedeem
- * @notice An organic in-kind LPT redemption is a valid op shape yet reverts LIQUIDITY_REQUIREMENT_VIOLATED, not on the
- *         op-shape check. The same perpetual premium accrual that stages the idle pile also drives the market
- *         liquidity-deficient, and a deficient market blocks every LPT redemption. The whole state is reached through
- *         public functions, no manual storage seeding or direct doPostOp calls (the companion coverage in
- *         Test_FeeAndLiquidityPremium builds the same shape with the mock-kernel doPostOp).
+ * @notice An organic in-kind LPT redemption whose BPT slice floors to zero (idle-premium-only) is NOT a valid op
+ *         shape: the LPT_REDEMPTION guard is strict deltaLPTRawNAV < 0, and a redemption that moves no deployed BPT
+ *         leaves deltaLPTRawNAV == 0, so the op-shape check reverts INVALID_POST_OP_STATE(LPT_REDEMPTION) BEFORE the
+ *         liquidity requirement is ever reached. The whole state is reached through public functions, no manual
+ *         storage seeding or direct doPostOp calls (the companion coverage in Test_FeeAndLiquidityPremium builds the
+ *         same shape with the mock-kernel doPostOp).
  * @dev How the organic state is reached:
  *      1. Venue slippage is armed (setVenueSlippageMode) so the reinvestment gate deterministically defers on
  *         every sync, the liquidity premium accrues as staged idle ST shares (kernel `lptOwnedSeniorTrancheShares`)
@@ -23,11 +26,10 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *         the LPT protocol fee is carved off). A sync mints NO liquidity-provider-tranche shares, so the LPT SUPPLY stays frozen
  *         at the seed and tracks the frozen BPT count exactly, while the idle ST-share pile grows without bound.
  *      3. Once `idle >= lptSupply + VIRTUAL_SHARES` (so a 1-share idle slice is >= 1 wei against the effective
- *         supply), redeeming a single LPT share in-kind takes its idle premium slice (the 1-share BPT slice floors
- *         to zero under the virtual-shares offset), a valid redemption shape (a redemption never grows the
- *         LPT's deployed raw NAV). The senior effective NAV grew while the pooled depth stayed frozen, so liquidity
- *         utilization has drifted above its limit, and the post-op liquidity requirement rejects the redemption. The
- *         redeemer's premium is not stranded, it waits until the market re-liquifies.
+ *         supply), redeeming a single LPT share in-kind takes only its idle premium slice: the 1-share BPT slice
+ *         floors to zero under the virtual-shares offset, so the redemption moves no deployed BPT and its
+ *         deltaLPTRawNAV is exactly zero. The strict op-shape guard (deltaLPTRawNAV < 0) rejects that zero-delta
+ *         shape and reverts INVALID_POST_OP_STATE(LPT_REDEMPTION) before the liquidity requirement is evaluated.
  */
 contract Test_OrganicIdleShareRedeem is DayMarketTestBase {
     uint256 internal stUnit;
@@ -54,7 +56,7 @@ contract Test_OrganicIdleShareRedeem is DayMarketTestBase {
         return kernel.getState().lptOwnedSeniorTrancheShares;
     }
 
-    function test_inKindLptRedeem_idlePremiumOverhang_revertsLiquidityRequirement_organic() public {
+    function test_inKindLptRedeem_idlePremiumOverhang_revertsInvalidPostOpState_organic() public {
         // Accrue senior yield and sync until the idle premium pile overtakes the frozen LPT supply. A sync mints no LPT
         // shares, so supply stays pinned to the frozen BPT count. Big up-only yields keep the market PERPETUAL and make
         // the LDM pay a large premium.
@@ -95,22 +97,21 @@ contract Test_OrganicIdleShareRedeem is DayMarketTestBase {
         assertEq(bptSlice, 0, "the 1-share BPT slice floors to zero against the effective supply");
         assertGe(idleSlice, 1, "the proportional idle ST-share slice must be positive");
 
-        // Cross-check against the real redeem quote: previewRedeem executes the actual redemption path, so in this
-        // liquidity-deficient market it bubbles the exact liquidity-gate revert the execution below hits. The preview
-        // agrees with exec that the shape is valid but the gate blocks it, no quote exists for a blocked redemption.
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        // Cross-check against the real redeem quote: previewRedeem executes the actual redemption path, so it bubbles
+        // the exact op-shape revert the execution below hits. With the BPT slice floored to zero the redemption's
+        // deltaLPTRawNAV is zero, which the strict op-shape guard rejects, no quote exists for a rejected shape.
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LPT_REDEMPTION));
         liquidityProviderTranche.previewRedeem(1);
 
         assertGe(liquidityProviderTranche.balanceOf(LPT_PROVIDER), 1, "the redeemer must hold the LPT share it redeems");
 
-        // Redeeming that single LPT share in-kind reverts, but not on the op-shape invariant. The redemption pulls its
-        // idle premium slice (the BPT leg floors to zero), a valid shape (a redemption never grows the LPT's deployed
-        // raw NAV), so it reaches the liquidity requirement, which the perpetual premium accrual has already driven past
-        // its limit: senior effective NAV climbed while the pooled depth stayed frozen. A liquidity-deficient market
-        // blocks every LPT redemption, so the premium waits until the market re-liquifies rather than being stranded by
-        // the shape check.
+        // Redeeming that single LPT share in-kind reverts on the op-shape invariant, BEFORE any liquidity check. The
+        // redemption pulls only its idle premium slice (the BPT leg floors to zero), so it moves no deployed BPT and
+        // its deltaLPTRawNAV is exactly zero. The LPT_REDEMPTION guard is strict deltaLPTRawNAV < 0, so a zero-delta
+        // idle-premium-only redemption is not a valid shape and reverts INVALID_POST_OP_STATE(LPT_REDEMPTION) before
+        // the liquidity requirement is ever evaluated.
         vm.prank(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LPT_REDEMPTION));
         liquidityProviderTranche.redeem(1, LPT_PROVIDER, LPT_PROVIDER);
     }
 }

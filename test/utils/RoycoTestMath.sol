@@ -41,7 +41,7 @@ library RoycoTestMath {
     ///         (VIRTUAL_SHARES / VIRTUAL_VALUE in Constants.sol). Every conversion prices against
     ///         (supply + VIRTUAL_SHARES) over (totalValue + VIRTUAL_VALUE); if the src values change without this
     ///         mirror, every cross-assert fails loudly.
-    uint256 internal constant VIRTUAL_SHARES = 1e6;
+    uint256 internal constant VIRTUAL_SHARES = 1;
     uint256 internal constant VIRTUAL_VALUE = 1;
 
     /// @notice One below solady expWad's overflow threshold, the clamp on the adaptive yield model's linear adaptation.

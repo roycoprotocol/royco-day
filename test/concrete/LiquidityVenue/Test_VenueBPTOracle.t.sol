@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { Vm } from "../../../lib/forge-std/src/Vm.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
@@ -67,8 +67,10 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
         MockBPTOracle replacement = new MockBPTOracle(balancerVault, address(bpt));
         replacement.setTVL(3e18);
         replacement.setMode(MockBPTOracle.Mode.MANUAL);
-        // Expected committed LPT raw NAV under the incoming oracle: floor(TVL x ownedBPT / bptSupply)
-        uint256 expectedLptRawNAV = Math.mulDiv(3e18, ownedBpt, bptSupply, Math.Rounding.Floor);
+        // Expected committed LPT raw NAV under the incoming oracle, via the venue's two-step floor: first the
+        // per-whole-BPT price floor(1e18 x TVL / bptSupply), then floor(ownedBPT x price / 1e18)
+        uint256 replacementPrice = Math.mulDiv(1e18, 3e18, bptSupply, Math.Rounding.Floor);
+        uint256 expectedLptRawNAV = Math.mulDiv(ownedBpt, replacementPrice, 1e18, Math.Rounding.Floor);
 
         vm.prank(ORACLE_ADMIN);
         vm.expectEmit(true, false, false, true, address(kernel));
@@ -82,7 +84,8 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
         MockBPTOracle secondReplacement = new MockBPTOracle(balancerVault, address(bpt));
         secondReplacement.setTVL(5e18);
         secondReplacement.setMode(MockBPTOracle.Mode.MANUAL);
-        uint256 expectedSecondLptRawNAV = Math.mulDiv(5e18, ownedBpt, bptSupply, Math.Rounding.Floor);
+        uint256 secondPrice = Math.mulDiv(1e18, 5e18, bptSupply, Math.Rounding.Floor);
+        uint256 expectedSecondLptRawNAV = Math.mulDiv(ownedBpt, secondPrice, 1e18, Math.Rounding.Floor);
 
         vm.prank(ORACLE_ADMIN);
         vm.expectEmit(true, false, false, true, address(kernel));
@@ -189,14 +192,14 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
     }
 
     /**
-     * @notice At TVL == 0 with BPT supply outstanding, BPT -> NAV marks exactly 0 without reverting (TVL is the numerator
-     *         of the mark), while NAV -> BPT panics with division-by-zero (TVL is the denominator of the inverse)
-     * @dev This directional asymmetry is why the raw-NAV mark never bricks an operation: syncs only ever read the
-     *      tolerant BPT -> NAV direction, and the panicking inverse's one protocol consumer, the reinvestment floor,
-     *      tolerates the conversion and defers (pinned in the sibling reinvest test file). This test pins the exact
-     *      boundary between the tolerant and the panicking direction
+     * @notice At TVL == 0 with BPT supply outstanding, the per-whole-BPT mark floors to zero, which the oracle's
+     *         non-zero price guard rejects as INVALID_PRICE: BOTH conversion directions fail loud, neither marks
+     *         zero nor panics on a divide
+     * @dev Both convertLPTAssetsToValue and convertValueToLPTAssets price through queryLPTAssetOracle, whose price
+     *      guard fires on a zero mark before any arithmetic, so a worthless pool bricks the mark symmetrically. This
+     *      fail-loud is intended: a live BPT supply that marks zero is a feed failure, not a graceful zero
      */
-    function test_LPTConvertTrancheUnitsToNAVUnits_ZeroTVLWithSupply_MarksZeroWithoutRevert() public {
+    function test_LPTConvertBothDirections_ZeroTVLWithSupply_RevertInvalidPrice() public {
         bptOracle.setTVL(0);
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
 
@@ -204,12 +207,12 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
         uint256 bptSupply = balancerVault.totalSupply(address(bpt));
         assertGt(bptSupply, 0, "arrange: genesis minimum supply must exist so the zero-supply early return is not taken");
 
-        // BPT -> NAV: floor(TVL x amount / supply) = floor(0 x 1e18 / supply) = 0 for ANY positive supply, so a
-        // worthless pool marks at exactly zero and never divides by zero
-        assertEq(toUint256(kernel.convertLPTAssetsToValue(toTrancheUnits(1e18))), 0, "a zero TVL must mark the BPT at exactly zero NAV, not revert");
+        // BPT -> NAV: the zero per-whole-BPT mark is rejected before the (floor-zero) multiply, fail-loud
+        vm.expectRevert(IRoycoDayKernel.INVALID_PRICE.selector);
+        kernel.convertLPTAssetsToValue(toTrancheUnits(1e18));
 
-        // NAV -> BPT: floor(supply x value / TVL) divides by TVL == 0, so the inverse direction panics (0x12)
-        vm.expectRevert(stdError.divisionError);
+        // NAV -> BPT: the same zero mark is rejected before the inverse divide, so the direction fails loud too
+        vm.expectRevert(IRoycoDayKernel.INVALID_PRICE.selector);
         kernel.convertValueToLPTAssets(toNAVUnits(uint256(1e18)));
     }
 
@@ -264,13 +267,13 @@ contract Test_SeniorShareRateProvider_LiquidityVenue is DayMarketTestBase {
      *         zero-fee/zero-premium market
      * @dev Seeded 100e18 ST at rate 1.0. A +10% vault accrual moves stEff to 110e18 with the supply unchanged (no fee
      *      and liquidity premium share mint at zero config). The rate is _convertToValue(WAD, supply, stEff), which now
-     *      carries the virtual-shares/value offset: floor((110e18 + 1) x 1e18 / (100e18 + 1e6)) = 1099999999999989000,
+     *      carries the virtual-shares/value offset: floor((110e18 + 1) x 1e18 / (100e18 + 1)) = 1099999999999999999,
      *      and the post-sync cache must equal it
      */
     function test_GetRate_LivePathExact_AndCacheParityAfterSync() public {
         applySTPnL(1000); // +10.00%
         uint256 liveRate = kernel.getRate(); // cache unset at test entry: live preview path
-        assertEq(liveRate, 1_099_999_999_999_989_000, "the live rate must be the offset-aware floor((110e18 + 1) x 1e18 / (100e18 + 1e6))");
+        assertEq(liveRate, 1_099_999_999_999_999_999, "the live rate must be the offset-aware floor((110e18 + 1) x 1e18 / (100e18 + 1))");
 
         vm.prank(SYNC_OPERATOR);
         kernel.syncTrancheAccounting(); // writes the transient senior share rate cache
@@ -294,8 +297,8 @@ contract Test_SeniorShareRateProvider_LiquidityVenue is DayMarketTestBase {
             IRateHarnessKernel(address(kernel)), IRateHarnessTranche(address(seniorTranche)), SYNC_OPERATOR, makeAddr("INLINE_MINT_RECIPIENT"), 100e18
         );
 
-        // Seed rate = _convertToValue(WAD, 100e18, 100e18) with the offset: floor((100e18 + 1) x 1e18 / (100e18 + 1e6))
-        assertEq(cachedRate, 999_999_999_999_990_000, "arrange: the cached rate at seed must be the offset-aware floor near 1.0");
+        // Seed rate = _convertToValue(WAD, 100e18, 100e18) with the offset: floor((100e18 + 1) x 1e18 / (100e18 + 1))
+        assertEq(cachedRate, 1_000_000_000_000_000_000, "arrange: the cached rate at seed must be the offset-aware floor near 1.0");
         assertEq(rateAfterInlineMint, cachedRate, "the rate must be unchanged by an inline supply move, the cache pins it");
     }
 
@@ -308,15 +311,15 @@ contract Test_SeniorShareRateProvider_LiquidityVenue is DayMarketTestBase {
      */
     function test_GetRate_MissPathPreviewsLiveOffCurrentSeniorSupply() public {
         // Cache unset (no sync in the body): 100e18 stEff over the seeded 100e18 supply previews live to the offset-aware
-        // _convertToValue(WAD, 100e18, 100e18) = floor((100e18 + 1) x 1e18 / (100e18 + 1e6)) = 999999999999990000
-        assertEq(kernel.getRate(), 999_999_999_999_990_000, "arrange: the uncached rate at seed must preview live to the offset-aware floor near 1.0");
+        // _convertToValue(WAD, 100e18, 100e18) = floor((100e18 + 1) x 1e18 / (100e18 + 1)) = 1000000000000000000
+        assertEq(kernel.getRate(), 1_000_000_000_000_000_000, "arrange: the uncached rate at seed must preview live to the offset-aware floor near 1.0");
 
         // Senior mint doubles the supply (through the tranche's kernel-only mint gate) and adds no backing NAV
         vm.prank(address(kernel));
         seniorTranche.kernelMint(makeAddr("INLINE_MINT_RECIPIENT"), 100e18);
 
-        // Still uncached, so the read previews live: floor((100e18 + 1) x 1e18 / (200e18 + 1e6)) = 499999999999997500
-        assertEq(kernel.getRate(), 499_999_999_999_997_500, "an uncached read previews live, halving the rate on a doubled senior supply");
+        // Still uncached, so the read previews live: floor((100e18 + 1) x 1e18 / (200e18 + 1)) = 500000000000000000
+        assertEq(kernel.getRate(), 500_000_000_000_000_000, "an uncached read previews live, halving the rate on a doubled senior supply");
     }
 }
 
@@ -328,7 +331,7 @@ interface IRateHarnessKernel {
 
 /// @dev Minimal senior-tranche surface the rate harness drives: the kernel-gated inline share mint
 interface IRateHarnessTranche {
-    function mint(address to, uint256 shares) external;
+    function kernelMint(address to, uint256 shares) external;
 }
 
 /**

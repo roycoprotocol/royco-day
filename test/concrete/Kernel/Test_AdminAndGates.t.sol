@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
+import { DispatchMode } from "../../../src/libraries/Types.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
@@ -188,26 +189,26 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
     function test_RevertIf_KernelMultiAssetEntrypointsCalledByNonTranche() public {
         vm.startPrank(ATTACKER);
         vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-        kernel.lptDepositMultiAsset(false, toTrancheUnits(1e18), 1e6, toTrancheUnits(0));
+        kernel.lptDepositMultiAsset(DispatchMode.EXECUTE, toTrancheUnits(1e18), 1e6, toTrancheUnits(0), ATTACKER, ATTACKER);
         vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-        kernel.lptDepositMultiAsset(true, toTrancheUnits(1e18), 1e6, toTrancheUnits(0));
+        kernel.lptDepositMultiAsset(DispatchMode.SIMULATE, toTrancheUnits(1e18), 1e6, toTrancheUnits(0), ATTACKER, ATTACKER);
         vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-        kernel.lptRedeemMultiAsset(false, 1e18, 0, 0, ATTACKER);
+        kernel.lptRedeemMultiAsset(DispatchMode.EXECUTE, 1e18, 0, 0, ATTACKER, ATTACKER, ATTACKER);
         vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-        kernel.lptRedeemMultiAsset(true, 1e18, 0, 0, ATTACKER);
+        kernel.lptRedeemMultiAsset(DispatchMode.SIMULATE, 1e18, 0, 0, ATTACKER, ATTACKER, ATTACKER);
         vm.stopPrank();
     }
 
     /// @notice Every venue driver is a kernel self-call seam, an external caller is rejected on each entrypoint in both modes
     function test_RevertIf_VenueDriversCalledExternally() public {
         vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-        kernel.addLiquidity(false, 1e18, 1e6, toTrancheUnits(0));
+        kernel.addLiquidity(DispatchMode.EXECUTE, 1e18, 1e6, toTrancheUnits(0));
         vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-        kernel.removeLiquidity(false, toTrancheUnits(1e18), 0, 0, address(this));
+        kernel.removeLiquidity(DispatchMode.EXECUTE, toTrancheUnits(1e18), 0, 0, address(this));
         vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-        kernel.addLiquidity(true, 1e18, 1e6, toTrancheUnits(0));
+        kernel.addLiquidity(DispatchMode.SIMULATE, 1e18, 1e6, toTrancheUnits(0));
         vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-        kernel.removeLiquidity(true, toTrancheUnits(1e18), 0, 0, address(this));
+        kernel.removeLiquidity(DispatchMode.SIMULATE, toTrancheUnits(1e18), 0, 0, address(this));
         vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
         kernel.attemptLiquidityPremiumReinvestment(type(uint256).max, ZERO_NAV_UNITS, 0);
     }
@@ -221,13 +222,13 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
      */
     function test_RevertIf_BalancerCallbacksCalledByNonVault() public {
         vm.expectRevert(abi.encodeWithSelector(IVaultErrors.SenderIsNotVault.selector, address(this)));
-        kernel.addBalancerV3Liquidity(false, 1e18, 1e6, toTrancheUnits(0));
+        kernel.addBalancerV3Liquidity(DispatchMode.EXECUTE, 1e18, 1e6, toTrancheUnits(0));
         vm.expectRevert(abi.encodeWithSelector(IVaultErrors.SenderIsNotVault.selector, address(this)));
-        kernel.addBalancerV3Liquidity(true, 1e18, 1e6, toTrancheUnits(0));
+        kernel.addBalancerV3Liquidity(DispatchMode.SIMULATE, 1e18, 1e6, toTrancheUnits(0));
         vm.expectRevert(abi.encodeWithSelector(IVaultErrors.SenderIsNotVault.selector, address(this)));
-        kernel.removeBalancerV3Liquidity(false, toTrancheUnits(1e18), 0, 0, address(this));
+        kernel.removeBalancerV3Liquidity(DispatchMode.EXECUTE, toTrancheUnits(1e18), 0, 0, address(this));
         vm.expectRevert(abi.encodeWithSelector(IVaultErrors.SenderIsNotVault.selector, address(this)));
-        kernel.removeBalancerV3Liquidity(true, toTrancheUnits(1e18), 0, 0, address(this));
+        kernel.removeBalancerV3Liquidity(DispatchMode.SIMULATE, toTrancheUnits(1e18), 0, 0, address(this));
     }
 }
 
@@ -248,10 +249,9 @@ contract Test_ColdCacheRateProvider_Kernel is DayMarketTestBase {
      * @notice On a freshly seeded market the cold-cache rate is exactly 1.0, the first mint's NAV per share
      * @dev The transient cache written by setUp's deposits cleared when that transaction ended, so this read takes
      *      the live-derivation path: NAV-per-share is convertToValue(WAD, supply, stEffectiveNAV) against the
-     *      virtual-share/asset offset, floor((100e18 + 1) * 1e18 / (100e18 + 1e6)) = 999999999999990000, a
-     *      virtual-share sliver under 1.0
+     *      virtual-share/asset offset, floor((100e18 + 1) * 1e18 / (100e18 + 1)) = 1000000000000000000, exactly 1.0
      */
     function test_GetRate_SeededMarketDerivesCommittedNavPerShare() public view {
-        assertEq(kernel.getRate(), 999_999_999_999_990_000, "the cold-cache rate must be floor((100e18 + 1) * 1e18 / (100e18 + 1e6))");
+        assertEq(kernel.getRate(), 1_000_000_000_000_000_000, "the cold-cache rate must be floor((100e18 + 1) * 1e18 / (100e18 + 1))");
     }
 }

@@ -86,11 +86,11 @@ contract Test_MockMarketRoleMatrix is DayMarketTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // mint is deliberately unbound -> defaults to AccessManager ADMIN_ROLE (0)
+    // kernelMint is deliberately unbound -> defaults to AccessManager ADMIN_ROLE (0)
     // ---------------------------------------------------------------------
 
-    function test_MintSelector_isUnbound_defaultsToAdminRole() public view {
-        assertEq(_role(address(seniorTranche), IRoycoVaultTranche.mint.selector), ADMIN_ROLE, "ST mint must be unbound (kernel gates it via onlyKernel)");
-        assertEq(_role(address(juniorTranche), IRoycoVaultTranche.mint.selector), ADMIN_ROLE, "JT mint must be unbound");
+    function test_KernelMintSelector_isUnbound_defaultsToAdminRole() public view {
+        assertEq(_role(address(seniorTranche), IRoycoVaultTranche.kernelMint.selector), ADMIN_ROLE, "ST kernelMint must be unbound (gated via onlyKernel, not a role)");
+        assertEq(_role(address(juniorTranche), IRoycoVaultTranche.kernelMint.selector), ADMIN_ROLE, "JT kernelMint must be unbound");
     }
 }

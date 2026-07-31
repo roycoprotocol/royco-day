@@ -67,12 +67,11 @@ contract MockAccountantKernel {
         Operation _op,
         NAV_UNIT _collateralNAV,
         NAV_UNIT _lptRawNAV,
-        NAV_UNIT _stSelfLiquidationBonusNAV,
-        bool _enforce
+        NAV_UNIT _stSelfLiquidationBonusNAV
     )
         external
         returns (SyncedAccountingState memory)
     {
-        return accountant.postOpSyncTrancheAccounting(_op, _collateralNAV, _lptRawNAV, _stSelfLiquidationBonusNAV, _enforce);
+        return accountant.postOpSyncTrancheAccounting(_op, _collateralNAV, _lptRawNAV, _stSelfLiquidationBonusNAV);
     }
 }

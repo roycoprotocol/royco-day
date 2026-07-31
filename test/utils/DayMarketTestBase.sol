@@ -334,6 +334,7 @@ abstract contract DayMarketTestBase is Assertions {
                 accountant: address(accountant),
                 liquidityProviderTranche: address(liquidityProviderTranche),
                 lptAsset: address(bpt),
+                quoteAsset: address(quoteToken),
                 enforceVaultSharesTransferWhitelist: _params.enforceWhitelistOnTransfer
             })
         );

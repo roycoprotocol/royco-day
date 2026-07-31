@@ -226,12 +226,12 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
 
     /**
      * @notice A deposit of zero assets is rejected, no free share can ever be minted
-     * @dev The kernel's post-operation validation fires first: a zero-asset deposit moves the senior raw NAV by
-     *      zero, which fails the deposit's required positive delta before the tranche's own zero-value guard runs
+     * @dev The mint guard fires first: a zero-asset deposit prices to zero shares, and the non-zero-shares mint
+     *      check (DepositLogic) reverts MUST_MINT_NON_ZERO_SHARES before the post-op sync ever runs
      */
     function test_RevertIf_DepositMovesNoValue() public {
         vm.prank(ST_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         seniorTranche.deposit(toTrancheUnits(0), ST_PROVIDER);
     }
 
@@ -242,7 +242,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         seniorTranche.deposit(toTrancheUnits(1e18), address(0));
         vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InvalidReceiver.selector, address(0)));
         seniorTranche.redeem(1e18, address(0), ST_PROVIDER);
-        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
         seniorTranche.redeem(0, ST_PROVIDER, ST_PROVIDER);
         vm.stopPrank();
     }
@@ -254,10 +254,10 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
     /**
      * @notice A delegate with an allowance can redeem the owner's senior shares, receiving the assets itself
      * @dev All senior value is backed by senior raw NAV (no losses have occurred), so redeeming 10e18 of the 100e18
-     *      senior shares pays out its proportional slice, scaled against the effective supply (100e18 + 1e6) so the
-     *      redeemer leaves one virtual-dust sliver behind: floor(100e18 x 10e18 / (100e18 + 1e6)) =
-     *      9999999999999900000 vault shares, and the claim's nav scales identically: floor(100e18 x 10e18 / (100e18 + 1e6))
-     *      (_scaleAssetClaims scales the nav field with no VIRTUAL_ASSETS term, unlike _convertToValue)
+     *      senior shares pays out its proportional slice, scaled against the effective supply (100e18 + 1) so the
+     *      redeemer leaves one virtual-dust sliver behind: floor(100e18 x 10e18 / (100e18 + 1)) =
+     *      9999999999999999999 vault shares, while the claim's nav carries the VIRTUAL_VALUE term in its numerator:
+     *      floor((100e18 + 1) x 10e18 / (100e18 + 1)) = 10e18, so the nav prices to the whole slice with no sliver
      */
     function test_Redeem_DelegateSpendsAllowanceAndReceivesAssets() public {
         vm.prank(ST_PROVIDER);
@@ -269,10 +269,10 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
             ST_DELEGATE,
             ST_DELEGATE,
             AssetClaims({
-                collateralAssets: toTrancheUnits(9_999_999_999_999_900_000),
+                collateralAssets: toTrancheUnits(9_999_999_999_999_999_999),
                 lptAssets: toTrancheUnits(0),
                 stShares: 0,
-                nav: toNAVUnits(uint256(9_999_999_999_999_900_000))
+                nav: toNAVUnits(uint256(10_000_000_000_000_000_000))
             }),
             10e18
         );
@@ -283,7 +283,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         assertEq(seniorTranche.allowance(ST_PROVIDER, ST_DELEGATE), 0, "the delegate's allowance must be fully consumed");
         assertEq(
             stJtVault.balanceOf(ST_DELEGATE) - delegateAssetsBefore,
-            9_999_999_999_999_900_000,
+            9_999_999_999_999_999_999,
             "the delegate receives the 10e18-share slice net of the virtual-dust sliver"
         );
     }
@@ -291,9 +291,9 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
     /**
      * @notice A delegate with an allowance can multi-asset redeem the owner's liquidity shares down to the quote leg
      * @dev The seeded pool is quote-only, so removing 0.5e18 of the 6e18 LPT shares returns no senior shares and the
-     *      proportional quote leg. The BPT claim scales against the effective supply (S + 1e6), so it lands one
-     *      virtual-dust sliver below the naive proportional share: floor(6e18 x 0.5e18 / (6e18 + 1e6)) =
-     *      499999999999916666 BPT, which unwinds to floor(6000001 x 499999999999916666 / 6.000001e18) = 499999 quote-wei
+     *      proportional quote leg. The BPT claim scales against the effective supply (S + 1), so it lands one
+     *      virtual-dust sliver below the naive proportional share: floor(6e18 x 0.5e18 / (6e18 + 1)) =
+     *      499999999999999999 BPT, which unwinds to floor(6000001 x 499999999999999999 / 6.000001e18) = 499999 quote-wei
      */
     function test_RedeemMultiAsset_DelegateSpendsAllowanceAndReceivesQuote() public {
         vm.prank(LPT_PROVIDER);
@@ -316,23 +316,23 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice The junior and liquidity conversion views price one whole asset into ~one share at the seeded 1.0 rates,
-     *         biased up by the virtual-shares offset (VIRTUAL_SHARES = 1e6 over VIRTUAL_VALUE = 1)
-     * @dev Every conversion prices against the effective supply (S + 1e6) over (effNAV + 1): the fresh 1:1 rate is
-     *      perturbed by a floor(1e6 x value / (effNAV + 1)) sliver, negligible at real NAV scale but pinned exactly.
-     *      Junior: floor((30e18 + 1e6) x 1e18 / (30e18 + 1)) = 1e18 + floor(1e6 / 30) = 1000000000000033333.
-     *      Liquidity: floor((6e18 + 1e6) x 1e18 / (6e18 + 1)) = 1e18 + floor(1e6 / 6) = 1000000000000166666
+     * @notice The junior and liquidity conversion views price one whole asset into exactly one share at the seeded 1.0
+     *         rates, the single-wei virtual-shares offset (VIRTUAL_SHARES = 1 over VIRTUAL_VALUE = 1) floors away
+     * @dev Every conversion prices against the effective supply (S + 1) over (effNAV + 1): the fresh 1:1 rate is
+     *      perturbed by a floor(1 x value / (effNAV + 1)) sliver, which is zero at this NAV scale.
+     *      Junior: floor((30e18 + 1) x 1e18 / (30e18 + 1)) = 1e18 + floor(1 / 30) = 1000000000000000000.
+     *      Liquidity: floor((6e18 + 1) x 1e18 / (6e18 + 1)) = 1e18 + floor(1 / 6) = 1000000000000000000
      */
     function test_ConvertToShares_JuniorAndLiquidityPriceAtSeededRates() public view {
         assertEq(
             juniorTranche.convertToShares(toTrancheUnits(1e18)),
-            1_000_000_000_000_033_333,
-            "one whole vault share converts to one junior share plus the virtual-offset sliver"
+            1_000_000_000_000_000_000,
+            "one whole vault share converts to exactly one junior share at the virtual-shares floor"
         );
         assertEq(
             liquidityProviderTranche.convertToShares(toTrancheUnits(1e18)),
-            1_000_000_000_000_166_666,
-            "one whole BPT converts to one liquidity share plus the virtual-offset sliver"
+            1_000_000_000_000_000_000,
+            "one whole BPT converts to exactly one liquidity share at the virtual-shares floor"
         );
     }
 
@@ -343,19 +343,19 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
     /**
      * @notice A quote-only multi-asset deposit preview quotes shares at the pool's linear fair value
      * @dev 1000 whole quote (1000e6) adds 1000e18 NAV, minting 1000e18 BPT at the mock venue's fair-value pricing,
-     *      and LPT shares are minted against the effective supply (6e18 + 1e6) over (6e18 + 1):
-     *      floor((6e18 + 1e6) x 1000e18 / (6e18 + 1)) = 1000e18 + the virtual-offset sliver = 1000000000000166666499
+     *      and LPT shares are minted against the effective supply (6e18 + 1) over (6e18 + 1):
+     *      floor((6e18 + 1) x 1000e18 / (6e18 + 1)) = 1000e18 exactly, the virtual-offset sliver floors away = 1000000000000000000000
      */
     function test_PreviewDepositMultiAsset_QuoteOnlyQuotesFairValueShares() public {
         (uint256 shares,) = liquidityProviderTranche.previewDepositMultiAsset(0, 1000e6);
-        assertEq(shares, 1_000_000_000_000_166_666_499, "1000 whole quote previews 1000e18 LPT shares plus the virtual-offset sliver");
+        assertEq(shares, 1_000_000_000_000_000_000_000, "1000 whole quote previews 1000e18 LPT shares at the virtual-shares floor");
     }
 
     /**
      * @notice A multi-asset redemption preview quotes the exact proportional quote-leg unwind
-     * @dev 1e18 of the 6e18 LPT shares claims floor(6e18 x 1e18 / (6e18 + 1e6)) = 999999999999833333 BPT (one
+     * @dev 1e18 of the 6e18 LPT shares claims floor(6e18 x 1e18 / (6e18 + 1)) = 999999999999999999 BPT (one
      *      virtual-dust sliver below 1e18), and the quote-only pool holds 6000001 quote-wei over a 6.000001e18 BPT
-     *      supply, so the removal quotes floor(6000001 x 999999999999833333 / 6.000001e18) = 999999 quote-wei
+     *      supply, so the removal quotes floor(6000001 x 999999999999999999 / 6.000001e18) = 999999 quote-wei
      */
     function test_PreviewRedeemMultiAsset_QuotesProportionalQuoteLeg() public {
         (AssetClaims memory stClaims, uint256 quoteAssets) = liquidityProviderTranche.previewRedeemMultiAsset(1e18);
@@ -433,22 +433,22 @@ contract Test_IdleLiquidityPremiumRedemption_LiquidityProviderTranche is DayMark
     /**
      * @notice The staged premium's pro-rata slice is paid out in senior shares on an in-kind redemption
      * @dev Full derivation of every literal (zero fees, pinned LPT yield share 0.1, pinned JT yield share 0.2). Every
-     *      share conversion prices against the effective supply (S + VIRTUAL_SHARES = S + 1e6) over (effNAV + 1):
+     *      share conversion prices against the effective supply (S + VIRTUAL_SHARES = S + 1) over (effNAV + 1):
      *      +100% shared PnL: stGain 100e18 -> jtRiskPremium 20e18, lptLiquidityPremium 10e18, stEff 180e18.
-     *      Premium shares = floor((100e18 + 1e6) x 10e18 / (170e18 + 1)) = 5882352941176529411, staged (deploy fails).
+     *      Premium shares = floor((100e18 + 1) x 10e18 / (170e18 + 1)) = 5882352941176470588, staged (deploy fails).
      *      Depth top-up: 12e18 quote-only BPT deposited; the depositor's shares price at the LPT effective NAV
-     *      6e18 + floor((180e18 + 1) x staged / (100e18 + staged + 1e6)) = 6e18 + 9999999999999999998 = 15999999999999999998,
-     *      so it mints floor((6e18 + 1e6) x 12e18 / (15999999999999999998 + 1)) = 4500000000000750000, LPT supply 10500000000000750000, depth 18e18.
-     *      Redeeming 3e18 of that supply claims floor(18e18 x 3e18 / (supply + 1e6)) = 5142857142856285714 BPT and
-     *      floor(staged x 3e18 / (supply + 1e6)) = 1680672268907299719 staged senior shares, leaving
-     *      5882352941176529411 - 1680672268907299719 = 4201680672269229692 staged with the kernel
+     *      6e18 + floor((180e18 + 1) x staged / (100e18 + staged + 1)) = 6e18 + 10000000000000000000 = 16000000000000000000,
+     *      so it mints floor((6e18 + 1) x 12e18 / (16000000000000000000 + 1)) = 4500000000000000000, LPT supply 10500000000000000000, depth 18e18.
+     *      Redeeming 3e18 of that supply claims floor(18e18 x 3e18 / (supply + 1)) = 5142857142857142856 BPT and
+     *      floor(staged x 3e18 / (supply + 1)) = 1680672268907563024 staged senior shares, leaving
+     *      5882352941176470588 - 1680672268907563024 = 4201680672268907564 staged with the kernel
      */
     function test_Redeem_InKind_PaysIdleLiquidityPremiumSliceDirectly() public {
         // Accrue the premium and commit it staged (slippage mode blocks the single-sided deploy)
         applySTPnL(10_000);
         _warpAndRefreshFeed(1 days);
         _sync();
-        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 5_882_352_941_176_529_411, "the whole premium must stay staged behind the slippage gate");
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 5_882_352_941_176_470_588, "the whole premium must stay staged behind the slippage gate");
 
         // Top up quote-only depth so the post-redemption liquidity requirement (9e18 against 180e18 senior) clears
         address depthProvider = makeAddr("DEPTH_PROVIDER");
@@ -462,7 +462,7 @@ contract Test_IdleLiquidityPremiumRedemption_LiquidityProviderTranche is DayMark
         bpt.approve(address(liquidityProviderTranche), 12e18);
         uint256 depthShares = liquidityProviderTranche.deposit(toTrancheUnits(12e18), depthProvider);
         vm.stopPrank();
-        assertEq(depthShares, 4_500_000_000_000_750_000, "the top-up mints floor((6e18 + 1e6) x 12e18 / (15999999999999999998 + 1)) LPT shares");
+        assertEq(depthShares, 4_500_000_000_000_000_000, "the top-up mints floor((6e18 + 1) x 12e18 / (16000000000000000000 + 1)) LPT shares");
 
         // The provider redeems 3e18 of the 10.5e18 LPT shares in kind and must receive BOTH legs of its slice
         uint256 stSharesBefore = seniorTranche.balanceOf(LPT_PROVIDER);
@@ -470,14 +470,14 @@ contract Test_IdleLiquidityPremiumRedemption_LiquidityProviderTranche is DayMark
         vm.prank(LPT_PROVIDER);
         AssetClaims memory claims = liquidityProviderTranche.redeem(3e18, LPT_PROVIDER, LPT_PROVIDER);
 
-        assertEq(toUint256(claims.lptAssets), 5_142_857_142_856_285_714, "the BPT slice must be floor(18e18 x 3e18 / (supply + 1e6))");
-        assertEq(claims.stShares, 1_680_672_268_907_299_719, "the staged-premium slice must be floor(staged x 3e18 / (supply + 1e6))");
-        assertEq(bpt.balanceOf(LPT_PROVIDER) - bptBefore, 5_142_857_142_856_285_714, "the redeemer must receive its BPT slice in kind");
+        assertEq(toUint256(claims.lptAssets), 5_142_857_142_857_142_856, "the BPT slice must be floor(18e18 x 3e18 / (supply + 1))");
+        assertEq(claims.stShares, 1_680_672_268_907_563_024, "the staged-premium slice must be floor(staged x 3e18 / (supply + 1))");
+        assertEq(bpt.balanceOf(LPT_PROVIDER) - bptBefore, 5_142_857_142_857_142_856, "the redeemer must receive its BPT slice in kind");
         assertEq(
             seniorTranche.balanceOf(LPT_PROVIDER) - stSharesBefore,
-            1_680_672_268_907_299_719,
+            1_680_672_268_907_563_024,
             "the redeemer must receive its staged premium slice as senior shares"
         );
-        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 4_201_680_672_269_229_692, "the kernel's staged pile must drop by exactly the paid slice");
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 4_201_680_672_268_907_564, "the kernel's staged pile must drop by exactly the paid slice");
     }
 }

@@ -109,7 +109,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         expiresAtTimestamp = uint32(Math.min(uint256(executableAtTimestamp) + config.baseConfig.depositExpirySeconds, type(uint32).max));
 
         // Populate the user's deposit request in memory before registering it
-        requestNonce = ++$.lastRequestNonce;
         DepositRequest memory request = DepositRequest({
             assets: _assets,
             // Snapshot the shares this deposit would mint at request-time pricing
@@ -123,7 +122,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
                 executorBonusWAD: _executorBonusWAD
             })
         });
-        $.userToNonceToDepositRequest[msg.sender][requestNonce] = request;
+        $.userToNonceToDepositRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)] = request;
 
         // Transfer the requested amount of tranche assets into the entry point to queue the deposit
         IERC20(config.asset).safeTransferFrom(msg.sender, address(this), toUint256(_assets));
@@ -288,7 +287,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         expiresAtTimestamp = uint32(Math.min(uint256(executableAtTimestamp) + config.baseConfig.redemptionExpirySeconds, type(uint32).max));
 
         // Populate the user's redemption request in memory before registering it
-        requestNonce = ++$.lastRequestNonce;
         RedemptionRequest memory request = RedemptionRequest({
             shares: _shares,
             // Snapshot the value of the escrowed shares
@@ -303,7 +301,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
                 executorBonusWAD: _executorBonusWAD
             })
         });
-        $.userToNonceToRedemptionRequest[msg.sender][requestNonce] = request;
+        $.userToNonceToRedemptionRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)] = request;
 
         // Transfer the requested amount of tranche shares into the entry point to queue the redemption
         IERC20(_tranche).safeTransferFrom(msg.sender, address(this), _shares);

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { LPT_LP_ROLE } from "../../../src/factory/Roles.sol";
+import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
@@ -44,10 +45,13 @@ contract Test_EmptyLPTPremiumBootstrap is DayMarketTestBase {
         balancerVault.mintPoolTokensTo(address(bpt), _to, _bptAmount, legs);
     }
 
-    /// @notice Premium ST shares ARE minted for the LPT while the LPT tranche supply is zero, and the first LPT
-    ///         depositor then captures that staged premium 1:1 (bootstrap pricing), a windfall funded by the
-    ///         dilution of plain ST holders.
-    function test_PremiumMintedToEmptyLPT_thenFirstDepositorCapturesIt() public {
+    /// @notice Premium ST shares ARE minted for the LPT while the LPT tranche supply is zero, but the first LPT
+    ///         depositor does NOT capture that staged premium: the bootstrap mint prices their deposit against the
+    ///         idle-inclusive LPT effective NAV (so they pay for the premium up front) and the redemption scaler
+    ///         carries the virtual-shares offset, so their actual redeemable claim never exceeds their deposit.
+    ///         The idle-inclusive totalAssets().nav is the whole-tranche effective NAV, not the depositor's claim,
+    ///         so this anchors on previewRedeem of the depositor's own shares instead.
+    function test_PremiumMintedToEmptyLPT_thenFirstDepositorCannotCaptureIt() public {
         // Seed ST/JT only. No LPT deposit, and minLiquidity == 0 means none is required for the ST deposit.
         _seedMarket(1000 * stUnit, 500 * stUnit);
         assertEq(liquidityProviderTranche.totalSupply(), 0, "precondition: the LPT tranche has zero shares");
@@ -77,11 +81,12 @@ contract Test_EmptyLPTPremiumBootstrap is DayMarketTestBase {
         uint256 premiumNAV = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(stagedPremium)));
         assertGt(premiumNAV, 0, "the staged premium has positive NAV");
 
-        // Now a first LPT depositor arrives with a TINY BPT position and captures the whole staged premium.
+        // Now a first LPT depositor arrives. Their BPT position is comparable to the accrued premium, so a naive
+        // bootstrap-1:1 reading of totalAssets().nav would suggest they double their money on the staged premium.
         address dave = makeAddr("DAVE_FIRST_LP");
         accessManager.grantRole(LPT_LP_ROLE, dave, 0);
-        uint256 daveBpt = 1e18; // one BPT unit, tiny next to the accumulated premium
-        _mintBptTo(dave, daveBpt, quoteUnit); // ~1 quote wei of backing, NAV ~ 1e18
+        uint256 daveBpt = 400e18; // quote-backed 1:1 so its NAV is 400e18, on the order of the staged premium
+        _mintBptTo(dave, daveBpt, 400 * quoteUnit);
         uint256 daveDepositNAV = toUint256(kernel.convertLPTAssetsToValue(toTrancheUnits(daveBpt)));
 
         vm.startPrank(dave);
@@ -89,14 +94,29 @@ contract Test_EmptyLPTPremiumBootstrap is DayMarketTestBase {
         uint256 daveShares = liquidityProviderTranche.deposit(toTrancheUnits(daveBpt), dave);
         vm.stopPrank();
 
-        // Dave is now 100% of LPT supply; his position's effective NAV is his BPT PLUS all the staged premium.
+        // Dave is now 100% of LPT supply, so the whole-tranche totalAssets().nav (his BPT PLUS all the staged
+        // premium) reads far above his deposit, the misleading idle-inclusive figure the old test anchored on.
         assertEq(liquidityProviderTranche.totalSupply(), daveShares, "Dave owns the entire LPT supply");
         uint256 daveEffNAV = toUint256(liquidityProviderTranche.totalAssets().nav);
+        assertGt(daveEffNAV, daveDepositNAV, "the idle-inclusive whole-tranche NAV reads above the deposit, but it is not Dave's claim");
 
-        // The windfall: Dave deposited ~daveDepositNAV but owns ~daveDepositNAV + stagedPremiumNAV.
-        assertGt(daveEffNAV, daveDepositNAV * 2, "Dave's position is worth far more than his deposit (captured premium)");
+        // RE-ANCHOR: Dave's actual redeemable claim is his own shares' previewRedeem, which prices in the bootstrap
+        // mint (deposit valued against the idle-inclusive effective NAV) and the redemption virtual-shares offset.
+        AssetClaims memory daveClaim = liquidityProviderTranche.previewRedeem(daveShares);
+        uint256 daveClaimNAV = toUint256(daveClaim.nav);
+        emit log_named_uint("dave shares", daveShares);
         emit log_named_uint("dave deposit NAV", daveDepositNAV);
-        emit log_named_uint("staged premium NAV (captured)", premiumNAV);
-        emit log_named_uint("dave effective NAV after deposit", daveEffNAV);
+        emit log_named_uint("dave whole-tranche totalAssets NAV (NOT his claim)", daveEffNAV);
+        emit log_named_uint("dave redeemable claim NAV (previewRedeem)", daveClaimNAV);
+
+        // The staged premium is NOT a windfall: the depositor's redeemable claim never exceeds their deposit. The
+        // bootstrap mint against P + D over the virtual single share mints s = floor(D/P) shares, and the redeem
+        // scaler pays (P + D) x s / (s + 1) <= D since P x floor(D/P) <= D always, so the premium cannot be extracted.
+        assertLe(daveClaimNAV, daveDepositNAV, "the first LP's redeemable claim never exceeds their deposit (no premium windfall)");
+
+        // Dave captures only a strict fraction of the staged idle senior shares, the rest stays custodied for the
+        // LPT tranche as a whole, the direct signature of the mint pricing and redemption offset neutralizing the premium.
+        assertLt(daveClaim.stShares, stagedPremium, "the depositor claims only part of the staged idle senior shares, not the whole premium");
+        assertGt(daveClaim.stShares, 0, "the depositor does claim a scaled slice of the idle senior shares");
     }
 }

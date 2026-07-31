@@ -13,6 +13,9 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
  * @notice The coverage and liquidity utilization computations on the post-op surface: the zero
  *         short-circuits and their precedence over the max edges, ceil bias exactness, the whole collateral
  *         NAV in the coverage numerator, and the pre-op placeholder versus post-op fresh-value contract
+ * @notice The accountant does not enforce the coverage or liquidity requirement: it returns the computed
+ *         utilizations and the kernel reverts past WAD. These tests assert the returned value the kernel gate
+ *         would act on, never a revert from the accountant
  */
 contract Test_Utilization_Accountant is AccountantTestBase {
     function setUp() public {
@@ -23,14 +26,14 @@ contract Test_Utilization_Accountant is AccountantTestBase {
     /**
      * zero minimum requirements short-circuit both utilizations to 0 before any max edge can fire —
      * a live collateral NAV against a zero junior buffer and zero market-making inventory reads (0, 0), so
-     * the fully enforced deposit passes both gates
+     * the deposit reads utilizations the kernel gate lets through
      */
     function test_Utilization_bothZeroWhenMinimumRequirementsZero() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.minCoverageWAD = 0;
         p.minLiquidityWAD = 0;
         _deploy(p);
-        SyncedAccountingState memory state = kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+        SyncedAccountingState memory state = kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         assertEq(state.coverageUtilizationWAD, 0, "zero minimum coverage short-circuits before the empty-buffer max edge");
         assertEq(state.liquidityUtilizationWAD, 0, "zero minimum liquidity short-circuits before the empty-inventory max edge");
     }
@@ -41,23 +44,24 @@ contract Test_Utilization_Accountant is AccountantTestBase {
      * market drained by a full senior redemption reads (0, 0) instead of (max, max)
      */
     function test_Utilization_zeroCollateralAndZeroSTEffectivePrecedeMaxEdges() public {
-        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
-        SyncedAccountingState memory state = kernel.doPostOp(Operation.ST_REDEEM, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        SyncedAccountingState memory state = kernel.doPostOp(Operation.ST_REDEMPTION, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         assertEq(state.coverageUtilizationWAD, 0, "zero collateral NAV so coverage utilization is zero, preceding the empty-buffer max edge");
         assertEq(state.liquidityUtilizationWAD, 0, "zero senior effective NAV precedes the zero-inventory max edge");
     }
 
     /**
      * a live collateral NAV against a zero junior buffer reads a uint256 max coverage utilization, and live
-     * senior value against a zero market-making inventory reads a uint256 max liquidity utilization — and the
-     * enforced gate then rejects the next senior deposit on the coverage side first
+     * senior value against a zero market-making inventory reads a uint256 max liquidity utilization — the
+     * value the kernel coverage gate would reject the next senior deposit on
      */
     function test_Utilization_bothMaxWhenBuffersZero() public {
-        SyncedAccountingState memory state = kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        SyncedAccountingState memory state = kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         assertEq(state.coverageUtilizationWAD, type(uint256).max, "zero junior buffer against live collateral reads max");
         assertEq(state.liquidityUtilizationWAD, type(uint256).max, "zero inventory against live senior value reads max");
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18 + 1)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+        // The accountant does not enforce, so the next senior deposit still settles and reads max coverage, the would-breach value the kernel gate rejects
+        SyncedAccountingState memory next = kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18 + 1)), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        assertEq(next.coverageUtilizationWAD, type(uint256).max, "the deeper senior deposit reads max coverage, the value the kernel gate rejects");
     }
 
     /**
@@ -67,7 +71,7 @@ contract Test_Utilization_Accountant is AccountantTestBase {
     function test_Utilization_ceilBiasExactness() public {
         _seedState(SEED_ST_EFF, 300e18, 0, 100e18, MarketState.PERPETUAL);
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + 300e18 + 7), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, false);
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + 300e18 + 7), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS);
         uint256 coverageUtilization = state.coverageUtilizationWAD;
         uint256 covProduct = (SEED_ST_EFF + 300e18 + 7) * uint256(DEFAULT_MIN_COVERAGE_WAD);
         assertEq(
@@ -91,13 +95,13 @@ contract Test_Utilization_Accountant is AccountantTestBase {
     function test_Utilization_coverageNumeratorIsWholeCollateralNAV() public {
         _seedFlatWithLPT(SEED_LPT_RAW);
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_EFF + 250e18), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, false);
+            kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_EFF + 250e18), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS);
         assertEq(state.coverageUtilizationWAD, 0.5e18, "coverage numerator is the whole collateral NAV");
     }
 
     /**
      * a zero minimum liquidity reads zero even against a zero market-making inventory, taking precedence
-     * over the zero-inventory max edge, so the enforced senior deposit passes its liquidity gate
+     * over the zero-inventory max edge, so the senior deposit reads a liquidity utilization the kernel gate lets through
      */
     function test_Utilization_liquidityZeroWhenMinLiquidityZero() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
@@ -105,19 +109,20 @@ contract Test_Utilization_Accountant is AccountantTestBase {
         _deploy(p);
         _seedFlatWithLPT(0);
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 100e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 100e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         assertEq(state.liquidityUtilizationWAD, 0, "zero minimum liquidity precedes the zero-inventory max edge");
         assertLe(state.coverageUtilizationWAD, WAD, "coverage gate satisfied on its own terms");
     }
 
-    /// a zero market-making inventory against a live requirement reads uint256 max and fires the enforced liquidity gate
+    /// a zero market-making inventory against a live requirement reads uint256 max, the value the kernel liquidity gate rejects
     function test_Utilization_liquidityMaxWhenLPTRawZero() public {
         _seedFlatWithLPT(0);
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 10e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 10e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         assertEq(state.liquidityUtilizationWAD, type(uint256).max, "zero inventory against a live requirement reads max");
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 11e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+        // The accountant does not enforce, so a deeper senior deposit still settles and reads max liquidity, the would-breach value the kernel gate rejects
+        SyncedAccountingState memory next = kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 11e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        assertEq(next.liquidityUtilizationWAD, type(uint256).max, "the deeper senior deposit reads max liquidity, the value the kernel gate rejects");
     }
 
     /**
@@ -134,7 +139,7 @@ contract Test_Utilization_Accountant is AccountantTestBase {
 
         // The post-op returns the freshly marked liquidity values: liquidityUtilization = ceil(1010e18 * 0.05e18 / 100e18) = 0.505e18
         SyncedAccountingState memory postOpState =
-            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 10e18), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, false);
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 10e18), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS);
         assertEq(toUint256(postOpState.lptRawNAV), SEED_LPT_RAW, "post-op returns the real lt raw NAV");
         assertEq(postOpState.liquidityUtilizationWAD, 0.505e18, "post-op returns the fresh liquidity utilization");
     }

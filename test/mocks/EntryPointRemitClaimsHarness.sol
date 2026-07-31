@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { RoycoDayEntryPoint } from "../../src/entrypoint/RoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../src/libraries/Types.sol";
+import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title EntryPointRemitClaimsHarness
@@ -28,7 +29,7 @@ contract EntryPointRemitClaimsHarness is RoycoDayEntryPoint {
     }
 }
 
-/// @notice Mock kernel exposing only the asset getters _remitRedemptionAndBonusClaims resolves
+/// @notice Mock kernel exposing the immutables carrier _remitRedemptionAndBonusClaims resolves the market's assets from
 contract MockKernelAssets {
     address public immutable COLLATERAL_ASSET;
     address public immutable LPT_ASSET;
@@ -40,5 +41,13 @@ contract MockKernelAssets {
         LPT_ASSET = _lptAsset;
         SENIOR_TRANCHE = _seniorTranche;
         QUOTE_ASSET = _quoteAsset;
+    }
+
+    /// @dev The remitter resolves the collateral, LPT, senior tranche, and quote legs off this struct
+    function getImmutableState() external view returns (IRoycoDayKernel.RoycoDayKernelImmutableState memory immutables) {
+        immutables.collateralAsset = COLLATERAL_ASSET;
+        immutables.lptAsset = LPT_ASSET;
+        immutables.seniorTranche = SENIOR_TRANCHE;
+        immutables.quoteAsset = QUOTE_ASSET;
     }
 }

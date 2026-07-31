@@ -122,8 +122,8 @@ abstract contract AccountantTestBase is Test {
     function _seedState(uint256 _stEff, uint256 _jtEff, uint256 _il, uint256 _lptRaw, MarketState _targetState) internal {
         assertTrue(!(_jtEff == 0 && _il > 0), "seed: jtEffectiveNAV 0 with il > 0 unreachable");
 
-        if (_stEff > 0) kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(_stEff), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
-        if (_jtEff + _il > 0) kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(_stEff + _jtEff + _il), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        if (_stEff > 0) kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(_stEff), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        if (_jtEff + _il > 0) kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(_stEff + _jtEff + _il), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         // Covered loss of exactly il: JT absorbs both attribution legs so the effective NAVs land on target
         if (_il > 0) kernel.doPreOp(toNAVUnits(_stEff + _jtEff));
 

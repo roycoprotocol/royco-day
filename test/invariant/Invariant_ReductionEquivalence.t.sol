@@ -292,8 +292,8 @@ contract Invariant_ReductionEquivalence is Test {
             assertEq(selPlain, selDisarmed, "revert reason diverged between the plain and the disarmed market");
 
             // The liquidity gate must never be the thing that rejects a senior/junior op in either market
-            assertTrue(selPlain != IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "the liquidity gate bound in the plain market");
-            assertTrue(selDisarmed != IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "the liquidity gate bound in the disarmed market");
+            assertTrue(selPlain != IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "the liquidity gate bound in the plain market");
+            assertTrue(selDisarmed != IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "the liquidity gate bound in the disarmed market");
 
             _assertTrajectoriesMatch();
             _assertOverlayLeftNoTrace(plainMarket, "plain market");

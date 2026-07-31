@@ -240,7 +240,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         // Clearly over the coverage limit (well beyond maxDeposit's documented dust-tolerance under-report).
         vm.startPrank(_stLp(0));
         IERC20(testConfig.stAsset).approve(address(ST), max + 100_000e18);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(max + 100_000e18), _stLp(0));
         vm.stopPrank();
     }
@@ -259,7 +259,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         // A deposit sized to the OLD max now breaches the tighter coverage gate.
         vm.startPrank(_stLp(0));
         IERC20(testConfig.stAsset).approve(address(ST), maxBefore);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(maxBefore), _stLp(0));
         vm.stopPrank();
     }
@@ -286,7 +286,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
 
         vm.startPrank(_stLp(0));
         IERC20(testConfig.stAsset).approve(address(ST), 50_000e18);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(50_000e18), _stLp(0));
         vm.stopPrank();
     }

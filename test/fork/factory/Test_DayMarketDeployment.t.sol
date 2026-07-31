@@ -452,8 +452,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
             _assertRole(t, UUPSUpgradeable.upgradeToAndCall.selector, ADMIN_UPGRADER_ROLE);
             _assertRole(t, ERC20BurnableUpgradeable.burn.selector, BURNER_ROLE);
             _assertRole(t, ERC20BurnableUpgradeable.burnFrom.selector, BURNER_ROLE);
-            // `mint` carries NO binding: it is gated by the tranche's own onlyKernel check (per-market, not AM-global).
-            _assertRole(t, IRoycoVaultTranche.mint.selector, 0);
+            // `kernelMint` carries NO binding: it is gated by the tranche's own onlyKernel check (per-market, not AM-global).
+            _assertRole(t, IRoycoVaultTranche.kernelMint.selector, 0);
         }
     }
 
@@ -515,10 +515,10 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     /// mint is an immutable-address check on THIS market's kernel, not an AccessManager role (cross-market bleed defense)
     function test_RevertIf_NonKernelMintsTrancheShares() public {
-        // Cross-market bleed defense: mint is an immutable-address check on THIS market's kernel, not an AM role.
+        // Cross-market bleed defense: kernelMint is an immutable-address check on THIS market's kernel, not an AM role.
         vm.prank(address(0xBAD));
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
-        ST.mint(address(0xBAD), 1);
+        ST.kernelMint(address(0xBAD), 1);
     }
 
     /// The template deployed the BPT oracle through Balancer's E-CLP oracle factory, priced on this market's pool with 1.0 rate-provider feeds

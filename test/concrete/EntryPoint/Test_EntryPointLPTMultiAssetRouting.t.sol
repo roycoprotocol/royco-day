@@ -11,6 +11,7 @@ import { MockBalancerVault } from "../../mocks/MockBalancerVault.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title Test_EntryPointLPTMultiAssetRouting
@@ -151,7 +152,7 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
 
         // An explicit amount inside the wedge window holds to the in-kind gate and reverts
         vm.prank(USER_A);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         entryPoint.executeRedemption(USER_A, nonce, maxMultiAssetShares);
 
         // An explicit amount within the in-kind bound exits in-kind
@@ -186,7 +187,7 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
         uint256 breachShares =
             maxMultiAssetShares + Math.mulDiv(2e12 + 1, liquidityProviderTranche.totalSupply(), toUint256(accountant.getState().lastLPTRawNAV), Math.Rounding.Ceil) + 2;
         vm.prank(USER_A);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         entryPoint.executeRedemption(USER_A, nonce, breachShares);
     }
 
@@ -278,22 +279,24 @@ contract Test_EntryPointLPTMultiAssetRouting is EntryPointTestBase {
         );
     }
 
-    /// @notice A wiped LP-token mark zeroes both bounds: a maximal execution settles nothing, keeps the escrow
-    ///         queued, and never reverts
+    /// @notice A wiped LP-token mark makes the market unpriceable: a maximal execution fails LOUDLY rather than
+    ///         settling against a dead mark, and the escrow stays queued untouched
+    /// @dev A zero pool mark against a live BPT supply is not a graceful zero, it reverts INVALID_PRICE at the venue
+    ///      oracle (BalancerV3LiquidityVenue.queryLPTAssetOracle). The execution syncs the market first, and that sync
+    ///      prices the LPT through the wiped mark, so the redemption fails loud instead of settling nothing. The escrow
+    ///      is untouched either way, so the request survives the wipe and stays cancellable
     function test_lptRedemption_maxSentinel_zeroCapacityExecutesNothing() public {
         (uint256 nonce,,) = _requestWholePosition(0);
         uint256 escrowedShares = entryPoint.getRedemptionRequest(USER_A, nonce).shares;
 
-        // Wipe the LP-token mark: both bounds read zero
+        // Wipe the LP-token mark: a zero pool mark against a live BPT supply is unpriceable, not a graceful zero
         bptOracle.setTVL(0);
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
-        _sync();
-        require(liquidityProviderTranche.maxRedeemMultiAsset(address(entryPoint)) == 0, "setup: the wiped mark must zero the multi-asset bound");
 
-        (AssetClaims memory claims, uint256 quoteAssets) = _executeRedemptionMaxWithQuote(USER_A, USER_A, nonce);
-
-        assertEq(toUint256(claims.nav), 0, "a zero-capacity maximal execution must settle nothing");
-        assertEq(quoteAssets, 0, "a zero-capacity maximal execution must carry no quote");
+        // Execution syncs the market first, and the wiped mark reverts INVALID_PRICE at the venue oracle, so the
+        // redemption fails LOUDLY instead of settling nothing against a dead mark. The escrow is untouched either way
+        vm.expectRevert();
+        _executeRedemptionMaxWithQuote(USER_A, USER_A, nonce);
         assertEq(entryPoint.getRedemptionRequest(USER_A, nonce).shares, escrowedShares, "the escrow must stay queued untouched");
     }
 

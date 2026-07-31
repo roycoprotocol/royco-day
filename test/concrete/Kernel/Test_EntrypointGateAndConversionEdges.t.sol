@@ -6,7 +6,7 @@ import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
-import { MAX_MINT_DILUTION_WAD, WAD } from "../../../src/libraries/Constants.sol";
+import { MAX_MINT_DILUTION_WAD, VIRTUAL_SHARES, WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { ValuationLogic } from "../../../src/libraries/logic/ValuationLogic.sol";
@@ -14,6 +14,7 @@ import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title Test_EntrypointGateAndConversionEdges
@@ -83,7 +84,7 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         stJtVault.mintShares(ST_PROVIDER, stUnit);
         vm.startPrank(ST_PROVIDER);
         stJtVault.approve(address(seniorTranche), stUnit);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         seniorTranche.deposit(toTrancheUnits(stUnit), ST_PROVIDER);
         vm.stopPrank();
     }
@@ -97,7 +98,7 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
      *         COVERAGE_REQUIREMENT_VIOLATED and an in-kind LPT redemption that strands the pool below the senior
      *         liquidity floor reverts LIQUIDITY_REQUIREMENT_VIOLATED: the breach exempts neither
      * @dev jtRedeem and lptRedeem both pass enforce = true unconditionally (RedemptionLogic.sol:109,146), so the
-     *      accountant's JT_REDEEM coverage gate and LPT_REDEEM liquidity gate (RoycoDayAccountant.sol:316-323) both
+     *      accountant's JT_REDEMPTION coverage gate and LPT_REDEMPTION liquidity gate (RoycoDayAccountant.sol:316-323) both
      *      fire in the wind-down state. An in-kind LPT redeem only shrinks the pool depth, so unlike a multi-asset
      *      redeem it cannot relax its own liquidity floor and is gated whenever it would breach it
      * @dev Breach derivation (shared -21% rate on the seeded 100/30 market): collateralNAV = 130 whole shares x
@@ -127,14 +128,14 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         // The JT redemption is coverage-gated during liquidation
         uint256 jtShares = juniorTranche.balanceOf(JT_PROVIDER) / 10;
         vm.prank(JT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         juniorTranche.redeem(jtShares, JT_PROVIDER, JT_PROVIDER);
 
         // The in-kind LPT redemption in the identical state is liquidity-gated: draining 3e18 of the 6e18 depth
         // would strand the pool below the senior floor, and the breach no longer exempts it
         uint256 lptShares = 3e18;
         vm.prank(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.redeem(lptShares, LPT_PROVIDER, LPT_PROVIDER);
     }
 
@@ -197,20 +198,25 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
      *         xMAX_MINT_DILUTION_WAD/(WAD - MAX_MINT_DILUTION_WAD) ~ 1e12) terminate in a Panic(0x11) after
      *         ~4 cycles, including inside the sync's fee mint
      * @dev The virtual-share offset shifts the boundary down by exactly VIRTUAL_SHARES: the largest supply whose
-     *      cap still fits is now floor((2^256 - 1)/k) - 1e6 (its effective supply is floor((2^256 - 1)/k), whose
-     *      cap is the largest multiple of k that fits), and one share-wei past it panics
+     *      cap still fits is now floor((2^256 - 1)/k) - VIRTUAL_SHARES (its effective supply is floor((2^256 - 1)/k),
+     *      whose cap is the largest multiple of k that fits), and one share-wei past it panics
      *      (k = MAX_MINT_DILUTION_WAD/(WAD - MAX_MINT_DILUTION_WAD) = 1e12 - 1 exactly, so the cap multiply is
      *      exact and the floor identity max - M x k < k gives the crisp +1 boundary)
+     * @dev With VIRTUAL_VALUE = 1 the unclamped price effectiveSupply x value / (totalValue + 1) overflows far
+     *      earlier than the cap when value is large, so the probe values the mint at exactly the cap (value = k over
+     *      the 1-wei virtual denominator) to isolate the cap's own overflow as the binding leg
      */
     function test_mintDilutionClamp_capComputationOverflowBoundary() public {
         uint256 k = MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD); // 1e12 - 1, exact division
-        // The cap is taken over the effective supply (supply + 1e6), so the largest supply whose cap fits is max/k - 1e6
-        uint256 supplyAtCliff = type(uint256).max / k - 1e6;
-        uint256 bindingValue = 1e18; // over a 1-wei denominator this always binds: ceil(1e18 x 1e6 / (1e18 - 1e6)) > 1
+        // The cap is taken over the effective supply (supply + VIRTUAL_SHARES), so the largest supply whose cap fits is max/k - VIRTUAL_SHARES
+        uint256 supplyAtCliff = type(uint256).max / k - VIRTUAL_SHARES;
+        // Value = k over the 1-wei virtual denominator prices the unclamped mint at exactly the cap (effectiveSupply x k),
+        // so the clamp is the binding leg and neither the unclamped mulDiv nor the cap overflows below the cliff
+        uint256 bindingValue = k;
 
         // Just below the cliff the clamped mint succeeds and returns the exact cap on the effective supply
         uint256 minted = this.convertToSharesCliffProbe(bindingValue, 0, supplyAtCliff);
-        assertEq(minted, Math.mulDiv(supplyAtCliff + 1e6, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD), "at the boundary the cap still fits");
+        assertEq(minted, Math.mulDiv(supplyAtCliff + VIRTUAL_SHARES, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD), "at the boundary the cap still fits");
 
         // One share-wei past the cliff the cap computation overflows uint256 and the mint panics
         vm.expectRevert(stdError.arithmeticError);
@@ -224,16 +230,17 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
     /**
      * @notice `redeemMultiAsset(shares, _minSTSharesOut, _minQuoteAssetsOut, ...)` always routes through the
      *         proportional venue removal (RedemptionLogic.sol runs removeLiquidity unconditionally), so the
-     *         caller's minimums bind even when the redeemer's venue-asset slice is zero: an idle-only exit with a
-     *         positive floor reverts inside the removal instead of settling below it, and the same exit with zero
-     *         floors settles paying the fair idle premium slice
-     * @dev Idle-only construction: venue slippage is armed so a +10% senior gain's liquidity premium mints as
+     *         caller's minimums bind even when the redeemer's venue-asset slice floors to zero: an idle-dominated
+     *         exit with a positive floor reverts inside the removal instead of settling below it, and the same exit
+     *         with zero floors settles paying the fair idle premium slice
+     * @dev Thinned-pool construction: venue slippage is armed so a +10% senior gain's liquidity premium mints as
      *      senior shares to the LPT but the gated reinvestment defers, staging the premium idle in the kernel.
-     *      Then the BPT oracle is pinned to a zero mark (a worthless pool), so lptRawNAV = 0 and every redeemer's
-     *      venue-asset slice is exactly zero: the LPT share's only remaining value is the idle premium leg.
-     *      Governance retires the liquidity requirement first (setMinLiquidity(0)) so the post-redemption
-     *      liquidity gate cannot mask the floor check being exercised, with a positive minimum and zero pool depth
-     *      every LPT redemption would revert LIQUIDITY_REQUIREMENT_VIOLATED instead
+     *      Then the pool is THINNED rather than zeroed: the BPT supply is diluted with dead-weight BPT (no new
+     *      balances) and the oracle pinned to a minimal non-zero TVL, so the redeemer's fixed BPT slice removes a
+     *      floor-zero fraction of the pool balances (the quote slice rounds to nothing) while the per-whole-BPT
+     *      mark stays non-zero. A zero mark would instead revert INVALID_PRICE, so the LPT share's only meaningful
+     *      value is the idle premium leg. Governance retires the liquidity requirement first (setMinLiquidity(0)) so
+     *      the post-redemption liquidity gate cannot mask the floor check being exercised
      * @dev Idle pile derivation (+10% on the seeded 100/30 market, same block so the instantaneous yield shares
      *      apply): stRaw 100e18 -> 110e18 gives stGain = 10e18; JT risk premium = 10e18 x 0.2 = 2e18 and LPT
      *      liquidity premium = 10e18 x 0.1 = 1e18 (the fixture's pinned yield shares); ST protocol fee =
@@ -241,18 +248,18 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
      *      fee carves 0.1e18 out of the premium and is remitted as senior shares to the protocol, so the LPT's idle
      *      leg is the net 0.9e18 and no LPT shares mint for it. The net premium mints against the retained senior
      *      NAV 108e18 - 1e18 - 0.7e18 = 106.3e18 over the 100e18 pre-sync supply, through the virtual-share/asset
-     *      offset (effective supply 100e18 + 1e6, denominator 106.3e18 + 1): idleShares =
-     *      floor((100e18 + 1e6) x 0.9e18 / (106.3e18 + 1)) = 846660395108192850. The pooled senior fee mint
-     *      (0.7e18 ST + 0.1e18 LPT) is floor((100e18 + 1e6) x 0.8e18 / (106.3e18 + 1)) = 752587017873949200, so the
-     *      senior supply lands at 101599247412982142050
+     *      offset (effective supply 100e18 + 1, denominator 106.3e18 + 1): idleShares =
+     *      floor((100e18 + 1) x 0.9e18 / (106.3e18 + 1)) = 846660395108184383. The pooled senior fee mint
+     *      (0.7e18 ST + 0.1e18 LPT) is floor((100e18 + 1) x 0.8e18 / (106.3e18 + 1)) = 752587017873941674, so the
+     *      senior supply lands at 101599247412982126057
      * @dev Redemption slice derivation: the LPT protocol fee mints no LPT shares, so the LPT supply stays the 6e18
      *      seed and the provider still owns the whole tranche. Redeeming the full 6e18 of the 6e18 supply scales the
-     *      idle pile by the redeemer's fraction of the EFFECTIVE LPT supply (6e18 + 1e6): stSharesToRedeem =
-     *      floor(846660395108192850 x 6e18 / (6e18 + 1e6)) = 846660395108051739, a virtual-share sliver (141111)
+     *      idle pile by the redeemer's fraction of the EFFECTIVE LPT supply (6e18 + 1): stSharesToRedeem =
+     *      floor(846660395108184383 x 6e18 / (6e18 + 1)) = 846660395108184382, a virtual-share sliver (1)
      *      short of the whole pile. Unwound to the yield-bearing asset, the total senior claim is
      *      floor(108e18 x 1e18 / 1.1e18) = 98181818181818181818 vault shares, scaled by the redeemed senior shares
-     *      over the effective senior supply: floor(98181818181818181818 x 846660395108051739 /
-     *      (101599247412982142050 + 1e6)) = 818181818181681816
+     *      over the effective senior supply: floor(98181818181818181818 x 846660395108184382 /
+     *      (101599247412982126057 + 1)) = 818181818181818180
      */
     function test_lptRedeemMultiAsset_zeroVenueSlice_enforcesSlippageFloorsAndPaysIdlePremium() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
@@ -264,7 +271,7 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         _sync();
         uint256 idleShares = kernel.getState().lptOwnedSeniorTrancheShares;
         assertEq(
-            idleShares, 846_660_395_108_192_850, "the staged premium must be floor((100e18 + 1e6) x 0.9e18 / (106.3e18 + 1)) senior shares net of the LPT fee"
+            idleShares, 846_660_395_108_184_383, "the staged premium must be floor((100e18 + 1) x 0.9e18 / (106.3e18 + 1)) senior shares net of the LPT fee"
         );
 
         // Retire the liquidity requirement so the redemption reaches the missing slippage check instead of the
@@ -273,51 +280,58 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         vm.prank(ACCOUNTANT_ADMIN);
         accountant.setMinLiquidity(0);
 
-        // Collapse the pool mark to zero (a worthless BPT): the LPT's deployed depth is now worth nothing and the
-        // idle premium senior shares are the LPT share's only remaining value
+        // Thin the pool instead of zeroing it: a zero pool mark now reverts INVALID_PRICE, so the worthless-pool
+        // premise is modeled as a THIN pool. Dilute the BPT supply with dead-weight BPT minted against no new
+        // balances, then pin the oracle to a minimal non-zero TVL. The redeemer's fixed BPT slice then removes a
+        // floor-zero fraction of the pool balances (the venue quote slice rounds to nothing) while the per-whole-BPT
+        // mark stays non-zero so the oracle holds. The owned depth marks at only a few wei, so the idle premium
+        // senior shares are the LPT share's only meaningful value
+        uint256[2] memory noNewLegs;
+        balancerVault.mintPoolTokensTo(address(bpt), makeAddr("POOL_DILUTER"), 1e30, noNewLegs);
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
-        bptOracle.setTVL(0);
+        bptOracle.setTVL(2e12);
         SyncedAccountingState memory pre = _sync();
-        assertEq(toUint256(pre.lptRawNAV), 0, "the committed LPT mark must read the pinned zero pool value");
-        assertEq(uint8(pre.marketState), uint8(MarketState.PERPETUAL), "a collapsed pool mark must not move the state machine");
+        assertEq(toUint256(pre.lptRawNAV), 6, "the thinned pool marks the owned 6e18 BPT at floor(6e18 x 1 / 1e18) = 6 wei, non-zero so the oracle holds");
+        assertEq(uint8(pre.marketState), uint8(MarketState.PERPETUAL), "a thinned pool mark must not move the state machine");
 
         // The provider still holds its full 6e18 seed shares, and the LPT supply stays the 6e18 seed: the gain
         // sync's LPT protocol fee mints senior shares to the fee recipient, not liquidity shares
         assertEq(liquidityProviderTranche.balanceOf(LPT_PROVIDER), 6e18, "the provider must still hold its full LPT seed shares");
         assertEq(liquidityProviderTranche.totalSupply(), 6e18, "the LPT supply must stay the 6e18 seed: the LPT protocol fee mints no liquidity shares");
 
-        // A positive floor reverts: the removal always runs, so the zero-output venue slice fails the caller's
-        // 1-wei minimums inside the vault instead of settling below them
+        // A positive floor reverts: the removal always runs, so the floor-zero venue slice fails the caller's 1-wei
+        // minimums inside the vault instead of settling below them
         vm.prank(LPT_PROVIDER);
         vm.expectPartialRevert(IVaultErrors.AmountOutBelowMin.selector);
         liquidityProviderTranche.redeemMultiAsset(6e18, 1, 1, LPT_PROVIDER, LPT_PROVIDER);
 
-        // With zero floors the idle-only exit settles: no quote or BPT flows from the worthless pool position
+        // With zero floors the idle-dominated exit settles: the thinned pool slice returns zero quote
         vm.prank(LPT_PROVIDER);
         (AssetClaims memory stClaims, uint256 quoteAssets) = liquidityProviderTranche.redeemMultiAsset(6e18, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
-        assertEq(quoteAssets, 0, "the zero-value venue slice must return zero quote assets");
-        assertEq(quoteToken.balanceOf(LPT_PROVIDER), 0, "no quote assets may reach the redeemer from a worthless pool");
-        assertEq(bpt.balanceOf(LPT_PROVIDER), 0, "the worthless pool position pays out no BPT either");
+        assertEq(quoteAssets, 0, "the floor-zero venue slice must return zero quote assets");
+        assertEq(quoteToken.balanceOf(LPT_PROVIDER), 0, "no quote assets may reach the redeemer from the thinned pool");
+        assertEq(bpt.balanceOf(LPT_PROVIDER), 0, "the pooled BPT is removed in-vault, no BPT reaches the redeemer");
 
-        // The fair idle premium slice is paid: the idle senior shares are unwound to the collateral asset at the 1.1 rate
-        assertEq(toUint256(stClaims.collateralAssets), 818_181_818_181_681_816, "the idle slice must unwind to its virtual-share-scaled vault shares");
+        // The fair idle premium slice is paid: the redeemed idle senior shares unwind to the collateral asset at the
+        // 1.1 rate, scaled against the effective senior supply
+        assertEq(toUint256(stClaims.collateralAssets), 818_181_818_181_818_180, "the idle slice must unwind to its virtual-share-scaled vault shares");
         assertEq(toUint256(stClaims.lptAssets), 0, "a senior claim carries no LPT-asset leg");
-        assertEq(stJtVault.balanceOf(LPT_PROVIDER), 818_181_818_181_681_816, "the unwound vault shares must land on the redeemer");
+        assertEq(stJtVault.balanceOf(LPT_PROVIDER), 818_181_818_181_818_180, "the unwound vault shares must land on the redeemer");
 
         // The shares are burned and the kernel state reflects a completed redemption: the idle pile drains to its
-        // virtual-share sliver while the (worthless) pooled BPT never left kernel custody
+        // virtual-share sliver and the pooled BPT is removed down to the same 1-wei dust
         assertEq(liquidityProviderTranche.balanceOf(LPT_PROVIDER), 0, "the redeemed LPT shares must be burned");
         assertEq(liquidityProviderTranche.totalSupply(), 0, "no LPT shares remain: the provider held the whole supply and the LPT fee mints none");
         // The sole holder redeems its whole balance, but the virtual-share offset scales its slice against the
-        // effective supply (6e18 + 1e6), so a 141111-share sliver of the idle pile (846660395108192850 -
-        // 846660395108051739) is left behind rather than draining to zero
+        // effective supply (6e18 + 1), so a 1-share sliver of the idle pile (846660395108184383 -
+        // 846660395108184382) is left behind rather than draining to zero
         assertEq(
             kernel.getState().lptOwnedSeniorTrancheShares,
-            141_111,
-            "the idle pile drains to its virtual-share sliver: idleShares minus floor(idleShares x 6e18 / (6e18 + 1e6))"
+            1,
+            "the idle pile drains to its virtual-share sliver: idleShares minus floor(idleShares x 6e18 / (6e18 + 1))"
         );
-        assertEq(
-            toUint256(kernel.getState().totalLPTAssets), SEEDED_LPT_RAW_NAV, "the pooled BPT must remain in kernel custody, the zero-unit removal moves nothing"
-        );
+        // The removal pulls the redeemer's proportional BPT slice, floor(6e18 x 6e18 / (6e18 + 1)) = 6e18 - 1, so the
+        // pooled BPT drains to the same 1-wei virtual-share dust
+        assertEq(toUint256(kernel.getState().totalLPTAssets), 1, "the pooled BPT is removed down to its virtual-share dust");
     }
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { AssetClaims } from "../../../src/libraries/Types.sol";
+import { AssetClaims, DispatchMode } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits } from "../../../src/libraries/Units.sol";
 import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { Assertions } from "../../utils/Assertions.sol";
@@ -76,16 +76,16 @@ contract DispatchTarget {
     }
 
     /// @notice A dual-mode operation returning a value tuple, the shape _dispatchAndUnwrap serves
-    function tupleOperation(bool _isPreview, uint256 _a, uint256 _b) external returns (uint256 sum, uint256 product) {
+    function tupleOperation(DispatchMode _mode, uint256 _a, uint256 _b) external returns (uint256 sum, uint256 product) {
         writes = 1;
         (sum, product) = (_a + _b, _a * _b);
-        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(sum, product));
+        if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(sum, product));
     }
 
     /// @notice A dual-mode operation returning bytes, the shape _dispatch serves
-    function bytesOperation(bool _isPreview, bytes memory _payload) external returns (bytes memory result) {
+    function bytesOperation(DispatchMode _mode, bytes memory _payload) external returns (bytes memory result) {
         writes = 1;
-        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(_payload);
+        if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(_payload);
         return _payload;
     }
 
@@ -110,22 +110,22 @@ contract DispatchLogicHarness {
 
     /// @notice Runs _simulate with the unwrap depth, the delivery _dispatchAndUnwrap consumers receive
     function simulateUnwrapped(address _target, bytes memory _callData) external returns (bytes memory result) {
-        result = _target._simulate(_callData, true);
+        result = _target._dispatchAndUnwrap(DispatchMode.SIMULATE, _callData);
     }
 
     /// @notice Runs _simulate keeping the error's offset and length prefix, the delivery _dispatch consumers receive
     function simulateWrapped(address _target, bytes memory _callData) external returns (bytes memory result) {
-        result = _target._simulate(_callData, false);
+        result = _target._dispatch(DispatchMode.SIMULATE, _callData);
     }
 
     /// @notice Runs _dispatch, the variant serving bytes-returning operations
-    function dispatch(address _target, bool _isPreview, bytes memory _callData) external returns (bytes memory result) {
-        result = _target._dispatch(_isPreview, _callData);
+    function dispatch(address _target, DispatchMode _mode, bytes memory _callData) external returns (bytes memory result) {
+        result = _target._dispatch(_mode, _callData);
     }
 
     /// @notice Runs _dispatchAndUnwrap, the variant serving tuple-returning operations
-    function dispatchAndUnwrap(address _target, bool _isPreview, bytes memory _callData) external returns (bytes memory result) {
-        result = _target._dispatchAndUnwrap(_isPreview, _callData);
+    function dispatchAndUnwrap(address _target, DispatchMode _mode, bytes memory _callData) external returns (bytes memory result) {
+        result = _target._dispatchAndUnwrap(_mode, _callData);
     }
 }
 
@@ -162,11 +162,10 @@ contract Test_DispatchLogic is Assertions {
     // Selector constant (spec: the assembly-readable literal must equal the error's real selector)
     // =============================
 
-    /// @notice The pinned literal selector constant equals SIMULATION_RESULT.selector, so the literal cannot drift
-    function test_SimulationResultSelectorConstant_MatchesError() public pure {
-        assertEq(
-            DispatchLogic.SIMULATION_RESULT_SELECTOR, DispatchLogic.SIMULATION_RESULT.selector, "the pinned selector literal must equal the error's selector"
-        );
+    /// @notice The SIMULATION_RESULT selector is pinned against a hardcoded literal, so a rename or signature change to the
+    ///         error (which would silently break every simulation's selector gate) is caught by this drift guard
+    function test_SimulationResultSelector_MatchesPinnedLiteral() public pure {
+        assertEq(DispatchLogic.SIMULATION_RESULT.selector, bytes4(0x9d59ef49), "the SIMULATION_RESULT selector must not drift from its pinned literal");
     }
 
     // =============================
@@ -309,8 +308,10 @@ contract Test_DispatchLogic is Assertions {
 
     /// @notice A tuple-returning operation dispatches to identical bytes in both modes, the bare tuple encoding
     function test_DispatchAndUnwrap_TupleOperation_ModesAreByteIdentical() public {
-        bytes memory executed = harness.dispatchAndUnwrap(address(target), false, abi.encodeCall(DispatchTarget.tupleOperation, (false, 3, 7)));
-        bytes memory simulated = harness.dispatchAndUnwrap(address(target), true, abi.encodeCall(DispatchTarget.tupleOperation, (true, 3, 7)));
+        bytes memory executed =
+            harness.dispatchAndUnwrap(address(target), DispatchMode.EXECUTE, abi.encodeCall(DispatchTarget.tupleOperation, (DispatchMode.EXECUTE, 3, 7)));
+        bytes memory simulated =
+            harness.dispatchAndUnwrap(address(target), DispatchMode.SIMULATE, abi.encodeCall(DispatchTarget.tupleOperation, (DispatchMode.SIMULATE, 3, 7)));
         assertEq(executed, simulated, "both modes must deliver the tuple operation's returndata byte for byte");
         assertEq(executed, abi.encode(uint256(10), uint256(21)), "the delivery must be the bare tuple encoding");
 
@@ -322,8 +323,10 @@ contract Test_DispatchLogic is Assertions {
     /// @notice A bytes-returning operation dispatches to identical bytes in both modes, the prefixed bytes encoding
     function test_Dispatch_BytesOperation_ModesAreByteIdentical() public {
         for (uint256 i = 0; i < payloads.length; i++) {
-            bytes memory executed = harness.dispatch(address(target), false, abi.encodeCall(DispatchTarget.bytesOperation, (false, payloads[i])));
-            bytes memory simulated = harness.dispatch(address(target), true, abi.encodeCall(DispatchTarget.bytesOperation, (true, payloads[i])));
+            bytes memory executed =
+                harness.dispatch(address(target), DispatchMode.EXECUTE, abi.encodeCall(DispatchTarget.bytesOperation, (DispatchMode.EXECUTE, payloads[i])));
+            bytes memory simulated =
+                harness.dispatch(address(target), DispatchMode.SIMULATE, abi.encodeCall(DispatchTarget.bytesOperation, (DispatchMode.SIMULATE, payloads[i])));
             assertEq(executed, simulated, "both modes must deliver the bytes operation's returndata byte for byte");
             assertEq(abi.decode(executed, (bytes)), payloads[i], "the delivery must decode to the operation's bytes return");
         }
@@ -335,10 +338,16 @@ contract Test_DispatchLogic is Assertions {
      *         revert pierces it, and the error's offset and length prefix stands in for the trampoline's
      */
     function test_Dispatch_TrampolinedOperation_ModesAreByteIdentical() public {
-        bytes memory executed =
-            harness.dispatch(address(target), false, abi.encodeCall(DispatchTarget.trampoline, (abi.encodeCall(DispatchTarget.tupleOperation, (false, 3, 7)))));
-        bytes memory simulated =
-            harness.dispatch(address(target), true, abi.encodeCall(DispatchTarget.trampoline, (abi.encodeCall(DispatchTarget.tupleOperation, (true, 3, 7)))));
+        bytes memory executed = harness.dispatch(
+            address(target),
+            DispatchMode.EXECUTE,
+            abi.encodeCall(DispatchTarget.trampoline, (abi.encodeCall(DispatchTarget.tupleOperation, (DispatchMode.EXECUTE, 3, 7))))
+        );
+        bytes memory simulated = harness.dispatch(
+            address(target),
+            DispatchMode.SIMULATE,
+            abi.encodeCall(DispatchTarget.trampoline, (abi.encodeCall(DispatchTarget.tupleOperation, (DispatchMode.SIMULATE, 3, 7))))
+        );
         assertEq(executed, simulated, "both modes must deliver the trampolined operation's returndata byte for byte");
 
         (uint256 sum, uint256 product) = abi.decode(abi.decode(simulated, (bytes)), (uint256, uint256));
@@ -350,12 +359,12 @@ contract Test_DispatchLogic is Assertions {
     function test_RevertIf_TrampolinedOperationFails_BubblesByteExact() public {
         bytes memory callData = abi.encodeCall(DispatchTarget.trampoline, (abi.encodeCall(DispatchTarget.revertWithArgs, (1337, address(0xCAFE)))));
         bytes memory expected = abi.encodeWithSelector(DispatchTarget.OPERATION_FAILED_WITH_ARGS.selector, 1337, address(0xCAFE));
-        try harness.dispatch(address(target), false, callData) {
+        try harness.dispatch(address(target), DispatchMode.EXECUTE, callData) {
             fail("an executed trampolined failure must bubble");
         } catch (bytes memory err) {
             assertEq(err, expected, "the executed trampolined failure must bubble byte-exact");
         }
-        try harness.dispatch(address(target), true, callData) {
+        try harness.dispatch(address(target), DispatchMode.SIMULATE, callData) {
             fail("a simulated trampolined failure must bubble");
         } catch (bytes memory err) {
             assertEq(err, expected, "the simulated trampolined failure must bubble byte-exact");
@@ -364,12 +373,12 @@ contract Test_DispatchLogic is Assertions {
 
     /// @notice An execution persists the operation's write while a simulation leaves none, on both variants
     function test_Dispatch_ExecutionPersistsAndSimulationUnwinds() public {
-        harness.dispatchAndUnwrap(address(target), true, abi.encodeCall(DispatchTarget.tupleOperation, (true, 3, 7)));
+        harness.dispatchAndUnwrap(address(target), DispatchMode.SIMULATE, abi.encodeCall(DispatchTarget.tupleOperation, (DispatchMode.SIMULATE, 3, 7)));
         assertEq(target.writes(), 0, "a simulated tuple operation must leave no state");
-        harness.dispatch(address(target), true, abi.encodeCall(DispatchTarget.bytesOperation, (true, payloads[1])));
+        harness.dispatch(address(target), DispatchMode.SIMULATE, abi.encodeCall(DispatchTarget.bytesOperation, (DispatchMode.SIMULATE, payloads[1])));
         assertEq(target.writes(), 0, "a simulated bytes operation must leave no state");
 
-        harness.dispatchAndUnwrap(address(target), false, abi.encodeCall(DispatchTarget.tupleOperation, (false, 3, 7)));
+        harness.dispatchAndUnwrap(address(target), DispatchMode.EXECUTE, abi.encodeCall(DispatchTarget.tupleOperation, (DispatchMode.EXECUTE, 3, 7)));
         assertEq(target.writes(), 1, "an executed operation must persist its write");
     }
 
@@ -389,12 +398,12 @@ contract Test_DispatchLogic is Assertions {
         } catch (bytes memory err) {
             assertEq(err, _expected, "the wrapped depth must bubble byte-exact");
         }
-        try harness.dispatch(address(target), true, _callData) {
+        try harness.dispatch(address(target), DispatchMode.SIMULATE, _callData) {
             fail("a simulated dispatch must bubble the failure");
         } catch (bytes memory err) {
             assertEq(err, _expected, "a simulated dispatch must bubble byte-exact");
         }
-        try harness.dispatchAndUnwrap(address(target), false, _callData) {
+        try harness.dispatchAndUnwrap(address(target), DispatchMode.EXECUTE, _callData) {
             fail("an executed dispatch must bubble the failure");
         } catch (bytes memory err) {
             assertEq(err, _expected, "an executed dispatch must bubble byte-exact");

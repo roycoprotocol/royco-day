@@ -23,7 +23,7 @@ import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../../src/interfaces/IYDM.sol";
 import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../src/libraries/Constants.sol";
-import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
+import { AssetClaims, DispatchMode, MarketState, Operation, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { IKernelTestHooks } from "../../utils/IKernelTestHooks.sol";
@@ -1083,8 +1083,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT lptAssetsOut, uint256 lptTotalSupplyAfterMints)
     {
         vm.prank(address(LPT), address(0));
+        // SIMULATE dispatch: the null synthetic caller, this contract the deposit receiver
         (bool ok, bytes memory ret) = address(KERNEL)
-            .call(abi.encodeCall(IRoycoDayKernel.lptDepositMultiAsset, (true, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(0))));
+            .call(abi.encodeCall(IRoycoDayKernel.lptDepositMultiAsset, (DispatchMode.SIMULATE, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(0), address(0), address(this))));
         assertFalse(ok, "the flagged flow must unwind via its result-carrying revert");
         if (bytes4(ret) != DispatchLogic.SIMULATION_RESULT.selector) _bubbleRevert(ret);
         bytes memory simulationResult;
@@ -1374,7 +1375,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 breachAssets = toUint256(maxAssets) + _stMaxDepositBreachSlackAssets();
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(ST), breachAssets);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
         _assertMarketUnchanged(pre);
@@ -1409,7 +1410,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(assets), ST_BOB_ADDRESS);
         vm.stopPrank();
         _assertMarketUnchanged(pre);
@@ -1434,7 +1435,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 breachAssets = toUint256(maxAssets) + _stMaxDepositBreachSlackAssets();
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(ST), breachAssets);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -1477,7 +1478,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 breachAssets = toUint256(maxAssets) + _stMaxDepositBreachSlackAssets();
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(ST), breachAssets);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -1732,12 +1733,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertCommittedConservation();
     }
 
-    /// @notice A multi-asset LPT deposit with zero of both constituent legs reverts with `MUST_DEPOSIT_NON_ZERO_ASSETS`.
+    /// @notice A multi-asset LPT deposit with zero of both constituent legs reverts with `MUST_MINT_NON_ZERO_SHARES` at the zero-priced LPT leg.
     /// @dev The selector is declared identically on `IRoycoDayKernel` and `IRoycoLiquidityProviderTranche`, the kernel's declaration reverts.
     function test_RevertIf_LPTDepositMultiAssetBothLegsZero() public whenLPT {
         _setupLPTProviders();
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayKernel.MUST_DEPOSIT_NON_ZERO_ASSETS.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         IRoycoLiquidityProviderTranche(address(LPT)).depositMultiAsset(0, 0, 0, LPT_ALICE_ADDRESS);
     }
 
@@ -1905,7 +1906,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.startPrank(LPT_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(LPT), breachAssets);
         IERC20(testConfig.quoteAsset).approve(address(LPT), quoteAssets);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         IRoycoLiquidityProviderTranche(address(LPT)).depositMultiAsset(breachAssets, quoteAssets, 0, LPT_BOB_ADDRESS);
         vm.stopPrank();
         _assertMarketUnchanged(pre);
@@ -1945,7 +1946,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.startPrank(LPT_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(LPT), collateralAssets);
         IERC20(testConfig.quoteAsset).approve(address(LPT), quoteAssets);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         IRoycoLiquidityProviderTranche(address(LPT)).depositMultiAsset(collateralAssets, quoteAssets, 0, LPT_BOB_ADDRESS);
         vm.stopPrank();
         _assertMarketUnchanged(pre);
@@ -2138,10 +2139,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertCommittedConservation();
     }
 
-    /// @notice A zero-share ST redemption reverts with the kernel's `MUST_REDEEM_NON_ZERO_SHARES`.
+    /// @notice A zero-share ST redemption reverts with the kernel's `MUST_REDEMPTION_NON_ZERO_SHARES`.
     function test_RevertIf_STRedeemZeroShares() public {
         vm.prank(ST_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
         ST.redeem(0, ST_ALICE_ADDRESS, ST_ALICE_ADDRESS);
     }
 
@@ -2334,21 +2335,20 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertLt(JT.maxRedeem(JT_ALICE_ADDRESS), shares, "arrange: the redemption must exceed the reported maximum");
 
         vm.prank(JT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         JT.redeem(shares, JT_ALICE_ADDRESS, JT_ALICE_ADDRESS);
         _assertMarketUnchanged(pre);
     }
 
-    /// @notice In a fixed-term market a JT redemption reverts with `DISABLED_IN_FIXED_TERM_STATE`, `maxRedeem`
-    ///         reports zero, and the junior max-withdrawable view zeroes.
+    /// @notice In a fixed-term market a JT redemption reverts with `DISABLED_IN_FIXED_TERM_STATE` and `maxRedeem`
+    ///         reports zero.
     function test_RevertIf_JTRedeemInFixedTerm() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         uint256 shares = JT.balanceOf(JT_ALICE_ADDRESS) / 2;
         _enterFixedTerm();
 
+        // maxRedeem carries the fixed-term gate, the removed kernel NAV-tuple getter did not survive the API unification
         assertEq(JT.maxRedeem(JT_ALICE_ADDRESS), 0, "jtMaxRedeem must report zero in a fixed term");
-        (, NAV_UNIT jtMaxWithdrawableNAV,) = KERNEL.jtMaxWithdrawable(JT_ALICE_ADDRESS);
-        assertEq(jtMaxWithdrawableNAV, ZERO_NAV_UNITS, "the junior max-withdrawable NAV must zero in a fixed term");
 
         vm.prank(JT_ALICE_ADDRESS);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
@@ -2400,7 +2400,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertLe(breachShares, JT.balanceOf(JT_ALICE_ADDRESS), "arrange: the breach redemption must be affordable");
 
         vm.prank(JT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         JT.redeem(breachShares, JT_ALICE_ADDRESS, JT_ALICE_ADDRESS);
     }
 
@@ -2546,7 +2546,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertSliceWouldBreachLiquidity(shares, minLiquidityWAD, pre);
 
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
         _assertMarketUnchanged(pre);
     }
@@ -2572,7 +2572,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // The in-kind redemption only shrinks the pool depth, so it cannot relax its own floor and reverts
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
         _assertMarketUnchanged(pre);
     }
@@ -2609,7 +2609,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertLe(breachShares, LPT.balanceOf(LPT_ALICE_ADDRESS), "arrange: the breach redemption must be affordable");
 
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(breachShares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
     }
 
@@ -2678,16 +2678,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertMarketUnchanged(preBreach);
     }
 
-    /// @notice A zero-share LPT redemption reverts with the kernel's `MUST_REDEEM_NON_ZERO_SHARES` on both the
+    /// @notice A zero-share LPT redemption reverts with the kernel's `MUST_REDEMPTION_NON_ZERO_SHARES` on both the
     ///         in-kind and the multi-asset flow.
     function test_RevertIf_LPTRedeemZeroShares() public whenLPT {
         _setupLPTProviders();
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
         LPT.redeem(0, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
 
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayKernel.MUST_REDEEM_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
         IRoycoLiquidityProviderTranche(address(LPT)).redeemMultiAsset(0, 0, 0, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
     }
 
@@ -4096,7 +4096,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      *         slice is nonzero commits as a NAV-neutral redemption, handing the redeemer exactly its pro-rata idle
      *         senior-share slice while the floored BPT leg pays nothing.
      * @dev The idle premium is a claimable leg of the LPT's effective NAV. Handing the senior shares over moves no raw
-     *      NAV (they stay in the senior supply), so the LPT_REDEEM shape check (a redemption never grows the LPT's
+     *      NAV (they stay in the senior supply), so the LPT_REDEMPTION shape check (a redemption never grows the LPT's
      *      deployed raw NAV) commits it. The arranged market is liquidity-healthy (utilization ~0.8), so the liquidity
      *      requirement passes and the premium is delivered rather than stranded.
      */
@@ -4172,7 +4172,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // previewRedeem simulates the real redemption and bubbles the still-breached coverage gate like exec
         NAV_UNIT expectedAliceValue = _expectedValue(aliceShares, r.post.jtSupply, r.post.lastJTEffectiveNAV);
         assertEq(JT.convertToAssets(aliceShares).nav, expectedAliceValue, "the unbacked holder's claim must be the floor-scaled dust slice");
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         JT.previewRedeem(aliceShares);
         assertLt(toUint256(expectedAliceValue) * 100, toUint256(value), "the unbacked holder must be diluted to under a percent of the new value");
     }
@@ -4222,11 +4222,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(JT.maxRedeem(JT_ALICE_ADDRESS), 0, "jtMaxRedeem must report zero once liquidation is breached");
         uint256 jtShares = JT.balanceOf(JT_ALICE_ADDRESS) / 10;
         vm.prank(JT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         JT.redeem(jtShares, JT_ALICE_ADDRESS, JT_ALICE_ADDRESS);
 
         // (d) The liquidity gate is enforced under liquidation: only a bounded surplus below the full pooled depth is reported
-        (, NAV_UNIT lptMaxWithdrawableNAV,) = KERNEL.lptMaxWithdrawable(LPT_ALICE_ADDRESS);
+        // The removed kernel getter's withdrawable NAV now reads off the accountant's maxLPTWithdrawal against a non-mutating sync preview
+        (SyncedAccountingState memory breachState,,) = KERNEL.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
+        NAV_UNIT lptMaxWithdrawableNAV = ACCOUNTANT.maxLPTWithdrawal(breachState);
         assertLt(lptMaxWithdrawableNAV, pre.lastLPTRawNAV, "the liquidation breach must not waive the pooled-depth liquidity floor");
         assertLt(LPT.maxRedeem(LPT_ALICE_ADDRESS), LPT.balanceOf(LPT_ALICE_ADDRESS), "lptMaxRedeem must stay bounded below the full balance");
 
@@ -4234,7 +4236,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 lptShares = (LPT.balanceOf(LPT_ALICE_ADDRESS) * 3) / 4;
         _assertSliceWouldBreachLiquidity(lptShares, minLiquidityWAD, pre);
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(lptShares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
 
         // (a) A senior redemption succeeds and pays the exact bonus out of the junior effective NAV
@@ -4507,33 +4509,26 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function test_KernelAndAccountant_callerGates() public {
         address outsider = _randomOutsider();
         vm.startPrank(outsider);
-        vm.expectRevert(IRoycoDayKernel.ONLY_SENIOR_TRANCHE.selector);
-        KERNEL.stDeposit(false, toTrancheUnits(1), outsider);
-        vm.expectRevert(IRoycoDayKernel.ONLY_SENIOR_TRANCHE.selector);
-        KERNEL.stRedeem(false, 1, outsider, outsider);
-        vm.expectRevert(IRoycoDayKernel.ONLY_JUNIOR_TRANCHE.selector);
-        KERNEL.jtDeposit(false, toTrancheUnits(1), outsider);
-        vm.expectRevert(IRoycoDayKernel.ONLY_JUNIOR_TRANCHE.selector);
-        KERNEL.jtRedeem(false, 1, outsider, outsider);
+        // The per-tranche in-kind entrypoints unified into inkindDeposit and inkindRedeem, both gated to the market's tranches
+        vm.expectRevert(IRoycoDayKernel.ONLY_TRANCHE.selector);
+        KERNEL.inkindDeposit(DispatchMode.EXECUTE, toTrancheUnits(1), outsider, outsider);
+        vm.expectRevert(IRoycoDayKernel.ONLY_TRANCHE.selector);
+        KERNEL.inkindRedeem(DispatchMode.EXECUTE, 1, outsider, outsider, outsider);
         if (testConfig.hasLiquidityProviderTranche) {
+            // The multi-asset pair in both dispatch modes: a direct SIMULATE call would commit the
+            // flow's mutations with no outer simulation revert to unwind them, so this gate is the sole defense
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptDeposit(false, toTrancheUnits(1), outsider);
+            KERNEL.lptDepositMultiAsset(DispatchMode.EXECUTE, toTrancheUnits(1), 1, ZERO_TRANCHE_UNITS, outsider, outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptRedeem(false, 1, outsider, outsider);
-            // The multi-asset pair in both preview modes: a direct call with _isPreview true would commit the
-            // flow's mutations with no outer preview revert to unwind them, so this gate is the sole defense
+            KERNEL.lptDepositMultiAsset(DispatchMode.SIMULATE, toTrancheUnits(1), 1, ZERO_TRANCHE_UNITS, address(0), address(this));
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptDepositMultiAsset(false, toTrancheUnits(1), 1, ZERO_TRANCHE_UNITS);
+            KERNEL.lptRedeemMultiAsset(DispatchMode.EXECUTE, 1, 0, 0, outsider, outsider, outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptDepositMultiAsset(true, toTrancheUnits(1), 1, ZERO_TRANCHE_UNITS);
-            vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptRedeemMultiAsset(false, 1, 0, 0, outsider, outsider);
-            vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptRedeemMultiAsset(true, 1, 0, 0, outsider, outsider);
+            KERNEL.lptRedeemMultiAsset(DispatchMode.SIMULATE, 1, 0, 0, address(0), address(0), outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-            KERNEL.addLiquidity(false, 1, 1, ZERO_TRANCHE_UNITS);
+            KERNEL.addLiquidity(DispatchMode.EXECUTE, 1, 1, ZERO_TRANCHE_UNITS);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-            KERNEL.removeLiquidity(false, toTrancheUnits(1), 0, 0, outsider);
+            KERNEL.removeLiquidity(DispatchMode.EXECUTE, toTrancheUnits(1), 0, 0, outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
             KERNEL.attemptLiquidityPremiumReinvestment(1, ZERO_NAV_UNITS, 0);
         }
@@ -4542,7 +4537,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
         ACCOUNTANT.commitLiquidityProviderTrancheRawNAV(ZERO_NAV_UNITS);
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        ACCOUNTANT.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        ACCOUNTANT.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
         ST.kernelMint(outsider, 1);
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
@@ -4745,8 +4740,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
                 uint256(ACCOUNTANT.getState().lastYieldShareAccrualTimestamp), block.timestamp, "the liquidity setter's inline sync must stamp the checkpoint"
             );
             _sync();
-            (, NAV_UNIT maxWithdrawableA,) = KERNEL.lptMaxWithdrawable(LPT_ALICE_ADDRESS);
-            assertEq(maxWithdrawableA, _expectedMaxLPTWithdrawalNAV(), "lptMaxWithdrawable must match the independent recompute");
+            // The removed kernel getter's withdrawable NAV now reads off the accountant's maxLPTWithdrawal against a non-mutating sync preview
+            (SyncedAccountingState memory stateA,,) = KERNEL.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
+            NAV_UNIT maxWithdrawableA = ACCOUNTANT.maxLPTWithdrawal(stateA);
+            assertEq(maxWithdrawableA, _expectedMaxLPTWithdrawalNAV(), "maxLPTWithdrawal must match the independent recompute");
             assertGt(toUint256(maxWithdrawableA), 0, "arrange: the liquidity surplus must be nonzero");
             // Counterweights independent of the max-withdrawal mirror: the withdrawable depth can never exceed the
             // pooled depth itself, and removing it must leave enough depth to satisfy the liquidity requirement
@@ -4761,8 +4758,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
             _setMinLiquidityWAD(minLiquidityA * 2);
             _sync();
-            (, NAV_UNIT maxWithdrawableB,) = KERNEL.lptMaxWithdrawable(LPT_ALICE_ADDRESS);
-            assertEq(maxWithdrawableB, _expectedMaxLPTWithdrawalNAV(), "lptMaxWithdrawable must match the independent recompute after the raise");
+            (SyncedAccountingState memory stateB,,) = KERNEL.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
+            NAV_UNIT maxWithdrawableB = ACCOUNTANT.maxLPTWithdrawal(stateB);
+            assertEq(maxWithdrawableB, _expectedMaxLPTWithdrawalNAV(), "maxLPTWithdrawal must match the independent recompute after the raise");
             assertLt(maxWithdrawableB, maxWithdrawableA, "raising the liquidity requirement must shrink the withdrawable depth");
         }
         _assertCommittedConservation();

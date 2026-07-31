@@ -309,9 +309,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
 
         MockRecordingYDM reverting = new MockRecordingYDM();
         reverting.setRevertOnInitialize(true);
-        vm.expectRevert(
-            abi.encodeWithSelector(IRoycoDayAccountant.FAILED_TO_INITIALIZE_YDM.selector, abi.encodeWithSelector(MockRecordingYDM.YDM_INIT_REVERTED.selector))
-        );
+        vm.expectRevert(MockRecordingYDM.YDM_INIT_REVERTED.selector);
         accountant.setJuniorTrancheYDM(address(reverting), abi.encodeCall(MockRecordingYDM.initializeModel, (hex"")));
     }
 
@@ -351,9 +349,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
 
         MockRecordingYDM reverting = new MockRecordingYDM();
         reverting.setRevertOnInitialize(true);
-        vm.expectRevert(
-            abi.encodeWithSelector(IRoycoDayAccountant.FAILED_TO_INITIALIZE_YDM.selector, abi.encodeWithSelector(MockRecordingYDM.YDM_INIT_REVERTED.selector))
-        );
+        vm.expectRevert(MockRecordingYDM.YDM_INIT_REVERTED.selector);
         accountant.setLiquidityProviderTrancheYDM(address(reverting), abi.encodeCall(MockRecordingYDM.initializeModel, (hex"")));
     }
 

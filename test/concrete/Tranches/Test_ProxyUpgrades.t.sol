@@ -59,6 +59,7 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
                 accountant: address(accountant),
                 liquidityProviderTranche: address(liquidityProviderTranche),
                 lptAsset: address(bpt),
+                quoteAsset: address(quoteToken),
                 enforceVaultSharesTransferWhitelist: params.enforceWhitelistOnTransfer
             })
         );
@@ -90,14 +91,14 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
         require(vm.revertToState(snapshotId), "control-state rewind failed");
 
         // Hand-derived control values under the virtual-shares/value offset: flat market at the 1.0 seed rate, so
-        // 10e18 vault shares are 10e18 NAV and mint floor((100e18 + 1e6) x 10e18 / (100e18 + 1)) = 10000000000000099999
-        // shares. Redeeming 5e18 of the resulting 110000000000000099999 supply claims the effective NAV slice
-        // floor(110e18 x 5e18 / (110000000000000099999 + 1e6)) = 4999999999999950000, converted once to collateral
+        // 10e18 vault shares are 10e18 NAV and mint floor((100e18 + 1) x 10e18 / (100e18 + 1)) = 10000000000000000000
+        // shares. Redeeming 5e18 of the resulting 110000000000000000000 supply claims the effective NAV slice
+        // floor(110e18 x 5e18 / (110000000000000000000 + 1)) = 4999999999999999999, converted once to collateral
         // at the identity 1.0 rate
-        assertEq(controlShares, 10_000_000_000_000_099_999, "the control deposit must mint exactly the offset-adjusted quote at the 1.0 seed rate");
+        assertEq(controlShares, 10_000_000_000_000_000_000, "the control deposit must mint exactly the offset-adjusted quote at the 1.0 seed rate");
         assertEq(
             toUint256(controlClaims.collateralAssets),
-            4_999_999_999_999_950_000,
+            4_999_999_999_999_999_999,
             "the control redemption must claim exactly the offset-adjusted pro-rata vault shares"
         );
 

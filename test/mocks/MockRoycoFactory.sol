@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { DispatchLogic } from "../../src/libraries/logic/DispatchLogic.sol";
+import { DispatchMode } from "../../src/libraries/Types.sol";
 
 /**
  * @title MockRoycoFactory
@@ -33,6 +34,6 @@ contract MockRoycoFactory {
     ///         this, mirroring how production templates configure the entry point during market deployments
     function executeAsFactory(address _target, bytes calldata _data) external returns (bytes memory result) {
         // Mirrors the production factory's dispatch, bubbling any target failure verbatim
-        return _target._dispatch(false, _data);
+        return _target._dispatch(DispatchMode.EXECUTE, _data);
     }
 }

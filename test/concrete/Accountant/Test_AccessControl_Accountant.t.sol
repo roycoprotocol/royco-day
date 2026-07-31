@@ -44,10 +44,10 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
     /// postOpSyncTrancheAccounting reverts for any non-kernel caller, including the admin
     function test_RevertIf_PostOpSyncFromNonKernel() public {
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, toNAVUnits(uint256(1e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, toNAVUnits(uint256(1e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.prank(stranger);
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, toNAVUnits(uint256(1e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, toNAVUnits(uint256(1e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
     }
 
     /// all 12 restricted setters (plus inherited pause/unpause) revert AccessManagedUnauthorized for a role-less caller

@@ -228,8 +228,8 @@ contract DayMarketHandler is DayMarketTestBase {
     }
 
     bytes4 internal constant SEL_DISABLED_FT = IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector;
-    bytes4 internal constant SEL_COVERAGE = IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector;
-    bytes4 internal constant SEL_LIQUIDITY = IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
+    bytes4 internal constant SEL_COVERAGE = IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector;
+    bytes4 internal constant SEL_LIQUIDITY = IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
     bytes4 internal constant SEL_INVALID_POST_OP = IRoycoDayAccountant.INVALID_POST_OP_STATE.selector;
     bytes4 internal constant SEL_ZERO_SHARES = IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector;
     bytes4 internal constant SEL_ERC20_BALANCE = IERC20Errors.ERC20InsufficientBalance.selector;
@@ -655,7 +655,7 @@ contract DayMarketHandler is DayMarketTestBase {
         address actor = stActors[bound(_actorSeed, 0, stActors.length - 1)];
         Snap memory s = _syncAndVerify("pre:aimedMaxST");
         if (s.ok) {
-            uint256 maxAssets = toUint256(kernel.stMaxDeposit(actor));
+            uint256 maxAssets = toUint256(seniorTranche.maxDeposit(actor));
             if (maxAssets == 0) {
                 // No capacity: a one-unit deposit must be rejected by one of the gates
                 _execStDeposit(actor, 1e12, s);
@@ -898,7 +898,7 @@ contract DayMarketHandler is DayMarketTestBase {
         try juniorTranche.redeem(_shares, _actor, _actor) {
             _recordSuccess("jtRedeem");
             ghost_transferredOut[address(stJtVault)] += stJtVault.balanceOf(_actor) - outBefore;
-            // The JT_REDEEM postOp IL scaling is deleted: a junior exit only settles in PERPETUAL where the
+            // The JT_REDEMPTION postOp IL scaling is deleted: a junior exit only settles in PERPETUAL where the
             // ledger is already zero, so a successful redeem must leave the committed value untouched
             _flag(toUint256(accountant.getState().lastJTImpermanentLoss) == ghost_jtImpermanentLossReplay, "jtRedeem moved the impermanent-loss ledger");
         } catch (bytes memory err) {

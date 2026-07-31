@@ -162,7 +162,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         address actor = LPT_PROVIDER;
         // The advertised senior capacity plus 10,000 whole vault shares of clear overshoot, so the post-op
         // coverage check must reject regardless of dust slack
-        uint256 stAssets = toUint256(kernel.stMaxDeposit(actor)) + 10_000e18;
+        uint256 stAssets = toUint256(seniorTranche.maxDeposit(actor)) + 10_000e18;
         uint256 quoteAssets = 100 * QUOTE_UNIT;
         _fundDepositLegs(actor, stAssets, quoteAssets);
 
@@ -171,7 +171,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         try liquidityProviderTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor) returns (uint256, uint256) {
             fail("the deposit must revert when its senior leg exceeds the market's coverage capacity");
         } catch (bytes memory err) {
-            assertEq(bytes4(err), IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector, "expected the coverage gate to reject the whole flow");
+            assertEq(bytes4(err), IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector, "expected the coverage gate to reject the whole flow");
         }
         assertEq(_marketDigest(actor), digestBefore, "a gate-rejected multi-asset deposit left a partial trace on the market");
     }
@@ -279,7 +279,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         try liquidityProviderTranche.redeemMultiAsset(shares, 0, 0, actor, actor) {
             fail("the redemption must revert when it would pull depth below the senior liquidity floor");
         } catch (bytes memory err) {
-            assertEq(bytes4(err), IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "expected the liquidity gate to reject the whole flow");
+            assertEq(bytes4(err), IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "expected the liquidity gate to reject the whole flow");
         }
         assertEq(_marketDigest(actor), digestBefore, "a gate-rejected multi-asset redemption left a partial trace on the market");
     }
@@ -338,7 +338,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
             // Otherwise only the liquidity gate (or the one-share rounding to a valueless op) may reject it
             bytes4 sel = bytes4(err);
             assertTrue(
-                sel == IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector || sel == IRoycoDayAccountant.INVALID_POST_OP_STATE.selector,
+                sel == IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector || sel == IRoycoDayAccountant.INVALID_POST_OP_STATE.selector,
                 "the boundary probe was rejected by something other than the liquidity gate or the valueless-op check"
             );
         }
@@ -348,7 +348,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
     function test_LPTDepositMultiAsset_MaxSeniorLeg_LeavesBothUtilizationsAtOrBelowWAD() public {
         address actor = LPT_PROVIDER;
         // The advertised senior capacity presses the coverage gate to its boundary
-        uint256 stAssets = toUint256(kernel.stMaxDeposit(actor));
+        uint256 stAssets = toUint256(seniorTranche.maxDeposit(actor));
         require(stAssets != 0, "setup: expected senior deposit capacity");
         uint256 quoteAssets = 100 * QUOTE_UNIT;
         _fundDepositLegs(actor, stAssets, quoteAssets);
@@ -421,7 +421,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         address actor = LPT_PROVIDER;
         uint256 shares = liquidityProviderTranche.balanceOf(actor);
         vm.prank(actor);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.redeemMultiAsset(shares, 0, 0, actor, actor);
 
         // The bounded maximum still executes: a multi-asset exit relaxes the floor by unwinding senior depth in

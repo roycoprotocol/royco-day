@@ -7,6 +7,7 @@ import { WAD } from "../../../src/libraries/Constants.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title TestFuzz_MaxDepositAndWithdrawal_Kernel
@@ -88,7 +89,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // One wei past the boundary trips whichever gate binds: coverage is checked before liquidity, so the
         // coverage error surfaces whenever covBound <= liqBound, otherwise only liquidity is violated
         bytes4 expectedError =
-            covBound <= liqBound ? IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector : IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
+            covBound <= liqBound ? IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector : IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
         vm.expectRevert(expectedError);
         seniorTranche.previewDeposit(toTrancheUnits(uint256(1)));
         stJtVault.mintShares(ST_PROVIDER, 1);
@@ -141,9 +142,9 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // One share past the true max makes the withdrawn NAV exceed floor((4jt - st)/4) and violates the coverage
         // requirement, from the preview and the execution alike (both from the untouched pre-redemption state, the
         // reverting calls mutate nothing)
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         juniorTranche.previewRedeem(sStar + 1);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         vm.prank(JT_PROVIDER);
         juniorTranche.redeem(sStar + 1, JT_PROVIDER, JT_PROVIDER);
 
@@ -209,9 +210,9 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
 
         // One share past the true max drops the retained depth below the required floor and violates the liquidity
         // requirement, from the preview and the execution alike (both from the untouched pre-redemption state)
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.previewRedeem(sStar + 1);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         vm.prank(LPT_PROVIDER);
         liquidityProviderTranche.redeem(sStar + 1, LPT_PROVIDER, LPT_PROVIDER);
 
