@@ -290,10 +290,11 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
      *      and balances alive, and no flow prices an uninitialized venue
      */
     function queryLPTAssetOracle() public view virtual override(RoycoDayKernel) returns (NAV_UNIT lptAssetPrice) {
-        TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply(_getRoycoDayKernelStorage().lptAsset));
+        RoycoDayKernelState storage $k = _getRoycoDayKernelStorage();
+        TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply($k.lptAsset));
         if (bptTotalSupply == ZERO_TRANCHE_UNITS) return ZERO_NAV_UNITS;
         NAV_UNIT bptTotalValue = toNAVUnits(LPOracleBase(_getBalancerV3LiquidityVenueStorage().bptOracle).computeTVL());
-        lptAssetPrice = _oneWholeLPTAsset().mulDiv(bptTotalValue, bptTotalSupply, Math.Rounding.Floor);
+        lptAssetPrice = toTrancheUnits($k.oneWholeLPTAsset).mulDiv(bptTotalValue, bptTotalSupply, Math.Rounding.Floor);
         require(lptAssetPrice != ZERO_NAV_UNITS, INVALID_PRICE());
     }
 

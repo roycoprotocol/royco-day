@@ -101,34 +101,26 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT value) {
-        return _collateralAssets.mulDiv(_getCollateralAssetPrice(), _oneWholeCollateralAsset(), Math.Rounding.Floor);
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
+        return _collateralAssets.mulDiv(_getCollateralAssetPrice(), toTrancheUnits($.oneWholeCollateralAsset), Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoDayKernel
     function convertValueToCollateralAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT collateralAssets) {
-        return _value.mulDiv(_oneWholeCollateralAsset(), _getCollateralAssetPrice(), Math.Rounding.Floor);
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
+        return _value.mulDiv(toTrancheUnits($.oneWholeCollateralAsset), _getCollateralAssetPrice(), Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoDayKernel
     function convertLPTAssetsToValue(TRANCHE_UNIT _lptAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT value) {
-        return _lptAssets.mulDiv(_getLPTAssetPrice(), _oneWholeLPTAsset(), Math.Rounding.Floor);
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
+        return _lptAssets.mulDiv(_getLPTAssetPrice(), toTrancheUnits($.oneWholeLPTAsset), Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoDayKernel
     function convertValueToLPTAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT lptAssets) {
-        return _value.mulDiv(_oneWholeLPTAsset(), _getLPTAssetPrice(), Math.Rounding.Floor);
-    }
-
-    /// @dev One whole collateral asset: 10^(COLLATERAL_ASSET_DECIMALS)
-    /// @return The value of one whole collateral asset in the collateral asset's own units
-    function _oneWholeCollateralAsset() internal view returns (TRANCHE_UNIT) {
-        return toTrancheUnits(10 ** uint256(_getRoycoDayKernelStorage().collateralAssetDecimals));
-    }
-
-    /// @dev One whole LPT asset: 10^(LPT_ASSET_DECIMALS)
-    /// @return The value of one whole LPT asset in the LPT asset's own units
-    function _oneWholeLPTAsset() internal view returns (TRANCHE_UNIT) {
-        return toTrancheUnits(10 ** uint256(_getRoycoDayKernelStorage().lptAssetDecimals));
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
+        return _value.mulDiv(toTrancheUnits($.oneWholeLPTAsset), _getLPTAssetPrice(), Math.Rounding.Floor);
     }
 
     // =============================

@@ -34,9 +34,15 @@ library InitializationLogic {
         $.juniorTranche = _params.juniorTranche;
         $.liquidityProviderTranche = _params.liquidityProviderTranche;
         $.collateralAsset = _params.collateralAsset;
-        $.collateralAssetDecimals = IERC20Metadata(_params.collateralAsset).decimals();
+        // Ensure that the collateral asset's decimals are less than or equal to 18
+        uint256 collateralAssetDecimals = IERC20Metadata(_params.collateralAsset).decimals();
+        require(collateralAssetDecimals <= 18, IRoycoDayKernel.INVALID_COLLATERAL_ASSET_DECIMALS());
+        $.oneWholeCollateralAsset = uint64(10 ** collateralAssetDecimals);
         $.lptAsset = _params.lptAsset;
-        $.lptAssetDecimals = IERC20Metadata(_params.lptAsset).decimals();
+        // Ensure that the LPT asset's decimals are less than or equal to 18
+        uint256 lptAssetDecimals = IERC20Metadata(_params.lptAsset).decimals();
+        require(lptAssetDecimals <= 18, IRoycoDayKernel.INVALID_LPT_ASSET_DECIMALS());
+        $.oneWholeLPTAsset = uint64(10 ** lptAssetDecimals);
         $.quoteAsset = _params.quoteAsset;
         $.accountant = _params.accountant;
 

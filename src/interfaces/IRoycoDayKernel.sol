@@ -79,9 +79,10 @@ interface IRoycoDayKernel {
         address liquidityProviderTranche;
         // Slot 3
         address collateralAsset;
+        uint64 oneWholeCollateralAsset;
         // Slot 4
         address lptAsset;
-        uint8 lptAssetDecimals;
+        uint64 oneWholeLPTAsset;
         // Slot 5
         address quoteAsset;
         // Slot 6
@@ -93,7 +94,6 @@ interface IRoycoDayKernel {
         // Slot 9
         address collateralAssetOracle;
         uint48 stalenessThresholdSeconds;
-        uint8 collateralAssetDecimals;
         // Slot 10
         address sequencerUptimeFeed;
         uint48 gracePeriodSeconds;
@@ -225,6 +225,12 @@ interface IRoycoDayKernel {
 
     /// @notice Thrown when the market's liquidity requirement is violated
     error LIQUIDITY_REQUIREMENT_VIOLATED();
+
+    /// @notice Thrown when the collateral asset's decimals are greater than 18
+    error INVALID_COLLATERAL_ASSET_DECIMALS();
+
+    /// @notice Thrown when the LPT asset's decimals are greater than 18
+    error INVALID_LPT_ASSET_DECIMALS();
 
     /// @notice Retrieves the senior tranche address
     /// @return seniorTranche The address of the senior tranche for this Royco market
