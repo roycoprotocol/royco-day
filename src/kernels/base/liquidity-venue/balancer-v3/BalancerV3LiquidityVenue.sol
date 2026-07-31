@@ -253,8 +253,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
      */
     function attemptLiquidityPremiumReinvestment(
         uint256 _stSharesToReinvest,
-        NAV_UNIT _stEffectiveNAV,
-        uint256 _totalSTShares
+        NAV_UNIT _stShareRate
     )
         external
         override(IRoycoDayKernel)
@@ -266,8 +265,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
             _getBalancerV3VenueImmutableState(),
             _getBalancerV3LiquidityVenueStorage().maxReinvestmentSlippageWAD,
             _stSharesToReinvest,
-            _stEffectiveNAV,
-            _totalSTShares
+            _stShareRate
         );
     }
 

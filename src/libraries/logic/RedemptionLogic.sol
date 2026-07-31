@@ -269,7 +269,6 @@ library RedemptionLogic {
         // Compute the senior tranche shares a proportional removal of the entire LPT asset holding would withdraw
         uint256 stSharesWithdrawn;
         if (lptClaims.lptAssets != ZERO_TRANCHE_UNITS) {
-            NAV_UNIT lptAssetPrice;
             (stSharesWithdrawn,,) = IRoycoDayKernel(address(this)).removeLiquidity(DispatchMode.SIMULATE, lptClaims.lptAssets, 0, 0, address(0));
         }
 

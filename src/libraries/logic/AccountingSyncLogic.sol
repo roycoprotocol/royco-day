@@ -7,7 +7,7 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { Cache, CacheKey } from "../Cache.sol";
 import { WAD } from "../Constants.sol";
 import { AssetClaims, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
-import { Math, NAV_UNIT, toUint256 } from "../Units.sol";
+import { Math, NAV_UNIT, toNAVUnits, toUint256 } from "../Units.sol";
 import { AssetLedgerLogic } from "./AssetLedgerLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { UtilizationLogic } from "./UtilizationLogic.sol";
@@ -68,8 +68,9 @@ library AccountingSyncLogic {
     }
 
     /**
-     * @notice Syncs the tranche accounting and attempts to reinvest the liquidity provider tranche's idle liquidity-premium senior shares into its market-making inventory
-     * @dev Values the reinvested shares against the freshly synced senior share rate, so a smaller amount can clear the venue's slippage gate when reinvesting the entire idle balance would not
+     * @notice Reinvests the liquidity provider tranche's idle liquidity-premium senior shares into its market-making inventory
+     * @dev The single reinvestment path for both the operation's settled tail and the standalone entrypoint: it values the pile at the senior share rate the transaction already cached, else syncs to stage any newly accrued premium into the idle pile and produce the fresh rate
+     * @dev A cached rate means the caller already synced this transaction (an operation's post-op or a prior sync), so a tail reinvestment never resyncs while a cold call always does
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stShares The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
@@ -81,12 +82,18 @@ library AccountingSyncLogic {
     )
         external
     {
-        // Sync first to stage any newly accrued premium into the idle pile and commit the fresh senior state the reinvestment values against
-        SyncedAccountingState memory state = _preOpSyncTrancheAccounting($, _immutables);
-        // Reinvest the requested idle premium shares (type(uint256).max reinvests the entire idle balance) at this sync's post-mint senior share rate
-        IRoycoDayKernel(address(this)).attemptLiquidityPremiumReinvestment(_stShares, state.stEffectiveNAV, IERC20(_immutables.seniorTranche).totalSupply());
-        // Re-commit the LPT raw NAV: the reinvestment settled after the sync's commit, so the committed depth must reflect the freshly deployed LPT assets
-        _commitLPTRawNAV($, _immutables, state);
+        // Value the pile at the senior share rate the transaction already cached, else sync to stage any newly accrued premium and produce the fresh rate
+        bool cacheHit;
+        uint256 stShareRate;
+        (cacheHit, stShareRate) = Cache._read(CacheKey.ST_SHARE_PRICE);
+        if (!cacheHit) {
+            _preOpSyncTrancheAccounting($, _immutables);
+            (, stShareRate) = Cache._read(CacheKey.ST_SHARE_PRICE);
+        }
+        // Reinvest the requested idle premium shares (type(uint256).max reinvests the entire idle balance) at the senior share rate
+        IRoycoDayKernel(address(this)).attemptLiquidityPremiumReinvestment(_stShares, toNAVUnits(stShareRate));
+        // Re-commit the LPT raw NAV: the reinvestment settled after the commit, so the committed depth must reflect the freshly deployed LPT assets
+        IRoycoDayAccountant(_immutables.accountant).commitLiquidityProviderTrancheRawNAV(ValuationLogic._getLiquidityProviderTrancheRawNAV($));
     }
 
     /**
@@ -272,14 +279,6 @@ library AccountingSyncLogic {
         // Refresh the cached senior share rate at the settled post-op state
         uint256 totalSTShares = IERC20(_immutables.seniorTranche).totalSupply();
         Cache._write(CacheKey.ST_SHARE_PRICE, toUint256(ValuationLogic._computeTrancheShareRate(totalSTShares, state.stEffectiveNAV)));
-
-        // Deploy the accumulated idle liquidity-premium senior shares now that the operation has settled and its requirements are enforced
-        if ($.lptOwnedSeniorTrancheShares != 0) {
-            // Value the pile at the settled post-op senior state, a gated or unpriceable deployment defers inside the attempt and leaves the shares idle
-            IRoycoDayKernel(address(this)).attemptLiquidityPremiumReinvestment(type(uint256).max, state.stEffectiveNAV, totalSTShares);
-            // Re-commit the LPT raw NAV: the deployment settled after the post-op's commit, so the committed depth must reflect the freshly deployed LPT assets
-            _commitLPTRawNAV($, _immutables, state);
-        }
 
         // Signal the settled sync with the final LPT mark and utilization the operation left behind
         emit IRoycoDayKernel.PostOpTrancheAccountingSynced(_op, state);

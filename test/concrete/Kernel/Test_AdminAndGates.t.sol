@@ -210,7 +210,7 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
         vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
         kernel.removeLiquidity(DispatchMode.SIMULATE, toTrancheUnits(1e18), 0, 0, address(this));
         vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-        kernel.attemptLiquidityPremiumReinvestment(type(uint256).max, ZERO_NAV_UNITS, 0);
+        kernel.attemptLiquidityPremiumReinvestment(type(uint256).max, ZERO_NAV_UNITS);
     }
 
     /**

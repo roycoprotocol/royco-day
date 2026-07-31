@@ -15,7 +15,6 @@ import { WAD, ZERO_TRANCHE_UNITS } from "../../Constants.sol";
 import { DispatchMode } from "../../Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../../Units.sol";
 import { DispatchLogic } from "../DispatchLogic.sol";
-import { ValuationLogic } from "../ValuationLogic.sol";
 
 /**
  * @title BalancerV3VenueLogic
@@ -178,16 +177,14 @@ library BalancerV3VenueLogic {
      * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
      * @param _maxReinvestmentSlippageWAD The maximum slippage tolerated on the single-sided reinvestment, scaled to WAD precision
      * @param _stSharesToReinvest The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
-     * @param _stEffectiveNAV The synced senior tranche effective NAV used to value the liquidity provider tranche's idle premium senior shares
-     * @param _totalSTShares The senior tranche share supply after the liquidity premium and senior tranche protocol fee shares are minted, the denominator of the senior share rate
+     * @param _stShareRate The senior share rate the pile is valued at, the NAV backing one whole (WAD) senior share at the operation's settled state
      */
     function attemptLiquidityPremiumReinvestment(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
         uint64 _maxReinvestmentSlippageWAD,
         uint256 _stSharesToReinvest,
-        NAV_UNIT _stEffectiveNAV,
-        uint256 _totalSTShares
+        NAV_UNIT _stShareRate
     )
         external
     {
@@ -197,8 +194,8 @@ library BalancerV3VenueLogic {
         uint256 stSharesToReinvest = Math.min(_stSharesToReinvest, lptOwnedSeniorTrancheShares);
         if (stSharesToReinvest == 0) return;
 
-        // Value the ST shares that need to be reinvested in NAV units at the synced senior share rate (effective NAV over the post-mint supply)
-        NAV_UNIT stSharesToReinvestNAV = ValuationLogic._convertToValue(stSharesToReinvest, _totalSTShares, _stEffectiveNAV, Math.Rounding.Ceil);
+        // Value the ST shares that need to be reinvested in NAV units at the senior share rate, rounding up so the slippage floor stays protective
+        NAV_UNIT stSharesToReinvestNAV = _stShareRate.mulDiv(stSharesToReinvest, WAD, Math.Rounding.Ceil);
         // Mark that senior NAV to its fair BPT at the manipulation-resistant oracle, discounted by the max tolerated slippage
         (bool priceExists, bytes memory returnData) = address(this)._tryExecute(abi.encodeCall(IRoycoDayKernel.convertValueToLPTAssets, stSharesToReinvestNAV));
         if (!priceExists) return;

@@ -336,8 +336,7 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Syncs the tranche accounting and attempts to reinvest the liquidity provider tranche's idle liquidity-premium senior shares into its market-making inventory
-     * @dev The on-demand deployment path: a sync never deploys the pile, so idle premium leaves the kernel only through an
-     *      operation's post-op sync or this entrypoint
+     * @dev The on-demand deployment path: a sync never deploys the pile, so idle premium leaves the kernel only through an operation's reinvestment tail or this entrypoint
      * @dev Values the reinvested shares against the freshly synced senior share rate, so a smaller amount can clear the venue's slippage gate when reinvesting the entire idle balance would not
      * @param _stShares The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
      */
@@ -576,8 +575,7 @@ interface IRoycoDayKernel {
      * @notice Attempts to reinvest the liquidity provider tranche's idle liquidity-premium senior shares into its market-making inventory
      * @dev Tolerates reversions gracefully so it is non-blocking for the tranche operation that invokes it
      * @param _stSharesToReinvest The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
-     * @param _stEffectiveNAV The synced senior tranche effective NAV used to value the liquidity provider tranche's idle premium senior shares
-     * @param _totalSTShares The senior tranche share supply after the liquidity premium and senior tranche protocol fee shares are minted, the denominator of the senior share rate
+     * @param _stShareRate The senior share rate the pile is valued at, the NAV backing one whole (WAD) senior share at the operation's settled state
      */
-    function attemptLiquidityPremiumReinvestment(uint256 _stSharesToReinvest, NAV_UNIT _stEffectiveNAV, uint256 _totalSTShares) external;
+    function attemptLiquidityPremiumReinvestment(uint256 _stSharesToReinvest, NAV_UNIT _stShareRate) external;
 }
