@@ -108,11 +108,11 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         ENTRY_POINT = IRoycoDayEntryPoint(result.entryPoint);
         vm.label(address(ENTRY_POINT), "EntryPoint");
 
-        COLLATERAL_ASSET = KERNEL.COLLATERAL_ASSET();
-        QUOTE_ASSET = KERNEL.QUOTE_ASSET();
+        COLLATERAL_ASSET = KERNEL.collateralAsset();
+        QUOTE_ASSET = KERNEL.quoteAsset();
         QUOTE_UNIT = 10 ** IERC20Metadata(QUOTE_ASSET).decimals();
-        LPT = IRoycoVaultTranche(KERNEL.LIQUIDITY_PROVIDER_TRANCHE());
-        POOL = KERNEL.LPT_ASSET();
+        LPT = IRoycoVaultTranche(KERNEL.liquidityProviderTranche());
+        POOL = KERNEL.lptAsset();
         VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
         vm.label(address(LPT), "LPT");
         vm.label(POOL, "BalancerPool");

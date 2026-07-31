@@ -229,7 +229,7 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
 
     /// @notice QUOTE_ASSET resolves from the registered pool token order to the token that is not the senior tranche share
     function test_Construction_ResolvesQuoteAssetFromRegistration() public view {
-        assertEq(kernel.QUOTE_ASSET(), address(quoteToken), "the quote asset must resolve from the pool registration");
+        assertEq(kernel.quoteAsset(), address(quoteToken), "the quote asset must resolve from the pool registration");
     }
 
     /**

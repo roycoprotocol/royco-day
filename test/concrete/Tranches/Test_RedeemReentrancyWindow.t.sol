@@ -289,20 +289,24 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
 
         // THE ASSET SWAP: the senior and junior tranches hold the hookable plain ERC20 itself, so a redemption's
         // payout transfer executes receiver code exactly where a callback-bearing production asset would
-        RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(stJtUnderlying), predictedKernel);
-        RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(stJtUnderlying), predictedKernel);
-        RoycoLiquidityProviderTranche lptImpl = new RoycoLiquidityProviderTranche(address(bpt), predictedKernel);
-        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel, 0);
+        RoycoSeniorTranche stImpl = new RoycoSeniorTranche();
+        RoycoJuniorTranche jtImpl = new RoycoJuniorTranche();
+        RoycoLiquidityProviderTranche lptImpl = new RoycoLiquidityProviderTranche();
+        RoycoDayAccountant accImpl = new RoycoDayAccountant();
 
-        // Tranche and accountant proxies must exist before the kernel impl (its constructor reads the accountant)
-        seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));
-        juniorTranche = RoycoJuniorTranche(_deployTrancheProxy(address(jtImpl), "Royco Junior Tranche", "RJT"));
-        liquidityProviderTranche = RoycoLiquidityProviderTranche(_deployTrancheProxy(address(lptImpl), "Royco Liquidity Provider Tranche", "RLT"));
+        // Tranche and accountant proxies must exist before the kernel (its initializer reads each tranche's asset)
+        seniorTranche =
+            RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST", predictedKernel, address(stJtUnderlying)));
+        juniorTranche =
+            RoycoJuniorTranche(_deployTrancheProxy(address(jtImpl), "Royco Junior Tranche", "RJT", predictedKernel, address(stJtUnderlying)));
+        liquidityProviderTranche = RoycoLiquidityProviderTranche(
+            _deployTrancheProxy(address(lptImpl), "Royco Liquidity Provider Tranche", "RLT", predictedKernel, address(bpt))
+        );
         accountant = RoycoDayAccountant(
             address(
                 new ERC1967Proxy(
                     address(accImpl),
-                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(params, jtYdmInitData, lptYdmInitData), address(accessManager)))
+                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(params, predictedKernel, jtYdmInitData, lptYdmInitData)))
                 )
             )
         );
@@ -317,17 +321,7 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         _initializePoolMinimumSupply();
 
         // The shipped kernel impl over the plain asset (the oracle above carries the whole collateral pricing swap)
-        RoycoDayBalancerV3Kernel kernelImpl = new RoycoDayBalancerV3Kernel(
-            IRoycoDayKernel.RoycoDayKernelConstructionParams({
-                seniorTranche: address(seniorTranche),
-                juniorTranche: address(juniorTranche),
-                collateralAsset: address(stJtUnderlying),
-                accountant: address(accountant),
-                liquidityProviderTranche: address(liquidityProviderTranche),
-                lptAsset: address(bpt),
-                quoteAsset: address(quoteToken)
-            })
-        );
+        RoycoDayBalancerV3Kernel kernelImpl = new RoycoDayBalancerV3Kernel(IVault(address(balancerVault)));
 
         PROTOCOL_FEE_RECIPIENT = makeAddr("PROTOCOL_FEE_RECIPIENT");
 
@@ -337,6 +331,13 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
             (
                 IRoycoDayKernel.RoycoDayKernelInitParams({
                     initialAuthority: address(accessManager),
+                    seniorTranche: address(seniorTranche),
+                    juniorTranche: address(juniorTranche),
+                    liquidityProviderTranche: address(liquidityProviderTranche),
+                    collateralAsset: address(stJtUnderlying),
+                    lptAsset: address(bpt),
+                    quoteAsset: address(quoteToken),
+                    accountant: address(accountant),
                     protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT,
                     stSelfLiquidationBonusWAD: params.stSelfLiquidationBonusWAD,
                     roycoBlacklist: address(0),

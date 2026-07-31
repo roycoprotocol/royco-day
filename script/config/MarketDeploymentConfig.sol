@@ -300,6 +300,7 @@ abstract contract MarketDeploymentConfig {
             minCoverageWAD: 0.1e18,
             coverageLiquidationUtilizationWAD: 1.0009009e18,
             fixedTermDurationSeconds: 0, // stable market, no fixed term
+            fixedTermGracePeriodSeconds: 0,
             ydmType: YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })
@@ -338,7 +339,6 @@ abstract contract MarketDeploymentConfig {
                 chargeYieldFeeOnSeniorTrancheShares: false,
                 chargeYieldFeeOnQuoteAsset: false
             }),
-            deployPoolHook: true, // the production default: external pool ops sync-then-execute and stay pausable
             stEntryPointConfig: _defaultEntryPointTrancheConfig(),
             jtEntryPointConfig: _defaultEntryPointTrancheConfig(),
             lptEntryPointConfig: _defaultEntryPointTrancheConfig()

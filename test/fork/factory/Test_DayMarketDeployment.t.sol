@@ -49,7 +49,6 @@ import { IRoycoAccessManager } from "../../../src/interfaces/factory/IRoycoAcces
 import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
 import { RoycoDayKernel } from "../../../src/kernels/base/RoycoDayKernel.sol";
 import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
-import { RoycoDayBalancerV3Hooks } from "../../../src/kernels/base/liquidity-venue/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
 import { TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../../src/libraries/Units.sol";
 import { RoycoLiquidityProviderTranche } from "../../../src/tranches/RoycoLiquidityProviderTranche.sol";
@@ -84,7 +83,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     // ── Deployed market (RoycoDayTestBase sets FACTORY/ACCESS_MANAGER/ST/JT/KERNEL/ACCOUNTANT/YDM/BLACKLIST via _setDeployedMarket) ──
     IRoycoVaultTranche internal LPT;
-    address internal POOL; // the Gyro E-CLP BPT (== kernel.LPT_ASSET())
+    address internal POOL; // the Gyro E-CLP BPT (== kernel.lptAsset())
     address internal BALANCER_HOOK; // the pool's hooks contract (the kernel-bound RoycoDayBalancerV3Hooks proxy)
     address internal LPT_YDM; // the LDM
     IVault internal VAULT;
@@ -120,8 +119,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         MARKET_SYNCER = RoycoMarketSyncer(result.marketSyncer);
 
         // Capture the Day-only addresses the script's DeploymentResult omits, by reading the deployed contracts.
-        LPT = IRoycoVaultTranche(KERNEL.LIQUIDITY_PROVIDER_TRANCHE());
-        POOL = KERNEL.LPT_ASSET();
+        LPT = IRoycoVaultTranche(KERNEL.liquidityProviderTranche());
+        POOL = KERNEL.lptAsset();
         LPT_YDM = ACCOUNTANT.getState().lptYDM;
         VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
         BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
@@ -159,15 +158,15 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     /// @notice The kernel, the three tranches, and the accountant all point at each other with the right tranche types
     function test_Linkage_KernelTranchesAccountant() public view {
-        assertEq(KERNEL.SENIOR_TRANCHE(), address(ST), "kernel ST");
-        assertEq(KERNEL.JUNIOR_TRANCHE(), address(JT), "kernel JT");
-        assertEq(KERNEL.LIQUIDITY_PROVIDER_TRANCHE(), address(LPT), "kernel LPT");
-        assertEq(KERNEL.ACCOUNTANT(), address(ACCOUNTANT), "kernel accountant");
-        assertEq(address(IRoycoDayAccountant(ACCOUNTANT.kernel()), address(KERNEL), "accountant kernel");
+        assertEq(KERNEL.seniorTranche(), address(ST), "kernel ST");
+        assertEq(KERNEL.juniorTranche(), address(JT), "kernel JT");
+        assertEq(KERNEL.liquidityProviderTranche(), address(LPT), "kernel LPT");
+        assertEq(KERNEL.accountant(), address(ACCOUNTANT), "kernel accountant");
+        assertEq(ACCOUNTANT.getState().kernel, address(KERNEL), "accountant kernel");
 
-        assertEq(STkernel(), address(KERNEL), "ST kernel");
-        assertEq(JTkernel(), address(KERNEL), "JT kernel");
-        assertEq(LPTkernel(), address(KERNEL), "LPT kernel");
+        assertEq(ST.kernel(), address(KERNEL), "ST kernel");
+        assertEq(JT.kernel(), address(KERNEL), "JT kernel");
+        assertEq(LPT.kernel(), address(KERNEL), "LPT kernel");
 
         assertTrue(ST.TRANCHE_TYPE() == TrancheType.SENIOR, "ST type");
         assertTrue(JT.TRANCHE_TYPE() == TrancheType.JUNIOR, "JT type");
@@ -177,8 +176,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     /// @notice ST/JT coinvest the snUSD vault as the kernel's single collateral asset and the LPT holds the Gyro E-CLP BPT
     function test_Linkage_TrancheAssets() public view {
         // The kernel carries ONE collateral asset for both coinvested tranches (ST_ASSET/JT_ASSET collapsed).
-        assertEq(KERNEL.COLLATERAL_ASSET(), SNUSD_VAULT, "kernel collateral asset");
-        assertEq(KERNEL.LPT_ASSET(), POOL, "kernel LPT asset == pool");
+        assertEq(KERNEL.collateralAsset(), SNUSD_VAULT, "kernel collateral asset");
+        assertEq(KERNEL.lptAsset(), POOL, "kernel LPT asset == pool");
         assertEq(ST.asset(), SNUSD_VAULT, "ST asset");
         assertEq(JT.asset(), SNUSD_VAULT, "JT asset");
         assertEq(LPT.asset(), POOL, "LPT asset == pool");
@@ -231,20 +230,9 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(VAULT.getStaticSwapFeePercentage(POOL), SWAP_FEE, "swap fee");
     }
 
-    /// The pool's hooks proxy was upgraded to the kernel-bound implementation with the registration-frozen flags
-    function test_Pool_HookUpgradedAndBound() public view {
-        HooksConfig memory hc = VAULT.getHooksConfig(POOL);
-        assertEq(hc.hooksContract, BALANCER_HOOK, "pool hook mismatch");
-        // The stand-in advertised the real hook's flags; they are frozen at registration.
-        assertTrue(hc.shouldCallBeforeSwap, "beforeSwap flag");
-        assertTrue(hc.shouldCallBeforeAddLiquidity, "beforeAdd flag");
-        assertTrue(hc.shouldCallBeforeRemoveLiquidity, "beforeRemove flag");
-
-        // The proxy was upgraded to the real kernel-bound hook and initialized.
-        RoycoDayBalancerV3Hooks hook = RoycoDayBalancerV3Hooks(BALANCER_HOOK);
-        assertEq(hook.ROYCO_DAY_KERNEL(), address(KERNEL), "hook -> kernel");
-        assertEq(hook.LIQUIDITY_PROVIDER_TRANCHE_BALANCER_V3_POOL(), POOL, "hook -> pool");
-        assertEq(AccessManagedUpgradeable(BALANCER_HOOK).authority(), address(ACCESS_MANAGER), "hook authority");
+    /// The pool carries no hooks contract: the kernel is its senior-leg rate provider and nothing else is registered
+    function test_Pool_IsHookless() public view {
+        assertEq(VAULT.getHooksConfig(POOL).hooksContract, address(0), "pool must be hookless");
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════

@@ -18,11 +18,11 @@ import { UpgradeModuleBase } from "../UpgradeModuleBase.sol";
  *      The base module:
  *        1. Resolves the kernel proxy via `getMarketAddresses(chainId, marketName).kernel`
  *        2. Validates the proxy is a kernel (immutables non-zero, getState() succeeds)
- *        3. Reads the `RoycoDayKernelConstructionParams` off the existing impl
- *        4. Lets the subclass build the new impl creation code from those params
- *        5. Predicts the new impl's CREATE2 address using the subclass-supplied kernel contract name
+ *        3. Lets the subclass build the new impl creation code (market-independent: the kernel implementation
+ *           carries no market wiring, so nothing has to be read off the proxy to rebuild it)
+ *        4. Predicts the new impl's CREATE2 address using the subclass-supplied kernel contract name
  *
- *      `snapshotState` records the common kernel surface (immutables + `getState()` + the live
+ *      `snapshotState` records the common kernel surface (its market wiring + `getState()` + the live
  *      tranche↔NAV conversion rate) and concatenates the subclass-specific snapshot.
  *      `verify` decodes both halves and asserts continuity.
  */
@@ -40,8 +40,9 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
     /// @notice Contract name embedded in the CREATE2 salt prefix; must match the live kernel impl class.
     function _kernelContractName() internal pure virtual returns (string memory);
 
-    /// @notice Creation code for the new kernel impl, given the construction params read off the proxy.
-    function _kernelCreationCodeWith(IRoycoDayKernel.RoycoDayKernelConstructionParams memory cp) internal pure virtual returns (bytes memory);
+    /// @notice Creation code for the new kernel impl
+    /// @dev Takes no market input: the implementation is shared by every market on the chain
+    function _kernelCreationCode() internal view virtual returns (bytes memory);
 
     /// @notice Module-specific snapshot bytes (e.g. oracle config, kernel-type immutables).
     function _snapshotKernelSpecific(address proxy) internal view virtual returns (bytes memory);
@@ -60,15 +61,16 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         MarketAddresses memory addrs = getMarketAddresses(_chainId, marketName);
         address proxy = addrs.kernel;
 
-        IRoycoDayKernel.RoycoDayKernelConstructionParams memory cp = _readConstructionParams(proxy);
+        // Sanity-check the proxy really is an initialized kernel before pointing an upgrade at it
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory immutables = IRoycoDayKernel(proxy).getImmutableState();
         require(
-            cp.seniorTranche != address(0) && cp.juniorTranche != address(0) && cp.accountant != address(0), UpgradeKernelBaseModule__NotAKernelProxy(proxy)
+            immutables.seniorTranche != address(0) && immutables.juniorTranche != address(0) && immutables.accountant != address(0),
+            UpgradeKernelBaseModule__NotAKernelProxy(proxy)
         );
-        // Sanity-check: the kernel must report state (proves the proxy is initialized + is a kernel)
         IRoycoDayKernel(proxy).getState();
 
         address oldImpl = _readImplementation(proxy);
-        bytes memory creationCode = _kernelCreationCodeWith(cp);
+        bytes memory creationCode = _kernelCreationCode();
         bytes32 salt = keccak256(abi.encodePacked("ROYCO_KERNEL_", _kernelContractName(), "_IMPLEMENTATION_", _saltVersion));
 
         address newImpl = _predictImpl(salt, creationCode);
@@ -90,17 +92,6 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
             }),
             label: label
         });
-    }
-
-    function _readConstructionParams(address _proxy) internal view returns (IRoycoDayKernel.RoycoDayKernelConstructionParams memory cp) {
-        IRoycoDayKernel k = IRoycoDayKernel(_proxy);
-        cp.seniorTranche = k.SENIOR_TRANCHE();
-        cp.juniorTranche = k.JUNIOR_TRANCHE();
-        cp.collateralAsset = k.COLLATERAL_ASSET();
-        cp.accountant = k.ACCOUNTANT();
-        cp.liquidityProviderTranche = k.LIQUIDITY_PROVIDER_TRANCHE();
-        cp.lptAsset = k.LPT_ASSET();
-        cp.quoteAsset = k.QUOTE_ASSET();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -126,7 +117,8 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         IRoycoDayKernel k = IRoycoDayKernel(_proxy);
         IRoycoDayKernel.RoycoDayKernelState memory state = k.getState();
         uint256 collateralConv = NAV_UNIT.unwrap(k.convertCollateralAssetsToValue(_oneTrancheUnit()));
-        return abi.encode(k.SENIOR_TRANCHE(), k.JUNIOR_TRANCHE(), k.COLLATERAL_ASSET(), k.ACCOUNTANT(), state, collateralConv);
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory immutables = k.getImmutableState();
+        return abi.encode(immutables.seniorTranche, immutables.juniorTranche, immutables.collateralAsset, immutables.accountant, state, collateralConv);
     }
 
     function _verifyCommon(address _proxy, bytes memory _snap) internal view {
@@ -140,10 +132,11 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         ) = abi.decode(_snap, (address, address, address, address, IRoycoDayKernel.RoycoDayKernelState, uint256));
 
         IRoycoDayKernel k = IRoycoDayKernel(_proxy);
-        require(k.SENIOR_TRANCHE() == senior, UpgradeKernelBaseModule__ImmutableChanged("SENIOR_TRANCHE"));
-        require(k.JUNIOR_TRANCHE() == junior, UpgradeKernelBaseModule__ImmutableChanged("JUNIOR_TRANCHE"));
-        require(k.COLLATERAL_ASSET() == collateralAsset, UpgradeKernelBaseModule__ImmutableChanged("COLLATERAL_ASSET"));
-        require(k.ACCOUNTANT() == accountant, UpgradeKernelBaseModule__ImmutableChanged("ACCOUNTANT"));
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory post_ = k.getImmutableState();
+        require(post_.seniorTranche == senior, UpgradeKernelBaseModule__ImmutableChanged("seniorTranche"));
+        require(post_.juniorTranche == junior, UpgradeKernelBaseModule__ImmutableChanged("juniorTranche"));
+        require(post_.collateralAsset == collateralAsset, UpgradeKernelBaseModule__ImmutableChanged("collateralAsset"));
+        require(post_.accountant == accountant, UpgradeKernelBaseModule__ImmutableChanged("accountant"));
 
         IRoycoDayKernel.RoycoDayKernelState memory post = k.getState();
         require(post.protocolFeeRecipient == state.protocolFeeRecipient, UpgradeKernelBaseModule__StateChanged("protocolFeeRecipient"));

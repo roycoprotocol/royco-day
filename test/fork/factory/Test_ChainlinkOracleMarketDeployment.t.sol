@@ -105,13 +105,13 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
         // The real Day template, bound to this factory. `deployScript` externally deploys each market's impls/YDMs/pool
-        // and pre-deploys its ST + hook proxies (`deployMarketContractsForTest`), then builds the template params
-        // (`buildMarketParams`). Its nested `deployDeterministicProxy` calls run with `msg.sender == address(deployScript)`,
-        // so the deployScript must hold DEPLOYER_ROLE.
+        // The template deploys every market contract itself, so the script only builds the params (`buildMarketParams`).
         deployScript = new DeployScript();
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
-        template = new RoycoDayBalancerV3MarketDeploymentTemplate(
-            IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(entryPoint), address(syncer)
+        template = RoycoDayBalancerV3MarketDeploymentTemplate(
+            deployScript.deployTemplateForTest(
+                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer)
+            )
         );
     }
 
@@ -132,9 +132,7 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
 
     function _encodedParams(bytes32 _marketId, address _oracleCollateralAsset) internal returns (bytes memory) {
         MarketConfig memory cfg = _marketConfig(_oracleCollateralAsset);
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
-            deployScript.deployMarketContractsForTest(cfg, _marketId, factory, address(template), address(am));
-        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -148,9 +146,7 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
     function test_ExecuteMarketDeployment_ChainlinkOracleKernelWiring() external {
         _register();
         MarketConfig memory cfg = _marketConfig(deployScript.getMarketConfig("snUSD").collateralAsset);
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
-            deployScript.deployMarketContractsForTest(cfg, MARKET_ID, factory, address(template), address(am));
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(0)));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
@@ -167,7 +163,7 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
 
         // The template deployed the BPT oracle through Balancer's E-CLP LP oracle factory and injected it into the
         // kernel's liquidity venue, overwriting the null placeholder in the params blob.
-        address pool = IRoycoDayKernel(r.kernel).LPT_ASSET();
+        address pool = IRoycoDayKernel(r.kernel).lptAsset();
         address bptOracle = BalancerV3LiquidityVenue(r.kernel).getBalancerV3LiquidityVenueState().bptOracle;
         assertTrue(bptOracle != address(0), "bptOracle unset");
         assertGt(bptOracle.code.length, 0, "bptOracle has no code");

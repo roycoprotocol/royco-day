@@ -49,12 +49,18 @@ abstract contract AccountantTestBase is Test {
     AccessManager internal authority;
     address internal stranger;
 
+    /// @dev The fixed-term grace period the next `_deploy` initializes the accountant with
+    uint24 internal fixedTermGracePeriodSeconds;
+
     /*//////////////////////////////////////////////////////////////////////
                             DEPLOY HELPERS
     //////////////////////////////////////////////////////////////////////*/
 
-    /// @dev Default init params with null YDM slots that _deploy fills with fresh mocks
+    /// @dev Default init params with null kernel and YDM slots that the deploy helpers fill in
     function _defaultParams() internal pure returns (IRoycoDayAccountant.RoycoDayAccountantInitParams memory p) {
+        p.kernel = address(0);
+        p.initialAuthority = address(0);
+        p.fixedTermGracePeriodSeconds = 0;
         p.minCoverageWAD = DEFAULT_MIN_COVERAGE_WAD;
         p.coverageLiquidationUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
         p.minLiquidityWAD = DEFAULT_MIN_LIQUIDITY_WAD;
@@ -84,11 +90,14 @@ abstract contract AccountantTestBase is Test {
         return _deployUninitializedWithGrace(0);
     }
 
-    /// @dev As _deployUninitialized, but bakes a nonzero fixed-term grace period into the implementation so the young-market lock-out is exercisable (the immutable anchors on this block's timestamp)
+    /// @dev As _deployUninitialized, but records a nonzero fixed-term grace period so the young-market lock-out is
+    ///      exercisable. The grace period is now an initialization parameter rather than an implementation immutable,
+    ///      so it is applied when the proxy is initialized, and the anchor is the initializing block's timestamp
     function _deployUninitializedWithGrace(uint24 _fixedTermGracePeriodSeconds) internal returns (RoycoDayAccountant acct) {
         kernel = new MockAccountantKernel();
         authority = new AccessManager(address(this));
-        implementation = new RoycoDayAccountant(address(kernel), _fixedTermGracePeriodSeconds);
+        implementation = new RoycoDayAccountant();
+        fixedTermGracePeriodSeconds = _fixedTermGracePeriodSeconds;
         acct = RoycoDayAccountant(address(new UninitializedERC1967Proxy(address(implementation))));
         kernel.setAccountant(address(acct));
     }
@@ -114,7 +123,11 @@ abstract contract AccountantTestBase is Test {
         if (_params.lptYDM == address(0)) _params.lptYDM = address(new MockRecordingYDM());
         jtYDM = MockRecordingYDM(_params.jtYDM);
         lptYDM = MockRecordingYDM(_params.lptYDM);
-        acct.initialize(_params, address(authority));
+        // The kernel and the grace period are initialization parameters now, not implementation immutables
+        _params.kernel = address(kernel);
+        _params.initialAuthority = address(authority);
+        _params.fixedTermGracePeriodSeconds = _fixedTermGracePeriodSeconds;
+        acct.initialize(_params);
         accountant = acct;
     }
 

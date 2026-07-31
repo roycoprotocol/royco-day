@@ -62,14 +62,14 @@ contract Test_FixedTermGracePeriod is AccountantTestBase {
     function test_commenceableTimestamp_isDeployTimePlusGrace() public {
         vm.warp(5000);
         _deployWithGrace(_defaultParams(), GRACE_SECONDS);
-        assertEq(accountant.FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP(), 5000 + uint256(GRACE_SECONDS), "commenceable = deploy time + grace");
+        assertEq(accountant.getState().fixedTermCommenceableAtTimestamp, 5000 + uint256(GRACE_SECONDS), "commenceable = deploy time + grace");
     }
 
     /// @notice A zero grace makes the commenceable timestamp exactly the deploy time, so a fixed term can commence from the very first block
     function test_commenceableTimestamp_zeroGraceIsDeployTime() public {
         vm.warp(5000);
         _deployWithGrace(_defaultParams(), 0);
-        assertEq(accountant.FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP(), 5000, "zero grace: commenceable = deploy time");
+        assertEq(accountant.getState().fixedTermCommenceableAtTimestamp, 5000, "zero grace: commenceable = deploy time");
     }
 
     // =============================
@@ -85,7 +85,7 @@ contract Test_FixedTermGracePeriod is AccountantTestBase {
     /// @notice One second before the commenceable timestamp the grace is still active, so the same covered loss cannot lock
     function test_oneSecondBeforeCommenceable_staysPerpetual() public {
         _deployWithGrace(_defaultParams(), GRACE_SECONDS);
-        vm.warp(accountant.FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP() - 1);
+        vm.warp(accountant.getState().fixedTermCommenceableAtTimestamp - 1);
         _seedSymmetric(SEED_ST, SEED_JT, SEED_LPT);
         SyncedAccountingState memory s = kernel.doPreOp(toNAVUnits(LOSS_COLLATERAL_NAV));
         _assertPerpetualNoIL(s, "one second before commenceable");
@@ -95,7 +95,7 @@ contract Test_FixedTermGracePeriod is AccountantTestBase {
     function test_afterGrace_healthyMarket_staysPerpetual() public {
         _deployWithGrace(_defaultParams(), GRACE_SECONDS);
         _seedSymmetric(SEED_ST, SEED_JT, SEED_LPT);
-        vm.warp(accountant.FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP() + 1000);
+        vm.warp(accountant.getState().fixedTermCommenceableAtTimestamp + 1000);
         // A flat resync at the unchanged 130e18 collateral NAV books no loss
         SyncedAccountingState memory s = kernel.doPreOp(toNAVUnits(SEED_ST + SEED_JT));
         assertEq(uint8(s.marketState), uint8(MarketState.PERPETUAL), "no fresh loss after grace: stays PERPETUAL");
@@ -109,7 +109,7 @@ contract Test_FixedTermGracePeriod is AccountantTestBase {
     /// @notice Exactly at the commenceable timestamp the grace is over (the gate is a strict block.timestamp < FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP), so the covered loss enters FIXED_TERM
     function test_atExactCommenceableTimestamp_locks() public {
         _deployWithGrace(_defaultParams(), GRACE_SECONDS);
-        vm.warp(accountant.FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP());
+        vm.warp(accountant.getState().fixedTermCommenceableAtTimestamp);
         _seedSymmetric(SEED_ST, SEED_JT, SEED_LPT);
         SyncedAccountingState memory s = kernel.doPreOp(toNAVUnits(LOSS_COLLATERAL_NAV));
         _assertFixedTermWithIL(s, "at commenceable timestamp");
@@ -118,7 +118,7 @@ contract Test_FixedTermGracePeriod is AccountantTestBase {
     /// @notice Well past the grace the covered loss locks normally, the direct contrast to the identical loss staying PERPETUAL inside the grace
     function test_wellAfterGrace_coveredLoss_locks() public {
         _deployWithGrace(_defaultParams(), GRACE_SECONDS);
-        vm.warp(accountant.FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP() + 365 days);
+        vm.warp(accountant.getState().fixedTermCommenceableAtTimestamp + 365 days);
         _seedSymmetric(SEED_ST, SEED_JT, SEED_LPT);
         SyncedAccountingState memory s = kernel.doPreOp(toNAVUnits(LOSS_COLLATERAL_NAV));
         _assertFixedTermWithIL(s, "well after grace");
@@ -143,7 +143,7 @@ contract Test_FixedTermGracePeriod is AccountantTestBase {
         vm.warp(1000);
         _deployWithGrace(_defaultParams(), type(uint24).max);
         assertEq(
-            accountant.FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP(), 1000 + uint256(type(uint24).max), "max grace: commenceable = deploy time + max uint24"
+            accountant.getState().fixedTermCommenceableAtTimestamp, 1000 + uint256(type(uint24).max), "max grace: commenceable = deploy time + max uint24"
         );
         _seedSymmetric(SEED_ST, SEED_JT, SEED_LPT);
         SyncedAccountingState memory s = kernel.doPreOp(toNAVUnits(LOSS_COLLATERAL_NAV));
@@ -160,7 +160,7 @@ contract Test_FixedTermGracePeriod is AccountantTestBase {
         _assertPerpetualNoIL(s1, "within grace loss 1");
 
         // A deeper covered loss later in the same window is still forced PERPETUAL, so no fixed term ever latches
-        vm.warp(accountant.FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP() - 1);
+        vm.warp(accountant.getState().fixedTermCommenceableAtTimestamp - 1);
         SyncedAccountingState memory s2 = kernel.doPreOp(toNAVUnits(LOSS_COLLATERAL_NAV - 5e18));
         _assertPerpetualNoIL(s2, "within grace loss 2");
     }

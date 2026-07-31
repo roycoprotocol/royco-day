@@ -10,6 +10,7 @@ interface IRoycoDayAccountant {
     /**
      * @notice Initialization parameters for the Royco Accountant
      * @custom:field kernel - The kernel that this accountant maintains mark-to-market NAV, JT impermanent loss, and fee accounting for
+     * @custom:field initialAuthority - The initial authority for the accountant
      * @custom:field fixedTermGracePeriodSeconds - The seconds after deployment during which the market cannot enter a fixed term no matter what, so a young market is never locked by an early junior impermanent loss
      * @custom:field minCoverageWAD - The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
@@ -30,6 +31,7 @@ interface IRoycoDayAccountant {
     struct RoycoDayAccountantInitParams {
         // Market Contracts
         address kernel;
+        address initialAuthority;
         // Deployment Configuration
         uint256 fixedTermGracePeriodSeconds;
         // Coverage configuration
@@ -153,7 +155,7 @@ interface IRoycoDayAccountant {
 
     /// @notice Emitted when the coverage percentage requirement is updated
     /// @param minCoverageWAD The new coverage percentage, scaled to WAD precision
-    event CoverageUpdated(uint64 minCoverageWAD);
+    event MinCoverageUpdated(uint64 minCoverageWAD);
 
     /// @notice Emitted when the liquidation threshold parameter is updated
     /// @param liquidationCoverageUtilizationWAD The new liquidation coverageUtilization threshold for this market, scaled to WAD precision
@@ -184,7 +186,7 @@ interface IRoycoDayAccountant {
 
     /// @notice Emitted when the liquidity percentage requirement is updated
     /// @param minLiquidityWAD The new percentage of the senior tranche NAV that must be in the liquidity provider tranche's market making inventory, scaled to WAD precision
-    event LiquidityUpdated(uint64 minLiquidityWAD);
+    event MinLiquidityUpdated(uint64 minLiquidityWAD);
 
     /// @notice Emitted when the kernel is updated
     /// @param kernel The new kernel address

@@ -56,7 +56,6 @@ import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../src/factory/templ
 import {
     TAG_ACCOUNTANT_IMPL,
     TAG_ACCOUNTANT_PROXY,
-    TAG_BALANCER_HOOK_PROXY,
     TAG_BALANCER_V3_POOL,
     TAG_JT_IMPL,
     TAG_JT_PROXY,
@@ -79,6 +78,7 @@ import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { RoycoDayBalancerV3Kernel } from "../src/kernels/RoycoDayBalancerV3Kernel.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
+import { BalancerV3PoolCreationParams } from "../src/libraries/logic/MarketVenueLogic.sol";
 import { ChainlinkPriceOracle } from "../src/oracle/ChainlinkPriceOracle.sol";
 import { ERC4626SharePriceOracle } from "../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../src/oracle/IdleCDOTranchePriceOracle.sol";
@@ -266,7 +266,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         }
 
         // Register (or reuse) the Day template for this kernel type.
-        s.template = _getOrRegisterTemplate(s.factory, _config.kernelType, s.entryPoint, s.marketSyncer);
+        s.template = _getOrRegisterTemplate(s.factory, _config, s.entryPoint, s.marketSyncer);
 
         // The pre-mined marketId for this market against this exact factory (its senior-tranche proxy sorts before the
         // quote asset, so the ST is pool token0).
@@ -433,19 +433,23 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (_config.collateralAssetOracle == address(0)) {
             _config.collateralAssetOracle = _deployCollateralAssetOracle(_config, marketId, address(_s.accessManager));
         }
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory marketContracts =
-            _deployMarketContracts(_config, marketId, _s.factory, _s.template, address(_s.accessManager));
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params =
-            _buildMarketParams(_config, marketId, _protocolFeeRecipient, _s.roycoBlacklist, marketContracts);
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params = _buildMarketParams(_config, marketId, _protocolFeeRecipient, _s.roycoBlacklist);
         IRoycoProtocolTemplate.DeploymentResult memory r = _s.factory.executeMarketDeployment(_s.template, abi.encode(params));
 
-        // The template deploys the remaining proxies (kernel, JT, LPT, accountant) and the real hook inside this wiring
-        // transaction (the senior tranche + hook proxies were pre-deployed above) and wires the whole market.
-        _logSection("Market wiring transaction (executeMarketDeployment)");
-        _logCreated("Kernel (proxy)         ", r.kernel);
+        // The template deploys the entire market in this one transaction: every tranche proxy, the Gyro E-CLP pool and
+        // its BPT oracle, the accountant, and the kernel, all against the implementations it was constructed with.
+        _logSection("Market deployment transaction (executeMarketDeployment)");
+        _logCreated("SeniorTranche (proxy)  ", r.seniorTranche);
         _logCreated("JuniorTranche (proxy)  ", r.juniorTranche);
         _logCreated("LiquidityProviderTranche (proxy)", r.liquidityProviderTranche);
         _logCreated("Accountant (proxy)     ", r.accountant);
+        _logCreated("Kernel (proxy)         ", r.kernel);
+        {
+            RoycoDayBalancerV3MarketDeploymentTemplate.ExtraContractsDeployedResult memory extras =
+                abi.decode(r.extras, (RoycoDayBalancerV3MarketDeploymentTemplate.ExtraContractsDeployedResult));
+            _logCreated("Balancer E-CLP pool    ", extras.balancerPool);
+            _logCreated("BPT oracle             ", extras.bptOracle);
+        }
 
         return DeploymentResult({
             factory: _s.factory,
@@ -502,85 +506,173 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     // INTERNAL: TEMPLATE REGISTRATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys + registers (or returns the cached) Day template for a kernel type.
+    /**
+     * @notice Deploys (or reuses) and registers the Day template for a market's kernel type
+     * @dev The template is CREATE2-deployed at a salt derived from its full construction params, so a chain reaches the
+     *      same template for the same implementation and model set, and a different set gets its own template rather
+     *      than silently reusing one wired to different yield distribution models
+     */
     function _getOrRegisterTemplate(
         RoycoFactory _factory,
-        KernelType _kernelType,
+        MarketConfig memory _config,
         address _entryPoint,
         address _marketSyncer
     )
         internal
         returns (address template)
     {
-        template = kernelTypeToTemplate[uint256(_kernelType)];
-        if (template != address(0)) {
-            _logDeploy("Template           ", template, true);
-            return template;
-        }
-
-        IRoycoFactory factoryIface = IRoycoFactory(address(_factory));
-        template = _deployTemplate(factoryIface, _kernelType, _entryPoint, _marketSyncer);
-
-        _factory.registerTemplate(template);
-        kernelTypeToTemplate[uint256(_kernelType)] = template;
-        _logDeploy("Template           ", template, false);
+        bool existed;
+        (template, existed) = _deployTemplate(IRoycoFactory(address(_factory)), _config, _entryPoint, _marketSyncer);
+        if (!_factory.isTemplateEnabled(template)) _factory.registerTemplate(template);
+        _logDeploy("Template           ", template, existed);
     }
 
-    /// @notice Public wrapper over `_buildMarketParams` so tests can construct real template deploy params from a market config.
-    /// @dev The caller supplies the `MarketContracts` (externally deployed impls/YDMs/pool), typically via `deployMarketContractsForTest`.
+    /**
+     * @notice Public wrapper over `_deployTemplate` so tests can stand up a real, fully-wired template
+     * @dev Deploys (or reuses) the chain's implementation set and the six yield distribution models, then the template
+     *      pinned to them, exactly as the production scaffolding phase does
+     */
+    function deployTemplateForTest(
+        IRoycoFactory _factory,
+        MarketConfig memory _config,
+        address _entryPoint,
+        address _marketSyncer
+    )
+        public
+        returns (address template)
+    {
+        (template,) = _deployTemplate(_factory, _config, _entryPoint, _marketSyncer);
+    }
+
+    /// @notice Public wrapper over `_buildMarketParams` so tests can construct real template deploy params from a market config
+    /// @dev Every market contract is deployed by the template itself, so the params are a pure function of the config
     function buildMarketParams(
         MarketConfig memory _config,
         bytes32 _marketId,
         address _protocolFeeRecipient,
-        address _roycoBlacklist,
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory _marketContracts
+        address _roycoBlacklist
     )
         public
         pure
         returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory)
     {
-        return _buildMarketParams(_config, _marketId, _protocolFeeRecipient, _roycoBlacklist, _marketContracts);
+        return _buildMarketParams(_config, _marketId, _protocolFeeRecipient, _roycoBlacklist);
     }
 
-    /// @notice Public wrapper over `_deployMarketContracts` so tests can externally deploy a market's impls/YDMs/pool
-    ///         and pre-deploy its ST + hook proxies, mirroring the production flow, before driving `executeMarketDeployment`.
-    function deployMarketContractsForTest(
+    /**
+     * @notice Deploys the concrete Day template, pinned to the chain's implementation and yield-distribution-model set
+     * @dev The implementations and models are deployed (or reused) first, then handed to the template as construction
+     *      params. Every market this template deploys shares them
+     */
+    function _deployTemplate(
+        IRoycoFactory _factory,
         MarketConfig memory _config,
-        bytes32 _marketId,
-        RoycoFactory _factory,
-        address _template,
-        address _accessManager
+        address _entryPoint,
+        address _marketSyncer
     )
-        public
-        returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory)
+        internal
+        returns (address template, bool existed)
     {
-        return _deployMarketContracts(_config, _marketId, _factory, _template, _accessManager);
+        if (_config.kernelType != KernelType.RoycoDayBalancerV3Kernel) revert UnsupportedKernelType(_config.kernelType);
+        ChainConfig memory chainConfig = getChainConfig(block.chainid, isTestEnv);
+
+        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _deployImplementationsAndModels(_config, chainConfig);
+        cp.factory = _factory;
+        cp.balancerV3PoolFactory = GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory);
+        cp.eclpLPOracleFactory = ILPOracleFactoryBase(chainConfig.eclpLPOracleFactory);
+        cp.roycoDayEntryPoint = _entryPoint;
+        cp.roycoMarketSyncer = _marketSyncer;
+
+        (template, existed) = deployWithSanityChecks(
+            _singletonSalt(string.concat("ROYCO_DAY_BALANCER_V3_TEMPLATE_", vm.toString(keccak256(abi.encode(cp))))),
+            abi.encodePacked(type(RoycoDayBalancerV3MarketDeploymentTemplate).creationCode, abi.encode(cp)),
+            false
+        );
     }
 
-    /// @notice Deploys the concrete Day template for a kernel type.
-    function _deployTemplate(IRoycoFactory _factory, KernelType _kernelType, address _entryPoint, address _marketSyncer) internal returns (address template) {
-        // The concrete Balancer-V3 template is constructed with the chain's Gyro E-CLP pool factory and the
-        // pre-deployed periphery singletons (entry point + market syncer) the template configures for each deployed market.
-        ChainConfig memory chainConfig = getChainConfig(block.chainid, isTestEnv);
-        GyroECLPPoolFactory poolFactory = GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory);
+    /**
+     * @notice Deploys (or reuses) the chain-wide implementation set and the six yield distribution model instances
+     * @dev Every one of these is market-independent, so CREATE2 makes the whole phase idempotent: a second market on
+     *      the same chain redeploys nothing. The models are deployed per shape AND per tranche slot because the
+     *      accountant rejects a market whose junior and liquidity provider models are the same instance
+     * @dev Both slots' target utilizations are constructor immutables on the models, so they are fixed for every market
+     *      this template deploys. A market needing different ones produces a different template address
+     */
+    function _deployImplementationsAndModels(
+        MarketConfig memory _config,
+        ChainConfig memory _chainConfig
+    )
+        internal
+        returns (RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp)
+    {
+        _logSection("Chain-wide implementations and yield distribution models");
+        bool existed;
 
-        if (_kernelType == KernelType.RoycoDayBalancerV3Kernel) {
-            return address(new RoycoDayBalancerV3MarketDeploymentTemplate(_factory, poolFactory, _entryPoint, _marketSyncer));
+        (cp.seniorTrancheImplementation, existed) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_SENIOR_TRANCHE_IMPLEMENTATION"), type(RoycoSeniorTranche).creationCode, false);
+        _logDeploy("SeniorTranche (impl)  ", cp.seniorTrancheImplementation, existed);
+
+        (cp.juniorTrancheImplementation, existed) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_JUNIOR_TRANCHE_IMPLEMENTATION"), type(RoycoJuniorTranche).creationCode, false);
+        _logDeploy("JuniorTranche (impl)  ", cp.juniorTrancheImplementation, existed);
+
+        (cp.liquidityProviderTrancheImplementation, existed) = deployWithSanityChecks(
+            _singletonSalt("ROYCO_LIQUIDITY_PROVIDER_TRANCHE_IMPLEMENTATION"), type(RoycoLiquidityProviderTranche).creationCode, false
+        );
+        _logDeploy("LPTranche (impl)      ", cp.liquidityProviderTrancheImplementation, existed);
+
+        (cp.accountantImplementation, existed) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_ACCOUNTANT_IMPLEMENTATION"), type(RoycoDayAccountant).creationCode, false);
+        _logDeploy("Accountant (impl)     ", cp.accountantImplementation, existed);
+
+        // The kernel implementation's only construction input is the chain's Balancer Vault, which is not market-specific
+        (cp.kernelImplementation, existed) = deployWithSanityChecks(
+            _singletonSalt("ROYCO_DAY_BALANCER_V3_KERNEL_IMPLEMENTATION"),
+            abi.encodePacked(type(RoycoDayBalancerV3Kernel).creationCode, abi.encode(GyroECLPPoolFactory(_chainConfig.gyroECLPPoolFactory).getVault())),
+            false
+        );
+        _logDeploy("Kernel (impl)         ", cp.kernelImplementation, existed);
+
+        (cp.bptOracleConstantPriceFeed, existed) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_BPT_ORACLE_CONSTANT_PRICE_FEED"), type(ConstantPriceFeed).creationCode, false);
+        _logDeploy("ConstantPriceFeed     ", cp.bptOracleConstantPriceFeed, existed);
+
+        for (uint256 i; i < 3; ++i) {
+            YDMType ydmType = YDMType(i);
+            cp.jtYdms[i] = _deployModel("JT model  ", ydmType, _config.jtYdmTargetUtilizationWAD, TAG_YDM);
+            cp.lptYdms[i] = _deployModel("LPT model ", ydmType, _config.lptYdmTargetUtilizationWAD, TAG_LDM);
         }
-        revert UnsupportedKernelType(_kernelType);
+    }
+
+    /// @notice Deploys (or reuses) one yield distribution model instance for a shape and tranche slot
+    /// @dev The slot tag keeps the junior and liquidity provider instances at distinct addresses even when their shape
+    ///      and target utilization coincide, which the accountant requires
+    function _deployModel(string memory _label, YDMType _ydmType, uint256 _targetUtilizationWAD, bytes32 _slotTag) internal returns (address model) {
+        bytes memory creationCode;
+        if (_ydmType == YDMType.StaticCurve) creationCode = type(StaticCurveYDM).creationCode;
+        else if (_ydmType == YDMType.AdaptiveCurve_V1) creationCode = type(AdaptiveCurveYDM_V1).creationCode;
+        else if (_ydmType == YDMType.AdaptiveCurve_V2) creationCode = type(AdaptiveCurveYDM_V2).creationCode;
+        else revert UnsupportedYDMType(_ydmType);
+
+        bool existed;
+        (model, existed) = deployWithSanityChecks(
+            keccak256(abi.encodePacked("ROYCO_YDM_", _slotTag, uint8(_ydmType))),
+            abi.encodePacked(creationCode, _ydmConstructorArgs(_ydmType, _targetUtilizationWAD)),
+            false
+        );
+        _logDeploy(string.concat(_label, vm.toString(uint8(_ydmType))), model, existed);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // INTERNAL: PARAM BUILDING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Builds the template `MarketParams` from a `MarketConfig` and the externally deployed `MarketContracts`.
+    /// @notice Builds the template `MarketParams` from a `MarketConfig`; every market contract is deployed by the template.
     function _buildMarketParams(
         MarketConfig memory _config,
         bytes32 _marketId,
         address _protocolFeeRecipient,
-        address _roycoBlacklist,
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory _marketContracts
+        address _roycoBlacklist
     )
         internal
         pure
@@ -588,23 +680,47 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     {
         params.marketId = _marketId;
 
-        // JT/LPT tranche init params — the template overwrites `initialAuthority` with the market authority. The senior
-        // tranche proxy is pre-deployed by the script (its init data is built in `_deployMarketContracts`).
-        params.jtTranche =
-            IRoycoVaultTranche.RoycoTrancheInitParams({ name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, initialAuthority: address(0) });
+        // Tranche init params carry only the token name and symbol: the template injects the market authority, the
+        // kernel, and each tranche's underlying asset, all of which are deployment-derived.
+        params.stTranche = IRoycoVaultTranche.RoycoTrancheInitParams({
+            name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol, initialAuthority: address(0), kernel: address(0), asset: address(0)
+        });
+        params.jtTranche = IRoycoVaultTranche.RoycoTrancheInitParams({
+            name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, initialAuthority: address(0), kernel: address(0), asset: address(0)
+        });
         params.lptTranche = IRoycoVaultTranche.RoycoTrancheInitParams({
-            name: _config.liquidityProviderTrancheName, symbol: _config.liquidityProviderTrancheSymbol, initialAuthority: address(0)
+            name: _config.liquidityProviderTrancheName,
+            symbol: _config.liquidityProviderTrancheSymbol,
+            initialAuthority: address(0),
+            kernel: address(0),
+            asset: address(0)
         });
         params.collateralAsset = _config.collateralAsset;
-        // The intended quote asset: the template pins the pool's second token against it during pool verification
         params.quoteAsset = _config.gyroECLPPoolParams.quoteAsset;
-        params.deployPoolHook = _config.deployPoolHook;
-        params.marketContracts = _marketContracts;
+
+        // The Gyro E-CLP pool the template creates for this market's liquidity venue
+        params.poolParams = BalancerV3PoolCreationParams({
+            name: _config.gyroECLPPoolParams.name,
+            symbol: _config.gyroECLPPoolParams.symbol,
+            eclpParams: _config.gyroECLPPoolParams.eclpParams,
+            derivedEclpParams: _config.gyroECLPPoolParams.derivedEclpParams,
+            swapFeePercentage: _config.gyroECLPPoolParams.swapFeePercentage,
+            quoteAssetRateProvider: _config.gyroECLPPoolParams.quoteAssetRateProvider,
+            chargeYieldFeeOnSeniorTrancheShares: _config.gyroECLPPoolParams.chargeYieldFeeOnSeniorTrancheShares,
+            chargeYieldFeeOnQuoteAsset: _config.gyroECLPPoolParams.chargeYieldFeeOnQuoteAsset
+        });
+
+        // The model shapes this market selects from the template's per-slot instances
+        params.jtYdmType = _config.ydmType;
+        params.lptYdmType = _config.ydmType;
 
         // Accountant init params. `jtYDM`/`lptYDM` are overwritten by the template with the deployed instances. BOTH YDMs get
         // initialization data so the accountant initializes each of them. The LPT premium/liquidity overlay is at its zero
         // baseline (LPT service off) — but the LDM is still deployed, initialized, and distinct from the JT YDM.
         params.accountant = IRoycoDayAccountant.RoycoDayAccountantInitParams({
+            kernel: address(0),
+            initialAuthority: address(0),
+            fixedTermGracePeriodSeconds: _config.fixedTermGracePeriodSeconds,
             minCoverageWAD: _config.minCoverageWAD,
             coverageLiquidationUtilizationWAD: _config.coverageLiquidationUtilizationWAD,
             minLiquidityWAD: 0,
@@ -694,117 +810,24 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         revert UnsupportedYDMType(_ydmType);
     }
 
-    /// @notice Deploys a YDM model of the configured type at the given target utilization, via the canonical CREATE2 deployer
-    /// @dev CREATE2's initcode-address binding means identical `(model, ctor args)` dedups to one instance, and distinct
-    ///      args produce distinct addresses (so a market can never silently reuse another's curve params)
-    function _deployYDM(string memory _name, YDMType _ydmType, uint256 _targetUtilizationWAD, bytes32 _ydmSalt) internal returns (address ydm) {
-        bytes memory creationCode;
-        if (_ydmType == YDMType.StaticCurve) {
-            creationCode = type(StaticCurveYDM).creationCode;
-        } else if (_ydmType == YDMType.AdaptiveCurve_V1) {
-            creationCode = type(AdaptiveCurveYDM_V1).creationCode;
-        } else if (_ydmType == YDMType.AdaptiveCurve_V2) {
-            creationCode = type(AdaptiveCurveYDM_V2).creationCode;
-        } else {
-            revert UnsupportedYDMType(_ydmType);
-        }
-        bool ydmExisted;
-        (ydm, ydmExisted) = deployWithSanityChecks(_ydmSalt, abi.encodePacked(creationCode, _ydmConstructorArgs(_ydmType, _targetUtilizationWAD)), false);
-        _logDeploy(_name, ydm, ydmExisted);
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // INTERNAL: EXTERNAL MARKET-CONTRACT DEPLOYMENT (impls, YDMs, pool, pre-deployed proxies)
     // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice Deploys the market's implementations + YDMs, creates the Gyro E-CLP pool, and pre-deploys the senior
-     *         tranche and pool-hook proxies through the factory, returning the addresses the template wires and verifies
-     * @dev Ordering mirrors the dependency graph: predict the four template-deployed proxy addresses (kernel, JT, LPT,
-     *      accountant) so the implementations can pin them as immutables; deploy the ST impl and its proxy (the pool
-     *      needs the ST share as a token); pre-deploy the hook proxy against the template's shared stand-in impl (the
-     *      pool must register against a hook); create the pool (senior leg's rate provider = the predicted kernel, still
-     *      codeless, which keeps the pool inert until the wiring tx); then deploy the remaining impls (LPT pins the pool)
-     *      and both YDMs.
-     */
-    function _deployMarketContracts(
-        MarketConfig memory _config,
-        bytes32 _marketId,
-        RoycoFactory _factory,
-        address _template,
-        address _accessManager
-    )
-        internal
-        returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc)
-    {
-        _logSection("Market off-factory contracts (impls, YDMs, pool, pre-deployed proxies)");
-
-        // Predict the kernel proxy address the implementations pin as immutables (the template deploys the kernel proxy
-        // at the same `_salt(marketId, TAG_KERNEL_PROXY)`, so its prediction matches)
-        address kernelProxy = _factory.predictDeterministicAddress(_salt(_marketId, TAG_KERNEL_PROXY));
-
-        // Pre-deploy the senior tranche proxy, then pre-deploy the pool-hook proxy and create the Gyro E-CLP pool, then
-        // deploy the remaining implementations + YDMs (each stage is a helper, keeping every function under the stack limit)
-        _predeploySeniorTrancheProxy(_config, _marketId, _factory, _accessManager, kernelProxy);
-        (address balancerPool, address bptOracle) = _createPoolWithHookProxy(
-            _config, _marketId, _factory, _template, _accessManager, kernelProxy, _factory.predictDeterministicAddress(_salt(_marketId, TAG_ST_PROXY))
-        );
-        mc = _deployImplsAndYdms(_config, _marketId, _factory, kernelProxy, balancerPool);
-        mc.bptOracle = bptOracle;
-    }
-
-    /// @notice Deploys the market's JT/LPT/accountant/kernel/real-hook implementations and both YDMs, returning them
-    ///         (with the pre-created pool) as the `MarketContracts` the template consumes
-    function _deployImplsAndYdms(
-        MarketConfig memory _config,
-        bytes32 _marketId,
-        RoycoFactory _factory,
-        address _kernelProxy,
-        address _balancerPool
-    )
-        internal
-        returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc)
-    {
-        mc.balancerPool = _balancerPool;
-        mc.jtImpl = _deployImplWithArgs(
-            "JuniorTranche (impl)   ", type(RoycoJuniorTranche).creationCode, abi.encode(_config.collateralAsset, _kernelProxy), _salt(_marketId, TAG_JT_IMPL)
-        );
-        mc.lptImpl = _deployImplWithArgs(
-            "LiquidityProviderTranche (impl)",
-            type(RoycoLiquidityProviderTranche).creationCode,
-            abi.encode(_balancerPool, _kernelProxy),
-            _salt(_marketId, TAG_LPT_IMPL)
-        );
-        mc.accountantImpl = _deployImplWithArgs(
-            "Accountant (impl)      ", type(RoycoDayAccountant).creationCode, abi.encode(_kernelProxy), _salt(_marketId, TAG_ACCOUNTANT_IMPL)
-        );
-        mc.kernelImpl = _deployKernelImpl(_config, _factory, _marketId, _balancerPool);
-        // The real kernel-bound hook implementation is deployed inside the template's wiring tx (its constructor reads
-        // the kernel's LPT_ASSET, so it cannot be deployed before the kernel proxy exists)
-        (mc.jtYdm, mc.lptYdm) = _deployYDMs(_config);
-    }
-
-    /// @notice Deploys the market's JT YDM and LPT LDM as market-agnostic shared singletons
-    /// @dev Deployed separately from the per-market Constants and shared across markets: the salt is market-agnostic
-    ///      and role-specific (`TAG_YDM` / `TAG_LDM`), so markets with the same model + params reuse one instance (their
-    ///      per-market curve state is keyed per accountant). CREATE2's initcode binding still gives distinct params
-    ///      distinct addresses (no silent first-writer-wins reuse) and keeps the JT YDM and LPT LDM distinct
-    function _deployYDMs(MarketConfig memory _config) internal returns (address jtYdm, address lptYdm) {
-        jtYdm = _deployYDM("JT YDM (shared)        ", _config.ydmType, _config.jtYdmTargetUtilizationWAD, _ydmSalt(TAG_YDM));
-        lptYdm = _deployYDM("LPT LDM (shared)        ", _config.ydmType, _config.lptYdmTargetUtilizationWAD, _ydmSalt(TAG_LDM));
-    }
-
-    /// @notice Market-agnostic, role-specific CREATE2 salt for a shared YDM singleton (`TAG_YDM` for the JT YDM,
-    ///         `TAG_LDM` for the LPT LDM)
-    function _ydmSalt(bytes32 _roleTag) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked("ROYCO_YDM_", _roleTag));
-    }
 
     /// @notice CREATE2-deploys an implementation from its creation code with ABI-encoded constructor args appended
     function _deployImplWithArgs(string memory _name, bytes memory _creationCode, bytes memory _ctorArgs, bytes32 _implSalt) internal returns (address impl) {
         bool existed;
         (impl, existed) = deployWithSanityChecks(_implSalt, abi.encodePacked(_creationCode, _ctorArgs), false);
         _logDeploy(_name, impl, existed);
+    }
+
+    /**
+     * @notice A market-scoped CREATE2 salt for the one market contract still deployed outside the template
+     * @dev Shares the template's `keccak256("ROYCO_MARKET_" ‖ marketId ‖ tag)` preimage so a previously deployed oracle
+     *      keeps its address, but the tags used with it are disjoint from the template's component tags
+     */
+    function _marketScopedSalt(bytes32 _marketId, bytes32 _componentTag) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked("ROYCO_MARKET_", _marketId, _componentTag));
     }
 
     /// @notice CREATE2-deploys the market's collateral asset oracle adapter selected by `collateralAssetOracleType`,
@@ -834,7 +857,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             revert UnsupportedOracleType(_config.collateralAssetOracleType);
         }
         bool existed;
-        (oracle, existed) = deployWithSanityChecks(_salt(_marketId, "COLLATERAL_ASSET_ORACLE"), abi.encodePacked(creationCode, ctorArgs), false);
+        (oracle, existed) = deployWithSanityChecks(_marketScopedSalt(_marketId, "COLLATERAL_ASSET_ORACLE"), abi.encodePacked(creationCode, ctorArgs), false);
         _logDeploy("CollateralAssetOracle  ", oracle, existed);
     }
 
@@ -847,11 +870,11 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             "CollateralAssetOracle (impl)",
             type(IdleCDOTranchePriceOracle).creationCode,
             abi.encode(p.idleCDO, _config.collateralAsset, p.underlyingTokenToNavAssetFeed),
-            _salt(_marketId, "COLLATERAL_ASSET_ORACLE_IMPL")
+            _marketScopedSalt(_marketId, "COLLATERAL_ASSET_ORACLE_IMPL")
         );
         bytes memory initData = abi.encodeCall(IdleCDOTranchePriceOracle.initialize, (_authority, p.minDeviationWAD, p.lastUpdate));
         bool existed;
-        (oracle, existed) = deployWithSanityChecks(_salt(_marketId, "COLLATERAL_ASSET_ORACLE"), getERC1967ProxyCreationCode(impl, initData), false);
+        (oracle, existed) = deployWithSanityChecks(_marketScopedSalt(_marketId, "COLLATERAL_ASSET_ORACLE"), getERC1967ProxyCreationCode(impl, initData), false);
         _logDeploy("CollateralAssetOracle  ", oracle, existed);
     }
 
@@ -878,178 +901,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         } else {
             revert UnsupportedOracleType(_oracleType);
         }
-    }
-
-    /// @notice Deploys the market's manipulation-resistant E-CLP BPT TVL oracle through Balancer's LP oracle factory
-    /// @dev Each pool leg's live balance is already priced by its rate provider, so every leg uses the shared stateless
-    ///      constant-1.0 price feed. The kernel's liquidity venue verifies `oracle.pool() == LPT_ASSET` on-chain at init
-    function _deployBPTOracle(address _pool) internal returns (address bptOracle) {
-        ChainConfig memory chainConfig = getChainConfig(block.chainid, isTestEnv);
-        IVault vault = IVault(address(GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory).getVault()));
-        (address constantPriceFeed, bool constantPriceFeedExisted) =
-            deployWithSanityChecks(_singletonSalt("ROYCO_BPT_ORACLE_CONSTANT_PRICE_FEED"), type(ConstantPriceFeed).creationCode, false);
-        _logDeploy("ConstantPriceFeed (shared)", constantPriceFeed, constantPriceFeedExisted);
-
-        IERC20[] memory poolTokens = vault.getPoolTokens(_pool);
-        BalancerAggregatorV3Interface[] memory feeds = new BalancerAggregatorV3Interface[](poolTokens.length);
-        for (uint256 i; i < poolTokens.length; ++i) {
-            feeds[i] = BalancerAggregatorV3Interface(constantPriceFeed);
-        }
-
-        bptOracle = address(
-            ILPOracleFactoryBase(chainConfig.eclpLPOracleFactory)
-                .create({ pool: IBasePool(_pool), shouldUseBlockTimeForOldestFeedUpdate: false, shouldRevertIfVaultUnlocked: false, feeds: feeds })
-        );
-        _logCreated("BPT oracle             ", bptOracle);
-    }
-
-    /// @notice Deploys the senior tranche impl and its pre-deployed proxy (built with the market authority; the
-    ///         template verifies it)
-    function _predeploySeniorTrancheProxy(
-        MarketConfig memory _config,
-        bytes32 _marketId,
-        RoycoFactory _factory,
-        address _accessManager,
-        address _kernelProxy
-    )
-        internal
-    {
-        (address stImpl, bool stImplExisted) = deployWithSanityChecks(
-            _salt(_marketId, TAG_ST_IMPL), abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_config.collateralAsset, _kernelProxy)), false
-        );
-        _logDeploy("SeniorTranche (impl)   ", stImpl, stImplExisted);
-        bytes memory stInitData = abi.encodeCall(
-            RoycoSeniorTranche.initialize,
-            (IRoycoVaultTranche.RoycoTrancheInitParams({
-                    name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol, initialAuthority: _accessManager
-                }))
-        );
-        address stProxy = _factory.deployDeterministicProxy(stImpl, stInitData, _salt(_marketId, TAG_ST_PROXY));
-        _logCreated("SeniorTranche (proxy)  ", stProxy);
-    }
-
-    /// @notice Optionally pre-deploys the pool-hook proxy against the stand-in impl, creates the market's Gyro E-CLP
-    ///         pool, and deploys the pool's BPT oracle
-    /// @dev When the market opts out of the hook (`deployPoolHook == false`) the stand-in proxy step is skipped
-    ///      entirely and the pool registers hookless (`poolHooksContract == address(0)`): the Vault then never
-    ///      consults hook callbacks, so external pool ops execute without the pre-op accounting sync.
-    ///      When hooked: the hook proxy's init data is a non-empty no-op (the hardened ERC1967Proxy rejects empty
-    ///      init data, and the stand-in's fallback swallows the delegatecall; the proxy is upgraded to the real hook
-    ///      in the wiring tx).
-    ///      The pool's senior leg rate provider is the predicted (still codeless) kernel; its role accounts are the AM.
-    ///      The BPT oracle is deployed here (co-located with pool creation) to keep `_deployMarketContracts` under the stack limit
-    function _createPoolWithHookProxy(
-        MarketConfig memory _config,
-        bytes32 _marketId,
-        RoycoFactory _factory,
-        address _template,
-        address _accessManager,
-        address _kernelProxy,
-        address _seniorTranche
-    )
-        internal
-        returns (address balancerPool, address bptOracle)
-    {
-        address hookProxy;
-        if (_config.deployPoolHook) {
-            hookProxy = _factory.deployDeterministicProxy(
-                RoycoDayBalancerV3MarketDeploymentTemplate(_template).BALANCER_HOOK_STANDIN_IMPL(), bytes("no-op"), _salt(_marketId, TAG_BALANCER_HOOK_PROXY)
-            );
-            _logCreated("Pool hook (proxy)      ", hookProxy);
-        }
-
-        balancerPool =
-            _createBalancerV3Pool(_config.gyroECLPPoolParams, _seniorTranche, _kernelProxy, hookProxy, _accessManager, _salt(_marketId, TAG_BALANCER_V3_POOL));
-        _logCreated("Balancer E-CLP pool    ", balancerPool);
-        bptOracle = _deployBPTOracle(balancerPool);
-    }
-
-    /// @notice Deploys the kernel implementation for a kernel type, appending the family's extra constructor arg(s)
-    /// @dev Ports the per-kernel constructor-arg branching that previously lived in the templates' `_kernelConstructionArgs`.
-    ///      The kernel construction params pin the predicted senior/junior/liquidity provider tranche and accountant proxy addresses
-    function _deployKernelImpl(
-        MarketConfig memory _config,
-        RoycoFactory _factory,
-        bytes32 _marketId,
-        address _balancerPool
-    )
-        internal
-        returns (address kernelImpl)
-    {
-        IRoycoDayKernel.RoycoDayKernelConstructionParams memory cp = IRoycoDayKernel.RoycoDayKernelConstructionParams({
-            seniorTranche: _factory.predictDeterministicAddress(_salt(_marketId, TAG_ST_PROXY)),
-            juniorTranche: _factory.predictDeterministicAddress(_salt(_marketId, TAG_JT_PROXY)),
-            collateralAsset: _config.collateralAsset,
-            accountant: _factory.predictDeterministicAddress(_salt(_marketId, TAG_ACCOUNTANT_PROXY)),
-            liquidityProviderTranche: _factory.predictDeterministicAddress(_salt(_marketId, TAG_LPT_PROXY)),
-            lptAsset: _balancerPool,
-            quoteAsset: _config.gyroECLPPoolParams.quoteAsset
-        });
-
-        bytes memory creationCode;
-        if (_config.kernelType == KernelType.RoycoDayBalancerV3Kernel) {
-            creationCode = abi.encodePacked(type(RoycoDayBalancerV3Kernel).creationCode, abi.encode(cp));
-        } else {
-            revert UnsupportedKernelType(_config.kernelType);
-        }
-        bool kernelImplExisted;
-        (kernelImpl, kernelImplExisted) = deployWithSanityChecks(_salt(_marketId, TAG_KERNEL_IMPL), creationCode, false);
-        _logDeploy("Kernel (impl)          ", kernelImpl, kernelImplExisted);
-    }
-
-    /// @notice Creates the Gyro E-CLP pool with tokens `{ST_share, quote}` (ported from the template's former pool creation)
-    /// @param _authority The market AccessManager, set as the pool's pause/swap-fee/creator role accounts
-    function _createBalancerV3Pool(
-        GyroECLPPoolParams memory _p,
-        address _seniorTranche,
-        address _seniorRateProvider,
-        address _hook,
-        address _authority,
-        bytes32 _salt_
-    )
-        internal
-        returns (address balancerV3Pool)
-    {
-        BalancerV3TokenConfig[] memory tokens = new BalancerV3TokenConfig[](2);
-
-        // Guaranteed by the mined marketId: the senior-tranche proxy sorts before the quote asset, so the ST is pool token0.
-        require(uint160(_seniorTranche) < uint160(_p.quoteAsset), SeniorTrancheNotFirstPoolToken(_seniorTranche, _p.quoteAsset));
-        tokens[0] = _buildTokenConfig(_seniorTranche, _seniorRateProvider, _p.chargeYieldFeeOnSeniorTrancheShares);
-        tokens[1] = _buildTokenConfig(_p.quoteAsset, _p.quoteAssetRateProvider, _p.chargeYieldFeeOnQuoteAsset);
-
-        BalancerV3PoolRoleAccounts memory roleAccounts =
-            BalancerV3PoolRoleAccounts({ pauseManager: _authority, swapFeeManager: _authority, poolCreator: _authority });
-
-        balancerV3Pool = GyroECLPPoolFactory(getChainConfig(block.chainid, isTestEnv).gyroECLPPoolFactory)
-            .create({
-            name: _p.name,
-            symbol: _p.symbol,
-            tokens: tokens,
-            eclpParams: _p.eclpParams,
-            derivedEclpParams: _p.derivedEclpParams,
-            roleAccounts: roleAccounts,
-            swapFeePercentage: _p.swapFeePercentage,
-            poolHooksContract: _hook,
-            enableDonation: false,
-            disableUnbalancedLiquidity: false,
-            salt: _salt_
-        });
-    }
-
-    /// @notice Builds the token config for a pool leg (ported from the template)
-    function _buildTokenConfig(address _token, address _rateProvider, bool _paysYieldFees) internal pure returns (BalancerV3TokenConfig memory) {
-        require(!_paysYieldFees || _rateProvider != address(0), RateProviderRequiredWhenPayingYieldFees(_token));
-        return BalancerV3TokenConfig({
-            token: IERC20(_token),
-            tokenType: _rateProvider == address(0) ? BalancerV3TokenType.STANDARD : BalancerV3TokenType.WITH_RATE,
-            rateProvider: IRateProvider(_rateProvider),
-            paysYieldFees: _paysYieldFees
-        });
-    }
-
-    /// @notice The template's per-market component salt: `keccak256("ROYCO_MARKET_" ‖ marketId ‖ tag)`
-    function _salt(bytes32 _marketId, bytes32 _componentTag) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked("ROYCO_MARKET_", _marketId, _componentTag));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

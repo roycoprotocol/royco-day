@@ -210,14 +210,14 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         address predicted = vm.computeCreateAddress(kernelProxyDeployer, vm.getNonce(kernelProxyDeployer) - 1);
         assertEq(address(kernel), predicted, "kernel proxy not at the CREATE-predicted address");
 
-        // The five-contract wiring must be closed under the kernel's immutables
-        assertEq(kernel.SENIOR_TRANCHE(), address(seniorTranche), "kernel ST wiring");
-        assertEq(kernel.JUNIOR_TRANCHE(), address(juniorTranche), "kernel JT wiring");
-        assertEq(kernel.LIQUIDITY_PROVIDER_TRANCHE(), address(liquidityProviderTranche), "kernel LPT wiring");
-        assertEq(kernel.ACCOUNTANT(), address(accountant), "kernel accountant wiring");
-        assertEq(kernel.COLLATERAL_ASSET(), address(stJtVault), "kernel collateral asset wiring");
-        assertEq(kernel.LPT_ASSET(), address(bpt), "kernel LPT asset wiring");
-        assertEq(kernel.QUOTE_ASSET(), address(quoteToken), "kernel quote asset wiring");
+        // The five-contract wiring must be closed under the kernel's recorded market state
+        assertEq(kernel.seniorTranche(), address(seniorTranche), "kernel ST wiring");
+        assertEq(kernel.juniorTranche(), address(juniorTranche), "kernel JT wiring");
+        assertEq(kernel.liquidityProviderTranche(), address(liquidityProviderTranche), "kernel LPT wiring");
+        assertEq(kernel.accountant(), address(accountant), "kernel accountant wiring");
+        assertEq(kernel.collateralAsset(), address(stJtVault), "kernel collateral asset wiring");
+        assertEq(kernel.lptAsset(), address(bpt), "kernel LPT asset wiring");
+        assertEq(kernel.quoteAsset(), address(quoteToken), "kernel quote asset wiring");
     }
 
     // =============================

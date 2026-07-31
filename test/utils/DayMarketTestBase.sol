@@ -282,16 +282,19 @@ abstract contract DayMarketTestBase is Assertions {
         kernelProxyDeployer = makeAddr("KERNEL_PROXY_DEPLOYER");
         address predictedKernel = vm.computeCreateAddress(kernelProxyDeployer, vm.getNonce(kernelProxyDeployer));
 
-        // 7. Impls with the predicted kernel address
-        RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(stJtVault), predictedKernel);
-        RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(stJtVault), predictedKernel);
-        RoycoLiquidityProviderTranche lptImpl = new RoycoLiquidityProviderTranche(address(bpt), predictedKernel);
-        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel, _params.fixedTermGracePeriodSeconds);
+        // 7. Market-independent impls: every market address now arrives through each proxy's initializer
+        RoycoSeniorTranche stImpl = new RoycoSeniorTranche();
+        RoycoJuniorTranche jtImpl = new RoycoJuniorTranche();
+        RoycoLiquidityProviderTranche lptImpl = new RoycoLiquidityProviderTranche();
+        RoycoDayAccountant accImpl = new RoycoDayAccountant();
 
-        // 8. Tranche and accountant proxies MUST exist before the kernel impl (its initialize calls tranche.asset())
-        seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));
-        juniorTranche = RoycoJuniorTranche(_deployTrancheProxy(address(jtImpl), "Royco Junior Tranche", "RJT"));
-        liquidityProviderTranche = RoycoLiquidityProviderTranche(_deployTrancheProxy(address(lptImpl), "Royco Liquidity Provider Tranche", "RLT"));
+        // 8. Tranche and accountant proxies MUST exist before the kernel (its initialize calls tranche.asset())
+        seniorTranche =
+            RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST", predictedKernel, address(stJtVault)));
+        juniorTranche = RoycoJuniorTranche(_deployTrancheProxy(address(jtImpl), "Royco Junior Tranche", "RJT", predictedKernel, address(stJtVault)));
+        liquidityProviderTranche = RoycoLiquidityProviderTranche(
+            _deployTrancheProxy(address(lptImpl), "Royco Liquidity Provider Tranche", "RLT", predictedKernel, address(bpt))
+        );
         vm.label(address(seniorTranche), "ST");
         vm.label(address(juniorTranche), "JT");
         vm.label(address(liquidityProviderTranche), "LPT");
@@ -300,7 +303,7 @@ abstract contract DayMarketTestBase is Assertions {
             address(
                 new ERC1967Proxy(
                     address(accImpl),
-                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(_params, jtYdmInitData, lptYdmInitData), address(accessManager)))
+                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(_params, predictedKernel, jtYdmInitData, lptYdmInitData)))
                 )
             )
         );
@@ -325,18 +328,8 @@ abstract contract DayMarketTestBase is Assertions {
         );
         _initializePoolMinimumSupply();
 
-        // 10. Kernel impl (constructor resolves the vault via BalancerPoolToken(lptAsset).getVault())
-        RoycoDayBalancerV3Kernel kernelImpl = new RoycoDayBalancerV3Kernel(
-            IRoycoDayKernel.RoycoDayKernelConstructionParams({
-                seniorTranche: address(seniorTranche),
-                juniorTranche: address(juniorTranche),
-                collateralAsset: address(stJtVault),
-                accountant: address(accountant),
-                liquidityProviderTranche: address(liquidityProviderTranche),
-                lptAsset: address(bpt),
-                quoteAsset: address(quoteToken)
-            })
-        );
+        // 10. Kernel impl: market-independent, its only construction input is the Balancer Vault
+        RoycoDayBalancerV3Kernel kernelImpl = new RoycoDayBalancerV3Kernel(IVault(address(balancerVault)));
 
         // 11. Protocol fee recipient wallet must exist before kernel init consumes it
         PROTOCOL_FEE_RECIPIENT = makeAddr("PROTOCOL_FEE_RECIPIENT");
@@ -347,6 +340,13 @@ abstract contract DayMarketTestBase is Assertions {
             (
                 IRoycoDayKernel.RoycoDayKernelInitParams({
                     initialAuthority: address(accessManager),
+                    seniorTranche: address(seniorTranche),
+                    juniorTranche: address(juniorTranche),
+                    liquidityProviderTranche: address(liquidityProviderTranche),
+                    collateralAsset: address(stJtVault),
+                    lptAsset: address(bpt),
+                    quoteAsset: address(quoteToken),
+                    accountant: address(accountant),
                     protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT,
                     stSelfLiquidationBonusWAD: _params.stSelfLiquidationBonusWAD,
                     roycoBlacklist: address(0),
@@ -704,10 +704,27 @@ abstract contract DayMarketTestBase is Assertions {
     }
 
     /// @notice Deploys a tranche proxy with its production-shaped init params
-    function _deployTrancheProxy(address _impl, string memory _name, string memory _symbol) internal returns (address proxy) {
+    function _deployTrancheProxy(
+        address _impl,
+        string memory _name,
+        string memory _symbol,
+        address _kernel,
+        address _asset
+    )
+        internal
+        returns (address proxy)
+    {
         bytes memory initData = abi.encodeCall(
             RoycoSeniorTranche.initialize,
-            (IRoycoVaultTranche.RoycoTrancheInitParams({ name: _name, symbol: _symbol, initialAuthority: address(accessManager) }))
+            (
+                IRoycoVaultTranche.RoycoTrancheInitParams({
+                    name: _name,
+                    symbol: _symbol,
+                    initialAuthority: address(accessManager),
+                    kernel: _kernel,
+                    asset: _asset
+                })
+            )
         );
         proxy = address(new ERC1967Proxy(_impl, initData));
     }
@@ -715,6 +732,7 @@ abstract contract DayMarketTestBase is Assertions {
     /// @notice Builds the accountant's init params from the fixture's market parameterization
     function _buildAccountantInitParams(
         MarketParamsConfig memory _params,
+        address _kernel,
         bytes memory _jtYdmInitData,
         bytes memory _lptYdmInitData
     )
@@ -723,6 +741,9 @@ abstract contract DayMarketTestBase is Assertions {
         returns (IRoycoDayAccountant.RoycoDayAccountantInitParams memory)
     {
         return IRoycoDayAccountant.RoycoDayAccountantInitParams({
+            kernel: _kernel,
+            initialAuthority: address(accessManager),
+            fixedTermGracePeriodSeconds: _params.fixedTermGracePeriodSeconds,
             minCoverageWAD: _params.minCoverageWAD,
             coverageLiquidationUtilizationWAD: _params.coverageLiquidationUtilizationWAD,
             minLiquidityWAD: _params.minLiquidityWAD,

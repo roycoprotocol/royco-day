@@ -43,13 +43,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /// @notice The concrete kernel's static test configuration (assets, fork, funding).
     TestConfig internal testConfig;
 
-    /// @notice The single coinvested collateral asset backing both ST and JT (== `KERNEL.COLLATERAL_ASSET()`).
+    /// @notice The single coinvested collateral asset backing both ST and JT (== `KERNEL.collateralAsset()`).
     address internal COLLATERAL_ASSET;
 
     // ── Day market-topology addresses the script's `DeploymentResult` does not surface ──
     /// @notice The liquidity provider tranche (holds the Gyro E-CLP BPT).
     IRoycoVaultTranche internal LPT;
-    /// @notice The liquidity provider tranche's Gyro E-CLP pool (the BPT, == `KERNEL.LPT_ASSET()`).
+    /// @notice The liquidity provider tranche's Gyro E-CLP pool (the BPT, == `KERNEL.lptAsset()`).
     address internal POOL;
     /// @notice The pool's kernel-bound hook (the upgraded `RoycoDayBalancerV3Hooks` proxy).
     address internal BALANCER_HOOK;
@@ -123,14 +123,14 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _setDeployedMarket(_deployKernelAndMarket());
 
         // The coinvestment collapse leaves one collateral asset, so the config's two hook assets must be it
-        COLLATERAL_ASSET = KERNEL.COLLATERAL_ASSET();
+        COLLATERAL_ASSET = KERNEL.collateralAsset();
         assertEq(testConfig.stAsset, COLLATERAL_ASSET, "setup: the configured ST asset must be the kernel's collateral asset");
         assertEq(testConfig.jtAsset, COLLATERAL_ASSET, "setup: the configured JT asset must be the kernel's collateral asset");
 
         // Capture the Day LPT topology the script result omits, by reading the deployed contracts.
         if (testConfig.hasLiquidityProviderTranche) {
-            LPT = IRoycoVaultTranche(KERNEL.LIQUIDITY_PROVIDER_TRANCHE());
-            POOL = KERNEL.LPT_ASSET();
+            LPT = IRoycoVaultTranche(KERNEL.liquidityProviderTranche());
+            POOL = KERNEL.lptAsset();
             LPT_YDM = ACCOUNTANT.getState().lptYDM;
             VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
             BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
@@ -4717,7 +4717,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         bytes memory coverageData = abi.encodeCall(ACCOUNTANT.setMinCoverage, (newMinCoverageWAD));
         _scheduleAccountantOperation(coverageData);
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.CoverageUpdated(newMinCoverageWAD);
+        emit IRoycoDayAccountant.MinCoverageUpdated(newMinCoverageWAD);
         _executeScheduledAccountantOperation(coverageData);
         assertEq(uint256(ACCOUNTANT.getState().minCoverageWAD), uint256(newMinCoverageWAD), "the coverage requirement must update");
         assertEq(uint256(ACCOUNTANT.getState().lastYieldShareAccrualTimestamp), block.timestamp, "the setter's inline sync must stamp the checkpoint");
@@ -4734,7 +4734,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             bytes memory liquidityData = abi.encodeCall(ACCOUNTANT.setMinLiquidity, (minLiquidityA));
             _scheduleAccountantOperation(liquidityData);
             vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-            emit IRoycoDayAccountant.LiquidityUpdated(minLiquidityA);
+            emit IRoycoDayAccountant.MinLiquidityUpdated(minLiquidityA);
             _executeScheduledAccountantOperation(liquidityData);
             assertEq(
                 uint256(ACCOUNTANT.getState().lastYieldShareAccrualTimestamp), block.timestamp, "the liquidity setter's inline sync must stamp the checkpoint"

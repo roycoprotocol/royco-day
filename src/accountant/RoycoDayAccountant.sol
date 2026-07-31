@@ -61,11 +61,10 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     /**
      * @notice Initializes the Royco accountant state
      * @param _params The initialization parameters for the Royco accountant
-     * @param _initialAuthority The initial authority for the Royco accountant
      */
-    function initialize(RoycoDayAccountantInitParams calldata _params, address _initialAuthority) external initializer {
+    function initialize(RoycoDayAccountantInitParams calldata _params) external initializer {
         // Initialize the base state of the accountant
-        __RoycoBase_init(_initialAuthority);
+        __RoycoBase_init(_params.initialAuthority);
 
         // Validate the accountant initialization parameters
         // Ensure that the kernel is not null
@@ -101,7 +100,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Set the fields in slot 1 of storage
         $.minCoverageWAD = _params.minCoverageWAD;
         $.fixedTermDurationSeconds = _params.fixedTermDurationSeconds;
-        emit CoverageUpdated(_params.minCoverageWAD);
+        emit MinCoverageUpdated(_params.minCoverageWAD);
         emit FixedTermDurationUpdated(_params.fixedTermDurationSeconds);
 
         // Set the fields in slot 2 of storage
@@ -112,7 +111,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         $.lptYDM = _params.lptYDM;
         $.minLiquidityWAD = _params.minLiquidityWAD;
         emit LiquidityProviderTrancheYDMUpdated(_params.lptYDM);
-        emit LiquidityUpdated(_params.minLiquidityWAD);
+        emit MinLiquidityUpdated(_params.minLiquidityWAD);
 
         // Set the maximum yield shares in slot 4 and slot 5 of storage (their time-weighted accumulators are zero-initialized)
         $.maxJTYieldShareWAD = _params.maxJTYieldShareWAD;
@@ -736,7 +735,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // The coverage requirement must leave headroom for the junior tranche to provide coverage (the liquidation threshold is unchanged and already valid)
         require(_minCoverageWAD < WAD, INVALID_COVERAGE_CONFIG());
         $.minCoverageWAD = _minCoverageWAD;
-        emit CoverageUpdated(_minCoverageWAD);
+        emit MinCoverageUpdated(_minCoverageWAD);
     }
 
     /// @inheritdoc IRoycoDayAccountant
@@ -758,7 +757,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // The liquidity requirement must leave headroom (minLiquidity < WAD)
         require(_minLiquidityWAD < WAD, INVALID_LIQUIDITY_CONFIG());
         _getRoycoDayAccountantStorage().minLiquidityWAD = _minLiquidityWAD;
-        emit LiquidityUpdated(_minLiquidityWAD);
+        emit MinLiquidityUpdated(_minLiquidityWAD);
     }
 
     /// @inheritdoc IRoycoDayAccountant

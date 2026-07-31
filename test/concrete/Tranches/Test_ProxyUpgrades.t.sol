@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Utils } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts/contracts/proxy/utils/UUPSUpgradeable.sol";
@@ -40,28 +41,14 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
     }
 
     /**
-     * @dev Deploys fresh implementations bytecode-identical to the live ones: same creation code, same
-     *      constructor args (the tranche and accountant impls bake the kernel PROXY address as an immutable, and
-     *      the proxy address never changes across an upgrade, so re-running the constructors reproduces the
-     *      original immutables exactly)
+     * @dev Deploys fresh implementations bytecode-identical to the live ones. Every implementation is now
+     *      market-independent — the market wiring lives in each proxy's storage, untouched by an upgrade — so the
+     *      only construction input anywhere is the kernel's Balancer Vault
      */
     function _deployFreshImplementations() internal returns (RoycoSeniorTranche stImpl, DayKernel kernelImpl, RoycoDayAccountant accImpl) {
-        stImpl = new RoycoSeniorTranche(address(stJtVault), address(kernel));
-        accImpl = new RoycoDayAccountant(address(kernel), 0);
-        // The kernel impl constructor re-validates the live wiring (the shared collateral asset and the
-        // registered two-token pool pairing the senior share), so a successful deploy is itself proof the
-        // upgrade target is built against this exact market
-        kernelImpl = new DayKernel(
-            IRoycoDayKernel.RoycoDayKernelConstructionParams({
-                seniorTranche: address(seniorTranche),
-                juniorTranche: address(juniorTranche),
-                collateralAsset: address(stJtVault),
-                accountant: address(accountant),
-                liquidityProviderTranche: address(liquidityProviderTranche),
-                lptAsset: address(bpt),
-                quoteAsset: address(quoteToken)
-            })
-        );
+        stImpl = new RoycoSeniorTranche();
+        accImpl = new RoycoDayAccountant();
+        kernelImpl = new DayKernel(IVault(address(balancerVault)));
     }
 
     /**
