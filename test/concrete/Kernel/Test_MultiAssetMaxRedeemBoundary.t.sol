@@ -175,7 +175,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
     /// @notice The multi-asset bound weakly dominates the in-kind bound in every state, strictly once the
     ///         idle liquidity premium pile adds senior-share relief
     function test_MaxRedeemMultiAsset_WeaklyDominatesInKindAcrossStates() public {
-        assertGe(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), liquidityProviderTranche.maxRedeem(LPT_PROVIDER), "dominance must hold at the seeded state");
+        assertGe(
+            liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER),
+            liquidityProviderTranche.maxRedeem(LPT_PROVIDER),
+            "dominance must hold at the seeded state"
+        );
 
         // A staged un-reinvested premium adds relief on top of the pool's senior leg: dominance turns strict
         _accumulateIdleLiquidityPremiumSeniorShares();
@@ -189,7 +193,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         applyLPTPnL(-3000);
         _sync();
         assertGt(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), 0, "the drawdown fixture must keep in-kind capacity open");
-        assertGe(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), liquidityProviderTranche.maxRedeem(LPT_PROVIDER), "dominance must hold through a drawdown");
+        assertGe(
+            liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER),
+            liquidityProviderTranche.maxRedeem(LPT_PROVIDER),
+            "dominance must hold through a drawdown"
+        );
     }
 
     /// @notice With no senior-share value in the removal and no idle premium, the two maxima coincide exactly:
@@ -269,7 +277,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
         uint256 balance = liquidityProviderTranche.balanceOf(LPT_PROVIDER);
         assertEq(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), balance, "a waived requirement must report the full balance");
-        assertEq(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), liquidityProviderTranche.maxRedeem(LPT_PROVIDER), "both maxima must agree under the waiver");
+        assertEq(
+            liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER),
+            liquidityProviderTranche.maxRedeem(LPT_PROVIDER),
+            "both maxima must agree under the waiver"
+        );
 
         vm.prank(LPT_PROVIDER);
         liquidityProviderTranche.redeemMultiAsset(balance, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
@@ -349,7 +361,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertEq(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), 0, "the in-kind maximum must mirror the zero");
         vm.prank(UNPAUSER);
         kernel.unpause();
-        assertGe(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), liquidityProviderTranche.maxRedeem(LPT_PROVIDER), "unpausing must restore the dominant maximum");
+        assertGe(
+            liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER),
+            liquidityProviderTranche.maxRedeem(LPT_PROVIDER),
+            "unpausing must restore the dominant maximum"
+        );
     }
 
     /// @notice A market with no liquidity provider tranche deposits reports a zero maximum instead of reverting on the empty venue preview

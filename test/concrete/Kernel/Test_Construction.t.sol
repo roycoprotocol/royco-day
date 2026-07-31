@@ -288,9 +288,15 @@ contract Test_PreGenesisConversions_Kernel is DayMarketTestBase {
     /// @dev Skips the genesis seed so the registered pool's BPT supply stays at exactly zero
     function _initializePoolMinimumSupply() internal override { }
 
-    /// @notice With zero BPT outstanding both conversion directions return zero, there is no pool value to apportion
-    function test_LPTConversions_ZeroBptSupplyResolvesToZero() public view {
+    /// @notice With zero BPT outstanding the BPT to NAV direction floors to zero, the NAV to BPT direction reverts on the
+    ///         zero-price division. Production never reaches the reverting direction on an empty pool: AssetLedgerLogic
+    ///         guards convertValueToLPTAssets behind lptRawNAV != 0 (which requires held BPT, hence a nonzero supply) and
+    ///         the reinvestment probe tolerates it via _tryExecute, so the panic is unreachable and a direct external call
+    ///         fails loud rather than fabricating a BPT amount from a null price
+    function test_LPTConversions_ZeroBptSupply_BptToNavZero_NavToBptReverts() public {
         assertEq(toUint256(kernel.convertLPTAssetsToValue(toTrancheUnits(5e18))), 0, "BPT -> NAV on an empty pool must be zero");
-        assertEq(toUint256(kernel.convertValueToLPTAssets(toNAVUnits(uint256(5e18)))), 0, "NAV -> BPT on an empty pool must be zero");
+        // Reverts with a division-by-zero panic (0x12) on the null price
+        vm.expectRevert();
+        kernel.convertValueToLPTAssets(toNAVUnits(uint256(5e18)));
     }
 }
