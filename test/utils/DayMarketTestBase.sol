@@ -286,7 +286,7 @@ abstract contract DayMarketTestBase is Assertions {
         RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(stJtVault), predictedKernel);
         RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(stJtVault), predictedKernel);
         RoycoLiquidityProviderTranche lptImpl = new RoycoLiquidityProviderTranche(address(bpt), predictedKernel);
-        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel);
+        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel, _params.fixedTermGracePeriodSeconds);
 
         // 8. Tranche and accountant proxies MUST exist before the kernel impl (its initialize calls tranche.asset())
         seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));

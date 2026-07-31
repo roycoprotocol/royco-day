@@ -47,7 +47,7 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
      */
     function _deployFreshImplementations() internal returns (RoycoSeniorTranche stImpl, DayKernel kernelImpl, RoycoDayAccountant accImpl) {
         stImpl = new RoycoSeniorTranche(address(stJtVault), address(kernel));
-        accImpl = new RoycoDayAccountant(address(kernel));
+        accImpl = new RoycoDayAccountant(address(kernel), 0);
         // The kernel impl constructor re-validates the live wiring (the shared collateral asset and the
         // registered two-token pool pairing the senior share), so a successful deploy is itself proof the
         // upgrade target is built against this exact market

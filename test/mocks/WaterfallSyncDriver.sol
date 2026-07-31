@@ -22,7 +22,7 @@ import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
  *      read the seeded dust tolerance from storage, so they are driven directly with a marshaled state struct
  */
 contract WaterfallSyncDriver is RoycoDayAccountant {
-    constructor(address _kernel) RoycoDayAccountant(_kernel) { }
+    constructor(address _kernel) RoycoDayAccountant(_kernel, 0) { }
 
     /// @notice Writes the full accountant state field set into ERC-7201 storage as the last committed checkpoint
     function seedCheckpoint(RoycoDayAccountantState calldata _seed) external {

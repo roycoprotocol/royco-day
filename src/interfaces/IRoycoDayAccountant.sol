@@ -216,6 +216,10 @@ interface IRoycoDayAccountant {
     /// @return kernel The kernel that this accountant maintains mark-to-market NAV, JT impermanent loss, and fee accounting for
     function KERNEL() external view returns (address kernel);
 
+    /// @notice The timestamp before which the market cannot enter a fixed term, the deployment time plus the fixed-term grace period
+    /// @return fixedTermCommenceableAtTimestamp The unix timestamp at and after which a fixed term may commence
+    function FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP() external view returns (uint256 fixedTermCommenceableAtTimestamp);
+
     /**
      * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market
      * @dev Must be called before any NAV mutating operation

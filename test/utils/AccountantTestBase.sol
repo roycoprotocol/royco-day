@@ -81,9 +81,14 @@ abstract contract AccountantTestBase is Test {
 
     /// @dev Deploys a fresh kernel, authority, implementation, and un-initialized ERC1967 proxy (RoycoBase disables initializers on the implementation)
     function _deployUninitialized() internal returns (RoycoDayAccountant acct) {
+        return _deployUninitializedWithGrace(0);
+    }
+
+    /// @dev As _deployUninitialized, but bakes a nonzero fixed-term grace period into the implementation so the young-market lock-out is exercisable (the immutable anchors on this block's timestamp)
+    function _deployUninitializedWithGrace(uint24 _fixedTermGracePeriodSeconds) internal returns (RoycoDayAccountant acct) {
         kernel = new MockAccountantKernel();
         authority = new AccessManager(address(this));
-        implementation = new RoycoDayAccountant(address(kernel));
+        implementation = new RoycoDayAccountant(address(kernel), _fixedTermGracePeriodSeconds);
         acct = RoycoDayAccountant(address(new UninitializedERC1967Proxy(address(implementation))));
         kernel.setAccountant(address(acct));
     }
@@ -93,7 +98,18 @@ abstract contract AccountantTestBase is Test {
      * @dev Null YDM slots in the params are filled with fresh MockRecordingYDM instances, otherwise the passed addresses are adopted as the suite's mocks
      */
     function _deploy(IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params) internal returns (RoycoDayAccountant acct) {
-        acct = _deployUninitialized();
+        return _deployWithGrace(_params, 0);
+    }
+
+    /// @dev As _deploy, but with a nonzero fixed-term grace period baked into the implementation
+    function _deployWithGrace(
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params,
+        uint24 _fixedTermGracePeriodSeconds
+    )
+        internal
+        returns (RoycoDayAccountant acct)
+    {
+        acct = _deployUninitializedWithGrace(_fixedTermGracePeriodSeconds);
         if (_params.jtYDM == address(0)) _params.jtYDM = address(new MockRecordingYDM());
         if (_params.lptYDM == address(0)) _params.lptYDM = address(new MockRecordingYDM());
         jtYDM = MockRecordingYDM(_params.jtYDM);

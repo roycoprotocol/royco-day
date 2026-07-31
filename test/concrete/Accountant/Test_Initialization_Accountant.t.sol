@@ -27,13 +27,13 @@ contract Test_Initialization_Accountant is AccountantTestBase {
     /// a null kernel reverts in the constructor
     function test_RevertIf_ConstructorNullKernel() public {
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new RoycoDayAccountant(address(0));
+        new RoycoDayAccountant(address(0), 0);
     }
 
     /// KERNEL is immutably set
     function test_Constructor_setsKernelImmutable() public {
         MockAccountantKernel freshKernel = new MockAccountantKernel();
-        RoycoDayAccountant acct = new RoycoDayAccountant(address(freshKernel));
+        RoycoDayAccountant acct = new RoycoDayAccountant(address(freshKernel), 0);
         assertEq(acct.KERNEL(), address(freshKernel), "kernel immutable");
     }
 

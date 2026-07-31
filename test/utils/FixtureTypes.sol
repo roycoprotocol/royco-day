@@ -37,6 +37,7 @@ struct MarketParamsConfig {
     uint64 lptYieldShareProtocolFeeWAD;
     // state machine / dust
     uint24 fixedTermDurationSeconds;
+    uint24 fixedTermGracePeriodSeconds;
     uint256 dustTolerance;
     // kernel
     uint64 stSelfLiquidationBonusWAD;

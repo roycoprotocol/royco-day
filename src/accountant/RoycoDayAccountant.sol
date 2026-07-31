@@ -29,6 +29,10 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     /// @inheritdoc IRoycoDayAccountant
     address public immutable override(IRoycoDayAccountant) KERNEL;
 
+    /// @inheritdoc IRoycoDayAccountant
+    /// @dev Set to the deployment timestamp plus the fixed-term grace period
+    uint256 public immutable override(IRoycoDayAccountant) FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP;
+
     /// @dev Permissions the function to only be callable by the market's kernel
     /// @dev Should be placed on all state mutating NAV synchronization functions
     modifier onlyRoycoKernel() {
@@ -60,11 +64,16 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     // Construction and Initialization Functions
     // =============================
 
-    /// @dev Constructs the accountant with the specified kernel
-    /// @param _kernel The kernel that this accountant maintains mark-to-market NAV, JT impermanent loss, and fee accounting for
-    constructor(address _kernel) {
+    /**
+     * @notice Constructs the accountant with the specified kernel
+     * @param _kernel The kernel that this accountant maintains mark-to-market NAV, JT impermanent loss, and fee accounting for
+     * @param _fixedTermGracePeriodSeconds The seconds after deployment during which the market cannot enter a fixed term no matter what, so a young market is never locked by an early junior impermanent loss
+     */
+    constructor(address _kernel, uint24 _fixedTermGracePeriodSeconds) {
         // Ensure the specified kernel is not null and immutably set it
         require((KERNEL = _kernel) != address(0), NULL_ADDRESS());
+        // The market cannot enter a fixed term until the grace period after deployment has elapsed
+        FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP = (block.timestamp + _fixedTermGracePeriodSeconds);
     }
 
     /**
@@ -545,10 +554,11 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             // 4. The JT impermanent loss is within the dust tolerance (fully repaid or dust-sized), so JT provides its loss-absorption buffer and needs no observation period: dust ST or JT losses (eg. rounding in the underlying NAVs) never lock or keep locking the market
             // 5. The current fixed-term has elapsed, so the transient JT observation period is complete
             // 6. The coverage utilization breached the liquidation threshold, so the market forces open senior exits
+            // 7. The market is still within its post-deployment fixed-term grace period, so it cannot enter it no matter what
             if (
                 fixedTermDurationSeconds == 0 || stEffectiveNAV == ZERO_NAV_UNITS || jtEffectiveNAV == ZERO_NAV_UNITS || jtImpermanentLoss <= dustTolerance
                     || (initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp)
-                    || coverageUtilizationWAD >= coverageLiquidationUtilizationWAD
+                    || coverageUtilizationWAD >= coverageLiquidationUtilizationWAD || block.timestamp < FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP
             ) {
                 // A perpetual commit always clears the JT impermanent loss ledger and the term, so a perpetual market never carries a drawdown
                 jtImpermanentLossErased = jtImpermanentLoss;

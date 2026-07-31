@@ -51,6 +51,7 @@ function defaultParams() pure returns (MarketParamsConfig memory) {
         lptYieldShareProtocolFeeWAD: 0.1e18,
         // state machine / dust
         fixedTermDurationSeconds: 2 weeks,
+        fixedTermGracePeriodSeconds: 0,
         dustTolerance: 1,
         // kernel
         stSelfLiquidationBonusWAD: 0.01e18,
