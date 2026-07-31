@@ -34,7 +34,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
     function test_Constructor_setsKernelImmutable() public {
         MockAccountantKernel freshKernel = new MockAccountantKernel();
         RoycoDayAccountant acct = new RoycoDayAccountant(address(freshKernel), 0);
-        assertEq(acct.KERNEL(), address(freshKernel), "kernel immutable");
+        assertEq(acctkernel(), address(freshKernel), "kernel immutable");
     }
 
     /// each of the four fee params above MAX_PROTOCOL_FEE_WAD reverts independently

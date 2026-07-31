@@ -45,7 +45,7 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
         address proxy = addrs.accountant;
 
         IRoycoDayAccountant a = IRoycoDayAccountant(proxy);
-        address kernel = a.KERNEL();
+        address kernel = a.kernel();
         require(kernel != address(0), UpgradeAccountantModule__NotAnAccountantProxy(proxy));
 
         // Strong type check: call an accountant-specific view. Reverts if the proxy is not actually
@@ -82,7 +82,7 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
     /// @inheritdoc UpgradeModuleBase
     function snapshotState(address _proxy) external view override returns (bytes memory) {
         IRoycoDayAccountant a = IRoycoDayAccountant(_proxy);
-        IRoycoDayKernel kernel = IRoycoDayKernel(a.KERNEL());
+        IRoycoDayKernel kernel = IRoycoDayKernel(akernel());
 
         NAV_UNIT collateralNAV = kernel.convertCollateralAssetsToValue(kernel.getState().totalCollateralAssets);
 
@@ -99,7 +99,7 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
             abi.decode(_preStateSnapshot, (address, IRoycoDayAccountant.RoycoDayAccountantState, SyncedAccountingState, NAV_UNIT));
 
         IRoycoDayAccountant a = IRoycoDayAccountant(_proxy);
-        require(a.KERNEL() == preKernel, UpgradeAccountantModule__KernelImmutableChanged(preKernel, a.KERNEL()));
+        require(akernel() == preKernel, UpgradeAccountantModule__KernelImmutableChanged(preKernel, akernel()));
 
         _assertStateEqual(a.getState(), preState);
 

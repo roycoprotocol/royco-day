@@ -9,6 +9,8 @@ import { NAV_UNIT } from "../libraries/Units.sol";
 interface IRoycoDayAccountant {
     /**
      * @notice Initialization parameters for the Royco Accountant
+     * @custom:field kernel - The kernel that this accountant maintains mark-to-market NAV, JT impermanent loss, and fee accounting for
+     * @custom:field fixedTermGracePeriodSeconds - The seconds after deployment during which the market cannot enter a fixed term no matter what, so a young market is never locked by an early junior impermanent loss
      * @custom:field minCoverageWAD - The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity provider tranche's market making inventory, scaled to WAD precision
@@ -26,6 +28,10 @@ interface IRoycoDayAccountant {
      * @custom:field lptYieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche, scaled to WAD precision
      */
     struct RoycoDayAccountantInitParams {
+        // Market Contracts
+        address kernel;
+        // Deployment Configuration
+        uint256 fixedTermGracePeriodSeconds;
         // Coverage configuration
         uint64 minCoverageWAD;
         uint256 coverageLiquidationUtilizationWAD;
@@ -70,6 +76,8 @@ interface IRoycoDayAccountant {
      * @custom:field maxLPTYieldShareWAD - The maximum LPT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (JT YDM output) since the last premium payment, scaled to WAD precision
      * @custom:field twLPTYieldShareAccruedWAD - The time-weighted liquidity provider tranche yield share (LPT YDM output) since the last premium payment, scaled to WAD precision
+     * @custom:field fixedTermCommenceableAtTimestamp - The timestamp at which the market can enter a fixed term, the deployment time plus the fixed-term grace period
+     * @custom:field fixedTermEndTimestamp - The end timestamp of the currently ongoing fixed term (set to 0 if the market is in a perpetual state)
      * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field lastCollateralNAV - The last recorded pure value of the coinvested collateral backing the senior and junior tranches
      * @custom:field lastSTEffectiveNAV - The last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses) of the senior tranche
@@ -101,7 +109,10 @@ interface IRoycoDayAccountant {
         // Slot 4 (uint128 holds over 1e13 years of the config-capped WAD-per-second accrual)
         uint128 twJTYieldShareAccruedWAD;
         uint128 twLPTYieldShareAccruedWAD;
-        // Slot 5-11
+        // Slot 5
+        address kernel;
+        uint64 fixedTermCommenceableAtTimestamp;
+        // Slot 6-11
         uint256 coverageLiquidationUtilizationWAD;
         NAV_UNIT lastCollateralNAV;
         NAV_UNIT lastSTEffectiveNAV;
@@ -175,6 +186,14 @@ interface IRoycoDayAccountant {
     /// @param minLiquidityWAD The new percentage of the senior tranche NAV that must be in the liquidity provider tranche's market making inventory, scaled to WAD precision
     event LiquidityUpdated(uint64 minLiquidityWAD);
 
+    /// @notice Emitted when the kernel is updated
+    /// @param kernel The new kernel address
+    event KernelUpdated(address kernel);
+
+    /// @notice Emitted when the fixed term commencement timestamp is updated
+    /// @param fixedTermCommenceableAtTimestamp The new fixed term commencement timestamp
+    event FixedTermCommenceableAtTimestampUpdated(uint64 fixedTermCommenceableAtTimestamp);
+
     /**
      * @notice Emitted when the maximum JT and LPT yield shares (premiums) are updated
      * @param maxJTYieldShareWAD The new maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
@@ -211,14 +230,6 @@ interface IRoycoDayAccountant {
 
     /// @notice Thrown when the operation and NAVs passed to post-op lead to an invalid state
     error INVALID_POST_OP_STATE(Operation _op);
-
-    /// @notice Retrieves the address of the kernel tied to this accountant
-    /// @return kernel The kernel that this accountant maintains mark-to-market NAV, JT impermanent loss, and fee accounting for
-    function KERNEL() external view returns (address kernel);
-
-    /// @notice The timestamp before which the market cannot enter a fixed term, the deployment time plus the fixed-term grace period
-    /// @return fixedTermCommenceableAtTimestamp The unix timestamp at and after which a fixed term may commence
-    function FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP() external view returns (uint256 fixedTermCommenceableAtTimestamp);
 
     /**
      * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market

@@ -11,30 +11,16 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
  */
 interface IRoycoDayKernel {
     /**
-     * @notice Construction parameters for the Royco Kernel
-     * @custom:field seniorTranche - The address of the Royco senior tranche associated with this kernel
-     * @custom:field juniorTranche - The address of the Royco junior tranche associated with this kernel
-     * @custom:field collateralAsset - The address of the coinvested collateral asset both the senior and junior tranches deposit
-     * @custom:field accountant - The address of the accountant for the Royco market
-     * @custom:field liquidityProviderTranche - The address of the Royco liquidity provider tranche associated with this kernel
-     * @custom:field lptAsset - The base asset of the liquidity provider tranche (the liquidity venue's market-making position token)
-     * @custom:field quoteAsset - The quote asset paired against the senior share in the liquidity venue, validated against the venue's registration
-     * @custom:field enforceVaultSharesTransferWhitelist Whether to enforce the vault shares transfer whitelist
-     */
-    struct RoycoDayKernelConstructionParams {
-        address seniorTranche;
-        address juniorTranche;
-        address collateralAsset;
-        address accountant;
-        address liquidityProviderTranche;
-        address lptAsset;
-        address quoteAsset;
-        bool enforceVaultSharesTransferWhitelist;
-    }
-
-    /**
      * @notice Initialization parameters for the Royco Kernel
      * @custom:field initialAuthority - The access manager for this kernel
+     * @custom:field seniorTranche - The address of the Royco senior tranche associated with this kernel
+     * @custom:field juniorTranche - The address of the Royco junior tranche associated with this kernel
+     * @custom:field liquidityProviderTranche - The address of the Royco liquidity provider tranche associated with this kernel
+     * @custom:field collateralAsset - The address of the coinvested collateral asset both the senior and junior tranches deposit
+     * @custom:field lptAsset - The base asset of the liquidity provider tranche (the liquidity venue's market-making position token)
+     * @custom:field quoteAsset - The quote asset paired against the senior share in the liquidity venue, validated against the venue's registration
+     * @custom:field accountant - The address of the accountant for the Royco market
+     * @custom:field enforceVaultSharesTransferWhitelist - Whether to enforce the vault shares transfer whitelist
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
@@ -45,6 +31,14 @@ interface IRoycoDayKernel {
      */
     struct RoycoDayKernelInitParams {
         address initialAuthority;
+        address seniorTranche;
+        address juniorTranche;
+        address liquidityProviderTranche;
+        address collateralAsset;
+        address lptAsset;
+        address quoteAsset;
+        address accountant;
+        bool enforceVaultSharesTransferWhitelist;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         address roycoBlacklist;
@@ -57,28 +51,60 @@ interface IRoycoDayKernel {
     /**
      * @notice Storage state for the Royco Day Kernel
      * @custom:storage-location erc7201:Royco.storage.RoycoDayKernelState
-     * @custom:field protocolFeeRecipient - The market's configured protocol fee recipient
+     * @custom:field seniorTranche - The address of the Royco senior tranche associated with the kernel
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
-     * @custom:field totalCollateralAssets - The coinvested collateral assets held for the senior and junior tranches, in the collateral asset's units
-     * @custom:field totalLPTAssets - The yield bearing assets held by the liquidity provider tranche, in LPT's asset units
-     * @custom:field lptOwnedSeniorTrancheShares - The senior tranche shares held by the liquidity provider tranche (accumulated liquidity premium payments)
+     * @custom:field enforceTrancheWhitelistOnTransfer - Whether the market enforces the vault-shares transfer whitelist on tranche balance updates
+     * @custom:field juniorTranche - The address of the Royco junior tranche associated with the kernel
+     * @custom:field liquidityProviderTranche - The address of the Royco liquidity provider tranche associated with the kernel
+     * @custom:field collateralAsset - The address of the coinvested collateral asset both the senior and junior tranches deposit
+     * @custom:field lptAsset - The base asset of the liquidity provider tranche (the liquidity venue's market-making position token)
+     * @custom:field lptAssetDecimals - The LPT asset's decimals, from which one whole LPT asset (10 ** decimals) is derived
+     * @custom:field quoteAsset - The quote asset paired against the senior share in the liquidity venue
+     * @custom:field accountant - The address of the accountant for the Royco market
+     * @custom:field protocolFeeRecipient - The market's configured protocol fee recipient
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
      * @custom:field collateralAssetOracle - The collateral asset oracle pricing 1 whole collateral asset in NAV units, also the clock the kernel pokes on every price-cached operation
      * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
+     * @custom:field collateralAssetDecimals - The collateral asset's decimals, from which one whole collateral asset (10 ** decimals) is derived
      * @custom:field sequencerUptimeFeed - The L2 sequencer uptime feed used to gate price queries (the null address when not applicable)
      * @custom:field gracePeriodSeconds - The grace period in seconds after the L2 sequencer is back up before oracle prices are trusted again
+     * @custom:field totalCollateralAssets - The coinvested collateral assets held for the senior and junior tranches, in the collateral asset's units
+     * @custom:field totalLPTAssets - The yield bearing assets held by the liquidity provider tranche, in LPT's asset units
+     * @custom:field lptOwnedSeniorTrancheShares - The senior tranche shares held by the liquidity provider tranche (accumulated liquidity premium payments)
      */
     struct RoycoDayKernelState {
-        address protocolFeeRecipient;
+        // Slot 0
+        address seniorTranche;
         uint64 stSelfLiquidationBonusWAD;
+        bool enforceTrancheWhitelistOnTransfer;
+        // Slot 1
+        address juniorTranche;
+        // Slot 2
+        address liquidityProviderTranche;
+        // Slot 3
+        address collateralAsset;
+        // Slot 4
+        address lptAsset;
+        uint8 lptAssetDecimals;
+        // Slot 5
+        address quoteAsset;
+        // Slot 6
+        address accountant;
+        // Slot 7
+        address protocolFeeRecipient;
+        // Slot 8
+        address roycoBlacklist;
+        // Slot 9
+        address collateralAssetOracle;
+        uint48 stalenessThresholdSeconds;
+        uint8 collateralAssetDecimals;
+        // Slot 10
+        address sequencerUptimeFeed;
+        uint48 gracePeriodSeconds;
+        // Slot 11-13
         TRANCHE_UNIT totalCollateralAssets;
         TRANCHE_UNIT totalLPTAssets;
         uint256 lptOwnedSeniorTrancheShares;
-        address roycoBlacklist;
-        address collateralAssetOracle;
-        uint48 stalenessThresholdSeconds;
-        address sequencerUptimeFeed;
-        uint48 gracePeriodSeconds;
     }
 
     /**
@@ -209,35 +235,35 @@ interface IRoycoDayKernel {
 
     /// @notice Retrieves the senior tranche address
     /// @return seniorTranche The address of the senior tranche for this Royco market
-    function SENIOR_TRANCHE() external view returns (address seniorTranche);
+    function seniorTranche() external view returns (address seniorTranche);
 
     /// @notice Retrieves the junior tranche address
     /// @return juniorTranche The address of the junior tranche for this Royco market
-    function JUNIOR_TRANCHE() external view returns (address juniorTranche);
+    function juniorTranche() external view returns (address juniorTranche);
 
     /// @notice Retrieves the coinvested collateral asset address
     /// @return collateralAsset The address of the coinvested collateral asset both the senior and junior tranches deposit
-    function COLLATERAL_ASSET() external view returns (address collateralAsset);
+    function collateralAsset() external view returns (address collateralAsset);
 
     /// @notice Retrieves the liquidity provider tranche address
     /// @return liquidityProviderTranche The address of the liquidity provider tranche for this Royco market
-    function LIQUIDITY_PROVIDER_TRANCHE() external view returns (address liquidityProviderTranche);
+    function liquidityProviderTranche() external view returns (address liquidityProviderTranche);
 
     /// @notice Retrieves the liquidity provider tranche's base asset (the liquidity venue's market-making position token) address
     /// @return lptAsset The liquidity provider tranche's base asset address
-    function LPT_ASSET() external view returns (address lptAsset);
+    function lptAsset() external view returns (address lptAsset);
 
     /// @notice Retrieves the quote asset paired against the senior share in the liquidity venue
     /// @return quoteAsset The quote asset's address
-    function QUOTE_ASSET() external view returns (address quoteAsset);
+    function quoteAsset() external view returns (address quoteAsset);
 
     /// @notice Retrieves the accountant address
     /// @return accountant The accountant responsible for maintaining this Royco market's accounting state and marking tranche NAVs to market
-    function ACCOUNTANT() external view returns (address accountant);
+    function accountant() external view returns (address accountant);
 
     /// @notice Whether the market enforces the vault-shares transfer whitelist on tranche balance updates
     /// @return enforced True if transfer-whitelist screening is enforced for this market
-    function ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() external view returns (bool enforced);
+    function enforceTrancheWhitelistOnTransfer() external view returns (bool enforced);
 
     /**
      * @notice Converts the specified collateral assets denominated in tranche units to their value in the kernel's NAV units

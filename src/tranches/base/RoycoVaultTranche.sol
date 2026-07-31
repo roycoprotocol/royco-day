@@ -28,38 +28,30 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     using SafeERC20 for IERC20;
     using DispatchLogic for address;
 
-    /// @dev The address of the yield bearing asset of the tranche
-    address internal immutable ASSET;
-
-    /// @inheritdoc IRoycoVaultTranche
-    address public immutable override(IRoycoVaultTranche) KERNEL;
+    /// @dev Storage slot for RoycoVaultTrancheState using ERC-7201 pattern
+    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoVaultTrancheState")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant ROYCO_VAULT_TRANCHE_STORAGE_SLOT = 0xb29e56aa3db56637b513fb077b36928988b241f28eccd4f6a5bd34624bbe3900;
 
     /// @dev Permissions the function to only be callable by the kernel, the single source of truth for sync-driven share mints
     modifier onlyKernel() {
-        require(msg.sender == KERNEL, ONLY_KERNEL());
+        require(msg.sender == _getRoycoVaultTrancheStorage().kernel, ONLY_KERNEL());
         _;
-    }
-
-    /**
-     * @notice Constructs the Royco vault tranche
-     * @param _asset The underlying asset for the tranche
-     * @param _kernel The kernel that handles the core market logic and accounting synchronization
-     */
-    constructor(address _asset, address _kernel) {
-        // Ensure that the asset and kernel are not null
-        require(_asset != address(0) && _kernel != address(0), NULL_ADDRESS());
-
-        // Set the immutable state
-        ASSET = _asset;
-        KERNEL = _kernel;
     }
 
     /**
      * @notice Initializes the Royco tranche
      * @dev This function initializes parent contracts and the tranche-specific state
-     * @param _params Deployment parameters including name, symbol, and initial authority
+     * @param _params Deployment parameters including name, symbol, initial authority, kernel, and asset
      */
     function __RoycoTranche_init(RoycoTrancheInitParams calldata _params) internal onlyInitializing {
+        // Ensure that the asset and kernel are not null
+        require(_params.asset != address(0) && _params.kernel != address(0), NULL_ADDRESS());
+
+        // Set the tranche's market wiring
+        RoycoVaultTrancheState storage $ = _getRoycoVaultTrancheStorage();
+        $.kernel = _params.kernel;
+        $.asset = _params.asset;
+
         // Initialize all the parent contracts
         __RoycoBase_init(_params.initialAuthority);
         __ERC20_init_unchained(_params.name, _params.symbol);
@@ -76,7 +68,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
 
         // Transfer the assets to the kernel
-        IERC20(ASSET).safeTransferFrom(msg.sender, KERNEL, toUint256(_assets));
+        RoycoVaultTrancheState storage $ = _getRoycoVaultTrancheStorage();
+        IERC20($.asset).safeTransferFrom(msg.sender, $.kernel, toUint256(_assets));
 
         // Deposit the assets into the Royco market, the kernel prices the shares and mints them to the receiver
         shares = _deposit(DispatchMode.EXECUTE, _assets, _receiver);
@@ -114,13 +107,13 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
 
     /// @inheritdoc IRoycoVaultTranche
     function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
-        return IRoycoDayKernel(KERNEL).inkindMaxDeposit(_receiver);
+        return IRoycoDayKernel(kernel()).inkindMaxDeposit(_receiver);
     }
 
     /// @inheritdoc IRoycoVaultTranche
     function maxRedeem(address _owner) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
         // The maximum redeemable shares are the minimum of the owner's share balance and the globally redeemable shares the kernel prices
-        return Math.min(balanceOf(_owner), IRoycoDayKernel(KERNEL).inkindMaxRedeemable(_owner));
+        return Math.min(balanceOf(_owner), IRoycoDayKernel(kernel()).inkindMaxRedeemable(_owner));
     }
 
     // =============================
@@ -130,20 +123,20 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     /// @inheritdoc IRoycoVaultTranche
     /// @dev Routes the deposit through the execute-and-revert pattern so the quote is produced by the actual kernel deposit path under its real semantics
     function previewDeposit(TRANCHE_UNIT _assets) external virtual override(IRoycoVaultTranche) returns (uint256 shares) {
-        return _deposit(DispatchMode.SIMULATE, _assets, KERNEL);
+        return _deposit(DispatchMode.SIMULATE, _assets, kernel());
     }
 
     /// @inheritdoc IRoycoVaultTranche
     /// @dev Routes the redemption through the execute-and-revert pattern so the quote is produced by the actual kernel redemption path under its real semantics
     function previewRedeem(uint256 _shares) external virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
-        return _redeem(DispatchMode.SIMULATE, _shares, KERNEL, address(0));
+        return _redeem(DispatchMode.SIMULATE, _shares, kernel(), address(0));
     }
 
     /// @inheritdoc IRoycoVaultTranche
     function convertToAssets(uint256 _shares) public view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
         // Get the post-sync tranche state: applying NAV reconciliation
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
-            IRoycoDayKernel(KERNEL).previewSyncTrancheAccountingFor(TRANCHE_TYPE());
+            IRoycoDayKernel(kernel()).previewSyncTrancheAccountingFor(TRANCHE_TYPE());
         if (TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER) {
             // We exclude any idle (not reinvested) ST shares from the LPT claims in order to ensure that its share price does not drop due to slippage incurred on reinvestment
             trancheClaims.stShares = 0;
@@ -154,14 +147,16 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
 
     /// @inheritdoc IRoycoVaultTranche
     function convertToShares(TRANCHE_UNIT _assets) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
+        address kernel = kernel();
+
         // Value the assets specified in NAV units
         NAV_UNIT value = (TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER)
-            ? IRoycoDayKernel(KERNEL).convertLPTAssetsToValue(_assets)
-            : IRoycoDayKernel(KERNEL).convertCollateralAssetsToValue(_assets);
+            ? IRoycoDayKernel(kernel).convertLPTAssetsToValue(_assets)
+            : IRoycoDayKernel(kernel).convertCollateralAssetsToValue(_assets);
 
         // Get the post-sync tranche state
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
-            IRoycoDayKernel(KERNEL).previewSyncTrancheAccountingFor(TRANCHE_TYPE());
+            IRoycoDayKernel(kernel).previewSyncTrancheAccountingFor(TRANCHE_TYPE());
 
         // We exclude any idle (not reinvested) ST shares from the LPT NAV basis in order to ensure that its NAV per share does not drop due to slippage incurred on reinvestment
         NAV_UNIT navBasis = ((TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER) ? state.lptRawNAV : trancheClaims.nav);
@@ -174,12 +169,17 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
 
     /// @inheritdoc IRoycoVaultTranche
     function totalAssets() external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
-        (, claims,) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccountingFor(TRANCHE_TYPE());
+        (, claims,) = IRoycoDayKernel(kernel()).previewSyncTrancheAccountingFor(TRANCHE_TYPE());
     }
 
     /// @inheritdoc IRoycoVaultTranche
     function asset() external view virtual override(IRoycoVaultTranche) returns (address) {
-        return ASSET;
+        return _getRoycoVaultTrancheStorage().asset;
+    }
+
+    /// @inheritdoc IRoycoVaultTranche
+    function kernel() public view virtual override(IRoycoVaultTranche) returns (address kernel) {
+        return _getRoycoVaultTrancheStorage().kernel;
     }
 
     /**
@@ -258,7 +258,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         // Deposit the assets into the Royco market through the kernel's in-kind deposit entrypoint, which prices and mints the shares
         // The kernel rejects a deposit that prices to zero shares
         return abi.decode(
-            KERNEL._dispatchAndUnwrap(_mode, abi.encodeCall(IRoycoDayKernel.inkindDeposit, (_mode, _assets, _resolveCaller(_mode), _receiver))), (uint256)
+            kernel()._dispatchAndUnwrap(_mode, abi.encodeCall(IRoycoDayKernel.inkindDeposit, (_mode, _assets, _resolveCaller(_mode), _receiver))), (uint256)
         );
     }
 
@@ -276,7 +276,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         // Redeem the shares through the kernel's in-kind redemption entrypoint, the kernel transfers the redeemed assets directly to the receiver
         // The kernel rejects a zero-share redemption
         return abi.decode(
-            KERNEL._dispatchAndUnwrap(_mode, abi.encodeCall(IRoycoDayKernel.inkindRedeem, (_mode, _shares, _resolveCaller(_mode), _owner, _receiver))),
+            kernel()._dispatchAndUnwrap(_mode, abi.encodeCall(IRoycoDayKernel.inkindRedeem, (_mode, _shares, _resolveCaller(_mode), _owner, _receiver))),
             (AssetClaims)
         );
     }
@@ -294,9 +294,20 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
      */
     function _update(address _from, address _to, uint256 _value) internal override(ERC20Upgradeable) {
         // Call the kernel's pre-balance update hook to assert that the balance update is valid
-        IRoycoDayKernel(KERNEL).preTrancheBalanceUpdateHook(msg.sender, _from, _to, _value);
+        IRoycoDayKernel(kernel()).preTrancheBalanceUpdateHook(msg.sender, _from, _to, _value);
 
         // Call the parent contract's update function to update the balance
         ERC20Upgradeable._update(_from, _to, _value);
+    }
+
+    /**
+     * @notice Returns a storage pointer to the RoycoVaultTrancheState storage
+     * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
+     * @return $ Storage pointer to the tranche's state
+     */
+    function _getRoycoVaultTrancheStorage() internal pure returns (RoycoVaultTrancheState storage $) {
+        assembly ("memory-safe") {
+            $.slot := ROYCO_VAULT_TRANCHE_STORAGE_SLOT
+        }
     }
 }

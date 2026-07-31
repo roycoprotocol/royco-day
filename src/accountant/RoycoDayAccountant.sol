@@ -26,28 +26,22 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayAccountantState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_DAY_ACCOUNTANT_STORAGE_SLOT = 0x3eb9440b0208b8d20dc454b361ed9d3f272aa9a4fb2bcc89d823d3b8e5663200;
 
-    /// @inheritdoc IRoycoDayAccountant
-    address public immutable override(IRoycoDayAccountant) KERNEL;
-
-    /// @inheritdoc IRoycoDayAccountant
-    /// @dev Set to the deployment timestamp plus the fixed-term grace period
-    uint256 public immutable override(IRoycoDayAccountant) FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP;
-
     /// @dev Permissions the function to only be callable by the market's kernel
     /// @dev Should be placed on all state mutating NAV synchronization functions
     modifier onlyRoycoKernel() {
-        require(msg.sender == KERNEL, ONLY_ROYCO_KERNEL());
+        require(msg.sender == _getRoycoDayAccountantStorage().kernel, ONLY_ROYCO_KERNEL());
         _;
     }
 
     /// @dev Synchronizes the market's accounting to reconcile unrealized PNL at the start of the call
     /// @dev Ensures that any parameter changes to the coverage or liquidity configurations are safe
     modifier withSyncedAccounting() {
+        address kernel = _getRoycoDayAccountantStorage().kernel;
         // Cache the state of the accountant after the pre-operation accounting synchronization
-        SyncedAccountingState memory preOp = IRoycoDayKernel(KERNEL).syncTrancheAccounting();
+        SyncedAccountingState memory preOp = IRoycoDayKernel(kernel).syncTrancheAccounting();
         _;
         // Retrieve the result of the accounting synchronization after the paramter change
-        SyncedAccountingState memory postOp = IRoycoDayKernel(KERNEL).syncTrancheAccounting();
+        SyncedAccountingState memory postOp = IRoycoDayKernel(kernel).syncTrancheAccounting();
         // Check that the coverage utilization is at most 100% or it didn't increase/worsen
         // Check that the coverage liquidation utilization didn't get worse or this parameter change did not send the market into a liquidation state
         require(
@@ -61,20 +55,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     // =============================
-    // Construction and Initialization Functions
+    // Initialization Functions
     // =============================
-
-    /**
-     * @notice Constructs the accountant with the specified kernel
-     * @param _kernel The kernel that this accountant maintains mark-to-market NAV, JT impermanent loss, and fee accounting for
-     * @param _fixedTermGracePeriodSeconds The seconds after deployment during which the market cannot enter a fixed term no matter what, so a young market is never locked by an early junior impermanent loss
-     */
-    constructor(address _kernel, uint24 _fixedTermGracePeriodSeconds) {
-        // Ensure the specified kernel is not null and immutably set it
-        require((KERNEL = _kernel) != address(0), NULL_ADDRESS());
-        // The market cannot enter a fixed term until the grace period after deployment has elapsed
-        FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP = (block.timestamp + _fixedTermGracePeriodSeconds);
-    }
 
     /**
      * @notice Initializes the Royco accountant state
@@ -86,6 +68,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         __RoycoBase_init(_initialAuthority);
 
         // Validate the accountant initialization parameters
+        // Ensure that the kernel is not null
+        require(_params.kernel != address(0), NULL_ADDRESS());
         // Ensure that the protocol fee percentages are valid
         require(
             _params.stProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _params.jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD
@@ -134,6 +118,12 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         $.maxJTYieldShareWAD = _params.maxJTYieldShareWAD;
         $.maxLPTYieldShareWAD = _params.maxLPTYieldShareWAD;
         emit MaxYieldSharesUpdated(_params.maxJTYieldShareWAD, _params.maxLPTYieldShareWAD);
+
+        // Set the fields in slot 5 of storage
+        $.kernel = _params.kernel;
+        $.fixedTermCommenceableAtTimestamp = uint64(block.timestamp + _params.fixedTermGracePeriodSeconds);
+        emit KernelUpdated(_params.kernel);
+        emit FixedTermCommenceableAtTimestampUpdated($.fixedTermCommenceableAtTimestamp);
 
         // Set the rest of the fields
         $.coverageLiquidationUtilizationWAD = _params.coverageLiquidationUtilizationWAD;
@@ -558,7 +548,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             if (
                 fixedTermDurationSeconds == 0 || stEffectiveNAV == ZERO_NAV_UNITS || jtEffectiveNAV == ZERO_NAV_UNITS || jtImpermanentLoss <= dustTolerance
                     || (initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp)
-                    || coverageUtilizationWAD >= coverageLiquidationUtilizationWAD || block.timestamp < FIXED_TERM_COMMENCEABLE_AT_TIMESTAMP
+                    || coverageUtilizationWAD >= coverageLiquidationUtilizationWAD || block.timestamp < $.fixedTermCommenceableAtTimestamp
             ) {
                 // A perpetual commit always clears the JT impermanent loss ledger and the term, so a perpetual market never carries a drawdown
                 jtImpermanentLossErased = jtImpermanentLoss;
@@ -687,7 +677,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         require(_jtYDM != $.lptYDM, YDMS_CANNOT_BE_IDENTICAL());
         // Best-effort sync to settle unrealized PNL under the outgoing JT YDM
         // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking JT YDM
-        KERNEL._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
+        $.kernel._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
         // Initialize and set the new JT YDM for this market
         _initializeYDM(_jtYDM, _jtYDMInitializationData);
         $.jtYDM = _jtYDM;
@@ -701,7 +691,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         require(_lptYDM != $.jtYDM, YDMS_CANNOT_BE_IDENTICAL());
         // Best-effort sync to settle unrealized PNL under the outgoing LPT YDM
         // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking LPT YDM
-        KERNEL._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
+        $.kernel._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
         // Initialize and set the new LPT YDM for this market
         _initializeYDM(_lptYDM, _lptYDMInitializationData);
         $.lptYDM = _lptYDM;

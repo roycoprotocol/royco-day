@@ -53,7 +53,7 @@ contract UpgradeTrancheModule is UpgradeModuleBase {
 
         // Read constructor immutables off the proxy (delegatecalled into existing impl)
         address asset = t.asset();
-        address kernel = t.KERNEL();
+        address kernel = t.kernel();
         require(asset != address(0) && kernel != address(0), UpgradeTrancheModule__NotATrancheProxy(proxy));
 
         address oldImpl = _readImplementation(proxy);
@@ -93,7 +93,7 @@ contract UpgradeTrancheModule is UpgradeModuleBase {
     function snapshotState(address _proxy) external view override returns (bytes memory) {
         IRoycoVaultTranche t = IRoycoVaultTranche(_proxy);
         AssetClaims memory claims = t.totalAssets();
-        return abi.encode(t.name(), t.symbol(), t.totalSupply(), t.asset(), t.KERNEL(), t.TRANCHE_TYPE(), claims.collateralAssets, claims.nav);
+        return abi.encode(t.name(), t.symbol(), t.totalSupply(), t.asset(), t.kernel(), t.TRANCHE_TYPE(), claims.collateralAssets, claims.nav);
     }
 
     /// @inheritdoc UpgradeModuleBase
@@ -114,7 +114,7 @@ contract UpgradeTrancheModule is UpgradeModuleBase {
         require(keccak256(bytes(t.symbol())) == keccak256(bytes(symbol)), UpgradeTrancheModule__SymbolChanged());
         require(t.totalSupply() == totalSupply, UpgradeTrancheModule__TotalSupplyChanged(totalSupply, t.totalSupply()));
         require(t.asset() == asset, UpgradeTrancheModule__AssetImmutableChanged(asset, t.asset()));
-        require(t.KERNEL() == kernel, UpgradeTrancheModule__KernelImmutableChanged(kernel, t.KERNEL()));
+        require(t.kernel() == kernel, UpgradeTrancheModule__KernelImmutableChanged(kernel, t.kernel()));
         require(t.TRANCHE_TYPE() == trancheType, UpgradeTrancheModule__TrancheTypeChanged(trancheType, t.TRANCHE_TYPE()));
 
         AssetClaims memory claims = t.totalAssets();

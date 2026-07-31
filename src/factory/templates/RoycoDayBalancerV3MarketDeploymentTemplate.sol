@@ -10,7 +10,6 @@ import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable
 import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { SSTORE2 } from "../../../lib/solady/src/utils/SSTORE2.sol";
 import { IRoycoAuth } from "../../interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../interfaces/IRoycoDayEntryPoint.sol";
@@ -21,8 +20,6 @@ import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
 import { RoycoDayBalancerV3Kernel } from "../../kernels/RoycoDayBalancerV3Kernel.sol";
 import { BalancerV3LiquidityVenue } from "../../kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
-import { RoycoDayBalancerV3Hooks } from "../../kernels/base/liquidity-venue/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
-import { RoycoDayBalancerV3HooksStandIn } from "../../kernels/base/liquidity-venue/balancer-v3/hooks/RoycoDayBalancerV3HooksStandIn.sol";
 import { TrancheType } from "../../libraries/Types.sol";
 import { RoycoLiquidityProviderTranche } from "../../tranches/RoycoLiquidityProviderTranche.sol";
 import {
@@ -43,7 +40,7 @@ import {
     SYNC_ROLE
 } from "../Roles.sol";
 import { BaseDeploymentTemplate } from "./base/BaseDeploymentTemplate.sol";
-import { TAG_ACCOUNTANT_PROXY, TAG_BALANCER_HOOK_PROXY, TAG_JT_PROXY, TAG_KERNEL_PROXY, TAG_LPT_PROXY, TAG_ST_PROXY } from "./base/Constants.sol";
+import { TAG_ACCOUNTANT_PROXY, TAG_JT_PROXY, TAG_KERNEL_PROXY, TAG_LPT_PROXY, TAG_ST_PROXY } from "./base/Constants.sol";
 import { EntryPointConfigurer } from "./periphery/EntryPointConfigurer.sol";
 import { MarketSyncerConfigurer } from "./periphery/MarketSyncerConfigurer.sol";
 
@@ -124,10 +121,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @custom:field kernelSpecificParams - ABI-encoded liquidity venue initialization params
      * @custom:field enforceVaultSharesTransferWhitelist - Whether to enforce the vault shares transfer whitelist (verified against the kernel's immutable)
      * @custom:field entryPointTrancheConfigs - The per-tranche entry point configurations applied after the market is deployed (any oracle clock is deployed externally and passed by address)
-     * @custom:field deployPoolHook - Whether the market's pool carries the Balancer hook
-     * @dev The senior tranche proxy (and, for a hooked market, the Balancer pool-hook proxy) are pre-deployed by the
-     *      deployer via `factory.deployDeterministicProxy` (the pool needs the ST share as a token, and a hooked pool
-     *      must register against its hook, before the wiring transaction), so `stTranche`'s init data is built
+     * @dev The senior tranche proxy is pre-deployed by the deployer via `factory.deployDeterministicProxy` (the pool
+     *      needs the ST share as a token before the wiring transaction), so `stTranche`'s init data is built
      *      script-side and only `jtTranche`/`lptTranche` are consumed here
      */
     struct MarketParams {
@@ -150,18 +145,15 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         bytes kernelSpecificParams;
         bool enforceVaultSharesTransferWhitelist;
         EntryPointTrancheConfigs entryPointTrancheConfigs;
-        bool deployPoolHook;
     }
 
     /**
      * @notice Balancer V3-specific addresses recorded for verification
      * @custom:field balancerPool - The deployed Gyro E-CLP pool (the liquidity provider tranche's BPT)
-     * @custom:field balancerHook - The deployed pool hook, or address(0) for a hookless market
      * @custom:field bptOracle - The deployed BPT oracle adapter that reports lptRawNAV
      */
     struct ExtraContractsDeployedResult {
         address balancerPool;
-        address balancerHook;
         address bptOracle;
     }
 
@@ -171,16 +163,12 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /// @notice Thrown when the pre-deployed senior tranche proxy is missing or was not deployed via the factory's `deployDeterministicProxy`
     error INVALID_SENIOR_TRANCHE_PROXY(address seniorTranche);
-    /// @notice Thrown when the pre-deployed pool-hook proxy was not deployed via the factory against the stand-in implementation
-    error INVALID_HOOK_PROXY(address hook);
     /// @notice Thrown when the pre-created Balancer pool did not originate from the expected Gyro E-CLP pool factory
     error POOL_NOT_FROM_FACTORY(address pool);
-    /// @notice Thrown when the pre-created Balancer pool is not a fresh, unseeded `{ST_share, quote}` pool hooked to the market's hook
+    /// @notice Thrown when the pre-created Balancer pool is not a fresh, unseeded, hookless `{ST_share, quote}` pool
     error INVALID_POOL_CONFIGURATION(address pool);
     /// @notice Thrown when a deployed market contract's on-chain wiring does not match the expected configuration
     error MARKET_WIRING_VERIFICATION_FAILED(address subject);
-    /// @notice Thrown when the CREATE of the real kernel-bound hook implementation returns the zero address
-    error HOOK_IMPL_DEPLOYMENT_FAILED();
 
     // ═══════════════════════════════════════════════════════════════════════════
     // IMMUTABLES
@@ -191,13 +179,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /// @notice The Balancer V3 vault
     IVault public immutable BALANCER_V3_VAULT;
-
-    /// @notice Shared registration-time stand-in hook implementation, deployed once here and reused as the initial
-    ///         implementation behind every market's pool-hook proxy (it is stateless, so one instance serves all markets)
-    address public immutable BALANCER_HOOK_STANDIN_IMPL;
-
-    /// @notice SSTORE2 pointer holding the real kernel-bound hook's creation code.
-    address private immutable _hookCreationCodePointer;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTRUCTION
@@ -215,10 +196,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     {
         BALANCER_V3_POOL_FACTORY = _balancerV3PoolFactory;
         BALANCER_V3_VAULT = IVault(address(_balancerV3PoolFactory.getVault()));
-        BALANCER_HOOK_STANDIN_IMPL = address(new RoycoDayBalancerV3HooksStandIn());
-
-        // Store the real hook's creation code as SSTORE2 data
-        _hookCreationCodePointer = SSTORE2.write(type(RoycoDayBalancerV3Hooks).creationCode);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -264,21 +241,16 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         MarketParams memory p = abi.decode(_params, (MarketParams));
         MarketContracts memory mc = p.marketContracts;
 
-        // 1. Predict the senior tranche (and, for a hooked market, the pool-hook) market proxy addresses.
-        //    The senior tranche and pool-hook (if expected) proxies are pre-deployed by the deployer
+        // 1. Predict the senior tranche market proxy address, which is pre-deployed by the deployer
         result.seniorTranche = ROYCO_FACTORY.predictDeterministicAddress(_marketComponentSalt(p.marketId, TAG_ST_PROXY));
-        address balancerHook =
-            p.deployPoolHook ? ROYCO_FACTORY.predictDeterministicAddress(_marketComponentSalt(p.marketId, TAG_BALANCER_HOOK_PROXY)) : address(0);
         result.ydm = mc.jtYdm;
         result.lptYdm = mc.lptYdm;
 
-        // 2. Verify the pre-deployed proxies by re-deriving their addresses from the shared salt and confirming
-        //    they are deployed (the hook proxy only exists for a hooked market).
+        // 2. Verify the pre-deployed proxy by re-deriving its address from the shared salt and confirming it is deployed
         require(result.seniorTranche.code.length > 0, INVALID_SENIOR_TRANCHE_PROXY(result.seniorTranche));
-        require(!p.deployPoolHook || balancerHook.code.length > 0, INVALID_HOOK_PROXY(balancerHook));
 
         // 3. Verify the pre-created Gyro E-CLP pool
-        _verifyPool(mc.balancerPool, result.seniorTranche, p.quoteAsset, balancerHook);
+        _verifyPool(mc.balancerPool, result.seniorTranche, p.quoteAsset);
 
         // 4. Deploy the JT and LPT tranche proxies against the script-deployed implementations
         result.juniorTranche = _deployProxy(mc.jtImpl, _encodeTrancheInitData(p.jtTranche), _marketComponentSalt(p.marketId, TAG_JT_PROXY));
@@ -291,36 +263,24 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
         // 6. Deploy the kernel proxy, injecting the externally deployed BPT oracle into the kernel's liquidity venue init
         //    (the venue's `_setBPTOracle` verifies `bptOracle.pool() == LPT_ASSET` on-chain during kernel initialization)
-        result.kernel = _deployKernelProxy(p, mc.bptOracle, _marketComponentSalt(p.marketId, TAG_KERNEL_PROXY));
+        result.kernel = _deployKernelProxy(
+            p,
+            result.seniorTranche,
+            result.juniorTranche,
+            result.liquidityProviderTranche,
+            result.accountant,
+            mc.bptOracle,
+            _marketComponentSalt(p.marketId, TAG_KERNEL_PROXY)
+        );
 
-        // 7. Now that the kernel has code, deploy the real kernel-bound hook implementation from
-        //    its SSTORE2-stored creation code
-        if (p.deployPoolHook) {
-            address realHookImpl = _deployRealHookImpl(result.kernel);
-            UUPSUpgradeable(balancerHook).upgradeToAndCall(realHookImpl, abi.encodeCall(RoycoDayBalancerV3Hooks.initialize, (ROYCO_FACTORY.ROYCO_AUTHORITY())));
-        }
+        // 7. Verify the whole market's on-chain wiring before granting it any roles
+        _validateDeployment(p, result);
 
-        // 8. Verify the whole market's on-chain wiring before granting it any roles
-        _validateDeployment(p, result, balancerHook);
+        // 8. Apply selector->role bindings + post-init grants
+        _applyRoleBindings(_buildRoleBindings(p, result));
 
-        // 9. Apply selector->role bindings + post-init grants (including SYNC_ROLE for the pool hook so it can sync the kernel)
-        _applyRoleBindings(_buildRoleBindings(p, result, balancerHook));
-
-        // 10. Record + verify extras
-        result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: mc.balancerPool, balancerHook: balancerHook, bptOracle: mc.bptOracle }));
-    }
-
-    /**
-     * @notice Deploys the real kernel-bound hook implementation from its SSTORE2-stored creation code, appending the
-     * kernel as its constructor arg
-     * @dev The hook constructor reads `kernel.LPT_ASSET()`, so the kernel proxy must already have code
-     */
-    function _deployRealHookImpl(address _kernel) internal returns (address impl) {
-        bytes memory initCode = abi.encodePacked(SSTORE2.read(_hookCreationCodePointer), abi.encode(_kernel));
-        assembly ("memory-safe") {
-            impl := create(0, add(initCode, 0x20), mload(initCode))
-        }
-        require(impl != address(0), HOOK_IMPL_DEPLOYMENT_FAILED());
+        // 9. Record + verify extras
+        result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: mc.balancerPool, bptOracle: mc.bptOracle }));
     }
 
     /// @inheritdoc BaseDeploymentTemplate
@@ -339,10 +299,34 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         _registerMarketKernelOnSyncer(ROYCO_FACTORY, _result.kernel);
     }
 
-    /// @notice Deploys the Day kernel proxy against the script-deployed kernel impl, injecting the externally deployed BPT oracle
-    function _deployKernelProxy(MarketParams memory _p, address _bptOracle, bytes32 _kernelProxySalt) internal returns (address kernel) {
+    /**
+     * @notice Deploys the Day kernel proxy against the script-deployed kernel impl, injecting the externally deployed BPT oracle
+     * @dev The kernel implementation carries no market-specific immutables, so the market's whole tranche set is passed
+     *      through its init params. The tranche proxies must already be initialized: the kernel's initializer reads
+     *      `asset()` back off each of them
+     */
+    function _deployKernelProxy(
+        MarketParams memory _p,
+        address _seniorTranche,
+        address _juniorTranche,
+        address _liquidityProviderTranche,
+        address _accountant,
+        address _bptOracle,
+        bytes32 _kernelProxySalt
+    )
+        internal
+        returns (address kernel)
+    {
         IRoycoDayKernel.RoycoDayKernelInitParams memory kip = IRoycoDayKernel.RoycoDayKernelInitParams({
             initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY(),
+            seniorTranche: _seniorTranche,
+            juniorTranche: _juniorTranche,
+            liquidityProviderTranche: _liquidityProviderTranche,
+            collateralAsset: _p.collateralAsset,
+            lptAsset: _p.marketContracts.balancerPool,
+            quoteAsset: _p.quoteAsset,
+            accountant: _accountant,
+            enforceVaultSharesTransferWhitelist: _p.enforceVaultSharesTransferWhitelist,
             protocolFeeRecipient: _p.protocolFeeRecipient,
             stSelfLiquidationBonusWAD: _p.stSelfLiquidationBonusWAD,
             roycoBlacklist: _p.roycoBlacklist,
@@ -363,18 +347,17 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @param _pool The pre-created pool
      * @param _seniorTranche The senior tranche share expected as the pool's first token
      * @param _quoteAsset The quote asset expected as the pool's second token
-     * @param _hook The hook expected as the pool's hook
      */
-    function _verifyPool(address _pool, address _seniorTranche, address _quoteAsset, address _hook) internal view {
+    function _verifyPool(address _pool, address _seniorTranche, address _quoteAsset) internal view {
         // Provenance: the pool was created by our Gyro E-CLP pool factory
         require(BALANCER_V3_POOL_FACTORY.isPoolFromFactory(_pool), POOL_NOT_FROM_FACTORY(_pool));
 
         // Unseeded: no BPT has been minted (belt-and-suspenders against a pool seeded during the cross-tx window)
         require(IERC20(_pool).totalSupply() == 0, INVALID_POOL_CONFIGURATION(_pool));
 
-        // Registered against this market's stand-in hook proxy
+        // Hookless: the kernel is the pool's senior-leg rate provider, and the market registers no hooks contract
         BalancerV3HooksConfig memory hooksConfig = BALANCER_V3_VAULT.getHooksConfig(_pool);
-        require(hooksConfig.hooksContract == _hook, INVALID_POOL_CONFIGURATION(_pool));
+        require(hooksConfig.hooksContract == address(0), INVALID_POOL_CONFIGURATION(_pool));
 
         // Exactly {ST share, quote asset}: the market id guarantees the deployed ST share sorts "less" than the
         // quote token, and the quote leg must be the deployer-intended asset
@@ -383,32 +366,31 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     }
 
     /**
-     * @notice Verifies the whole market's on-chain wiring after the proxies are deployed and the hook is upgraded
+     * @notice Verifies the whole market's on-chain wiring after the proxies are deployed and initialized
      * @dev Cross-checks every deployed contract's immutables/state against the params and against each other, so a
      *      script-side deployment mistake (wrong impl, mis-encoded init data, swapped address) fails loud here rather
      *      than producing a subtly mis-wired live market. Modeled on royco-dawn's `RoycoFactory._validateDeployment`
      */
-    function _validateDeployment(MarketParams memory _p, DeploymentResult memory _r, address _hook) internal view {
+    function _validateDeployment(MarketParams memory _p, DeploymentResult memory _r) internal view {
         address authority = ROYCO_FACTORY.ROYCO_AUTHORITY();
         address pool = _p.marketContracts.balancerPool;
 
-        // Shared market authority governs every component (tranches, kernel, accountant, and the hook when deployed)
+        // Shared market authority governs every component (tranches, kernel, and accountant)
         require(IAccessManaged(_r.seniorTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
         require(IAccessManaged(_r.juniorTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
         require(IAccessManaged(_r.liquidityProviderTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityProviderTranche));
         require(IAccessManaged(_r.kernel).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
         require(IAccessManaged(_r.accountant).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_r.accountant));
-        require(!_p.deployPoolHook || IAccessManaged(_hook).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_hook));
 
         // Senior tranche: type, kernel binding, asset, and unseeded
         require(IRoycoVaultTranche(_r.seniorTranche).TRANCHE_TYPE() == TrancheType.SENIOR, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
-        require(IRoycoVaultTranche(_r.seniorTranche).KERNEL() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
+        require(IRoycoVaultTranche(_r.seniorTranche).kernel() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
         require(IRoycoVaultTranche(_r.seniorTranche).asset() == _p.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
         require(IERC20(_r.seniorTranche).totalSupply() == 0, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
 
         // Junior tranche: type, kernel binding, asset
         require(IRoycoVaultTranche(_r.juniorTranche).TRANCHE_TYPE() == TrancheType.JUNIOR, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
-        require(IRoycoVaultTranche(_r.juniorTranche).KERNEL() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
+        require(IRoycoVaultTranche(_r.juniorTranche).kernel() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
         require(IRoycoVaultTranche(_r.juniorTranche).asset() == _p.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
 
         // Liquidity provider tranche: type, kernel binding, asset is the pool BPT
@@ -416,39 +398,34 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
             IRoycoVaultTranche(_r.liquidityProviderTranche).TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER,
             MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityProviderTranche)
         );
-        require(IRoycoVaultTranche(_r.liquidityProviderTranche).KERNEL() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityProviderTranche));
+        require(IRoycoVaultTranche(_r.liquidityProviderTranche).kernel() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityProviderTranche));
         require(IRoycoVaultTranche(_r.liquidityProviderTranche).asset() == pool, MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityProviderTranche));
 
         // Kernel: full tranche set, assets, accountant, and the whitelist-enforcement flag
         IRoycoDayKernel kernel = IRoycoDayKernel(_r.kernel);
-        require(kernel.SENIOR_TRANCHE() == _r.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.JUNIOR_TRANCHE() == _r.juniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.LIQUIDITY_PROVIDER_TRANCHE() == _r.liquidityProviderTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.ACCOUNTANT() == _r.accountant, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.COLLATERAL_ASSET() == _p.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.LPT_ASSET() == pool, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() == _p.enforceVaultSharesTransferWhitelist, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
+        require(kernel.seniorTranche() == _r.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
+        require(kernel.juniorTranche() == _r.juniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
+        require(kernel.liquidityProviderTranche() == _r.liquidityProviderTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
+        require(kernel.accountant() == _r.accountant, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
+        require(kernel.collateralAsset() == _p.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
+        require(kernel.lptAsset() == pool, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
+        require(kernel.enforceTrancheWhitelistOnTransfer() == _p.enforceVaultSharesTransferWhitelist, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
 
         // The market id should guarantee that the deployed ST share is "less" than the quote token
         IERC20[] memory tokens = BALANCER_V3_VAULT.getPoolTokens(pool);
         require(address(tokens[0]) == _r.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(pool));
-        require(address(tokens[1]) == kernel.QUOTE_ASSET(), MARKET_WIRING_VERIFICATION_FAILED(pool));
+        require(address(tokens[1]) == kernel.quoteAsset(), MARKET_WIRING_VERIFICATION_FAILED(pool));
 
         // Accountant: kernel binding and the injected JT YDM / LPT LDM instances
-        require(IRoycoDayAccountant(_r.accountant).KERNEL() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.accountant));
         IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = IRoycoDayAccountant(_r.accountant).getState();
+        require(accountantState.kernel == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.accountant));
         require(
             accountantState.jtYDM == _p.marketContracts.jtYdm && accountantState.lptYDM == _p.marketContracts.lptYdm,
             MARKET_WIRING_VERIFICATION_FAILED(_r.accountant)
         );
 
-        // Hook: bound to this market's kernel and pool when deployed
-        if (_p.deployPoolHook) {
-            require(RoycoDayBalancerV3Hooks(_hook).ROYCO_DAY_KERNEL() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_hook));
-            require(RoycoDayBalancerV3Hooks(_hook).LIQUIDITY_PROVIDER_TRANCHE_BALANCER_V3_POOL() == pool, MARKET_WIRING_VERIFICATION_FAILED(_hook));
-        } else {
-            require(BALANCER_V3_VAULT.getHooksConfig(pool).hooksContract == address(0), MARKET_WIRING_VERIFICATION_FAILED(pool));
-        }
+        // Pool: remains hookless, the kernel serves as its senior-leg rate provider
+        require(BALANCER_V3_VAULT.getHooksConfig(pool).hooksContract == address(0), MARKET_WIRING_VERIFICATION_FAILED(pool));
 
         // Kernel-family-specific wiring (e.g. Makina machine, IdleCDO CDO)
         _validateKernelSpecifics(_r.kernel, _p.kernelSpecificParams);
@@ -460,9 +437,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /// @notice Assembles the market's full role-binding config, pairing each deployment's runtime target addresses with
     ///         the selector/role sets from the per-target binding helpers and the deployer-declared oracle bindings
-    function _buildRoleBindings(MarketParams memory _p, DeploymentResult memory _r, address _balancerHook) internal view returns (RoleBindings memory) {
+    function _buildRoleBindings(MarketParams memory _p, DeploymentResult memory _r) internal view returns (RoleBindings memory) {
         // Runtime target addresses, index-aligned with the binding helpers below
-        address[9] memory targets = [
+        address[8] memory targets = [
             _r.seniorTranche,
             _r.juniorTranche,
             _r.liquidityProviderTranche,
@@ -470,7 +447,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
             _r.accountant,
             address(BALANCER_V3_VAULT),
             address(BALANCER_V3_VAULT.getProtocolFeeController()),
-            _balancerHook,
             _p.collateralAssetOracle
         ];
 
@@ -497,19 +473,14 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         if (accessManager.wasEverConfigured(targets[6])) (s, r) = (new bytes4[](0), new uint64[](0));
         else (s, r) = _balancerProtocolFeeControllerBinding();
         targetBindings[6] = TargetBinding({ target: targets[6], selectors: s, roleIds: r });
-        // 7: Balancer pool hook, skipped entirely for a hookless market (the target is the zero address)
-        if (_p.deployPoolHook) (s, r) = _balancerHookBinding();
-        else (s, r) = (new bytes4[](0), new uint64[](0));
-        targetBindings[7] = TargetBinding({ target: targets[7], selectors: s, roleIds: r });
-        // 8: collateral asset oracle restricted surface, declared per oracle kind by the deployer .
-        if (accessManager.wasEverConfigured(targets[8])) (s, r) = (new bytes4[](0), new uint64[](0));
+        // 7: collateral asset oracle restricted surface, declared per oracle kind by the deployer .
+        if (accessManager.wasEverConfigured(targets[7])) (s, r) = (new bytes4[](0), new uint64[](0));
         else (s, r) = (_p.collateralAssetOracleBindingSelectors, _p.collateralAssetOracleBindingRoleIds);
-        targetBindings[8] = TargetBinding({ target: targets[8], selectors: s, roleIds: r });
+        targetBindings[7] = TargetBinding({ target: targets[7], selectors: s, roleIds: r });
 
-        // Post-init grants: accountant SYNC and (hooked markets only) hook SYNC (all zero execution delay)
-        RoleGrant[] memory grants = new RoleGrant[](_p.deployPoolHook ? 2 : 1);
+        // Post-init grants: accountant SYNC (zero execution delay)
+        RoleGrant[] memory grants = new RoleGrant[](1);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
-        if (_p.deployPoolHook) grants[1] = RoleGrant({ roleId: SYNC_ROLE, account: _balancerHook, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targetBindings, postInitGrants: grants });
     }
@@ -529,18 +500,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         r[2] = ADMIN_ORACLE_ROLE;
         s[3] = IRoycoDayKernel.setSequencerUptimeFeed.selector;
         r[3] = ADMIN_ORACLE_ROLE;
-    }
-
-    /// @notice Admin surface for the Balancer pool hook (a RoycoBase UUPS contract): pause/unpause/upgrade
-    function _balancerHookBinding() private pure returns (bytes4[] memory s, uint64[] memory r) {
-        s = new bytes4[](3);
-        r = new uint64[](3);
-        s[0] = IRoycoAuth.pause.selector;
-        r[0] = ADMIN_PAUSER_ROLE;
-        s[1] = IRoycoAuth.unpause.selector;
-        r[1] = ADMIN_UNPAUSER_ROLE;
-        s[2] = UUPSUpgradeable.upgradeToAndCall.selector;
-        r[2] = ADMIN_UPGRADER_ROLE;
     }
 
     /// @dev `mint` carries no binding: it is gated by the tranche's own `onlyKernel` check (an immutable-address

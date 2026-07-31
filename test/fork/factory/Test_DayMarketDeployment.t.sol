@@ -163,11 +163,11 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(KERNEL.JUNIOR_TRANCHE(), address(JT), "kernel JT");
         assertEq(KERNEL.LIQUIDITY_PROVIDER_TRANCHE(), address(LPT), "kernel LPT");
         assertEq(KERNEL.ACCOUNTANT(), address(ACCOUNTANT), "kernel accountant");
-        assertEq(address(IRoycoDayAccountant(ACCOUNTANT).KERNEL()), address(KERNEL), "accountant kernel");
+        assertEq(address(IRoycoDayAccountant(ACCOUNTANT.kernel()), address(KERNEL), "accountant kernel");
 
-        assertEq(ST.KERNEL(), address(KERNEL), "ST kernel");
-        assertEq(JT.KERNEL(), address(KERNEL), "JT kernel");
-        assertEq(LPT.KERNEL(), address(KERNEL), "LPT kernel");
+        assertEq(STkernel(), address(KERNEL), "ST kernel");
+        assertEq(JTkernel(), address(KERNEL), "JT kernel");
+        assertEq(LPTkernel(), address(KERNEL), "LPT kernel");
 
         assertTrue(ST.TRANCHE_TYPE() == TrancheType.SENIOR, "ST type");
         assertTrue(JT.TRANCHE_TYPE() == TrancheType.JUNIOR, "JT type");

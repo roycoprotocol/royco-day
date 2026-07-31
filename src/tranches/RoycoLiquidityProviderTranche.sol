@@ -21,15 +21,8 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
     using SafeERC20 for IERC20;
     using DispatchLogic for address;
 
-    /**
-     * @notice Constructs the Royco liquidity provider tranche vault
-     * @param _asset The underlying asset for the tranche
-     * @param _kernel The kernel that handles the core market logic and accounting synchronization
-     */
-    constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
-
     /// @notice Initializes the Royco liquidity provider tranche
-    /// @param _lptParams Deployment parameters including name, symbol, and initial authority for the liquidity provider tranche
+    /// @param _lptParams Deployment parameters including name, symbol, initial authority, kernel, and asset for the liquidity provider tranche
     function initialize(RoycoTrancheInitParams calldata _lptParams) external initializer {
         __RoycoTranche_init(_lptParams);
     }
@@ -59,9 +52,9 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
 
         // Pull the constituent assets to the kernel (it executes them for the senior mint and the liquidity add)
-        address kernel = KERNEL;
-        if (_collateralAssets != 0) IERC20(IRoycoDayKernel(kernel).COLLATERAL_ASSET()).safeTransferFrom(msg.sender, kernel, _collateralAssets);
-        if (_quoteAssets != 0) IERC20(IRoycoDayKernel(kernel).QUOTE_ASSET()).safeTransferFrom(msg.sender, kernel, _quoteAssets);
+        address kernel = kernel();
+        if (_collateralAssets != 0) IERC20(IRoycoDayKernel(kernel).collateralAsset()).safeTransferFrom(msg.sender, kernel, _collateralAssets);
+        if (_quoteAssets != 0) IERC20(IRoycoDayKernel(kernel).quoteAsset()).safeTransferFrom(msg.sender, kernel, _quoteAssets);
 
         // Deposit the constituent assets into the Royco market, the kernel prices the shares and mints them to the receiver
         TRANCHE_UNIT lptAssetsMinted;
@@ -112,7 +105,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         returns (uint256 shares, uint256 lptAssetsOut)
     {
         TRANCHE_UNIT lptAssetsMinted;
-        (shares, lptAssetsMinted) = _depositMultiAsset(DispatchMode.SIMULATE, _collateralAssets, _quoteAssets, 0, KERNEL);
+        (shares, lptAssetsMinted) = _depositMultiAsset(DispatchMode.SIMULATE, _collateralAssets, _quoteAssets, 0, kernel());
         lptAssetsOut = toUint256(lptAssetsMinted);
     }
 
@@ -124,7 +117,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         override(IRoycoLiquidityProviderTranche)
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
-        (stClaims, quoteAssets) = _redeemMultiAsset(DispatchMode.SIMULATE, _shares, 0, 0, KERNEL, address(0));
+        (stClaims, quoteAssets) = _redeemMultiAsset(DispatchMode.SIMULATE, _shares, 0, 0, kernel(), address(0));
     }
 
     // =============================
@@ -134,7 +127,7 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
     /// @inheritdoc IRoycoLiquidityProviderTranche
     function maxRedeemMultiAsset(address _owner) external virtual override(IRoycoLiquidityProviderTranche) returns (uint256 shares) {
         // The maximum redeemable shares are the minimum of the owner's share balance and the globally redeemable shares the kernel prices
-        return Math.min(balanceOf(_owner), IRoycoDayKernel(KERNEL).lptMaxRedeemableMultiAsset(_owner));
+        return Math.min(balanceOf(_owner), IRoycoDayKernel(kernel()).lptMaxRedeemableMultiAsset(_owner));
     }
 
     // =============================
@@ -165,13 +158,14 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
     {
         // Orchestrate the multi-asset deposit in the kernel, bounding the liquidity add's slippage by the caller's minimum LPT assets out
         return abi.decode(
-            KERNEL._dispatchAndUnwrap(
-                _mode,
-                abi.encodeCall(
-                    IRoycoDayKernel.lptDepositMultiAsset,
-                    (_mode, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(_minLPTAssetsOut), _resolveCaller(_mode), _receiver)
-                )
-            ),
+            kernel()
+                ._dispatchAndUnwrap(
+                    _mode,
+                    abi.encodeCall(
+                        IRoycoDayKernel.lptDepositMultiAsset,
+                        (_mode, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(_minLPTAssetsOut), _resolveCaller(_mode), _receiver)
+                    )
+                ),
             (uint256, TRANCHE_UNIT)
         );
     }
@@ -204,12 +198,13 @@ contract RoycoLiquidityProviderTranche is RoycoVaultTranche, IRoycoLiquidityProv
         // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out
         // The kernel rejects a zero-share redemption at its LPT redemption leg
         return abi.decode(
-            KERNEL._dispatchAndUnwrap(
-                _mode,
-                abi.encodeCall(
-                    IRoycoDayKernel.lptRedeemMultiAsset, (_mode, _shares, _minSTSharesOut, _minQuoteAssetsOut, _resolveCaller(_mode), _owner, _receiver)
-                )
-            ),
+            kernel()
+                ._dispatchAndUnwrap(
+                    _mode,
+                    abi.encodeCall(
+                        IRoycoDayKernel.lptRedeemMultiAsset, (_mode, _shares, _minSTSharesOut, _minQuoteAssetsOut, _resolveCaller(_mode), _owner, _receiver)
+                    )
+                ),
             (AssetClaims, uint256)
         );
     }

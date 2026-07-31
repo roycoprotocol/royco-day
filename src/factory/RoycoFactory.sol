@@ -264,7 +264,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         if (kernel == address(0)) return (address(0), address(0), address(0), address(0), address(0));
         // The kernel's immutables are the single source of truth for the market's contract set
         IRoycoDayKernel dayKernel = IRoycoDayKernel(kernel);
-        return (dayKernel.SENIOR_TRANCHE(), dayKernel.JUNIOR_TRANCHE(), dayKernel.LIQUIDITY_PROVIDER_TRANCHE(), kernel, dayKernel.ACCOUNTANT());
+        return (dayKernel.seniorTranche(), dayKernel.juniorTranche(), dayKernel.liquidityProviderTranche(), kernel, dayKernel.accountant());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

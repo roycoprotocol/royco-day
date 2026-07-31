@@ -38,21 +38,17 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.BalancerV3LiquidityVenueState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant BALANCER_V3_LIQUIDITY_VENUE_STORAGE_SLOT = 0x6acdb3c7456d7977317bc93eaa2681ec68014f836d3a13d257053a0d594f9a00;
 
-    /// @notice Index of the Senior Tranche share token in the pool's token registration order
-    uint256 internal immutable ST_SHARE_POOL_INDEX;
-
-    /// @notice Index of the quote asset in the pool's token registration order
-    uint256 internal immutable QUOTE_ASSET_POOL_INDEX;
-
     /**
      * @notice The namespaced storage for the BalancerV3LiquidityVenue
      * @custom:storage-location erc7201:Royco.storage.BalancerV3LiquidityVenueState
      * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity provider tranche assets
      * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision, a reinvestment breaching it is skipped and the premium shares remain idle
+     * @custom:field stShareIsPoolToken1 - Whether the senior tranche share is the pool's second registered token
      */
     struct BalancerV3LiquidityVenueState {
         address bptOracle;
         uint64 maxReinvestmentSlippageWAD;
+        bool stShareIsPoolToken1;
     }
 
     /**
@@ -108,31 +104,48 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
 
     /// @notice Constructs the Balancer V3 liquidity venue
     /// @param _balancerV3Vault The instance of the singleton Balancer V3 Vault
-    constructor(IVault _balancerV3Vault) VaultGuard(_balancerV3Vault) {
-        // Ensure the passed vault is the one the pool (LPT_ASSET) is registered with (LPT_ASSET reads fine here in the body)
-        require(address(BalancerPoolToken(LPT_ASSET).getVault()) == address(_balancerV3Vault), INVALID_BALANCER_V3_VAULT());
+    constructor(IVault _balancerV3Vault) VaultGuard(_balancerV3Vault) { }
+
+    /**
+     * @notice Initializes the Balancer V3 liquidity venue
+     * @param _params The liquidity venue initialization parameters
+     */
+    function __BalancerV3LiquidityVenue_init_unchained(LiquidityVenueInitParams calldata _params) internal onlyInitializing {
+        RoycoDayKernelState storage $k = _getRoycoDayKernelStorage();
+        address lptAsset = $k.lptAsset;
+        address seniorTranche = $k.seniorTranche;
+
+        // Ensure the vault this venue was constructed against is the one the pool (the LPT asset) is registered with
+        require(address(BalancerPoolToken(lptAsset).getVault()) == address(_vault), INVALID_BALANCER_V3_VAULT());
         // Ensure that the Balancer V3 Pool is registered with the vault
-        require(_vault.isPoolRegistered(LPT_ASSET), POOL_NOT_REGISTERED());
+        require(_vault.isPoolRegistered(lptAsset), POOL_NOT_REGISTERED());
 
         // Retrieve the constituent tokens of this kernel's Balancer V3 pool and ensure that there are exactly 2
-        IERC20[] memory tokens = _vault.getPoolTokens(LPT_ASSET);
+        IERC20[] memory tokens = _vault.getPoolTokens(lptAsset);
         require(tokens.length == 2, POOL_MUST_HAVE_TWO_TOKENS());
 
-        // Resolve and cache the indexes of the ST share and the quote asset
+        // Resolve and persist the pool's token ordering
         // Revert if the pool is not configured with the senior tranche share as one of its two constituents
-        if (address(tokens[0]) == SENIOR_TRANCHE) QUOTE_ASSET_POOL_INDEX = 1;
-        else if (address(tokens[1]) == SENIOR_TRANCHE) ST_SHARE_POOL_INDEX = 1;
+        BalancerV3LiquidityVenueState storage $ = _getBalancerV3LiquidityVenueStorage();
+        if (address(tokens[0]) == seniorTranche) $.stShareIsPoolToken1 = false;
+        else if (address(tokens[1]) == seniorTranche) $.stShareIsPoolToken1 = true;
         else revert INVALID_POOL_TOKEN_CONFIGURATION();
 
         // Ensure the kernel's configured quote asset is the pool's non-senior constituent token
-        require(address(tokens[QUOTE_ASSET_POOL_INDEX]) == QUOTE_ASSET, QUOTE_ASSET_MISMATCH());
-    }
+        (, uint256 quoteAssetPoolIndex) = _poolTokenIndexes($);
+        require(address(tokens[quoteAssetPoolIndex]) == $k.quoteAsset, QUOTE_ASSET_MISMATCH());
 
-    /// @notice Initializes the Balancer V3 liquidity venue
-    /// @param _params The liquidity venue initialization parameters
-    function __BalancerV3LiquidityVenue_init_unchained(LiquidityVenueInitParams calldata _params) internal onlyInitializing {
         _setBPTOracle(_params.bptOracle);
         _setMaxReinvestmentSlippage(_params.maxReinvestmentSlippageWAD);
+    }
+
+    /// @dev Indexes of the pool's two constituents in its token registration order
+    /// @dev The pool is validated to hold exactly two tokens, so the senior share's position fixes the quote asset's as its complement
+    /// @param $ The venue's state, carrying the pool's resolved token ordering
+    /// @return stSharePoolIndex The senior tranche share's index among the pool's two registered tokens
+    /// @return quoteAssetPoolIndex The quote asset's index among the pool's two registered tokens
+    function _poolTokenIndexes(BalancerV3LiquidityVenueState storage $) internal view returns (uint256 stSharePoolIndex, uint256 quoteAssetPoolIndex) {
+        return $.stShareIsPoolToken1 ? (1, 0) : (0, 1);
     }
 
     // =============================
@@ -158,8 +171,8 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
             // Simulate the poke first so a circuit-breaking oracle halts pool pricing identically to the kernel's operations
             IRoycoPriceOracle($.collateralAssetOracle).previewPoke();
             // NOTE: The accountant's preview is read directly so pricing the senior leg never recurses back into the liquidity provider tranche mark
-            SyncedAccountingState memory state = IRoycoDayAccountant(ACCOUNTANT).previewSyncTrancheAccounting(ValuationLogic._getCollateralNAV($));
-            (,, uint256 stTotalSupply) = FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
+            SyncedAccountingState memory state = IRoycoDayAccountant($.accountant).previewSyncTrancheAccounting(ValuationLogic._getCollateralNAV($));
+            (,, uint256 stTotalSupply) = FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20($.seniorTranche).totalSupply());
 
             // Compute the ST share rate
             rate = toUint256(ValuationLogic._computeTrancheShareRate(stTotalSupply, state.stEffectiveNAV));
@@ -277,10 +290,10 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
      *      and balances alive, and no flow prices an uninitialized venue
      */
     function queryLPTAssetOracle() public view virtual override(RoycoDayKernel) returns (NAV_UNIT lptAssetPrice) {
-        TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply(LPT_ASSET));
+        TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply(_getRoycoDayKernelStorage().lptAsset));
         if (bptTotalSupply == ZERO_TRANCHE_UNITS) return ZERO_NAV_UNITS;
         NAV_UNIT bptTotalValue = toNAVUnits(LPOracleBase(_getBalancerV3LiquidityVenueStorage().bptOracle).computeTVL());
-        lptAssetPrice = ONE_WHOLE_LPT_ASSET.mulDiv(bptTotalValue, bptTotalSupply, Math.Rounding.Floor);
+        lptAssetPrice = _oneWholeLPTAsset().mulDiv(bptTotalValue, bptTotalSupply, Math.Rounding.Floor);
         require(lptAssetPrice != ZERO_NAV_UNITS, INVALID_PRICE());
     }
 
@@ -358,7 +371,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     /// @notice Sets the new BPT oracle
     /// @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
     function _setBPTOracle(address _bptOracle) internal {
-        require(address(LPOracleBase(_bptOracle).pool()) == LPT_ASSET, BPT_ORACLE_POOL_MISMATCH());
+        require(address(LPOracleBase(_bptOracle).pool()) == _getRoycoDayKernelStorage().lptAsset, BPT_ORACLE_POOL_MISMATCH());
         // The venue reads the oracle while the vault is unlocked, so it must not revert on an unlocked vault
         require(!LPOracleBase(_bptOracle).getShouldRevertIfVaultUnlocked(), BPT_ORACLE_CANNOT_REVERT_WHILE_VAULT_UNLOCKED());
         _getBalancerV3LiquidityVenueStorage().bptOracle = _bptOracle;
@@ -383,13 +396,15 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
      * @return immutables The venue's Balancer V3 vault, required asset and tranche addresses, and the corresponding asset indexes in the pool
      */
     function _getBalancerV3VenueImmutableState() internal view returns (IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory immutables) {
+        RoycoDayKernelState storage $k = _getRoycoDayKernelStorage();
+        (uint256 stSharePoolIndex, uint256 quoteAssetPoolIndex) = _poolTokenIndexes(_getBalancerV3LiquidityVenueStorage());
         return IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState({
             vault: _vault,
-            lptAsset: LPT_ASSET,
-            seniorTranche: SENIOR_TRANCHE,
-            quoteAsset: QUOTE_ASSET,
-            stSharePoolIndex: ST_SHARE_POOL_INDEX,
-            quoteAssetPoolIndex: QUOTE_ASSET_POOL_INDEX
+            lptAsset: $k.lptAsset,
+            seniorTranche: $k.seniorTranche,
+            quoteAsset: $k.quoteAsset,
+            stSharePoolIndex: stSharePoolIndex,
+            quoteAssetPoolIndex: quoteAssetPoolIndex
         });
     }
 
