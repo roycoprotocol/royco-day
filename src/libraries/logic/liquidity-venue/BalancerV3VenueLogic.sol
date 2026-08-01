@@ -32,7 +32,8 @@ library BalancerV3VenueLogic {
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel supplies the senior tranche shares and quote assets it already holds and receives the minted BPT for the liquidity provider tranche
-     * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The Balancer V3 venue configuration a delegatecalled venue logic function cannot read from the kernel's state, carried in from the kernel mixin
      * @param _mode The dispatch mode: SIMULATE computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling, EXECUTE settles
      * @param _seniorShares The exact amount of senior tranche shares to add into the pool from this kernel's balance
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
@@ -41,6 +42,7 @@ library BalancerV3VenueLogic {
      * @return lptAssetPrice The value of 1 whole BPT against the post-add pool state, produced only for a preview to cache for the operation (zero when settling)
      */
     function addBalancerV3Liquidity(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
         IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
         DispatchMode _mode,
         uint256 _seniorShares,
@@ -50,18 +52,20 @@ library BalancerV3VenueLogic {
         external
         returns (uint256 lptAssets, NAV_UNIT lptAssetPrice)
     {
+        address lptAsset = $.lptAsset;
+
         // The exact senior tranche share and quote asset amounts to add, ordered by the pool's token registration
         uint256[] memory exactAmountsIn = new uint256[](2);
         exactAmountsIn[_immutables.stSharePoolIndex] = _seniorShares;
         exactAmountsIn[_immutables.quoteAssetPoolIndex] = _quoteAssets;
 
         // If the pool is initialized, add liquidity directly, else, the pool must be initialized (seeded)
-        if (_immutables.vault.isPoolInitialized(_immutables.lptAsset)) {
+        if (_immutables.vault.isPoolInitialized(lptAsset)) {
             // Credit this kernel with the BPT minted by the unbalanced add of the specified senior tranche shares and quote assets
             (, lptAssets,) = _immutables.vault
                 .addLiquidity(
                     AddLiquidityParams({
-                        pool: _immutables.lptAsset, // The Balancer pool to add liquidity to is the liquidity provider tranche's asset (BPT)
+                        pool: lptAsset, // The Balancer pool to add liquidity to is the liquidity provider tranche's asset (BPT)
                         to: address(this), // The kernel custodies the BPT balance of the entire liquidity provider tranche, so the minted BPT is credited to it
                         maxAmountsIn: exactAmountsIn, // For UNBALANCED adds the Vault treats these as the exact amounts in (not upper bounds)
                         minBptAmountOut: toUint256(_minLPTAssetsOut), // The Vault reverts the add if it would mint fewer BPT than this, bounding the add's slippage
@@ -72,14 +76,14 @@ library BalancerV3VenueLogic {
         } else {
             // The pool's registered tokens, ordered by the pool's token registration
             IERC20[] memory tokens = new IERC20[](2);
-            tokens[_immutables.stSharePoolIndex] = IERC20(_immutables.seniorTranche);
-            tokens[_immutables.quoteAssetPoolIndex] = IERC20(_immutables.quoteAsset);
+            tokens[_immutables.stSharePoolIndex] = IERC20($.seniorTranche);
+            tokens[_immutables.quoteAssetPoolIndex] = IERC20($.quoteAsset);
 
             // Credit this kernel with the BPT minted by seeding the pool's initial balances
             // NOTE: The Vault permanently burns a minimum BPT supply to the null address on initialization, so lptAssets is net of that burn
             lptAssets = _immutables.vault
                 .initialize(
-                    _immutables.lptAsset, // The Balancer pool to initialize is the liquidity provider tranche's asset (BPT)
+                    lptAsset, // The Balancer pool to initialize is the liquidity provider tranche's asset (BPT)
                     address(this), // The kernel custodies the BPT balance of the entire liquidity provider tranche, so the minted BPT is credited to it
                     tokens, // The pool's registered tokens in registration order
                     exactAmountsIn, // The exact amounts seeding the pool's initial balances
@@ -97,12 +101,14 @@ library BalancerV3VenueLogic {
 
         // Settle the senior tranche shares and quote assets this kernel owes the Vault for the add by transferring them in and cancelling the debt
         if (_seniorShares > 0) {
-            IERC20(_immutables.seniorTranche).safeTransfer(address(_immutables.vault), _seniorShares);
-            _immutables.vault.settle(IERC20(_immutables.seniorTranche), _seniorShares);
+            IERC20 seniorTranche = IERC20($.seniorTranche);
+            seniorTranche.safeTransfer(address(_immutables.vault), _seniorShares);
+            _immutables.vault.settle(seniorTranche, _seniorShares);
         }
         if (_quoteAssets > 0) {
-            IERC20(_immutables.quoteAsset).safeTransfer(address(_immutables.vault), _quoteAssets);
-            _immutables.vault.settle(IERC20(_immutables.quoteAsset), _quoteAssets);
+            IERC20 quoteAsset = IERC20($.quoteAsset);
+            quoteAsset.safeTransfer(address(_immutables.vault), _quoteAssets);
+            _immutables.vault.settle(quoteAsset, _quoteAssets);
         }
         /// @dev All credit and debt created during this callback has been settled
     }
@@ -112,7 +118,8 @@ library BalancerV3VenueLogic {
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel receives any ST shares withdrawn and is responsible for converting them to the base assets before remitting them to the user
-     * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The Balancer V3 venue configuration a delegatecalled venue logic function cannot read from the kernel's state, carried in from the kernel mixin
      * @param _mode The dispatch mode: SIMULATE computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling, EXECUTE settles
      * @param _lptAssets The exact BPT amount (LPT assets) to burn from this kernel's balance
      * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage at the Vault
@@ -123,6 +130,7 @@ library BalancerV3VenueLogic {
      * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the mark a caller's preview caches for the operation
      */
     function removeBalancerV3Liquidity(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
         IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
         DispatchMode _mode,
         TRANCHE_UNIT _lptAssets,
@@ -142,7 +150,7 @@ library BalancerV3VenueLogic {
         (, uint256[] memory amountsOut,) = _immutables.vault
             .removeLiquidity(
                 RemoveLiquidityParams({
-                    pool: _immutables.lptAsset, // The Balancer pool to remove liquidity from is the liquidity provider tranche's asset (BPT)
+                    pool: $.lptAsset, // The Balancer pool to remove liquidity from is the liquidity provider tranche's asset (BPT)
                     from: address(this), // The kernel custodies the BPT balance of the entire liquidity provider tranche, so the BPT constituents are debited from its claims
                     maxBptAmountIn: toUint256(_lptAssets), // For PROPORTIONAL removals the Vault treats this as the exact BPT amount to burn (not an upper bound)
                     minAmountsOut: minAmountsOut, // The Vault reverts the removal if any constituent comes out below these floors, bounding the removal's slippage
@@ -164,9 +172,9 @@ library BalancerV3VenueLogic {
         if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(stShares, quoteAssets, lptAssetPrice));
 
         // Credit the ST shares withdrawn to the kernel for downstream redemption before remitting assets to the user
-        if (stShares > 0) _immutables.vault.sendTo(IERC20(_immutables.seniorTranche), address(this), stShares);
+        if (stShares > 0) _immutables.vault.sendTo(IERC20($.seniorTranche), address(this), stShares);
         // Credit the quote assets withdrawn to its specified receiver
-        if (quoteAssets > 0) _immutables.vault.sendTo(IERC20(_immutables.quoteAsset), _quoteAssetsReceiver, quoteAssets);
+        if (quoteAssets > 0) _immutables.vault.sendTo(IERC20($.quoteAsset), _quoteAssetsReceiver, quoteAssets);
         /// @dev All credit and debt created during this callback has been settled
     }
 
@@ -174,7 +182,7 @@ library BalancerV3VenueLogic {
      * @notice Attempts to reinvest the liquidity provider tranche's idle liquidity-premium senior shares into its market-making inventory
      * @dev Tolerates reversions gracefully so it is non-blocking for the tranche operation that invokes it
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
+     * @param _immutables The Balancer V3 venue configuration a delegatecalled venue logic function cannot read from the kernel's state, carried in from the kernel mixin
      * @param _maxReinvestmentSlippageWAD The maximum slippage tolerated on the single-sided reinvestment, scaled to WAD precision
      * @param _stSharesToReinvest The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
      * @param _stShareRate The senior share rate the pile is valued at, the NAV backing one whole (WAD) senior share at the operation's settled state

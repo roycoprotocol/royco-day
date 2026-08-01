@@ -238,9 +238,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     {
         require(
             address(_params.balancerV3PoolFactory) != address(0) && address(_params.eclpLPOracleFactory) != address(0)
-                && _params.bptOracleConstantPriceFeed != address(0) && _params.seniorTrancheBeacon != address(0)
-                && _params.juniorTrancheBeacon != address(0) && _params.liquidityProviderTrancheBeacon != address(0)
-                && _params.kernelBeacon != address(0) && _params.accountantBeacon != address(0),
+                && _params.bptOracleConstantPriceFeed != address(0) && _params.seniorTrancheBeacon != address(0) && _params.juniorTrancheBeacon != address(0)
+                && _params.liquidityProviderTrancheBeacon != address(0) && _params.kernelBeacon != address(0) && _params.accountantBeacon != address(0),
             NULL_CONSTRUCTION_PARAMETER()
         );
 
@@ -363,9 +362,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
         // Deploy the liquidity provider tranche.
         result.liquidityProviderTranche = _deployProxy(
-            LIQUIDITY_PROVIDER_TRANCHE_BEACON,
-            _encodeTrancheInitData(p.lptTranche, kernel, balancerPool),
-            _marketComponentSalt(p.marketId, TAG_LPT_PROXY)
+            LIQUIDITY_PROVIDER_TRANCHE_BEACON, _encodeTrancheInitData(p.lptTranche, kernel, balancerPool), _marketComponentSalt(p.marketId, TAG_LPT_PROXY)
         );
 
         // Deploy the accountant.

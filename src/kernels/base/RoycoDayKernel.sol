@@ -68,7 +68,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _;
         // Skip the deployment outright when the tranche holds no idle premium
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        if ($.lptOwnedSeniorTrancheShares != 0) AccountingSyncLogic.reinvestLiquidityPremium($, getImmutableState(), type(uint256).max);
+        if ($.lptOwnedSeniorTrancheShares != 0) AccountingSyncLogic.reinvestLiquidityPremium($, type(uint256).max);
     }
 
     // =============================
@@ -138,7 +138,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withCollateralPriceCached
         returns (SyncedAccountingState memory state)
     {
-        return AccountingSyncLogic.syncTrancheAccounting(_getRoycoDayKernelStorage(), getImmutableState());
+        return AccountingSyncLogic.preOpSyncTrancheAccounting(_getRoycoDayKernelStorage());
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -152,7 +152,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withCollateralPriceCached
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
-        return AccountingSyncLogic.syncTrancheAccountingFor(_getRoycoDayKernelStorage(), getImmutableState(), _trancheType);
+        return AccountingSyncLogic.preOpSyncTrancheAccounting(_getRoycoDayKernelStorage(), _trancheType);
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -168,7 +168,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         // Simulate the poke first so a circuit-breaking oracle reverts identically to a real operation
         IRoycoPriceOracle($.collateralAssetOracle).previewPoke();
-        return AccountingSyncLogic.previewSyncTrancheAccountingFor($, getImmutableState(), _trancheType);
+        return AccountingSyncLogic.previewSyncTrancheAccountingFor($, _trancheType);
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -181,7 +181,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         nonReentrant
         withCollateralPriceCached
     {
-        AccountingSyncLogic.reinvestLiquidityPremium(_getRoycoDayKernelStorage(), getImmutableState(), _stShares);
+        AccountingSyncLogic.reinvestLiquidityPremium(_getRoycoDayKernelStorage(), _stShares);
     }
 
     // =============================
@@ -208,7 +208,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (uint256 trancheSharesMinted)
     {
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        return DepositLogic.inkindDeposit($, getImmutableState(), _mode, _getInvokingTranche($), _assets, _caller, _receiver);
+        return DepositLogic.inkindDeposit($, _mode, _getInvokingTranche($), _assets, _caller, _receiver);
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -231,7 +231,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (AssetClaims memory userAssetClaims)
     {
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        return RedemptionLogic.inkindRedeem($, getImmutableState(), _mode, _getInvokingTranche($), _shares, _caller, _owner, _receiver);
+        return RedemptionLogic.inkindRedeem($, _mode, _getInvokingTranche($), _shares, _caller, _owner, _receiver);
     }
 
     // =============================
@@ -259,9 +259,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withLiquidityPremiumReinvestment
         returns (uint256 trancheSharesMinted, TRANCHE_UNIT lptAssetsOut)
     {
-        return DepositLogic.lptDepositMultiAsset(
-            _getRoycoDayKernelStorage(), getImmutableState(), _mode, _collateralAssets, _quoteAssets, _minLPTAssetsOut, _caller, _receiver
-        );
+        return DepositLogic.lptDepositMultiAsset(_getRoycoDayKernelStorage(), _mode, _collateralAssets, _quoteAssets, _minLPTAssetsOut, _caller, _receiver);
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -286,7 +284,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
         return RedemptionLogic.lptRedeemMultiAsset(
-            _getRoycoDayKernelStorage(), getImmutableState(), _mode, _lptShares, _minSTSharesOut, _minQuoteAssetsOut, _caller, _owner, _receiver
+            _getRoycoDayKernelStorage(), _mode, _lptShares, _minSTSharesOut, _minQuoteAssetsOut, _caller, _owner, _receiver
         );
     }
 
@@ -299,14 +297,14 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and unbounded
     function inkindMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernel) onlyTranche returns (TRANCHE_UNIT) {
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        return DepositLogic.inkindMaxDeposit($, getImmutableState(), _getInvokingTranche($), _receiver);
+        return DepositLogic.inkindMaxDeposit($, _getInvokingTranche($), _receiver);
     }
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev Redemptions are allowed only in a PERPETUAL market state, the JT withdrawal bounded by the market's coverage requirement and the LPT withdrawal by its liquidity requirement
     function inkindMaxRedeemable(address _owner) public view virtual override(IRoycoDayKernel) onlyTranche returns (uint256 maxRedeemableShares) {
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        return RedemptionLogic.inkindMaxRedeemable($, getImmutableState(), _getInvokingTranche($), _owner);
+        return RedemptionLogic.inkindMaxRedeemable($, _getInvokingTranche($), _owner);
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -317,7 +315,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyLiquidityProviderTranche
         returns (uint256 maxRedeemableShares)
     {
-        return RedemptionLogic.lptMaxRedeemableMultiAsset(_getRoycoDayKernelStorage(), getImmutableState(), _owner);
+        return RedemptionLogic.lptMaxRedeemableMultiAsset(_getRoycoDayKernelStorage(), _owner);
     }
 
     // =============================
@@ -474,7 +472,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function _preOpSyncTrancheAccountingWithPriceCached() internal virtual withCollateralPriceCached returns (SyncedAccountingState memory state) {
-        return AccountingSyncLogic._preOpSyncTrancheAccounting(_getRoycoDayKernelStorage(), getImmutableState());
+        return AccountingSyncLogic.preOpSyncTrancheAccounting(_getRoycoDayKernelStorage());
     }
 
     /// @inheritdoc IRoycoDayKernel

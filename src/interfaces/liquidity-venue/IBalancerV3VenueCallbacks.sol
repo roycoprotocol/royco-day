@@ -12,19 +12,16 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
  */
 interface IBalancerV3VenueCallbacks {
     /**
-     * @notice The immutable liquidity venue configuration a delegatecalled venue logic function needs, carried in from the kernel mixin
+     * @notice The venue configuration a delegatecalled venue logic function cannot read from the kernel's state, carried in from the kernel mixin
+     * @dev The vault is a kernel implementation immutable (it lives in the kernel's code, which a delegatecalled library cannot read), and the
+     *      pool token indexes are resolved from the venue's own namespaced storage, so both cross the delegatecall boundary in this carrier
+     *      while the market's wiring (tranches and assets) is read from the kernel's state directly
      * @custom:field vault - The Balancer V3 Vault the kernel's pool is registered with
-     * @custom:field lptAsset - The liquidity provider tranche asset (the Balancer Pool Token) the kernel custodies
-     * @custom:field seniorTranche - The senior tranche share token, one of the pool's two constituents
-     * @custom:field quoteAsset - The quote asset, the pool's other constituent
      * @custom:field stSharePoolIndex - The senior tranche share token's index in the pool's token registration order
      * @custom:field quoteAssetPoolIndex - The quote asset's index in the pool's token registration order
      */
     struct BalancerV3VenueImmutableState {
         IVault vault;
-        address lptAsset;
-        address seniorTranche;
-        address quoteAsset;
         uint256 stSharePoolIndex;
         uint256 quoteAssetPoolIndex;
     }

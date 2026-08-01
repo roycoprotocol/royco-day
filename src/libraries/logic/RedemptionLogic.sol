@@ -40,7 +40,6 @@ library RedemptionLogic {
      * @dev Redemptions are enabled only in a PERPETUAL market state, the JT redemption granted that the market's coverage requirement
      *      and the LPT redemption granted that the market's liquidity requirement are satisfied post-redemption
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _trancheType An enumerator indicating which tranche to redeem from
      * @param _shares The number of shares to redeem
@@ -51,7 +50,6 @@ library RedemptionLogic {
      */
     function inkindRedeem(
         IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         DispatchMode _mode,
         TrancheType _trancheType,
         uint256 _shares,
@@ -71,7 +69,7 @@ library RedemptionLogic {
         uint256 totalTrancheShares;
         // Execute an accounting sync to reconcile underlying PNL and read the redeemed tranche's post-mint claims and supply
         SyncedAccountingState memory state;
-        (state, userAssetClaims, totalTrancheShares) = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, _trancheType);
+        (state, userAssetClaims, totalTrancheShares) = AccountingSyncLogic.preOpSyncTrancheAccounting($, _trancheType);
         // Redemptions are disabled during a fixed-term market state
         require(state.marketState == MarketState.PERPETUAL, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
 
@@ -91,13 +89,13 @@ library RedemptionLogic {
         // Burn the owner's redeemed shares, their claims were scaled against the pre-burn supply above
         // A null owner is a simulation's synthetic owner holding no real shares, so only it skips the burn, which feeds no downstream input in this flow
         // The tranche's allowance gate makes a null owner unreachable in execution, so a skipped burn never skips ownership enforcement
-        if (_owner != address(0)) IRoycoVaultTranche(AssetLedgerLogic._getTrancheAddress(_immutables, _trancheType)).kernelBurn(_owner, _shares);
+        if (_owner != address(0)) IRoycoVaultTranche(AssetLedgerLogic._getTrancheAddress($, _trancheType)).kernelBurn(_owner, _shares);
 
         // Execute a post-redeem sync on accounting, enforcing the market's requirements against the redemption's settled state
-        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, toRedemptionOperation(_trancheType), stSelfLiquidationBonusNAV);
+        AccountingSyncLogic.postOpSyncTrancheAccounting($, toRedemptionOperation(_trancheType), stSelfLiquidationBonusNAV);
 
         // Remit the asset claims to the receiver
-        AssetLedgerLogic._remitClaims(_immutables, userAssetClaims, _receiver);
+        AssetLedgerLogic._remitClaims($, userAssetClaims, _receiver);
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
         if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(userAssetClaims));
@@ -111,7 +109,6 @@ library RedemptionLogic {
      * @dev The flow's intermediate legs defer the liquidity requirement to the final leg's settled state, whose unhealed violation the end-of-flow gate reverts on
      * @dev LPT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _lptShares The number of LPT shares being redeemed (used to size the proportional LPT-asset slice)
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
@@ -124,7 +121,6 @@ library RedemptionLogic {
      */
     function lptRedeemMultiAsset(
         IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         DispatchMode _mode,
         uint256 _lptShares,
         uint256 _minSTSharesOut,
@@ -142,8 +138,7 @@ library RedemptionLogic {
         // LPT leg: an in-kind LPT redemption of the owner's shares to the kernel itself, leaving the redeemed LPT assets and idle premium senior shares in its custody
         // Its in-flow post-op waives the liquidity requirement the ST leg's post-op enforces on this flow's final settled state
         // All legs run settled in preview and execution alike, this flow's own result revert unwinds them in a preview
-        AssetClaims memory lptAssetClaims =
-            inkindRedeem($, _immutables, DispatchMode.EXECUTE, TrancheType.LIQUIDITY_PROVIDER, _lptShares, _caller, _owner, address(this));
+        AssetClaims memory lptAssetClaims = inkindRedeem($, DispatchMode.EXECUTE, TrancheType.LIQUIDITY_PROVIDER, _lptShares, _caller, _owner, address(this));
 
         // Remove the redeemed LPT assets from the liquidity venue: the senior shares return to the kernel and the quote goes to the receiver
         // The removal settles in both modes since the kernel custodies the BPT, so the ST leg delivers senior shares even in a preview
@@ -160,7 +155,7 @@ library RedemptionLogic {
         // Its in-flow post-op enforces the liquidity requirement against this flow's final settled state, after the senior unwind shrank the requirement the removal's depth exit raised
         stSharesWithdrawn += lptAssetClaims.stShares;
         if (stSharesWithdrawn != 0) {
-            stClaims = inkindRedeem($, _immutables, DispatchMode.EXECUTE, TrancheType.SENIOR, stSharesWithdrawn, _caller, address(this), _receiver);
+            stClaims = inkindRedeem($, DispatchMode.EXECUTE, TrancheType.SENIOR, stSharesWithdrawn, _caller, address(this), _receiver);
         }
 
         // Exit the settled multi-asset flow, reverting on a pending liquidity violation its final settled state never healed
@@ -180,14 +175,12 @@ library RedemptionLogic {
      * @dev ST redemptions are otherwise unrestricted: the senior claim never exceeds the collateral NAV under conservation, so its entire effective NAV is withdrawable
      * @dev JT withdrawals are bounded by the market's coverage requirement and LPT withdrawals by its liquidity requirement
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _trancheType An enumerator indicating which tranche to return the max redeemable shares for
      * @param _owner The address that is redeeming the shares
      * @return maxRedeemableShares The maximum number of shares that can be redeemed from the specified tranche
      */
     function inkindMaxRedeemable(
         IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         TrancheType _trancheType,
         address _owner
     )
@@ -216,12 +209,12 @@ library RedemptionLogic {
             // The junior tranche's total claim on the collateral NAV is exactly its effective NAV under NAV conservation
             claimNAV = state.jtEffectiveNAV;
             // The withdrawal is bounded by the market's coverage requirement
-            maxWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxJTWithdrawal(state);
+            maxWithdrawableNAV = IRoycoDayAccountant($.accountant).maxJTWithdrawal(state);
         } else {
             // An in-kind redemption pulls a proportional slice of both LPT legs
             claimNAV = state.lptRawNAV;
             // The withdrawal is bounded by the market's liquidity requirement
-            maxWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxLPTWithdrawal(state);
+            maxWithdrawableNAV = IRoycoDayAccountant($.accountant).maxLPTWithdrawal(state);
         }
 
         // With no claim on the assets nothing is redeemable
@@ -242,18 +235,10 @@ library RedemptionLogic {
      *
      * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _owner The address that is redeeming the shares
      * @return maxRedeemableShares The maximum number of shares that can be redeemed multi-asset from the liquidity provider tranche
      */
-    function lptMaxRedeemableMultiAsset(
-        IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        address _owner
-    )
-        external
-        returns (uint256 maxRedeemableShares)
-    {
+    function lptMaxRedeemableMultiAsset(IRoycoDayKernel.RoycoDayKernelState storage $, address _owner) external returns (uint256 maxRedeemableShares) {
         // If the owner is blacklisted or the kernel is currently paused, nothing is redeemable
         if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) return 0;
 
@@ -276,11 +261,10 @@ library RedemptionLogic {
         // The claim and the withdrawal bound share the post-remove mark so their ratio sizes the redeemable share fraction exactly
         NAV_UNIT claimOnLPTNAV = state.lptRawNAV;
         // The withdrawal is bounded by the market's liquidity requirement
-        NAV_UNIT lptWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxLPTWithdrawal(state);
+        NAV_UNIT lptWithdrawableNAV = IRoycoDayAccountant($.accountant).maxLPTWithdrawal(state);
 
         // Value the withdrawn and idle premium senior shares at the post-sync senior share rate, rounding down so the requirement reduction is never overstated
-        (,, uint256 totalSTShares) =
-            FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
+        (,, uint256 totalSTShares) = FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20($.seniorTranche).totalSupply());
         NAV_UNIT stSharesRedeemedNAV =
             ValuationLogic._convertToValue((stSharesWithdrawn + lptClaims.stShares), totalSTShares, state.stEffectiveNAV, Math.Rounding.Floor);
         // Compute the reduction in the market's liquidity requirement from redeeming the senior shares in-flow

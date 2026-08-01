@@ -314,7 +314,9 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         onlyVault
         returns (uint256 lptAssets, NAV_UNIT lptAssetPrice)
     {
-        return BalancerV3VenueLogic.addBalancerV3Liquidity(_getBalancerV3VenueImmutableState(), _mode, _seniorShares, _quoteAssets, _minLPTAssetsOut);
+        return BalancerV3VenueLogic.addBalancerV3Liquidity(
+            _getRoycoDayKernelStorage(), _getBalancerV3VenueImmutableState(), _mode, _seniorShares, _quoteAssets, _minLPTAssetsOut
+        );
     }
 
     /// @inheritdoc IBalancerV3VenueCallbacks
@@ -331,7 +333,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
         returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT lptAssetPrice)
     {
         return BalancerV3VenueLogic.removeBalancerV3Liquidity(
-            _getBalancerV3VenueImmutableState(), _mode, _lptAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver
+            _getRoycoDayKernelStorage(), _getBalancerV3VenueImmutableState(), _mode, _lptAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver
         );
     }
 
@@ -386,20 +388,15 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IRateP
     // =============================
 
     /**
-     * @notice Builds the immutables carrier threaded into the Balancer V3 venue's delegatecall logic library
-     * @dev A delegatecalled library cannot read the venue's immutables directly, so they are passed in via this struct
-     * @return immutables The venue's Balancer V3 vault, required asset and tranche addresses, and the corresponding asset indexes in the pool
+     * @notice Builds the venue configuration carrier threaded into the Balancer V3 venue's delegatecall logic library
+     * @dev A delegatecalled library cannot read the venue's immutables directly, so the vault crosses the boundary in this struct
+     *      alongside the pool token indexes resolved from the venue's storage, while the market's wiring is read from the kernel's state
+     * @return immutables The venue's Balancer V3 vault and the pool token indexes of its two constituents
      */
     function _getBalancerV3VenueImmutableState() internal view returns (IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory immutables) {
-        RoycoDayKernelState storage $k = _getRoycoDayKernelStorage();
         (uint256 stSharePoolIndex, uint256 quoteAssetPoolIndex) = _poolTokenIndexes(_getBalancerV3LiquidityVenueStorage());
         return IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState({
-            vault: _vault,
-            lptAsset: $k.lptAsset,
-            seniorTranche: $k.seniorTranche,
-            quoteAsset: $k.quoteAsset,
-            stSharePoolIndex: stSharePoolIndex,
-            quoteAssetPoolIndex: quoteAssetPoolIndex
+            vault: _vault, stSharePoolIndex: stSharePoolIndex, quoteAssetPoolIndex: quoteAssetPoolIndex
         });
     }
 
