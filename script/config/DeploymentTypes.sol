@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { YDMType } from "../../src/factory/templates/base/Types.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
@@ -19,6 +19,15 @@ import { IYDM } from "../../src/interfaces/IYDM.sol";
 /// @dev New Day kernel types are added here as they ship.
 enum KernelType {
     RoycoDayBalancerV3Kernel
+}
+
+/// @notice The yield distribution model shapes the deployment path can deploy
+/// @dev The template keys its model registry by name rather than by this enum, so a new shape can be registered on a
+///      live template. This enum stays script-side, where it selects the model's creation code and initialization data
+enum YDMType {
+    StaticCurve,
+    AdaptiveCurve_V1,
+    AdaptiveCurve_V2
 }
 
 /// @notice Collateral asset oracle kinds the deployment path can deploy (one per `src/oracle/` adapter).
@@ -263,6 +272,8 @@ struct MarketConfig {
     uint256 lptYdmTargetUtilizationWAD; // LDM target-utilization kink
     // Liquidity provider tranche: the Gyro E-CLP {ST_share, quote} pool the LPT BPT is minted from.
     GyroECLPPoolParams gyroECLPPoolParams;
+    // Genesis pool liquidity
+    RoycoDayBalancerV3MarketDeploymentTemplate.PoolInitializationParams poolInitialization;
     // Entry point config per tranche
     IRoycoDayEntryPoint.TrancheConfig stEntryPointConfig;
     IRoycoDayEntryPoint.TrancheConfig jtEntryPointConfig;

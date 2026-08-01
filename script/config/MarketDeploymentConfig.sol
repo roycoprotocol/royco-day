@@ -8,6 +8,7 @@ import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
 import { RoycoAccessManager } from "../../src/factory/RoycoAccessManager.sol";
 import { RoycoCreate3Deployer } from "../../src/factory/RoycoCreate3Deployer.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { TAG_ST_PROXY } from "../../src/factory/templates/base/Constants.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { BalancerV3LiquidityVenue } from "../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
@@ -68,7 +69,7 @@ abstract contract MarketDeploymentConfig {
     /// @dev CREATE2 salt for a protocol singleton (AccessManager, factory, etc.), suffixed with the environment so a
     ///      test deployment and a production deployment never collide on a deterministic address.
     function _singletonSalt(string memory _seed) internal view returns (bytes32) {
-        return keccak256(abi.encodePacked(_seed, isTestEnv ? "_TEST" : "_PROD"));
+        return keccak256(abi.encodePacked(_seed, isTestEnv ? "_TEST_324324" : "_PROD"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -141,6 +142,7 @@ abstract contract MarketDeploymentConfig {
         // snUSD against the test-environment factory ("_TEST" salts, prod deployer key).
         address testEnvFactory = _predictFactoryProxy(DEPLOYER, true);
         _marketIds[snUSDHash][testEnvFactory] = _mineMarketId(SNUSD, testEnvFactory, USDC[MAINNET]);
+        _marketIds[snUSDHash][address(0xcEC7f6E54b89fBd283382921A90Cf8C7A13dD62f)] = _mineMarketId(SNUSD, testEnvFactory, USDC[MAINNET]);
     }
 
     /// @notice The mined marketId for `_marketName` against `_factory`. Reverts if none is configured.
@@ -310,6 +312,14 @@ abstract contract MarketDeploymentConfig {
             ),
             jtYdmTargetUtilizationWAD: 0.9e18,
             lptYdmTargetUtilizationWAD: 0.9e18,
+            // Genesis pool liquidity. The deployer funds and approves the template for these amounts before running
+            // the market deployment, and receives the genesis liquidity provider shares.
+            poolInitialization: RoycoDayBalancerV3MarketDeploymentTemplate.PoolInitializationParams({
+                funder: DEPLOYER,
+                collateralAmount: 0, // no collateral leg: the genesis liquidity is quote-only
+                quoteAmount: 1e6, // 10,000 USDC of quote depth
+                minLPTAssetsOut: 0
+            }),
             gyroECLPPoolParams: GyroECLPPoolParams({
                 name: _poolName(SNUSD, USDC[block.chainid]),
                 symbol: _poolSymbol(SNUSD, USDC[block.chainid]),

@@ -44,6 +44,9 @@ import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePri
 /// @dev Requires a mainnet fork (real Balancer V3 + Gyro E-CLP + the REAL Pareto Idle CDO). FAILS (env not
 ///      found) when `MAINNET_RPC_URL` is unset, instead of silently passing.
 contract Test_IdleCDOMarketDeployment is Test {
+    /// @dev The address that supplies each market's genesis pool liquidity in this suite
+    address internal constant POOL_SEED_FUNDER = address(uint160(uint256(keccak256("POOL_SEED_FUNDER"))));
+
     using Math for uint256;
 
     uint256 internal constant FORK_BLOCK = 25_400_000;
@@ -128,6 +131,13 @@ contract Test_IdleCDOMarketDeployment is Test {
                 IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer)
             )
         );
+
+        // The template resolves a market's yield distribution models out of its own registry, so bind its registration
+        // surface and register the config's shapes, exactly as the scaffolding phase does.
+        bytes4[] memory ydmSelectors = new bytes4[](1);
+        ydmSelectors[0] = RoycoDayBalancerV3MarketDeploymentTemplate.setYieldDistributionModels.selector;
+        am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
+        deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("snUSD"));
     }
 
     // ─── helpers ───
@@ -149,12 +159,22 @@ contract Test_IdleCDOMarketDeployment is Test {
         );
     }
 
+    /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold the quote and
+    ///      have approved the template before `executeMarketDeployment`. Points the seed at a test-controlled funder
+    function _fundPoolSeed(MarketConfig memory _cfg) internal {
+        _cfg.poolInitialization.funder = POOL_SEED_FUNDER;
+        deal(_cfg.gyroECLPPoolParams.quoteAsset, POOL_SEED_FUNDER, _cfg.poolInitialization.quoteAmount);
+        vm.prank(POOL_SEED_FUNDER);
+        IERC20(_cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
+    }
+
     /// @dev Clones the snUSD market config in memory and swaps in the CDO AA tranche collateral + its proxied
     ///      virtual-price oracle. The direct-template path must supply the deployed oracle itself (the `deploy()` flow resolves it).
     function _marketConfig() internal returns (MarketConfig memory cfg) {
         cfg = deployScript.getMarketConfig("snUSD");
         cfg.collateralAsset = AA_TRANCHE_TOKEN;
         cfg.collateralAssetOracle = _deployIdleOracle(AA_TRANCHE_TOKEN);
+            _fundPoolSeed(cfg);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
-import { ILPOracleFactoryBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
-import { IGyroECLPPool } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
-import { IRateProvider } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/solidity-utils/helpers/IRateProvider.sol";
-import { IBasePool } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IBasePool.sol";
+import { ILPOracleFactoryBase } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
+import { IGyroECLPPool } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
+import { IRateProvider } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/solidity-utils/helpers/IRateProvider.sol";
+import { IBasePool } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IBasePool.sol";
 import {
     PoolRoleAccounts as BalancerV3PoolRoleAccounts,
     TokenConfig as BalancerV3TokenConfig,
     TokenType as BalancerV3TokenType
-} from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
-import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
+} from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
+import { GyroECLPPoolFactory } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import {
     AggregatorV3Interface as BalancerAggregatorV3Interface
-} from "../../../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+} from "../../../../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @notice The Gyro E-CLP pool creation inputs a market supplies, carried in the template's market params
@@ -39,12 +39,12 @@ struct BalancerV3PoolCreationParams {
 }
 
 /**
- * @title MarketVenueLogic
- * @author Waymont
+ * @title BalancerV3VenueCreationLogic
+ * @author Shivaansh Kapoor, Ankur Dubey
  * @notice Creation of a Royco Day market's Balancer V3 liquidity venue: the Gyro E-CLP `{ST share, quote}` pool and
  *         its manipulation-resistant BPT TVL oracle
  */
-library MarketVenueLogic {
+library BalancerV3VenueCreationLogic {
     /// @notice Thrown when the senior tranche share does not sort below the quote asset, so it would not be pool token0
     error SENIOR_TRANCHE_NOT_FIRST_POOL_TOKEN(address seniorTranche, address quoteAsset);
 
