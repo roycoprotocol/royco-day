@@ -499,6 +499,32 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertEq(keccak256(abi.encode(claims)), keccak256(abi.encode(previewClaims)), "the returned claims must match the preview leg for leg");
     }
 
+    /// @notice Preview parity holds in the wedge past the in-kind maximum, where the LPT leg records a transient
+    ///         liquidity violation only the ST leg's settled state can heal: the preview must judge that healing
+    ///         leg at the same settled post-remove venue mark execution prices live, so it quotes instead of reverting
+    /// @dev The regression cell for the preview's cached venue mark: the removal leg settles in preview and
+    ///      execution alike (the kernel custodies the BPT), so the mark the preview caches must be read off the
+    ///      settled post-remove venue. A zeroed or stale mark deflates the healing leg's LPT raw NAV, the recorded
+    ///      violation never clears, and the preview reverts LIQUIDITY_REQUIREMENT_VIOLATED on a size execution accepts
+    function test_LPTRedeemMultiAsset_WedgePreviewParity_HealedViolationQuotesLikeExecution() public {
+        uint256 wedgeShares = liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER);
+        // The wedge premise: this size breaches the in-kind gate outright, so the multi-asset flow's LPT leg
+        // must record a pending violation instead and ride on its ST leg's heal
+        assertGt(wedgeShares, liquidityProviderTranche.maxRedeem(LPT_PROVIDER), "the wedge window between the two bounds must be real");
+        vm.prank(LPT_PROVIDER);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        liquidityProviderTranche.redeem(wedgeShares, LPT_PROVIDER, LPT_PROVIDER);
+
+        // The preview must clear the healed gate and quote the wedge size instead of reverting on it
+        (AssetClaims memory previewClaims, uint256 previewQuote) = liquidityProviderTranche.previewRedeemMultiAsset(wedgeShares);
+
+        vm.prank(LPT_PROVIDER);
+        (AssetClaims memory claims, uint256 quoteOut) = liquidityProviderTranche.redeemMultiAsset(wedgeShares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
+
+        assertEq(quoteOut, previewQuote, "the wedge quote leg must land exactly as previewed");
+        assertEq(keccak256(abi.encode(claims)), keccak256(abi.encode(previewClaims)), "the wedge claims must match the preview leg for leg");
+    }
+
     /// @notice Preview equals execution on the deposit side: the venue mints exactly the previewed pool tokens
     ///         and the tranche mints exactly the previewed shares
     function test_LPTDepositMultiAsset_MintedBPTMatchesPreviewAdd_ByBalanceDelta() public {

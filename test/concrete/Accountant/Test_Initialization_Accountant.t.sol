@@ -300,9 +300,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
         vm.expectEmit(true, true, true, true, address(acct));
         emit IRoycoDayAccountant.MaxYieldSharesUpdated(p.maxJTYieldShareWAD, p.maxLPTYieldShareWAD);
         vm.expectEmit(true, true, true, true, address(acct));
-        emit IRoycoDayAccountant.KernelUpdated(p.kernel);
-        vm.expectEmit(true, true, true, true, address(acct));
-        emit IRoycoDayAccountant.FixedTermCommenceableAtTimestampUpdated(uint64(block.timestamp + p.fixedTermGracePeriodSeconds));
+        emit IRoycoDayAccountant.FixedTermCommenceableAt(uint64(block.timestamp + p.fixedTermGracePeriodSeconds));
         vm.expectEmit(true, true, true, true, address(acct));
         emit IRoycoDayAccountant.LiquidationCoverageUtilizationUpdated(p.coverageLiquidationUtilizationWAD);
         vm.expectEmit(true, true, true, true, address(acct));
