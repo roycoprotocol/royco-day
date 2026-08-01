@@ -90,7 +90,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
     /// @dev A liquidity provider tranche custodying an arbitrary asset, so the venue's pool checks are reachable
     ///      past the kernel's tranche-asset agreement check
     function _lptCustodying(address _asset) internal returns (address) {
-        return _deployTrancheProxy(address(new RoycoLiquidityProviderTranche()), "Foreign LPT", "fLPT", address(kernel), _asset);
+        return _deployTrancheProxy(address(lptBeacon), "Foreign LPT", "fLPT", address(kernel), _asset);
     }
 
     // =============================
@@ -142,7 +142,13 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
             _goodInitParams(address(collateralAssetOracle), PROTOCOL_FEE_RECIPIENT);
         sp.lptAsset = address(shimBpt);
         sp.liquidityProviderTranche = _lptCustodying(address(shimBpt));
-        _expectInitRevert(sp, vp, BalancerV3LiquidityVenue.POOL_MUST_HAVE_TWO_TOKENS.selector);
+
+        // The impl must be constructed against the shim vault: the venue's vault-agreement guard
+        // (INVALID_BALANCER_V3_VAULT) runs before the token-count guard, and this test pins the latter
+        DayKernel impl = new DayKernel(IVault(address(shim)));
+        bytes memory initData = abi.encodeCall(impl.initialize, (sp, vp));
+        vm.expectRevert(BalancerV3LiquidityVenue.POOL_MUST_HAVE_TWO_TOKENS.selector);
+        new ERC1967Proxy(address(impl), initData);
     }
 
     /// @notice A tranche wired with a null asset or a null kernel is rejected at its own initialization
@@ -183,7 +189,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
         foreignVault.setRate(1e18);
         (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(collateralAssetOracle), PROTOCOL_FEE_RECIPIENT);
-        sp.juniorTranche = _deployTrancheProxy(address(new RoycoLiquidityProviderTranche()), "Foreign JT", "fJT", address(kernel), address(foreignVault));
+        sp.juniorTranche = _deployTrancheProxy(address(lptBeacon), "Foreign JT", "fJT", address(kernel), address(foreignVault));
         _expectInitRevert(sp, vp, IRoycoDayKernel.TRANCHE_AND_KERNEL_ASSETS_MISMATCH.selector);
     }
 

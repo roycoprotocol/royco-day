@@ -36,7 +36,7 @@ library DepositLogic {
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _trancheType An enumerator indicating which tranche to deposit into
      * @param _assets The amount of assets to deposit, denominated in the specified tranche's tranche units
-     * @param _caller The address that initiated the deposit, the null address for a composite flow that already screened its caller at the flow entry
+     * @param _caller The address that initiated the deposit, the null address for a simulation's synthetic caller (a composite flow forwards its own resolved caller)
      * @param _receiver The address that receives the minted tranche shares
      * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
      */
@@ -88,7 +88,7 @@ library DepositLogic {
      * @notice Atomically enters the liquidity provider tranche with the LPT assets' constituent assets: deposits collateral (minting senior
      *         shares), adds (senior shares + quote) into the liquidity venue to mint the LPT tranche assets, then deposits them into the LPT
      * @dev Composed from the shared deposit primitives: an ST deposit seeding the add's senior shares, the venue add, then an LPT deposit of the minted assets
-     * @dev Screens the caller and receiver at the flow entry, so the inner legs pass a null caller and skip re-screening it
+     * @dev Screens the caller and receiver at the flow entry and forwards its caller into the inner legs, mirroring the multi-asset redemption's caller forwarding
      * @dev Assumes the collateral and quote have been transferred to the kernel before this call (by the LPT tranche)
      * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit that mints no senior shares
      * @dev The flow's intermediate legs defer the liquidity requirement to the final leg's settled state, whose unhealed violation the end-of-flow gate reverts on
@@ -126,7 +126,7 @@ library DepositLogic {
         // Its post-op waives the liquidity requirement that this operation may satisfy below with the added liquidity
         uint256 stSharesMinted;
         if (_collateralAssets != ZERO_TRANCHE_UNITS) {
-            stSharesMinted = inkindDeposit($, DispatchMode.EXECUTE, TrancheType.SENIOR, _collateralAssets, address(0), address(this));
+            stSharesMinted = inkindDeposit($, DispatchMode.EXECUTE, TrancheType.SENIOR, _collateralAssets, _caller, address(this));
         }
 
         // Add the minted ST shares and supplied quote assets into the liquidity venue with the specified slippage check
@@ -139,7 +139,7 @@ library DepositLogic {
 
         // LPT leg: an in-kind LPT deposit of the minted assets at the post-add price, priced and minted to the receiver by the shared primitive
         // Its in-flow post-op enforces the liquidity requirement against this flow's settled state
-        trancheSharesMinted = inkindDeposit($, DispatchMode.EXECUTE, TrancheType.LIQUIDITY_PROVIDER, lptAssetsOut, address(0), _receiver);
+        trancheSharesMinted = inkindDeposit($, DispatchMode.EXECUTE, TrancheType.LIQUIDITY_PROVIDER, lptAssetsOut, _caller, _receiver);
 
         // Exit the settled multi-asset flow, reverting on a pending liquidity violation its final settled state never healed
         AccountingSyncLogic._exitMultiAssetFlow();

@@ -323,17 +323,12 @@ abstract contract DayMarketTestBase is Assertions {
 
         // 9. Register the pool BEFORE kernel impl construction (the LPT venue constructor validates the registration
         //    and that the pool pairs the senior tranche, BalancerV3LiquidityVenue.sol:89-107).
-        //    Production Balancer registers pool tokens sorted ascending by address (InputHelpers.ensureSortedTokens),
-        //    so the senior tranche can land at index 1 and the venue's tokens[1] == SENIOR_TRANCHE branch is real
-        bool stSortsFirst = address(seniorTranche) < address(quoteToken);
-        stPoolTokenIndex = stSortsFirst ? 0 : 1;
-        IERC20[2] memory poolTokens =
-            stSortsFirst ? [IERC20(address(seniorTranche)), IERC20(address(quoteToken))] : [IERC20(address(quoteToken)), IERC20(address(seniorTranche))];
-        balancerVault.registerPool(address(bpt), poolTokens);
-        // Documenting assertion: the recorded index must resolve the senior share in the registered order. Under
-        // the deterministic forge test deployer every standard token shape (A-D) sorts the quote token below the
-        // tranche proxies, so ST lands at index 1 and the venue constructor's tokens[1] == SENIOR_TRANCHE branch
-        // (BalancerV3LiquidityVenue.sol:103) is exercised by every market lifecycle suite, not forced artificially
+        //    The venue requires tokens[0] == seniorTranche and tokens[1] == quoteAsset structurally, a guarantee the
+        //    factory template provides in production by mining the market id so the ST share sorts below the quote
+        //    token, so the fixture registers that guaranteed order deterministically
+        stPoolTokenIndex = 0;
+        balancerVault.registerPool(address(bpt), [IERC20(address(seniorTranche)), IERC20(address(quoteToken))]);
+        // Documenting assertion: the recorded index must resolve the senior share in the registered order
         require(
             address(balancerVault.getPoolTokens(address(bpt))[stPoolTokenIndex]) == address(seniorTranche),
             "DayMarketTestBase: recorded senior pool index does not match the registered token order"

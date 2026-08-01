@@ -386,7 +386,7 @@ interface IRoycoDayKernel {
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _assets The amount of assets to deposit, denominated in the calling tranche's tranche units
-     * @param _caller The address that initiated the deposit on the tranche, screened with the receiver against the market's blacklist
+     * @param _caller The address that initiated the deposit on the tranche, screened with the receiver against the market's blacklist, the null address for a simulation's synthetic caller
      * @param _receiver The address that receives the minted tranche shares
      * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
      */
@@ -402,7 +402,7 @@ interface IRoycoDayKernel {
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _shares The number of shares to redeem
-     * @param _caller The address that initiated the redemption on the tranche, screened with the owner and receiver against the market's blacklist
+     * @param _caller The address that initiated the redemption on the tranche, screened with the owner and receiver against the market's blacklist, the null address for a simulation's synthetic caller that also skips the share burn
      * @param _owner The address whose tranche shares are burned for the redemption, the null address for a simulation's synthetic owner
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
@@ -429,7 +429,7 @@ interface IRoycoDayKernel {
      * @param _collateralAssets The amount of collateral to deposit for the senior leg, denominated in tranche units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLPTAssetsOut The minimum LPT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
-     * @param _caller The address that initiated the deposit on the tranche, screened with the receiver against the market's blacklist
+     * @param _caller The address that initiated the deposit on the tranche, screened with the receiver against the market's blacklist, the null address for a simulation's synthetic caller
      * @param _receiver The address that receives the minted tranche shares
      * @return trancheSharesMinted The number of tranche shares minted to the receiver for the deposit
      * @return lptAssetsOut The amount of LPT tranche assets minted and credited to the liquidity provider tranche
@@ -454,7 +454,7 @@ interface IRoycoDayKernel {
      * @param _lptShares The number of LPT shares being redeemed (used to size the proportional LPT-asset slice)
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
-     * @param _caller The address that initiated the redemption on the tranche, screened with the owner and receiver against the market's blacklist
+     * @param _caller The address that initiated the redemption on the tranche, screened with the owner and receiver against the market's blacklist, the null address for a simulation's synthetic caller that also skips the share burn
      * @param _owner The address whose LPT shares are burned for the redemption, the null address for a simulation's synthetic owner
      * @param _receiver The address that receives the collateral and quote
      * @return stClaims The ST redemption asset claims transferred to the receiver (its collateral asset leg)
@@ -583,7 +583,7 @@ interface IRoycoDayKernel {
      * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets, the withdrawn senior shares are returned to the kernel for the combined senior unwind
      * @return stShares The senior tranche shares withdrawn by the removal
      * @return quoteAssets The quote assets withdrawn by the removal
-     * @return lptAssetPrice The value of 1 whole LPT asset against the post-remove venue state, the mark a caller's preview caches for the operation
+     * @return lptAssetPrice The value of 1 whole LPT asset against the post-remove venue state, produced only for a preview to cache for the operation (zero when settling)
      */
     function removeLiquidity(
         DispatchMode _mode,

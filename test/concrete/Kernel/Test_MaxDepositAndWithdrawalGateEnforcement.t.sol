@@ -5,11 +5,8 @@ import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
-import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
-import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
-import { defaultParams } from "../../utils/MarketParams.sol";
-import { cellA } from "../../utils/TokenConfigs.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
@@ -93,9 +90,10 @@ contract Test_MaxDepositAndWithdrawalGateEnforcement_Kernel is MarketFuzzTestBas
      * the max deposit passes, consuming the dust slack lands coverage utilization on WAD, and one more wei violates
      */
     function test_STDeposit_CoverageDustSlackGate_ConsumesSlackThenReverts() public {
-        MarketParamsConfig memory p = defaultParams();
-        p.dustTolerance = 1e12;
-        _deployMarket(cellA(), p);
+        // Raise the live market's dust tolerance in place: redeploying just for a param would re-roll the
+        // tranche/quote address ordering the venue's structural token check pins (the factory mines it in prod)
+        vm.prank(MARKET_OPS_ADMIN);
+        accountant.setDustTolerance(toNAVUnits(uint256(1e12)));
 
         uint256 st = 1000e18;
         uint256 jt = 400e18;
@@ -120,9 +118,9 @@ contract Test_MaxDepositAndWithdrawalGateEnforcement_Kernel is MarketFuzzTestBas
      * WAD, and one more wei violates liquidity
      */
     function test_STDeposit_LiquidityDustSlackGate_ConsumesSlackThenReverts() public {
-        MarketParamsConfig memory p = defaultParams();
-        p.dustTolerance = 1e12;
-        _deployMarket(cellA(), p);
+        // In-place dust raise, same rationale as the coverage dust-slack seed above
+        vm.prank(MARKET_OPS_ADMIN);
+        accountant.setDustTolerance(toNAVUnits(uint256(1e12)));
 
         uint256 st = 1000e18;
         uint256 jt = 1000e18;
@@ -214,9 +212,9 @@ contract Test_MaxDepositAndWithdrawalGateEnforcement_Kernel is MarketFuzzTestBas
      * advertises past it and one share past the true boundary still violates liquidity
      */
     function test_LPTRedemption_DustSlackLiquidityGate_OneSharePastMaxReverts() public {
-        MarketParamsConfig memory p = defaultParams();
-        p.dustTolerance = 1e12;
-        _deployMarket(cellA(), p);
+        // In-place dust raise, same rationale as the ST dust-slack seeds above
+        vm.prank(MARKET_OPS_ADMIN);
+        accountant.setDustTolerance(toNAVUnits(uint256(1e12)));
 
         uint256 st = 1000e18;
         uint256 jt = 1000e18;

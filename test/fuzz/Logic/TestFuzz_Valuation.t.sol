@@ -16,27 +16,30 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  *         mint in the contributed value
  * @dev Pure-library layer, no market deploy. Production is asserted against RoycoTestMath or a hand-derived
  *      bound, never against a second call of the function under test
- * @dev The share mint carries the protocol's mint-dilution clamp (MAX_MINT_DILUTION_WAD = WAD − 1e6): a
- *      single mint owns at most (1 − 1e-12) of the post-mint supply, leaving incumbents the residual
- *      WAD − MAX_MINT_DILUTION_WAD = 1e6. The inline pins below recompute the bind predicate from first
- *      principles per branch; the clamp-specific properties (cap exactness, ownership bound, depositor loss)
- *      live in TestFuzz_MintDilutionClamp.t.sol
+ * @dev The share mint carries the protocol's mint-dilution clamp (MAX_MINT_DILUTION_WAD = WAD − 1e6), which
+ *      arms ONLY in the collapsed-price regime (the effective supply worth over ~1e12x its backing, the state
+ *      a supply-inflation attack needs) and there caps the mint at the residual guarantee; a mint into a
+ *      healthily priced tranche always prices fairly, however large. The inline pins below recompute the arm
+ *      predicate from first principles per branch; the clamp-specific properties (cap exactness, ownership
+ *      bound, depositor loss) live in TestFuzz_MintDilutionClamp.t.sol
  */
 contract TestFuzz_Valuation_Logic is Test {
     /// @notice Suite-wide NAV and share-supply ceiling
     uint256 internal constant MAX_NAV = 1e30;
 
     /// @notice Virtual shares / virtual value, restated inline independently of production and the mirror
-    uint256 internal constant VS = 1e6;
+    uint256 internal constant VS = 1;
     uint256 internal constant VA = 1;
 
-    /// @dev The clamp's bind predicate, restated inline and independently of both production and the mirror:
-    ///      a mint binds iff value · (WAD − MAX_MINT_DILUTION_WAD) > (totalValue + VA) · MAX_MINT_DILUTION_WAD (the
-    ///      effective supply cancels, so the predicate carries only the virtual-value denominator). Products fit:
-    ///      value, totalValue + VA <= 1e30 + 1 and WAD − MAX_MINT_DILUTION_WAD = 1e6, so both sides stay below 1e48
-    function _binds(uint256 _value, uint256 _totalValue) internal pure returns (bool) {
-        uint256 d = _totalValue + VA;
-        return _value * (WAD - MAX_MINT_DILUTION_WAD) > d * MAX_MINT_DILUTION_WAD;
+    /// @dev The clamp's arm predicate, restated inline and independently of both production and the mirror:
+    ///      the clamp arms iff the tranche is in the collapsed-price regime, (supply + VS) · (WAD − MAX_MINT_DILUTION_WAD)
+    ///      > (totalValue + VA) · MAX_MINT_DILUTION_WAD (the integer-equivalent product form of production's
+    ///      ceil((supply + VS) · (WAD − MAX_MINT_DILUTION_WAD) / MAX_MINT_DILUTION_WAD) > totalValue + VA), i.e. one
+    ///      effective share is backed by under ~1e-12 NAV. The mint size plays no part: an armed state clamps at the
+    ///      cap, a healthy state prices fairly regardless of the deposit. Products fit: supply + VS, totalValue + VA
+    ///      <= 1e30 + 1 against factors <= 1e18, so both sides stay below 1e49
+    function _armed(uint256 _supply, uint256 _totalValue) internal pure returns (bool) {
+        return (_supply + VS) * (WAD - MAX_MINT_DILUTION_WAD) > (_totalValue + VA) * MAX_MINT_DILUTION_WAD;
     }
 
     /**
@@ -45,9 +48,11 @@ contract TestFuzz_Valuation_Logic is Test {
      * tranche deposit prices through, so an edge regression here misprices every entry.
      * Property: _convertToShares(v, T, S, Floor) == RoycoTestMath.convertToShares(v, T, S) exactly, with each
      * branch additionally re-pinned against inline math so the mirror itself cannot mask a regression:
-     *   S == 0 && T == 0 => shares == v (a genuinely fresh tranche mints 1:1, clamp exempt)
-     *   mint binds       => shares == floor((S + VS) * MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD)) (the cap on the effective supply)
-     *   otherwise        => shares == floor((S + VS) * v / (T + VA)) (T == 0 with a live supply pins the denominator to the 1-wei VA)
+     *   S == 0 && T == 0 => shares == v (a genuinely fresh tranche mints 1:1: effective supply and denominator
+     *                       are both exactly the 1-wei virtual offsets and the clamp cannot arm at that ratio)
+     *   clamp armed      => shares == min(cap, fair) with cap = floor((S + VS) * MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD)):
+     *                       in the collapsed-price regime a runaway mint plateaus at the cap while a small mint still prices fairly
+     *   otherwise        => shares == fair = floor((S + VS) * v / (T + VA)) (T == 0 with a live supply pins the denominator to the 1-wei VA)
      */
     function testFuzz_ConvertToShares_MatchesMirrorIncludingZeroEdges(uint256 _value, uint256 _totalValue, uint256 _supply) public pure {
         _value = bound(_value, 0, MAX_NAV); // uniform over the full supported NAV range incl. the 0 edge
@@ -61,18 +66,20 @@ contract TestFuzz_Valuation_Logic is Test {
 
         // Every branch re-pinned with inline math independent of both production and the mirror. Under virtual
         // shares / virtual value there are three branches: the fresh-tranche 1:1 bootstrap (no shares AND no
-        // backing), the dilution clamp, and the fair price against the effective supply (S + VS) over (T + VA)
+        // backing), the armed collapsed-price regime (min of the cap and the fair price), and the fair price
+        // against the effective supply (S + VS) over (T + VA)
         uint256 effectiveSupply = _supply + VS;
+        uint256 fairShares = Math.mulDiv(effectiveSupply, _value, _totalValue + VA, Math.Rounding.Floor);
         if (_supply == 0 && _totalValue == 0) {
             assertEq(shares, _value, "a fresh tranche mints 1:1");
-        } else if (_binds(_value, _totalValue)) {
+        } else if (_armed(_supply, _totalValue)) {
             assertEq(
                 shares,
-                Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD),
-                "a binding mint clamps to the cap on the effective supply"
+                Math.min(Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD), fairShares),
+                "an armed mint is the min of the cap and the fair price"
             );
         } else {
-            assertEq(shares, Math.mulDiv(effectiveSupply, _value, _totalValue + VA, Math.Rounding.Floor), "fair mint == floor((S + VS) * v / (T + VA))");
+            assertEq(shares, fairShares, "fair mint == floor((S + VS) * v / (T + VA))");
         }
     }
 
@@ -80,9 +87,11 @@ contract TestFuzz_Valuation_Logic is Test {
      * Redemption-side pricing: the value paid out for a share count floors in favor of the holders who
      * stay, so a redeemer can never extract more than its exact pro-rata slice of the backing value.
      * Property: _convertToValue(shares, S, T, Floor) == RoycoTestMath.convertToValue(shares, T, S) exactly,
-     * with the zero edge pinned inline:
-     *   S == 0 && T == 0 => value == 0 (a genuinely fresh tranche backs no claim)
-     *   otherwise        => value == floor((T + VA) * shares / (S + VS))
+     * plus the single-formula inline pin over the whole domain (the primitive carries no zero special case:
+     * the 1-wei virtual offsets keep it well-defined everywhere):
+     *   value == floor((T + VA) * shares / (S + VS))
+     * On the genuinely fresh edge (S == 0 && T == 0) the formula degenerates to value == shares, the exact
+     * inverse of the fresh mint's 1:1 branch, additionally pinned so the round-trip identity stays visible
      */
     function testFuzz_ConvertToValue_MatchesMirrorIncludingZeroEdges(uint256 _shares, uint256 _totalValue, uint256 _supply) public pure {
         _shares = bound(_shares, 0, MAX_NAV); // uniform over the full share range incl. the 0 edge
@@ -93,10 +102,9 @@ contract TestFuzz_Valuation_Logic is Test {
 
         assertEq(value, RoycoTestMath.convertToValue(_shares, _totalValue, _supply), "value == RoycoTestMath.convertToValue");
 
+        assertEq(value, Math.mulDiv(_totalValue + VA, _shares, _supply + VS, Math.Rounding.Floor), "value == floor((T + VA) * shares / (S + VS))");
         if (_supply == 0 && _totalValue == 0) {
-            assertEq(value, 0, "a fresh tranche has no claim");
-        } else {
-            assertEq(value, Math.mulDiv(_totalValue + VA, _shares, _supply + VS, Math.Rounding.Floor), "value == floor((T + VA) * shares / (S + VS))");
+            assertEq(value, _shares, "the fresh edge inverts the 1:1 fresh mint");
         }
     }
 
@@ -111,12 +119,14 @@ contract TestFuzz_Valuation_Logic is Test {
      * The fair-pricing round trip only exists below the bind: a binding mint deliberately returns less
      * (the clamp's purpose; its loss bound is the DepositorLossBounded property in
      * TestFuzz_MintDilutionClamp.t.sol), so the domain is shaped to the no-bind region via bound(), not
-     * assumed away: v is drawn from [0, min(MAX_NAV, T * MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD))], the exact no-bind interval
+     * assumed away: v is drawn from [0, min(MAX_NAV, floor((T + VA) * MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD)))].
+     * Below that ceiling v * (WAD − MMD) <= (T + VA) * MMD, so fair <= cap and even an armed clamp's
+     * min(cap, fair) resolves to the fair price (integer lemma)
      */
     function testFuzz_ValuationRoundTrip_LossWithinDerivedSlack(uint256 _value, uint256 _totalValue, uint256 _supply) public pure {
         _totalValue = bound(_totalValue, 1, MAX_NAV); // live vault: positive backing (T == 0 pinned in the equality property)
         _supply = bound(_supply, 1, MAX_NAV); // live vault: positive supply (S == 0 pinned in the equality property)
-        // The exact no-bind ceiling: v <= floor((T + VA) * MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD)) never binds (integer lemma); capped to the domain
+        // The exact no-bind ceiling: v <= floor((T + VA) * MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD)) keeps fair <= cap, so the mint prices fairly even when the clamp is armed; capped to the domain
         uint256 noBindCeiling = Math.mulDiv(_totalValue + VA, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
         _value = bound(_value, 0, noBindCeiling < MAX_NAV ? noBindCeiling : MAX_NAV); // uniform over the fair-priced region
 
@@ -169,8 +179,9 @@ contract TestFuzz_Valuation_Logic is Test {
         _totalValue = bound(_totalValue, 1, MAX_NAV); // positive backing so the exact ratios are well-defined
         _supply = bound(_supply, 1, MAX_NAV); // live supply so neither bootstrap branch triggers
         _shares = bound(_shares, 0, MAX_NAV); // full share range incl. the 0 edge
-        // Stay below the clamp bind so both share variants price fairly (a binding mint returns the cap
-        // regardless of the rounding argument, which is pinned in TestFuzz_MintDilutionClamp.t.sol)
+        // Stay below the clamp bind so both share variants price fairly: below the ceiling fair <= cap, so an
+        // armed clamp's min(cap, fair) still resolves to the fair price on both rounding sides (the binding
+        // plateau itself is pinned in TestFuzz_MintDilutionClamp.t.sol)
         uint256 noBindCeiling = Math.mulDiv(_totalValue + VA, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
         _value = bound(_value, 0, noBindCeiling < MAX_NAV ? noBindCeiling : MAX_NAV); // uniform over the fair-priced region
 

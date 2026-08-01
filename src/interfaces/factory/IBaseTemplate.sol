@@ -12,8 +12,10 @@ import { IRoycoProtocolTemplate } from "./IRoycoProtocolTemplate.sol";
 interface IBaseTemplate is IRoycoProtocolTemplate {
     /// @notice Thrown when a factory-only function is called by another address
     error ONLY_ROYCO_FACTORY();
+
     /// @notice Thrown when the template is constructed with the zero address as its factory
     error ROYCO_FACTORY_CANNOT_BE_ZERO_ADDRESS();
+
     /// @notice Thrown when two index-aligned arrays have mismatched lengths
     error LENGTH_MISMATCH();
 

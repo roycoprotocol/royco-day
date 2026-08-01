@@ -191,18 +191,25 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /// @notice Thrown when the kernel proxy did not land on the address the market was wired against
     error KERNEL_PROXY_ADDRESS_MISMATCH(address expected, address deployed);
+
     /// @notice Thrown when the created Balancer pool is not a fresh, unseeded, hookless `{ST_share, quote}` pool
     error INVALID_POOL_CONFIGURATION(address pool);
+
     /// @notice Thrown when a construction parameter is the null address
     error NULL_CONSTRUCTION_PARAMETER();
+
     /// @notice Thrown when a junior and a liquidity provider yield distribution model share an instance, which the accountant rejects
     error YIELD_DISTRIBUTION_MODELS_NOT_DISTINCT();
+
     /// @notice Thrown when a market selects a yield distribution model shape this template has no instances for
     error YDM_NOT_REGISTERED(string ydmType);
+
     /// @notice Thrown when registering a model shape under an empty name
     error INVALID_YDM_TYPE();
+
     /// @notice Thrown when a market is deployed without genesis pool liquidity
     error POOL_SEED_REQUIRED();
+
     /// @notice Thrown when the genesis deposit mints too few shares to cover the dead-share lock
     error INSUFFICIENT_GENESIS_SHARES(uint256 shares);
 
@@ -213,6 +220,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @param lptYdm The liquidity provider tranche's model instance for this shape
      */
     event YieldDistributionModelsRegistered(string ydmType, address jtYdm, address lptYdm);
+
     /// @notice Thrown when a deployed market contract's on-chain wiring does not match the expected configuration
     error MARKET_WIRING_VERIFICATION_FAILED(address subject);
 

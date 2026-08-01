@@ -78,9 +78,10 @@ abstract contract AccountantTestBase is Test {
         p.lptYieldShareProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
     }
 
-    /// @dev Default init params with two fresh mock YDMs pre-filled (for direct initialize tests)
+    /// @dev Default init params with two fresh mock YDMs and the suite's kernel pre-filled (for direct initialize tests)
     function _paramsWithFreshYDMs() internal returns (IRoycoDayAccountant.RoycoDayAccountantInitParams memory p) {
         p = _defaultParams();
+        p.kernel = address(kernel);
         p.jtYDM = address(new MockRecordingYDM());
         p.lptYDM = address(new MockRecordingYDM());
     }

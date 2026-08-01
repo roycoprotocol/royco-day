@@ -92,8 +92,8 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         uint256 shares = bound(_sharesSeed, 1e6, st); // dust-to-full-exit slices, small slices exercise the zero-bonus floor path
         // The base slice floors over the EFFECTIVE senior supply (st + VIRTUAL_SHARES): _scaleAssetClaims runs BEFORE the
         // self-liquidation bonus is layered on (see src RedemptionLogic.stRedeem), so userClaimNAV is this offset-scaled slice
-        uint256 baseNav = (st + 1).mulDiv(shares, st + 1e6);
-        uint256 baseCollateralAssets = totalClaimAssets.mulDiv(shares, st + 1e6);
+        uint256 baseNav = (st + 1).mulDiv(shares, st + 1);
+        uint256 baseCollateralAssets = totalClaimAssets.mulDiv(shares, st + 1);
         assertEq(kernel.getState().stSelfLiquidationBonusWAD, CONFIGURED_BONUS_WAD, "the deployed bonus config must match the pinned 1% rate");
         RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs memory bonusIn = RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs({
             stEffectiveNAV: st,
@@ -197,12 +197,12 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         assertEq(toUint256(state.jtEffectiveNAV), jtEffHand, "the junior buffer must equal the conservation-derived mark");
 
         // The redeemer's base slice, pro-rata over the still-whole senior effective NAV. _scaleAssetClaims floors over
-        // the EFFECTIVE supply (st + VIRTUAL_SHARES), so the slice is floor(st x shares / (st + 1e6)) rather than shares 1:1;
+        // the EFFECTIVE supply (st + VIRTUAL_SHARES), so the slice is floor(st x shares / (st + 1)) rather than shares 1:1;
         // the bonus is applied AFTER this scaling, so this offset-scaled nav is the bonus's userClaimNAV. The collateral
         // leg is the tranche's single claim conversion floor(st x 1e18 / rate) scaled by the same slice
         uint256 shares = bound(_sharesSeed, 1e6, st); // dust-to-full-exit slices, small slices exercise the floor paths
-        uint256 baseNav = (st + 1).mulDiv(shares, st + 1e6);
-        uint256 baseCollateralAssets = st.mulDiv(1e18, rate).mulDiv(shares, st + 1e6);
+        uint256 baseNav = (st + 1).mulDiv(shares, st + 1);
+        uint256 baseCollateralAssets = st.mulDiv(1e18, rate).mulDiv(shares, st + 1);
 
         // The exact bonus the stack must pay: min(desired, junior buffer, utilization-neutral max), mirrored
         // with the fuzzed near-WAD config in place of the deployed 1% rate

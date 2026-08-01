@@ -5,6 +5,7 @@ import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contrac
 import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { UpgradeableBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
@@ -290,18 +291,18 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
 
         // THE ASSET SWAP: the senior and junior tranches hold the hookable plain ERC20 itself, so a redemption's
         // payout transfer executes receiver code exactly where a callback-bearing production asset would
-        RoycoSeniorTranche stImpl = new RoycoSeniorTranche();
-        RoycoJuniorTranche jtImpl = new RoycoJuniorTranche();
-        RoycoLiquidityProviderTranche lptImpl = new RoycoLiquidityProviderTranche();
+        UpgradeableBeacon stSwapBeacon = new UpgradeableBeacon(address(new RoycoSeniorTranche()), address(accessManager));
+        UpgradeableBeacon jtSwapBeacon = new UpgradeableBeacon(address(new RoycoJuniorTranche()), address(accessManager));
+        UpgradeableBeacon lptSwapBeacon = new UpgradeableBeacon(address(new RoycoLiquidityProviderTranche()), address(accessManager));
         RoycoDayAccountant accImpl = new RoycoDayAccountant();
 
         // Tranche and accountant proxies must exist before the kernel (its initializer reads each tranche's asset)
         seniorTranche =
-            RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST", predictedKernel, address(stJtUnderlying)));
+            RoycoSeniorTranche(_deployTrancheProxy(address(stSwapBeacon), "Royco Senior Tranche", "RST", predictedKernel, address(stJtUnderlying)));
         juniorTranche =
-            RoycoJuniorTranche(_deployTrancheProxy(address(jtImpl), "Royco Junior Tranche", "RJT", predictedKernel, address(stJtUnderlying)));
+            RoycoJuniorTranche(_deployTrancheProxy(address(jtSwapBeacon), "Royco Junior Tranche", "RJT", predictedKernel, address(stJtUnderlying)));
         liquidityProviderTranche = RoycoLiquidityProviderTranche(
-            _deployTrancheProxy(address(lptImpl), "Royco Liquidity Provider Tranche", "RLT", predictedKernel, address(bpt))
+            _deployTrancheProxy(address(lptSwapBeacon), "Royco Liquidity Provider Tranche", "RLT", predictedKernel, address(bpt))
         );
         accountant = RoycoDayAccountant(
             address(
@@ -314,11 +315,10 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
 
         // Register the pool before kernel impl construction (the liquidity venue constructor validates the registration),
         // sorted ascending by address exactly as the production vault registers pool tokens
-        bool stSortsFirst = address(seniorTranche) < address(quoteToken);
-        stPoolTokenIndex = stSortsFirst ? 0 : 1;
-        IERC20[2] memory poolTokens =
-            stSortsFirst ? [IERC20(address(seniorTranche)), IERC20(address(quoteToken))] : [IERC20(address(quoteToken)), IERC20(address(seniorTranche))];
-        balancerVault.registerPool(address(bpt), poolTokens);
+        // The venue requires tokens[0] == seniorTranche and tokens[1] == quoteAsset structurally, the ordering the
+        // factory template guarantees in production by mining the market id, so the fixture registers it directly
+        stPoolTokenIndex = 0;
+        balancerVault.registerPool(address(bpt), [IERC20(address(seniorTranche)), IERC20(address(quoteToken))]);
         _initializePoolMinimumSupply();
 
         // The shipped kernel impl over the plain asset (the oracle above carries the whole collateral pricing swap)

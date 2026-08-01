@@ -130,7 +130,7 @@ library BalancerV3LiquidityVenueLogic {
      * @param _quoteAssetsReceiver The recipient of the quote assets withdrawn
      * @return stShares The senior tranche shares withdrawn back to this kernel by the unwrap
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
-     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the mark a caller's preview caches for the operation
+     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, produced only for a preview to cache for the operation (zero when settling)
      */
     function removeBalancerV3Liquidity(
         IRoycoDayKernel.RoycoDayKernelState storage $_kernel,
@@ -166,7 +166,7 @@ library BalancerV3LiquidityVenueLogic {
         quoteAssets = amountsOut[QUOTE_ASSET_POOL_INDEX];
 
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement
-        // The post-add price is produced only here: the preview's unwind discards the post-add pool state, so this frame is the only place to capture its mark
+        // The post-remove price is produced only here: the preview's unwind discards the post-remove pool state, so this frame is the only place to capture its mark
         if (_mode == DispatchMode.SIMULATE) {
             revert DispatchLogic.SIMULATION_RESULT(abi.encode(stShares, quoteAssets, IRoycoDayKernel(address(this)).queryLPTAssetOracle()));
         }

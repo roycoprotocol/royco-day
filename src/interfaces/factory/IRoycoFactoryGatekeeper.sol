@@ -10,19 +10,25 @@ pragma solidity ^0.8.28;
 interface IRoycoFactoryGatekeeper {
     /// @notice Emitted when a target is configured through the gatekeeper
     event FreshTargetConfigured(address indexed target, uint256 selectorCount);
+
     /// @notice Emitted when a market deployment's role grants are applied
     event MarketRolesGranted(uint256 grantCount);
 
     /// @notice Thrown when any caller other than the factory invokes the gatekeeper
     error ONLY_FACTORY();
+
     /// @notice Thrown when the target already carries configuration and so may never be configured by a deployment
     error TARGET_ALREADY_CONFIGURED(address target);
+
     /// @notice Thrown when the target is the access manager, the factory, or the gatekeeper itself
     error TARGET_FORBIDDEN(address target);
+
     /// @notice Thrown when a market deployment tries to grant a role outside the two it legitimately mints
     error ROLE_FORBIDDEN(uint64 roleId);
+
     /// @notice Thrown when the selector and role arrays differ in length
     error LENGTH_MISMATCH();
+
     /// @notice Thrown when a constructor argument is the zero address
     error NULL_ADDRESS();
 
