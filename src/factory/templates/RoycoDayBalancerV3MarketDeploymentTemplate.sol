@@ -441,6 +441,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     /**
      * @notice Seeds the market's pool with its genesis liquidity through the liquidity provider tranche's multi-asset deposit
      * @dev The funder must have approved this template for both legs, and receives the genesis shares
+     * @dev The quote leg is mandatory; the collateral leg is optional
      * @param _p The market's params, carrying the funder, the amounts, and the slippage bound
      * @param _liquidityProviderTranche The market's liquidity provider tranche
      */

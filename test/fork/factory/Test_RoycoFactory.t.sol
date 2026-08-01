@@ -162,13 +162,20 @@ contract Test_RoycoFactory is Test {
         factory.registerTemplate(address(template));
     }
 
-    /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold the quote and
-    ///      have approved the template before `executeMarketDeployment`. Points the seed at a test-controlled funder
+    /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold each seed leg and
+    ///      have approved the template before `executeMarketDeployment`. Points the seed at a test-controlled funder.
+    ///      The collateral leg is optional, so it is funded only when the config asks for it
     function _fundPoolSeed(MarketConfig memory _cfg) internal {
         _cfg.poolInitialization.funder = POOL_SEED_FUNDER;
-        deal(_cfg.gyroECLPPoolParams.quoteAsset, POOL_SEED_FUNDER, _cfg.poolInitialization.quoteAmount);
+        _fundSeedLeg(_cfg.gyroECLPPoolParams.quoteAsset, _cfg.poolInitialization.quoteAmount);
+        if (_cfg.poolInitialization.collateralAmount != 0) _fundSeedLeg(_cfg.collateralAsset, _cfg.poolInitialization.collateralAmount);
+    }
+
+    /// @dev Deals one seed leg to the funder and approves the template to pull it
+    function _fundSeedLeg(address _asset, uint256 _amount) internal {
+        deal(_asset, POOL_SEED_FUNDER, _amount);
         vm.prank(POOL_SEED_FUNDER);
-        IERC20(_cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
+        IERC20(_asset).approve(address(template), _amount);
     }
 
 
@@ -199,6 +206,33 @@ contract Test_RoycoFactory is Test {
         bytes memory p = _encodedParams(_marketId);
         vm.prank(DEPLOYER);
         return factory.executeMarketDeployment(address(template), p);
+    }
+
+    /// The genesis seed's collateral leg is optional. When the config asks for one, the multi-asset deposit mints it
+    /// into senior shares, so the pool opens with depth on BOTH legs rather than quote alone.
+    /// @dev The market must set `minCoverageWAD` to zero for this to be reachable: the seed is the market's FIRST
+    ///      deposit, so the junior tranche is still empty and any senior mint under a nonzero coverage floor takes
+    ///      coverage utilization above WAD and reverts `COVERAGE_REQUIREMENT_VIOLATED` inside the deployment
+    function test_ExecuteMarketDeployment_SeedsBothPoolLegsWhenCollateralIsConfigured() external {
+        _register();
+
+        MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
+        cfg.minCoverageWAD = 0;
+        cfg.poolInitialization.collateralAmount = 10_000e18;
+        _fundPoolSeed(cfg);
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT, address(0)));
+
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
+
+        IVault vault = IVault(address(GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY).getVault()));
+        (,, uint256[] memory balances,) = vault.getPoolTokenInfo(IRoycoDayKernel(r.kernel).lptAsset());
+        assertGt(balances[0], 0, "senior leg opened with no genesis depth");
+        assertGt(balances[1], 0, "quote leg opened with no genesis depth");
+        // The collateral leg is the only source of senior shares here, and the funder receives the genesis LP shares
+        assertGt(IERC20(r.seniorTranche).totalSupply(), 0, "collateral leg minted no senior shares");
+        assertGt(IERC20(r.liquidityProviderTranche).balanceOf(POOL_SEED_FUNDER), 0, "funder holds no genesis liquidity shares");
     }
 
     /// The single wiring transaction must fit under EIP-7825's per-transaction gas cap (the reason the deployment
