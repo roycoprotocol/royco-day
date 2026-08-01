@@ -17,13 +17,12 @@ import {
 } from "../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { UUPSUpgradeable } from "../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { AccessManager } from "../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
+import { BeaconProxy } from "../lib/openzeppelin-contracts/contracts/proxy/beacon/BeaconProxy.sol";
+import { UpgradeableBeacon } from "../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { IERC20 } from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoMarketSyncer } from "../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { RoycoDayAccountant } from "../src/accountant/RoycoDayAccountant.sol";
 import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
-import { BeaconProxy } from "../lib/openzeppelin-contracts/contracts/proxy/beacon/BeaconProxy.sol";
-import { UpgradeableBeacon } from "../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
-import { IRoycoAccessManager } from "../src/interfaces/factory/IRoycoAccessManager.sol";
 import { RoycoDayEntryPoint } from "../src/entrypoint/RoycoDayEntryPoint.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -77,11 +76,12 @@ import { IRoycoDayEntryPoint } from "../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
+import { IRoycoAccessManager } from "../src/interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { RoycoDayBalancerV3Kernel } from "../src/kernels/RoycoDayBalancerV3Kernel.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
-import { BalancerV3PoolCreationParams } from "../src/libraries/logic/MarketVenueLogic.sol";
+import { BalancerV3PoolCreationParams } from "../src/libraries/logic/liquidity-venue/BalancerV3VenueCreationLogic.sol";
 import { ChainlinkPriceOracle } from "../src/oracle/ChainlinkPriceOracle.sol";
 import { ERC4626SharePriceOracle } from "../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../src/oracle/IdleCDOTranchePriceOracle.sol";
@@ -617,13 +617,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         _logSection("Chain-wide implementations, beacons, and yield distribution models");
         bool existed;
 
-        cp.seniorTrancheBeacon =
-            _deployBeacon("SeniorTranche", _singletonSalt("ROYCO_SENIOR_TRANCHE"), type(RoycoSeniorTranche).creationCode, _authority);
-        cp.juniorTrancheBeacon =
-            _deployBeacon("JuniorTranche", _singletonSalt("ROYCO_JUNIOR_TRANCHE"), type(RoycoJuniorTranche).creationCode, _authority);
-        cp.liquidityProviderTrancheBeacon = _deployBeacon(
-            "LPTranche    ", _singletonSalt("ROYCO_LIQUIDITY_PROVIDER_TRANCHE"), type(RoycoLiquidityProviderTranche).creationCode, _authority
-        );
+        cp.seniorTrancheBeacon = _deployBeacon("SeniorTranche", _singletonSalt("ROYCO_SENIOR_TRANCHE"), type(RoycoSeniorTranche).creationCode, _authority);
+        cp.juniorTrancheBeacon = _deployBeacon("JuniorTranche", _singletonSalt("ROYCO_JUNIOR_TRANCHE"), type(RoycoJuniorTranche).creationCode, _authority);
+        cp.liquidityProviderTrancheBeacon =
+            _deployBeacon("LPTranche    ", _singletonSalt("ROYCO_LIQUIDITY_PROVIDER_TRANCHE"), type(RoycoLiquidityProviderTranche).creationCode, _authority);
         cp.accountantBeacon = _deployBeacon("Accountant   ", _singletonSalt("ROYCO_ACCOUNTANT"), type(RoycoDayAccountant).creationCode, _authority);
 
         // The kernel implementation's only construction input is the chain's Balancer Vault, which is not market-specific
@@ -859,13 +856,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     ///      access manager records every configured target and the gatekeeper rejects reconfiguring one
     function _bindBeaconUpgradeRoles(AccessManager _accessManager, address _template) internal {
         RoycoDayBalancerV3MarketDeploymentTemplate t = RoycoDayBalancerV3MarketDeploymentTemplate(_template);
-        address[5] memory beacons = [
-            t.SENIOR_TRANCHE_BEACON(),
-            t.JUNIOR_TRANCHE_BEACON(),
-            t.LIQUIDITY_PROVIDER_TRANCHE_BEACON(),
-            t.KERNEL_BEACON(),
-            t.ACCOUNTANT_BEACON()
-        ];
+        address[5] memory beacons =
+            [t.SENIOR_TRANCHE_BEACON(), t.JUNIOR_TRANCHE_BEACON(), t.LIQUIDITY_PROVIDER_TRANCHE_BEACON(), t.KERNEL_BEACON(), t.ACCOUNTANT_BEACON()];
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = UpgradeableBeacon.upgradeTo.selector;
         for (uint256 i; i < beacons.length; ++i) {
@@ -943,9 +935,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
         bool existed;
         (oracle, existed) = deployWithSanityChecks(
-            _marketScopedSalt(_marketId, "COLLATERAL_ASSET_ORACLE"),
-            abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(beacon, initData)),
-            false
+            _marketScopedSalt(_marketId, "COLLATERAL_ASSET_ORACLE"), abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(beacon, initData)), false
         );
         _logDeploy("CollateralAssetOracle  ", oracle, existed);
     }

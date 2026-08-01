@@ -29,7 +29,6 @@ interface IRoycoFactory {
     /// @notice Emitted when a market deployment completes
     event MarketDeploymentCompleted(address indexed template, address indexed deployer, IRoycoProtocolTemplate.DeploymentResult result);
 
-
     /// @notice Thrown when a factory primitive is called by anything other than the active template
     error ONLY_ACTIVE_TEMPLATE();
 
@@ -53,7 +52,6 @@ interface IRoycoFactory {
 
     /// @notice Thrown when the template's bound factory is not this factory
     error TEMPLATE_BOUND_TO_DIFFERENT_FACTORY();
-
 
     /// @notice Thrown when deploying via a template that is not enabled
     error TEMPLATE_NOT_ENABLED();

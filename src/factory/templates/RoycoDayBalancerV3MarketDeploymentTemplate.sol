@@ -21,7 +21,7 @@ import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolT
 import { RoycoDayBalancerV3Kernel } from "../../kernels/RoycoDayBalancerV3Kernel.sol";
 import { BalancerV3LiquidityVenue } from "../../kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { TrancheType } from "../../libraries/Types.sol";
-import { BalancerV3PoolCreationParams, MarketVenueLogic } from "../../libraries/logic/MarketVenueLogic.sol";
+import { BalancerV3PoolCreationParams, BalancerV3VenueCreationLogic } from "../../libraries/logic/liquidity-venue/BalancerV3VenueCreationLogic.sol";
 import { RoycoLiquidityProviderTranche } from "../../tranches/RoycoLiquidityProviderTranche.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -238,9 +238,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     {
         require(
             address(_params.balancerV3PoolFactory) != address(0) && address(_params.eclpLPOracleFactory) != address(0)
-                && _params.bptOracleConstantPriceFeed != address(0) && _params.seniorTrancheBeacon != address(0)
-                && _params.juniorTrancheBeacon != address(0) && _params.liquidityProviderTrancheBeacon != address(0)
-                && _params.kernelBeacon != address(0) && _params.accountantBeacon != address(0),
+                && _params.bptOracleConstantPriceFeed != address(0) && _params.seniorTrancheBeacon != address(0) && _params.juniorTrancheBeacon != address(0)
+                && _params.liquidityProviderTrancheBeacon != address(0) && _params.kernelBeacon != address(0) && _params.accountantBeacon != address(0),
             NULL_CONSTRUCTION_PARAMETER()
         );
 
@@ -344,7 +343,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         );
 
         // Deploy the Balancer V3 pool and BPT oracle for the LP tranche.
-        (address balancerPool, address bptOracle) = MarketVenueLogic.createPoolAndBPTOracle(
+        (address balancerPool, address bptOracle) = BalancerV3VenueCreationLogic.createPoolAndBPTOracle(
             BALANCER_V3_POOL_FACTORY,
             ECLP_LP_ORACLE_FACTORY,
             BPT_ORACLE_CONSTANT_PRICE_FEED,
@@ -363,9 +362,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
         // Deploy the liquidity provider tranche.
         result.liquidityProviderTranche = _deployProxy(
-            LIQUIDITY_PROVIDER_TRANCHE_BEACON,
-            _encodeTrancheInitData(p.lptTranche, kernel, balancerPool),
-            _marketComponentSalt(p.marketId, TAG_LPT_PROXY)
+            LIQUIDITY_PROVIDER_TRANCHE_BEACON, _encodeTrancheInitData(p.lptTranche, kernel, balancerPool), _marketComponentSalt(p.marketId, TAG_LPT_PROXY)
         );
 
         // Deploy the accountant.

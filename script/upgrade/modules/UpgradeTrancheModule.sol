@@ -60,8 +60,7 @@ contract UpgradeTrancheModule is UpgradeModuleBase {
             (proxy, beacon, creationCode) = (addrs.juniorTranche, beacons.juniorTranche, type(RoycoJuniorTranche).creationCode);
             (salt, prefix) = (keccak256(abi.encodePacked("ROYCO_JT_TRANCHE_IMPLEMENTATION_", _saltVersion)), "JT/");
         } else {
-            (proxy, beacon, creationCode) =
-                (addrs.liquidityProviderTranche, beacons.liquidityProviderTranche, type(RoycoLiquidityProviderTranche).creationCode);
+            (proxy, beacon, creationCode) = (addrs.liquidityProviderTranche, beacons.liquidityProviderTranche, type(RoycoLiquidityProviderTranche).creationCode);
             (salt, prefix) = (keccak256(abi.encodePacked("ROYCO_LPT_TRANCHE_IMPLEMENTATION_", _saltVersion)), "LPT/");
         }
 

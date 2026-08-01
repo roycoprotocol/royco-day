@@ -6,8 +6,8 @@ import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts/contracts/p
 import { console2 } from "lib/forge-std/src/console2.sol";
 
 import { IBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/IBeacon.sol";
-import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { UpgradeableBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AccessManagerConfigUtils } from "../../utils/AccessManagerConfigUtils.sol";
 import { Create2DeployUtils } from "../../utils/Create2DeployUtils.sol";
