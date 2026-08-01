@@ -24,7 +24,7 @@ library FeeAndLiquidityPremiumLogic {
      * @dev The premium and ST protocol fee are priced jointly against the pre-sync senior supply, so neither dilutes the other
      * @dev The LPT protocol fee is carved out of the liquidity premium and remitted as senior shares to the protocol, so the LPT receives the premium net of the fee and no LPT shares are minted
      * @dev The minted premium accumulates as idle senior shares and are not reinvested here
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _state The synced accounting state whose accrued liquidity premium and protocol fees are minted
      */
     function _processFeesAndLiquidityPremium(IRoycoDayKernel.RoycoDayKernelState storage $, SyncedAccountingState memory _state) internal {

@@ -18,7 +18,7 @@ library ValuationLogic {
 
     /**
      * @notice Returns the mark-to-market value of the coinvested collateral backing the senior and junior tranches, denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @return collateralNAV The pure value of the held collateral assets
      */
     function _getCollateralNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT collateralNAV) {
@@ -31,7 +31,7 @@ library ValuationLogic {
 
     /**
      * @notice Returns the raw net asset value of the liquidity provider tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @return lptRawNAV The pure net asset value of the liquidity provider tranche invested assets
      */
     function _getLiquidityProviderTrancheRawNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT lptRawNAV) {
@@ -50,7 +50,7 @@ library ValuationLogic {
      *      The preview path uses the overload below to inject the post-mint count that storage does not yet reflect
      * @dev The senior NAV and share supply must be mutually consistent: the post-sync effective NAV against the
      *      post-carve-out-mint total supply, so the held senior shares are valued at the correct NAV per share
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stEffectiveNAV The senior tranche's post-sync effective NAV: the total NAV backing all senior shares after reconciling unrealized PnL
      * @param _totalSeniorTrancheShares The total senior tranche shares outstanding after minting the premium and protocol fee shares
      * @return lptEffectiveNAV The effective net asset value of the liquidity provider tranche
@@ -72,7 +72,7 @@ library ValuationLogic {
      * @notice Returns the effective net asset value of the liquidity provider tranche for an explicitly supplied held senior-share count
      * @dev The preview path supplies the post-mint held-share count (current storage plus this sync's premium shares) before the
      *      premium mint commits it to storage, so the previewed LPT effective NAV matches the value execution computes from storage
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stEffectiveNAV The senior tranche's post-sync effective NAV: the total NAV backing all senior shares after reconciling unrealized PnL
      * @param _totalSeniorTrancheShares The total senior tranche shares outstanding after minting the premium and protocol fee shares
      * @param _lptOwnedSeniorTrancheShares The senior tranche shares held by the liquidity provider tranche from accumulated liquidity premium payments

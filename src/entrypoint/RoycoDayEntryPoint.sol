@@ -97,10 +97,8 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
         _enforceNotBlacklisted(config.kernel, msg.sender, _receiver);
 
-        // Poke the market's collateral asset oracle to refresh it
-        _pokeOracle(_tranche, config);
-
         // Sync the market before the request is registered, the reference below prices against this one accounting state
+        // The sync pokes the collateral asset oracle as its first action, so the request registers against a fresh mark or reverts on a circuit-broken oracle
         (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(config.kernel).syncTrancheAccountingFor(config.trancheType);
 
         // Resolve the request's executable and expiry timestamps: the expiry is a saturating add, so a maximal window
@@ -177,7 +175,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
         _validateRequestExecution(_requestNonce, request.baseRequest, config);
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
-        // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request (the tranche deposit below screens the receiver)
+        // Screen the executor and request owner through the market's kernel so a flagged party can never operate the request (the tranche deposit below screens the receiver)
         _enforceNotBlacklisted(config.kernel, msg.sender, _user);
 
         // Sync the market before the deposit is executed
@@ -275,10 +273,8 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
         // The senior and junior tranches must redeem in-kind
         require(_mode == RedemptionMode.INKIND || config.trancheType == TrancheType.LIQUIDITY_PROVIDER, UNSUPPORTED_REDEMPTION_MODE());
 
-        // Poke the market's collateral asset oracle to refresh it
-        _pokeOracle(_tranche, config);
-
         // Sync the market before the request is registered, the reference below prices against this one accounting state
+        // The sync pokes the collateral asset oracle as its first action, so the request registers against a fresh mark or reverts on a circuit-broken oracle
         (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(config.kernel).syncTrancheAccountingFor(config.trancheType);
 
         // Resolve the request's executable and expiry timestamps: the expiry is a saturating add, so a maximal window
@@ -357,8 +353,8 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
         _validateRequestExecution(_requestNonce, request.baseRequest, config);
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
-        // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request
-        _enforceNotBlacklisted(config.kernel, msg.sender, _user);
+        // Screen the executor, request owner, and receiver through the market's kernel so a flagged party can never operate the request or receive its proceeds
+        _enforceNotBlacklisted(config.kernel, msg.sender, _user, request.baseRequest.receiver);
 
         // Sync the market before the redemption is executed, the execution-time value below is measured against this one accounting state
         (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(config.kernel).syncTrancheAccountingFor(config.trancheType);
@@ -414,9 +410,8 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
         // Else, if this is a third party execution, withdraw the assets, forfeit the value accrued during the queue as protocol fees, and remit the executor bonus
         else {
             // Ensure that the user has opted into third party execution
+            // The receiver was screened at the execution entry above, covering the remittance legs below that settle outside the kernel's screened flows
             require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
-            // Screen the receiver against the market's blacklist, the asset and quote remittance legs below settle outside the kernel's screened flows (the self path's redemption screens the receiver)
-            IRoycoDayKernel(config.kernel).enforceNotBlacklisted(request.baseRequest.receiver);
 
             // Redeem shares to this contract for bonus calculation, forfeiting the value accrued during the queue as protocol fees
             (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) = _redeemWithValueForfeiture(
@@ -549,7 +544,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
         DepositRequest memory request = $.userToNonceToDepositRequest[msg.sender][_requestNonce];
         require(request.assets != ZERO_TRANCHE_UNITS, INVALID_REQUEST(_requestNonce));
-        // Screen the canceller and receiver against the market's blacklist, the returned escrow settles outside the kernel's screened flows
+        // Screen the canceller and receiver through the market's kernel, the returned escrow settles outside the kernel's screened flows
         _enforceNotBlacklisted($.trancheToConfig[request.baseRequest.tranche].kernel, msg.sender, _receiver);
 
         // Mark the request as cancelled
@@ -574,7 +569,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
         RedemptionRequest memory request = $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
         require(request.shares != 0, INVALID_REQUEST(_requestNonce));
-        // Screen the canceller and receiver against the market's blacklist, the share escrow return below only screens the receiver through the kernel's balance update hook
+        // Screen the canceller and receiver through the market's kernel, the share escrow return below only screens the receiver through the kernel's balance update hook
         _enforceNotBlacklisted($.trancheToConfig[request.baseRequest.tranche].kernel, msg.sender, _receiver);
 
         // Mark the request as cancelled
@@ -864,8 +859,8 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
     }
 
     /**
-     * @dev Batch-screens two accounts against the market's blacklist through the tranche's kernel
-     * @param _kernel The kernel of the market that the tranche belongs to, consulted for the market's configured blacklist
+     * @dev Batch-screens two accounts against the market's blacklist
+     * @param _kernel The kernel routing to the market's configured blacklist, never itself screened
      * @param _account0 The address of the first account to screen
      * @param _account1 The address of the second account to screen
      */
@@ -873,6 +868,21 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
         address[] memory accountsToScreen = new address[](2);
         accountsToScreen[0] = _account0;
         accountsToScreen[1] = _account1;
+        IRoycoDayKernel(_kernel).enforceNotBlacklisted(accountsToScreen);
+    }
+
+    /**
+     * @dev Batch-screens three accounts against the market's blacklist
+     * @param _kernel The kernel routing to the market's configured blacklist, never itself screened
+     * @param _account0 The address of the first account to screen
+     * @param _account1 The address of the second account to screen
+     * @param _account2 The address of the third account to screen
+     */
+    function _enforceNotBlacklisted(address _kernel, address _account0, address _account1, address _account2) internal view {
+        address[] memory accountsToScreen = new address[](3);
+        accountsToScreen[0] = _account0;
+        accountsToScreen[1] = _account1;
+        accountsToScreen[2] = _account2;
         IRoycoDayKernel(_kernel).enforceNotBlacklisted(accountsToScreen);
     }
 

@@ -28,7 +28,7 @@ library BalancerV3LiquidityVenueLogic {
     using SafeERC20 for IERC20;
     using DispatchLogic for address;
 
-    /// @dev The pool token indexes are a venue-initialization invariant: the ST share is always token0 and the quote asset token1
+    /// @dev The pool token indexes are a venue-initialization invariant
     uint256 internal constant ST_SHARE_POOL_INDEX = 0;
     uint256 internal constant QUOTE_ASSET_POOL_INDEX = 1;
 
@@ -37,7 +37,7 @@ library BalancerV3LiquidityVenueLogic {
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel supplies the senior tranche shares and quote assets it already holds and receives the minted BPT for the liquidity provider tranche
-     * @param $_kernel The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $_kernel The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _vault The Balancer V3 Vault, a kernel implementation immutable a delegatecalled library cannot read, so it crosses the boundary as a parameter
      * @param _mode The dispatch mode: SIMULATE computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling, EXECUTE settles
      * @param _seniorShares The exact amount of senior tranche shares to add into the pool from this kernel's balance
@@ -121,7 +121,7 @@ library BalancerV3LiquidityVenueLogic {
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel receives any ST shares withdrawn and is responsible for converting them to the base assets before remitting them to the user
-     * @param $_kernel The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $_kernel The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _vault The Balancer V3 Vault, a kernel implementation immutable a delegatecalled library cannot read, so it crosses the boundary as a parameter
      * @param _mode The dispatch mode: SIMULATE computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling, EXECUTE settles
      * @param _lptAssets The exact BPT amount (LPT assets) to burn from this kernel's balance
@@ -181,7 +181,7 @@ library BalancerV3LiquidityVenueLogic {
     /**
      * @notice Attempts to reinvest the liquidity provider tranche's idle liquidity-premium senior shares into its market-making inventory
      * @dev Tolerates reversions gracefully so it is non-blocking for the tranche operation that invokes it
-     * @param $_kernel The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $_kernel The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _vault The Balancer V3 Vault, a kernel implementation immutable a delegatecalled library cannot read, so it crosses the boundary as a parameter
      * @param _maxReinvestmentSlippageWAD The maximum slippage tolerated on the single-sided reinvestment, scaled to WAD precision
      * @param _stSharesToReinvest The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance

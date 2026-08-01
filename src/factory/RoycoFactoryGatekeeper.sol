@@ -48,11 +48,8 @@ contract RoycoFactoryGatekeeper is IRoycoFactoryGatekeeper {
     {
         require(_selectors.length == _roleIds.length, LENGTH_MISMATCH());
 
-        // The protocol's own contracts are never legitimate deployment targets
-        require(_target != ROYCO_ACCESS_MANAGER && _target != ROYCO_FACTORY && _target != address(this), TARGET_FORBIDDEN(_target));
-
-        // A target may be configured exactly once, by the deployment that created it
-        require(!IRoycoAccessManager(ROYCO_ACCESS_MANAGER).wasEverConfigured(_target), TARGET_ALREADY_CONFIGURED(_target));
+        // The protocol's own contracts are never legitimate deployment targets, and a target may be configured exactly once, by the deployment that created it
+        _requireNotConfigured(_target);
 
         // Bind the selectors to the target
         AccessManager am = AccessManager(ROYCO_ACCESS_MANAGER);

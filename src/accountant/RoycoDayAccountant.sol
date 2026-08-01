@@ -119,8 +119,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Set the fields in slot 5 of storage
         $.kernel = _params.kernel;
         $.fixedTermCommenceableAtTimestamp = uint64(block.timestamp + _params.fixedTermGracePeriodSeconds);
-        emit KernelUpdated(_params.kernel);
-        emit FixedTermCommenceableAtTimestampUpdated($.fixedTermCommenceableAtTimestamp);
+        emit FixedTermCommenceableAt($.fixedTermCommenceableAtTimestamp);
 
         // Set the rest of the fields
         $.coverageLiquidationUtilizationWAD = _params.coverageLiquidationUtilizationWAD;

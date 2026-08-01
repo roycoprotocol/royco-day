@@ -24,7 +24,7 @@ library AssetLedgerLogic {
 
     /**
      * @notice Resolves the specified tranche's contract address from the kernel's state
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _trancheType An enumerator indicating which tranche's address to resolve
      * @return The specified tranche's contract address
      */
@@ -36,7 +36,7 @@ library AssetLedgerLogic {
 
     /**
      * @notice Derives the cumulative asset claims that the specified tranche is entitled to
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _trancheType An enumerator indicating which tranche to return cumulative claims for
      * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
      * @return claims The cumulative asset claims that the specified tranche is entitled to
@@ -65,7 +65,7 @@ library AssetLedgerLogic {
 
     /**
      * @notice Credits deposited assets to the specified tranche's ledger
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _trancheType An enumerator indicating which tranche's ledger to credit
      * @param _assets The amount of assets to credit, denominated in the tranche's tranche units
      */
@@ -77,7 +77,7 @@ library AssetLedgerLogic {
 
     /**
      * @notice Debits the specified asset claims from the kernel's tranche ledgers
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _claims The collateral assets, LPT assets, and ST shares to debit from the ledgers
      */
     function _debitAssets(IRoycoDayKernel.RoycoDayKernelState storage $, AssetClaims memory _claims) internal {
@@ -90,7 +90,7 @@ library AssetLedgerLogic {
     /**
      * @notice Remits the specified asset claims to the receiver via direct transfers
      * @dev Holds no accounting effects, callers debit the claims from their ledgers first so the transfers can run last (CEI)
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _claims The collateral assets, LPT assets, and ST shares to transfer to the specified receiver
      * @param _receiver The receiver of the asset claims
      */

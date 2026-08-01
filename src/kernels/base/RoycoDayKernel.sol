@@ -153,7 +153,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withCollateralPriceCached
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
-        return AccountingSyncLogic.preOpSyncTrancheAccounting(_getRoycoDayKernelStorage(), _trancheType);
+        return AccountingSyncLogic.preOpSyncTrancheAccountingFor(_getRoycoDayKernelStorage(), _trancheType);
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -169,7 +169,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         // Simulate the poke first so a circuit-breaking oracle reverts identically to a real operation
         IRoycoPriceOracle($.collateralAssetOracle).previewPoke();
-        return AccountingSyncLogic.previewSyncTrancheAccountingFor($, _trancheType);
+        return AccountingSyncLogic.previewPreOpSyncTrancheAccountingFor($, _trancheType);
     }
 
     /// @inheritdoc IRoycoDayKernel

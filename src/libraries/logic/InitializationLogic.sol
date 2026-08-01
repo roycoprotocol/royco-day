@@ -12,7 +12,7 @@ import { WAD, WAD_DECIMALS } from "../Constants.sol";
 library InitializationLogic {
     /**
      * @notice Validates and persists the market's wiring and configuration into the kernel's state
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _params The standard initialization parameters for the Royco kernel
      */
     function initializeKernel(IRoycoDayKernel.RoycoDayKernelState storage $, IRoycoDayKernel.RoycoDayKernelInitParams memory _params) external {

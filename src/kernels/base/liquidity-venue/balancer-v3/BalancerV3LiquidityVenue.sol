@@ -237,7 +237,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IBalan
     }
 
     // =============================
-    // Balancer V3 Liquidity Position Callback Functions
+    // Balancer V3 Vault Callback Functions
     // =============================
 
     /// @inheritdoc IBalancerV3LiquidityVenue

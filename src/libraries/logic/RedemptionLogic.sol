@@ -39,11 +39,11 @@ library RedemptionLogic {
      * @dev A null owner is a simulation's synthetic owner holding no real shares, so only it skips the burn
      * @dev Redemptions are enabled only in a PERPETUAL market state, the JT redemption granted that the market's coverage requirement
      *      and the LPT redemption granted that the market's liquidity requirement are satisfied post-redemption
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _trancheType An enumerator indicating which tranche to redeem from
      * @param _shares The number of shares to redeem
-     * @param _caller The address that initiated the redemption
+     * @param _caller The address that initiated the redemption, the null address for a composite flow that already screened its caller at the flow entry
      * @param _owner The address whose tranche shares are burned for the redemption, the null address for a simulation's synthetic owner
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
@@ -69,7 +69,7 @@ library RedemptionLogic {
         uint256 totalTrancheShares;
         // Execute an accounting sync to reconcile underlying PNL and read the redeemed tranche's post-mint claims and supply
         SyncedAccountingState memory state;
-        (state, userAssetClaims, totalTrancheShares) = AccountingSyncLogic.preOpSyncTrancheAccounting($, _trancheType);
+        (state, userAssetClaims, totalTrancheShares) = AccountingSyncLogic.preOpSyncTrancheAccountingFor($, _trancheType);
         // Redemptions are disabled during a fixed-term market state
         require(state.marketState == MarketState.PERPETUAL, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
 
@@ -105,10 +105,11 @@ library RedemptionLogic {
      * @notice Atomically exits the liquidity provider tranche to the LPT assets' constituent assets: proportionally removes the LPT-asset slice,
      *         redeems the venue-held senior shares to collateral, and returns (collateral + quote) to the receiver
      * @dev Composes the shared redemption legs: an in-kind LPT redemption to the kernel, the proportional venue removal of the redeemed slice, and a senior redemption of the withdrawn and idle premium shares
+     * @dev Screens the caller, owner, and receiver at the flow entry, so the inner legs pass a null caller and skip re-screening it, covering the venue's direct quote remittance and a skipped senior leg alike
      * @dev Burns the owner's LPT shares after scaling their claims against the pre-burn supply
      * @dev The flow's intermediate legs defer the liquidity requirement to the final leg's settled state, whose unhealed violation the end-of-flow gate reverts on
      * @dev LPT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
      * @param _lptShares The number of LPT shares being redeemed (used to size the proportional LPT-asset slice)
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
@@ -132,13 +133,16 @@ library RedemptionLogic {
         external
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
+        // Screen the redemption's involved accounts against the market's blacklist so no blacklisted account can initiate, source, or receive the redemption
+        BlacklistLogic._enforceNotBlacklisted($, _caller, _owner, _receiver);
+
         // Mark the multi-asset flow, whose exit below judges the liquidity requirement at the flow's final settled state
         AccountingSyncLogic._enterMultiAssetFlow();
 
         // LPT leg: an in-kind LPT redemption of the owner's shares to the kernel itself, leaving the redeemed LPT assets and idle premium senior shares in its custody
         // Its in-flow post-op waives the liquidity requirement the ST leg's post-op enforces on this flow's final settled state
         // All legs run settled in preview and execution alike, this flow's own result revert unwinds them in a preview
-        AssetClaims memory lptAssetClaims = inkindRedeem($, DispatchMode.EXECUTE, TrancheType.LIQUIDITY_PROVIDER, _lptShares, _caller, _owner, address(this));
+        AssetClaims memory lptAssetClaims = inkindRedeem($, DispatchMode.EXECUTE, TrancheType.LIQUIDITY_PROVIDER, _lptShares, address(0), _owner, address(this));
 
         // Remove the redeemed LPT assets from the liquidity venue: the senior shares return to the kernel and the quote goes to the receiver
         // The removal settles in both modes since the kernel custodies the BPT, so the ST leg delivers senior shares even in a preview
@@ -155,7 +159,7 @@ library RedemptionLogic {
         // Its in-flow post-op enforces the liquidity requirement against this flow's final settled state, after the senior unwind shrank the requirement the removal's depth exit raised
         stSharesWithdrawn += lptAssetClaims.stShares;
         if (stSharesWithdrawn != 0) {
-            stClaims = inkindRedeem($, DispatchMode.EXECUTE, TrancheType.SENIOR, stSharesWithdrawn, _caller, address(this), _receiver);
+            stClaims = inkindRedeem($, DispatchMode.EXECUTE, TrancheType.SENIOR, stSharesWithdrawn, address(0), address(this), _receiver);
         }
 
         // Exit the settled multi-asset flow, reverting on a pending liquidity violation its final settled state never healed
@@ -174,7 +178,7 @@ library RedemptionLogic {
      * @dev Redemptions are allowed only in a PERPETUAL market state
      * @dev ST redemptions are otherwise unrestricted: the senior claim never exceeds the collateral NAV under conservation, so its entire effective NAV is withdrawable
      * @dev JT withdrawals are bounded by the market's coverage requirement and LPT withdrawals by its liquidity requirement
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _trancheType An enumerator indicating which tranche to return the max redeemable shares for
      * @param _owner The address that is redeeming the shares
      * @return maxRedeemableShares The maximum number of shares that can be redeemed from the specified tranche
@@ -234,7 +238,7 @@ library RedemptionLogic {
      *      Isolate z: z = (LPT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)) * LPT_RAW_NAV / (LPT_RAW_NAV - (SENIOR_SHARE_REDEMPTION_NAV * MIN_LIQUIDITY))
      *
      * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _owner The address that is redeeming the shares
      * @return maxRedeemableShares The maximum number of shares that can be redeemed multi-asset from the liquidity provider tranche
      */

@@ -40,9 +40,8 @@ struct BalancerV3PoolCreationParams {
 
 /**
  * @title BalancerV3VenueCreationLogic
- * @author Shivaansh Kapoor, Ankur Dubey
- * @notice Creation of a Royco Day market's Balancer V3 liquidity venue: the Gyro E-CLP `{ST share, quote}` pool and
- *         its manipulation-resistant BPT TVL oracle
+ * @author Ankur Dubey, Shivaansh Kapoor
+ * @notice Creation of a Royco Day market's Balancer V3 Gyro E-CLP liquidity venue: the Gyro E-CLP `{ST share, quote}` pool and its manipulation-resistant BPT TVL oracle
  */
 library BalancerV3VenueCreationLogic {
     /// @notice Thrown when the senior tranche share does not sort below the quote asset, so it would not be pool token0
@@ -79,8 +78,8 @@ library BalancerV3VenueCreationLogic {
         external
         returns (address pool, address bptOracle)
     {
-        // Balancer registers a pool's tokens in ascending address order, and the market's whole design assumes the
-        // senior share is token0, so reject any market id that did not mine to that ordering
+        // Balancer registers a pool's tokens in ascending address order
+        // The market's design assumes that the senior share is token0, so reject any market id that did not mine to that ordering
         require(uint160(_seniorTranche) < uint160(_quoteAsset), SENIOR_TRANCHE_NOT_FIRST_POOL_TOKEN(_seniorTranche, _quoteAsset));
 
         BalancerV3TokenConfig[] memory tokens = new BalancerV3TokenConfig[](2);
