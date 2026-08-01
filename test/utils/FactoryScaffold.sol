@@ -70,9 +70,8 @@ library FactoryScaffold {
 
     /// @notice Mirrors `Deploy.s.sol._wireFactoryRoles`: the factory's own selector bindings plus its narrow role set
     function wireFactoryRoles(RoycoAccessManager _accessManager, address _factory) internal {
-        bytes4[] memory deployerSelectors = new bytes4[](2);
+        bytes4[] memory deployerSelectors = new bytes4[](1);
         deployerSelectors[0] = IRoycoFactory.executeMarketDeployment.selector;
-        deployerSelectors[1] = IRoycoFactory.deployDeterministicProxy.selector;
         _accessManager.setTargetFunctionRole(_factory, deployerSelectors, DEPLOYER_ROLE);
 
         bytes4[] memory adminFactorySelectors = new bytes4[](2);

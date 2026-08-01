@@ -53,9 +53,10 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
         IRoycoDayKernel k = IRoycoDayKernel(kernel);
         a.previewSyncTrancheAccounting(k.convertCollateralAssetsToValue(k.getState().totalCollateralAssets));
 
-        address oldImpl = _readImplementation(proxy);
+        address beacon = getComponentBeacons(_chainId).accountant;
+        address oldImpl = _readBeaconImplementation(beacon);
 
-        bytes memory creationCode = abi.encodePacked(type(RoycoDayAccountant).creationCode, abi.encode(kernel));
+        bytes memory creationCode = type(RoycoDayAccountant).creationCode;
         bytes32 salt = keccak256(abi.encodePacked("ROYCO_ACCOUNTANT_IMPLEMENTATION_", _saltVersion));
 
         address newImpl = _predictImpl(salt, creationCode);
@@ -64,15 +65,15 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
         string memory label = string.concat("Accountant/", marketName);
 
         prepared = PreparedUpgrade({
-            proxy: proxy,
+            beacon: beacon,
             oldImpl: oldImpl,
             newImpl: newImpl,
             implSalt: salt,
             implCreationCode: creationCode,
             call: UpgradeCall({
                 marketName: marketName,
-                target: proxy,
-                callData: _buildUpgradeCallData(newImpl),
+                target: beacon,
+                callData: _buildBeaconUpgradeCallData(newImpl),
                 description: string.concat("Upgrade ", label, " implementation to ", vm.toString(newImpl))
             }),
             label: label

@@ -128,11 +128,11 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
     // DEPLOYMENT HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys an ERC1967 proxy pointing at `_impl` with `_initData`, via the factory's active-template primitive
+    /// @notice Deploys a beacon proxy reading from `_beacon` with `_initData`, via the factory's active-template primitive
     /// @dev Reverts if a contract already exists at the CREATE3 address, every market proxy must be a fresh deployment
-    function _deployProxy(address _impl, bytes memory _initData, bytes32 _salt) internal returns (address proxy) {
+    function _deployProxy(address _beacon, bytes memory _initData, bytes32 _salt) internal returns (address proxy) {
         bool alreadyDeployed;
-        (proxy, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicProxyFromTemplate(_impl, _initData, _salt);
+        (proxy, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicProxyFromTemplate(_beacon, _initData, _salt);
         require(!alreadyDeployed, MARKET_COMPONENT_ALREADY_DEPLOYED(proxy, _salt));
     }
 

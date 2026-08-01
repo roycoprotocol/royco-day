@@ -670,23 +670,7 @@ contract Test_RoycoFactory is Test {
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
         factory.executeAsFactory(address(this), "");
 
-        // `deployDeterministicProxy` is NOT active-template gated: it is a standalone deployer primitive bound to DEPLOYER_ROLE, so a
-        // caller without that role is rejected by the AccessManager (never with ONLY_ACTIVE_TEMPLATE). The init data is
-        // a harmless view call: the hardened ERC1967Proxy rejects empty init data.
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, STRANGER));
-        factory.deployDeterministicProxy(address(template), abi.encodeCall(IBaseTemplate.ROYCO_FACTORY, ()), keccak256("z"));
-
         vm.stopPrank();
-
-        // A DEPLOYER_ROLE holder CAN call `deployDeterministicProxy` outside a deployment window: it deploys a live ERC1967 proxy
-        // at the CREATE3 address derived from the salt (which is itself the proxy's provenance — only the factory can
-        // deploy there). (Init data is a non-empty no-op view call — the hardened ERC1967Proxy rejects empty init data.)
-        vm.prank(DEPLOYER);
-        address proxy = factory.deployDeterministicProxy(address(template), abi.encodeCall(IBaseTemplate.ROYCO_FACTORY, ()), keccak256("standalone-proxy"));
-        assertGt(proxy.code.length, 0, "deployDeterministicProxy must produce a live proxy");
-        assertEq(
-            proxy, factory.predictDeterministicAddress(keccak256("standalone-proxy")), "deployDeterministicProxy must deploy at the salt's CREATE3 address"
-        );
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

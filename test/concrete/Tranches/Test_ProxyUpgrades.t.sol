@@ -2,11 +2,10 @@
 pragma solidity ^0.8.28;
 
 import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
-import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
-import { ERC1967Utils } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Utils.sol";
-import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts/contracts/proxy/utils/UUPSUpgradeable.sol";
+import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
+import { Ownable } from "../../../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
-import { RoycoBase } from "../../../src/base/RoycoBase.sol";
+import { UpgradeableBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { RoycoDayBalancerV3Kernel as DayKernel } from "../../../src/kernels/RoycoDayBalancerV3Kernel.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
@@ -18,26 +17,29 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
  * @title Test_ProxyUpgrades_Tranches
- * @notice Exercises the UUPS upgrade surface shared by every market proxy: a role-gated upgrade must swap only
- *         the implementation pointer while every balance, supply, committed checkpoint, and authority wired into
- *         the proxy storage survives byte-for-byte, and the three rejection tiers (unauthorized caller, codeless
- *         implementation, non-UUPS target) must each leave the pointer untouched
+ * @notice Exercises the beacon upgrade surface shared by every market proxy: a role-gated upgrade must move only the
+ *         implementation the beacon points at, while every balance, supply, committed checkpoint, and authority in
+ *         each proxy's storage survives byte-for-byte; both rejection tiers (unauthorized caller, codeless
+ *         implementation) must leave the beacon untouched; and one upgrade must move every market at once
  * @dev Seeded once in setUp: ST 100e18 and JT 30e18 vault shares at the 1.0 seed rate (coverage
  *      (100 + 30) x 0.2 / 30 = 0.8667 <= 1), plus the market base's auto-seeded quote-only LPT depth of 6 whole
  *      quote (required ceil(100e18 x 0.05) = 5e18 plus one whole-token cushion), so LPT_PROVIDER holds 6e18 LPT shares
  */
 contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
-    /// @dev The ERC1967 implementation slot, bytes32(uint256(keccak256("eip1967.proxy.implementation")) - 1)
-    bytes32 internal constant ERC1967_IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
-
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
         _seedMarket(100e18, 30e18);
     }
 
-    /// @dev Reads the implementation address a proxy currently delegates to straight out of its ERC1967 slot
-    function _implOf(address _proxy) internal view returns (address) {
-        return address(uint160(uint256(vm.load(_proxy, ERC1967_IMPLEMENTATION_SLOT))));
+    /// @dev Upgrades a beacon the way governance does: the access manager owns every beacon, so an upgrade is an
+    ///      `execute` through the manager, which is where the upgrader role and its execution delay are enforced
+    function _upgradeBeacon(UpgradeableBeacon _beacon, address _newImplementation) internal {
+        accessManager.execute(address(_beacon), abi.encodeCall(UpgradeableBeacon.upgradeTo, (_newImplementation)));
+    }
+
+    /// @dev The implementation every proxy reading from this beacon currently delegates to
+    function _implOf(UpgradeableBeacon _beacon) internal view returns (address) {
+        return _beacon.implementation();
     }
 
     /**
@@ -61,7 +63,7 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
      *      run replays the identical deposit and redemption on a state snapshot of the NEVER-upgraded market, so
      *      the upgraded flows are compared against an independent execution, not against themselves
      */
-    function test_UpgradeToAndCall_TrancheKernelAccountantPreserveStateAndFlows() public {
+    function test_BeaconUpgrade_TrancheKernelAccountantPreserveStateAndFlows() public {
         // Fund and approve the probe deposit BEFORE the snapshot so the control and post-upgrade runs replay
         // against byte-identical chain state and differ ONLY in whether the proxies were upgraded
         stJtVault.mintShares(ST_PROVIDER, 10e18);
@@ -89,26 +91,26 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
         );
 
         // Pre-upgrade digests of everything an upgrade must not touch
-        address oldStImpl = _implOf(address(seniorTranche));
-        address oldKernelImpl = _implOf(address(kernel));
-        address oldAccImpl = _implOf(address(accountant));
+        address oldStImpl = _implOf(stBeacon);
+        address oldKernelImpl = _implOf(kernelBeacon);
+        address oldAccImpl = _implOf(accountantBeacon);
         bytes memory accStateBefore = abi.encode(accountant.getState());
         bytes memory kernelStateBefore = abi.encode(kernel.getState());
 
         (RoycoSeniorTranche freshStImpl, DayKernel freshKernelImpl, RoycoDayAccountant freshAccImpl) = _deployFreshImplementations();
         vm.startPrank(UPGRADER);
-        seniorTranche.upgradeToAndCall(address(freshStImpl), "");
-        kernel.upgradeToAndCall(address(freshKernelImpl), "");
-        accountant.upgradeToAndCall(address(freshAccImpl), "");
+        _upgradeBeacon(stBeacon, address(freshStImpl));
+        _upgradeBeacon(kernelBeacon, address(freshKernelImpl));
+        _upgradeBeacon(accountantBeacon, address(freshAccImpl));
         vm.stopPrank();
 
-        // The ONLY storage words an upgrade may write are the three implementation slots
+        // The ONLY state an upgrade may write is the implementation each beacon points at
         assertNotEq(address(freshStImpl), oldStImpl, "the fresh senior tranche impl must be a new deployment");
-        assertEq(_implOf(address(seniorTranche)), address(freshStImpl), "the senior tranche proxy must now delegate to the fresh impl");
+        assertEq(_implOf(stBeacon), address(freshStImpl), "the senior tranche beacon must now point at the fresh impl");
         assertNotEq(address(freshKernelImpl), oldKernelImpl, "the fresh kernel impl must be a new deployment");
-        assertEq(_implOf(address(kernel)), address(freshKernelImpl), "the kernel proxy must now delegate to the fresh impl");
+        assertEq(_implOf(kernelBeacon), address(freshKernelImpl), "the kernel beacon must now point at the fresh impl");
         assertNotEq(address(freshAccImpl), oldAccImpl, "the fresh accountant impl must be a new deployment");
-        assertEq(_implOf(address(accountant)), address(freshAccImpl), "the accountant proxy must now delegate to the fresh impl");
+        assertEq(_implOf(accountantBeacon), address(freshAccImpl), "the accountant beacon must now point at the fresh impl");
 
         // Share ledgers survive: the seeded 100e18 / 30e18 / 6e18 positions and supplies are proxy storage
         assertEq(seniorTranche.balanceOf(ST_PROVIDER), 100e18, "the senior LP's 100e18 shares must survive the upgrade");
@@ -139,45 +141,66 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
     }
 
     /**
-     * @notice The upgrade gate rejects, in order: a caller without the upgrader role, a codeless implementation,
-     *         and a target with code but no valid UUPS proxiable slot, on all three proxy kinds, leaving the
-     *         implementation pointer untouched every time
-     * @dev An upgrade is the single most privileged operation in the market (a hostile implementation can seize
-     *      every tranche's capital), and a bad target is just as fatal in the other direction: pointing the proxy
-     *      at a codeless address or a non-UUPS contract bricks the market with no recovery path, because the
-     *      broken implementation cannot execute the next upgrade. Tier one passes a perfectly valid fresh impl so
-     *      the missing role is the only discriminant, and authorization is proven to be checked BEFORE the target
-     *      is even inspected
+     * @notice The upgrade gate rejects a caller without the upgrader role and a codeless implementation, on every
+     *         component beacon, leaving the implementation each beacon points at untouched every time
+     * @dev An upgrade is the single most privileged operation in the protocol, and under a beacon it is strictly more
+     *      so: one call moves every market of that component type at once. A bad target is just as fatal in the other
+     *      direction, since pointing a beacon at a codeless address bricks every market that reads from it with no
+     *      recovery path. Tier one passes a perfectly valid fresh impl so the missing role is the only discriminant,
+     *      proving authorization is checked BEFORE the target is inspected
+     * @dev There is no beacon analogue of the old third tier (a contract with code but no `proxiableUUID`): a beacon
+     *      performs no proxiable-slot probe, so any contract with code is an acceptable target
      */
-    function test_RevertIf_UpgradeUnauthorizedCodelessOrNonUUPSTarget() public {
+    function test_RevertIf_BeaconUpgradeUnauthorizedOrCodeless() public {
         (RoycoSeniorTranche freshStImpl, DayKernel freshKernelImpl, RoycoDayAccountant freshAccImpl) = _deployFreshImplementations();
-        address[3] memory proxies = [address(seniorTranche), address(kernel), address(accountant)];
+        UpgradeableBeacon[3] memory beacons = [stBeacon, kernelBeacon, accountantBeacon];
         address[3] memory validImpls = [address(freshStImpl), address(freshKernelImpl), address(freshAccImpl)];
         address intruder = makeAddr("UPGRADE_INTRUDER");
         address codelessImpl = makeAddr("CODELESS_IMPL");
 
         for (uint256 i; i < 3; ++i) {
-            address implBefore = _implOf(proxies[i]);
+            address implBefore = _implOf(beacons[i]);
 
-            // Tier one: no upgrader role, even with a perfectly valid target, is rejected with the caller named
+            // Tier one: no upgrader role, even with a perfectly valid target, is rejected by the access manager
             vm.prank(intruder);
-            vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, intruder));
-            UUPSUpgradeable(proxies[i]).upgradeToAndCall(validImpls[i], "");
+            vm.expectRevert(abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedCall.selector, intruder, address(beacons[i]), UpgradeableBeacon.upgradeTo.selector));
+            accessManager.execute(address(beacons[i]), abi.encodeCall(UpgradeableBeacon.upgradeTo, (validImpls[i])));
 
-            // Tier two: an authorized upgrader pointing at an address with no code is stopped by the shared
-            // base's code-length guard, catching the fat-finger that would otherwise brick the proxy forever
+            // Tier one (b): the beacon is owned by the access manager, so even the upgrader cannot call it directly
             vm.prank(UPGRADER);
-            vm.expectRevert(RoycoBase.INVALID_IMPLEMENTATION.selector);
-            UUPSUpgradeable(proxies[i]).upgradeToAndCall(codelessImpl, "");
+            vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, UPGRADER));
+            beacons[i].upgradeTo(validImpls[i]);
 
-            // Tier three: a target WITH code but no proxiableUUID (here the market's plain ERC20 quote token)
-            // fails the UUPS compatibility probe, so a non-upgradeable contract can never become the implementation
+            // Tier two: an authorized upgrader pointing at an address with no code is stopped by the beacon's
+            // code-length guard, catching the fat-finger that would otherwise brick every market at once
             vm.prank(UPGRADER);
-            vm.expectRevert(abi.encodeWithSelector(ERC1967Utils.ERC1967InvalidImplementation.selector, address(quoteToken)));
-            UUPSUpgradeable(proxies[i]).upgradeToAndCall(address(quoteToken), "");
+            vm.expectRevert(abi.encodeWithSelector(UpgradeableBeacon.BeaconInvalidImplementation.selector, codelessImpl));
+            _upgradeBeacon(beacons[i], codelessImpl);
 
             // Every rejection must leave the pointer exactly where it was, no partial write survives a revert
-            assertEq(_implOf(proxies[i]), implBefore, "a rejected upgrade must leave the implementation pointer untouched");
+            assertEq(_implOf(beacons[i]), implBefore, "a rejected upgrade must leave the implementation untouched");
         }
+    }
+
+    /**
+     * @notice One beacon upgrade moves every market that reads from it, which is the whole point of the pattern
+     * @dev Deploys a second, independent market against the SAME beacons the fixture market uses, then upgrades the
+     *      senior tranche beacon once and asserts both markets' senior proxies resolve to the new implementation. This
+     *      is the property that replaces per-market upgrades, and the reason a staged rollout is no longer possible
+     */
+    function test_BeaconUpgrade_MovesEveryMarketReadingFromIt() public {
+        address firstMarketSenior = address(seniorTranche);
+        address secondMarketSenior =
+            _deployTrancheProxy(address(stBeacon), "Second Market Senior", "RST2", address(kernel), address(stJtVault));
+
+        address freshImpl = address(new RoycoSeniorTranche());
+        vm.prank(UPGRADER);
+        _upgradeBeacon(stBeacon, freshImpl);
+
+        assertEq(_implOf(stBeacon), freshImpl, "the beacon must point at the fresh implementation");
+        assertEq(RoycoSeniorTranche(firstMarketSenior).kernel(), address(kernel), "the first market's senior proxy must still resolve its own state");
+        assertEq(
+            RoycoSeniorTranche(secondMarketSenior).kernel(), address(kernel), "the second market's senior proxy must resolve through the same beacon"
+        );
     }
 }

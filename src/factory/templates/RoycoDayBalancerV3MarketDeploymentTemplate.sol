@@ -7,7 +7,6 @@ import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contrac
 import { IVaultAdmin } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultAdmin.sol";
 import { HooksConfig as BalancerV3HooksConfig } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
-import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
@@ -76,11 +75,11 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @custom:field bptOracleConstantPriceFeed - The shared stateless constant-1.0 price feed both pool legs are priced against
      * @custom:field roycoDayEntryPoint - The chain's entry point singleton, configured with each market's tranches
      * @custom:field roycoMarketSyncer - The chain's market syncer singleton, registered with each market's kernel
-     * @custom:field seniorTrancheImplementation - The senior tranche implementation
-     * @custom:field juniorTrancheImplementation - The junior tranche implementation
-     * @custom:field liquidityProviderTrancheImplementation - The liquidity provider tranche implementation
-     * @custom:field kernelImplementation - The Day kernel implementation for this template's kernel family
-     * @custom:field accountantImplementation - The accountant implementation
+     * @custom:field seniorTrancheBeacon - The senior tranche beacon, holding the implementation every senior proxy resolves against
+     * @custom:field juniorTrancheBeacon - The junior tranche beacon
+     * @custom:field liquidityProviderTrancheBeacon - The liquidity provider tranche beacon
+     * @custom:field kernelBeacon - The Day kernel beacon for this template's kernel family
+     * @custom:field accountantBeacon - The accountant beacon
      * @custom:field jtYdms - The junior tranche's yield distribution model instance for each `YDMType`, indexed by the enum
      * @custom:field lptYdms - The liquidity provider tranche's model instance for each `YDMType`, indexed by the enum
      */
@@ -91,11 +90,11 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         address bptOracleConstantPriceFeed;
         address roycoDayEntryPoint;
         address roycoMarketSyncer;
-        address seniorTrancheImplementation;
-        address juniorTrancheImplementation;
-        address liquidityProviderTrancheImplementation;
-        address kernelImplementation;
-        address accountantImplementation;
+        address seniorTrancheBeacon;
+        address juniorTrancheBeacon;
+        address liquidityProviderTrancheBeacon;
+        address kernelBeacon;
+        address accountantBeacon;
         address[3] jtYdms;
         address[3] lptYdms;
     }
@@ -201,20 +200,20 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     /// @notice The shared stateless constant-1.0 price feed both of a pool's legs are priced against
     address public immutable BPT_ORACLE_CONSTANT_PRICE_FEED;
 
-    /// @notice The senior tranche implementation every market's senior proxy is deployed against
-    address public immutable SENIOR_TRANCHE_IMPLEMENTATION;
+    /// @notice The senior tranche beacon every market's senior proxy resolves its implementation from
+    address public immutable SENIOR_TRANCHE_BEACON;
 
-    /// @notice The junior tranche implementation every market's junior proxy is deployed against
-    address public immutable JUNIOR_TRANCHE_IMPLEMENTATION;
+    /// @notice The junior tranche beacon every market's junior proxy resolves its implementation from
+    address public immutable JUNIOR_TRANCHE_BEACON;
 
-    /// @notice The liquidity provider tranche implementation every market's liquidity proxy is deployed against
-    address public immutable LIQUIDITY_PROVIDER_TRANCHE_IMPLEMENTATION;
+    /// @notice The liquidity provider tranche beacon every market's liquidity proxy resolves its implementation from
+    address public immutable LIQUIDITY_PROVIDER_TRANCHE_BEACON;
 
-    /// @notice The Day kernel implementation every market's kernel proxy is deployed against
-    address public immutable KERNEL_IMPLEMENTATION;
+    /// @notice The Day kernel beacon every market's kernel proxy resolves its implementation from
+    address public immutable KERNEL_BEACON;
 
-    /// @notice The accountant implementation every market's accountant proxy is deployed against
-    address public immutable ACCOUNTANT_IMPLEMENTATION;
+    /// @notice The accountant beacon every market's accountant proxy resolves its implementation from
+    address public immutable ACCOUNTANT_BEACON;
 
     /// @notice The junior tranche's yield distribution model instance for each `YDMType`, indexed by the enum
     address private immutable _JT_YDM_STATIC_CURVE;
@@ -239,9 +238,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     {
         require(
             address(_params.balancerV3PoolFactory) != address(0) && address(_params.eclpLPOracleFactory) != address(0)
-                && _params.bptOracleConstantPriceFeed != address(0) && _params.seniorTrancheImplementation != address(0)
-                && _params.juniorTrancheImplementation != address(0) && _params.liquidityProviderTrancheImplementation != address(0)
-                && _params.kernelImplementation != address(0) && _params.accountantImplementation != address(0),
+                && _params.bptOracleConstantPriceFeed != address(0) && _params.seniorTrancheBeacon != address(0)
+                && _params.juniorTrancheBeacon != address(0) && _params.liquidityProviderTrancheBeacon != address(0)
+                && _params.kernelBeacon != address(0) && _params.accountantBeacon != address(0),
             NULL_CONSTRUCTION_PARAMETER()
         );
 
@@ -250,11 +249,11 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         ECLP_LP_ORACLE_FACTORY = _params.eclpLPOracleFactory;
         BPT_ORACLE_CONSTANT_PRICE_FEED = _params.bptOracleConstantPriceFeed;
 
-        SENIOR_TRANCHE_IMPLEMENTATION = _params.seniorTrancheImplementation;
-        JUNIOR_TRANCHE_IMPLEMENTATION = _params.juniorTrancheImplementation;
-        LIQUIDITY_PROVIDER_TRANCHE_IMPLEMENTATION = _params.liquidityProviderTrancheImplementation;
-        KERNEL_IMPLEMENTATION = _params.kernelImplementation;
-        ACCOUNTANT_IMPLEMENTATION = _params.accountantImplementation;
+        SENIOR_TRANCHE_BEACON = _params.seniorTrancheBeacon;
+        JUNIOR_TRANCHE_BEACON = _params.juniorTrancheBeacon;
+        LIQUIDITY_PROVIDER_TRANCHE_BEACON = _params.liquidityProviderTrancheBeacon;
+        KERNEL_BEACON = _params.kernelBeacon;
+        ACCOUNTANT_BEACON = _params.accountantBeacon;
 
         // The accountant rejects a market whose two models are the same instance, so establish once here that no
         // selection of shapes can ever produce one: every junior slot must differ from every liquidity provider slot
@@ -341,7 +340,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
         // Deploy the senior tranche.
         result.seniorTranche = _deployProxy(
-            SENIOR_TRANCHE_IMPLEMENTATION, _encodeTrancheInitData(p.stTranche, kernel, p.collateralAsset), _marketComponentSalt(p.marketId, TAG_ST_PROXY)
+            SENIOR_TRANCHE_BEACON, _encodeTrancheInitData(p.stTranche, kernel, p.collateralAsset), _marketComponentSalt(p.marketId, TAG_ST_PROXY)
         );
 
         // Deploy the Balancer V3 pool and BPT oracle for the LP tranche.
@@ -359,19 +358,19 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
         // Deploy the junior tranche.
         result.juniorTranche = _deployProxy(
-            JUNIOR_TRANCHE_IMPLEMENTATION, _encodeTrancheInitData(p.jtTranche, kernel, p.collateralAsset), _marketComponentSalt(p.marketId, TAG_JT_PROXY)
+            JUNIOR_TRANCHE_BEACON, _encodeTrancheInitData(p.jtTranche, kernel, p.collateralAsset), _marketComponentSalt(p.marketId, TAG_JT_PROXY)
         );
 
         // Deploy the liquidity provider tranche.
         result.liquidityProviderTranche = _deployProxy(
-            LIQUIDITY_PROVIDER_TRANCHE_IMPLEMENTATION,
+            LIQUIDITY_PROVIDER_TRANCHE_BEACON,
             _encodeTrancheInitData(p.lptTranche, kernel, balancerPool),
             _marketComponentSalt(p.marketId, TAG_LPT_PROXY)
         );
 
         // Deploy the accountant.
         result.accountant = _deployProxy(
-            ACCOUNTANT_IMPLEMENTATION,
+            ACCOUNTANT_BEACON,
             _encodeAccountantInitData(p.accountant, kernel, result.ydm, result.lptYdm),
             _marketComponentSalt(p.marketId, TAG_ACCOUNTANT_PROXY)
         );
@@ -445,7 +444,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
             sequencerUptimeFeed: _p.sequencerUptimeFeed,
             gracePeriodSeconds: _p.gracePeriodSeconds
         });
-        kernel = _deployProxy(KERNEL_IMPLEMENTATION, _kernelInitData(kip, _p.kernelSpecificParams, _bptOracle), _kernelProxySalt);
+        kernel = _deployProxy(KERNEL_BEACON, _kernelInitData(kip, _p.kernelSpecificParams, _bptOracle), _kernelProxySalt);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -609,8 +608,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     /// @dev `mint` carries no binding: it is gated by the tranche's own `onlyKernel` check (an immutable-address
     ///      check), which scopes minting to THIS market's kernel in a way a shared AccessManager role could not
     function _trancheBinding(uint64 _depositRole, uint64 _redeemRole, bool _isLiquidity) private pure returns (bytes4[] memory s, uint64[] memory r) {
-        // Base tranche surface (7 selectors) + the two LPT-only multi-asset selectors when binding the liquidity provider tranche
-        uint256 n = _isLiquidity ? 9 : 7;
+        // Base tranche surface (6 selectors) + the two LPT-only multi-asset selectors when binding the liquidity provider tranche
+        // Upgrades are not bound here: a beacon proxy has no per-proxy upgrade entrypoint, its beacon carries that authority
+        uint256 n = _isLiquidity ? 8 : 6;
         s = new bytes4[](n);
         r = new uint64[](n);
         s[0] = IRoycoVaultTranche.deposit.selector;
@@ -621,29 +621,28 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         r[2] = ADMIN_PAUSER_ROLE;
         s[3] = IRoycoAuth.unpause.selector;
         r[3] = ADMIN_UNPAUSER_ROLE;
-        s[4] = UUPSUpgradeable.upgradeToAndCall.selector;
-        r[4] = ADMIN_UPGRADER_ROLE;
-        s[5] = ERC20BurnableUpgradeable.burn.selector;
+        s[4] = ERC20BurnableUpgradeable.burn.selector;
+        r[4] = BURNER_ROLE;
+        s[5] = ERC20BurnableUpgradeable.burnFrom.selector;
         r[5] = BURNER_ROLE;
-        s[6] = ERC20BurnableUpgradeable.burnFrom.selector;
-        r[6] = BURNER_ROLE;
         if (_isLiquidity) {
-            s[7] = RoycoLiquidityProviderTranche.depositMultiAsset.selector;
-            r[7] = _depositRole;
-            s[8] = RoycoLiquidityProviderTranche.redeemMultiAsset.selector;
-            r[8] = _redeemRole;
+            s[6] = RoycoLiquidityProviderTranche.depositMultiAsset.selector;
+            r[6] = _depositRole;
+            s[7] = RoycoLiquidityProviderTranche.redeemMultiAsset.selector;
+            r[7] = _redeemRole;
         }
     }
 
     /// @dev The kernel's operational surface
     function _kernelBinding() private view returns (bytes4[] memory s, uint64[] memory r) {
         (bytes4[] memory ps, uint64[] memory pr) = _kernelPricingBinding();
-        uint256 n = 9 + ps.length;
+        // Upgrades are not bound here: the kernel's beacon carries that authority for every market at once
+        uint256 n = 8 + ps.length;
         s = new bytes4[](n);
         r = new uint64[](n);
         for (uint256 i; i < ps.length; ++i) {
-            s[9 + i] = ps[i];
-            r[9 + i] = pr[i];
+            s[8 + i] = ps[i];
+            r[8 + i] = pr[i];
         }
         s[0] = IRoycoDayKernel.setProtocolFeeRecipient.selector;
         r[0] = ADMIN_KERNEL_ROLE;
@@ -651,23 +650,22 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         r[1] = ADMIN_PAUSER_ROLE;
         s[2] = IRoycoAuth.unpause.selector;
         r[2] = ADMIN_UNPAUSER_ROLE;
-        s[3] = UUPSUpgradeable.upgradeToAndCall.selector;
-        r[3] = ADMIN_UPGRADER_ROLE;
-        s[4] = IRoycoDayKernel.syncTrancheAccounting.selector;
-        r[4] = SYNC_ROLE;
-        s[5] = IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector;
-        r[5] = ADMIN_KERNEL_ROLE;
-        s[6] = IRoycoDayKernel.reinvestLiquidityPremium.selector;
-        r[6] = ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE;
-        s[7] = IRoycoDayKernel.setRoycoBlacklist.selector;
-        r[7] = ADMIN_MARKET_OPS_ROLE;
-        s[8] = IRoycoDayKernel.syncTrancheAccountingFor.selector;
-        r[8] = SYNC_ROLE;
+        s[3] = IRoycoDayKernel.syncTrancheAccounting.selector;
+        r[3] = SYNC_ROLE;
+        s[4] = IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector;
+        r[4] = ADMIN_KERNEL_ROLE;
+        s[5] = IRoycoDayKernel.reinvestLiquidityPremium.selector;
+        r[5] = ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE;
+        s[6] = IRoycoDayKernel.setRoycoBlacklist.selector;
+        r[6] = ADMIN_MARKET_OPS_ROLE;
+        s[7] = IRoycoDayKernel.syncTrancheAccountingFor.selector;
+        r[7] = SYNC_ROLE;
     }
 
+    /// @dev Upgrades are not bound here: the accountant's beacon carries that authority for every market at once
     function _accountantBinding() private pure returns (bytes4[] memory s, uint64[] memory r) {
-        s = new bytes4[](15);
-        r = new uint64[](15);
+        s = new bytes4[](14);
+        r = new uint64[](14);
         s[0] = IRoycoDayAccountant.setJuniorTrancheYDM.selector;
         r[0] = ADMIN_ACCOUNTANT_ROLE;
         s[1] = IRoycoDayAccountant.setLiquidityProviderTrancheYDM.selector;
@@ -694,10 +692,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         r[11] = ADMIN_PAUSER_ROLE;
         s[12] = IRoycoAuth.unpause.selector;
         r[12] = ADMIN_UNPAUSER_ROLE;
-        s[13] = UUPSUpgradeable.upgradeToAndCall.selector;
-        r[13] = ADMIN_UPGRADER_ROLE;
-        s[14] = IRoycoDayAccountant.setDustTolerance.selector;
-        r[14] = ADMIN_MARKET_OPS_ROLE;
+        s[13] = IRoycoDayAccountant.setDustTolerance.selector;
+        r[13] = ADMIN_MARKET_OPS_ROLE;
     }
 
     function _balancerVaultBinding() private pure returns (bytes4[] memory s, uint64[] memory r) {

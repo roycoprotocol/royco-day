@@ -5,9 +5,11 @@ import { IVault } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/
 import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { ERC20BurnableUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
+import { BeaconProxy } from "../../lib/openzeppelin-contracts/contracts/proxy/beacon/BeaconProxy.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { UpgradeableBeacon } from "../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -193,6 +195,13 @@ abstract contract DayMarketTestBase is Assertions {
     /// @notice The EOA that deploys the kernel proxy so its address is CREATE-predictable for the impl constructors
     address internal kernelProxyDeployer;
 
+    /// @dev The component beacons every market proxy resolves its implementation through
+    UpgradeableBeacon internal stBeacon;
+    UpgradeableBeacon internal jtBeacon;
+    UpgradeableBeacon internal lptBeacon;
+    UpgradeableBeacon internal kernelBeacon;
+    UpgradeableBeacon internal accountantBeacon;
+
     // =============================
     // Role Wallets and Actors
     // =============================
@@ -282,18 +291,20 @@ abstract contract DayMarketTestBase is Assertions {
         kernelProxyDeployer = makeAddr("KERNEL_PROXY_DEPLOYER");
         address predictedKernel = vm.computeCreateAddress(kernelProxyDeployer, vm.getNonce(kernelProxyDeployer));
 
-        // 7. Market-independent impls: every market address now arrives through each proxy's initializer
-        RoycoSeniorTranche stImpl = new RoycoSeniorTranche();
-        RoycoJuniorTranche jtImpl = new RoycoJuniorTranche();
-        RoycoLiquidityProviderTranche lptImpl = new RoycoLiquidityProviderTranche();
-        RoycoDayAccountant accImpl = new RoycoDayAccountant();
+        // 7. Market-independent impls behind per-component beacons, mirroring production: every market address
+        //    arrives through each proxy's initializer, and the beacon is what an upgrade moves
+        stBeacon = new UpgradeableBeacon(address(new RoycoSeniorTranche()), address(accessManager));
+        jtBeacon = new UpgradeableBeacon(address(new RoycoJuniorTranche()), address(accessManager));
+        lptBeacon = new UpgradeableBeacon(address(new RoycoLiquidityProviderTranche()), address(accessManager));
+        accountantBeacon = new UpgradeableBeacon(address(new RoycoDayAccountant()), address(accessManager));
 
         // 8. Tranche and accountant proxies MUST exist before the kernel (its initialize calls tranche.asset())
         seniorTranche =
-            RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST", predictedKernel, address(stJtVault)));
-        juniorTranche = RoycoJuniorTranche(_deployTrancheProxy(address(jtImpl), "Royco Junior Tranche", "RJT", predictedKernel, address(stJtVault)));
+            RoycoSeniorTranche(_deployTrancheProxy(address(stBeacon), "Royco Senior Tranche", "RST", predictedKernel, address(stJtVault)));
+        juniorTranche =
+            RoycoJuniorTranche(_deployTrancheProxy(address(jtBeacon), "Royco Junior Tranche", "RJT", predictedKernel, address(stJtVault)));
         liquidityProviderTranche = RoycoLiquidityProviderTranche(
-            _deployTrancheProxy(address(lptImpl), "Royco Liquidity Provider Tranche", "RLT", predictedKernel, address(bpt))
+            _deployTrancheProxy(address(lptBeacon), "Royco Liquidity Provider Tranche", "RLT", predictedKernel, address(bpt))
         );
         vm.label(address(seniorTranche), "ST");
         vm.label(address(juniorTranche), "JT");
@@ -301,8 +312,8 @@ abstract contract DayMarketTestBase is Assertions {
 
         accountant = RoycoDayAccountant(
             address(
-                new ERC1967Proxy(
-                    address(accImpl),
+                new BeaconProxy(
+                    address(accountantBeacon),
                     abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(_params, predictedKernel, jtYdmInitData, lptYdmInitData)))
                 )
             )
@@ -328,15 +339,15 @@ abstract contract DayMarketTestBase is Assertions {
         );
         _initializePoolMinimumSupply();
 
-        // 10. Kernel impl: market-independent, its only construction input is the Balancer Vault
-        RoycoDayBalancerV3Kernel kernelImpl = new RoycoDayBalancerV3Kernel(IVault(address(balancerVault)));
+        // 10. Kernel impl behind its beacon: market-independent, its only construction input is the Balancer Vault
+        kernelBeacon = new UpgradeableBeacon(address(new RoycoDayBalancerV3Kernel(IVault(address(balancerVault)))), address(accessManager));
 
         // 11. Protocol fee recipient wallet must exist before kernel init consumes it
         PROTOCOL_FEE_RECIPIENT = makeAddr("PROTOCOL_FEE_RECIPIENT");
 
         // 12. Kernel proxy from the dedicated deployer so it lands at the predicted address
         bytes memory kernelInitData = abi.encodeCall(
-            kernelImpl.initialize,
+            RoycoDayBalancerV3Kernel.initialize,
             (
                 IRoycoDayKernel.RoycoDayKernelInitParams({
                     initialAuthority: address(accessManager),
@@ -361,7 +372,7 @@ abstract contract DayMarketTestBase is Assertions {
             )
         );
         vm.prank(kernelProxyDeployer);
-        address kernelProxy = address(new ERC1967Proxy(address(kernelImpl), kernelInitData));
+        address kernelProxy = address(new BeaconProxy(address(kernelBeacon), kernelInitData));
         require(kernelProxy == predictedKernel, "DayMarketTestBase: kernel proxy address prediction failed");
         kernel = RoycoDayBalancerV3Kernel(kernelProxy);
         vm.label(kernelProxy, "Kernel");
@@ -376,6 +387,7 @@ abstract contract DayMarketTestBase is Assertions {
 
         // 14. Role bindings and grants, mirroring the production template
         _wireTargetFunctionRoles();
+        _wireBeaconUpgradeRoles();
         _wireRoleGrants();
     }
 
@@ -705,7 +717,7 @@ abstract contract DayMarketTestBase is Assertions {
 
     /// @notice Deploys a tranche proxy with its production-shaped init params
     function _deployTrancheProxy(
-        address _impl,
+        address _beacon,
         string memory _name,
         string memory _symbol,
         address _kernel,
@@ -726,7 +738,7 @@ abstract contract DayMarketTestBase is Assertions {
                 })
             )
         );
-        proxy = address(new ERC1967Proxy(_impl, initData));
+        proxy = address(new BeaconProxy(_beacon, initData));
     }
 
     /// @notice Builds the accountant's init params from the fixture's market parameterization
@@ -786,7 +798,6 @@ abstract contract DayMarketTestBase is Assertions {
         accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.setRoycoBlacklist.selector), ADMIN_MARKET_OPS_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
-        accessManager.setTargetFunctionRole(k, _sels(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
 
         // Kernel pricing admin surface (the liquidity venue setters and the collateral asset oracle setters the template binds)
         accessManager.setTargetFunctionRole(
@@ -828,7 +839,6 @@ abstract contract DayMarketTestBase is Assertions {
         accessManager.setTargetFunctionRole(a, _sels(IRoycoDayAccountant.setDustTolerance.selector), ADMIN_MARKET_OPS_ROLE);
         accessManager.setTargetFunctionRole(a, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(a, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
-        accessManager.setTargetFunctionRole(a, _sels(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
     }
 
     /// @notice Binds one tranche's selector surface (deposit/redeem/admin/burn, plus the LPT multi-asset pair)
@@ -848,7 +858,6 @@ abstract contract DayMarketTestBase is Assertions {
         // the kernel is the market's single pause authority, so a tranche-level pause is inert
         accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
-        accessManager.setTargetFunctionRole(_tranche, _sels(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
         accessManager.setTargetFunctionRole(_tranche, _sels(ERC20BurnableUpgradeable.burn.selector, ERC20BurnableUpgradeable.burnFrom.selector), BURNER_ROLE);
     }
 
@@ -858,6 +867,16 @@ abstract contract DayMarketTestBase is Assertions {
      *      BURNER_ROLE to the kernel) minus the Balancer hook grant, which does not exist in mock-land. The fixture
      *      itself receives ST_LP_ROLE so the LPT seed helper can source senior shares through the production path
      */
+    /// @dev Binds each component beacon's upgrade entrypoint, mirroring production where beacons are bound once per
+    ///      chain rather than per market. This replaces the per-proxy bindings the components carried while UUPS
+    function _wireBeaconUpgradeRoles() internal {
+        accessManager.setTargetFunctionRole(address(stBeacon), _sels(UpgradeableBeacon.upgradeTo.selector), ADMIN_UPGRADER_ROLE);
+        accessManager.setTargetFunctionRole(address(jtBeacon), _sels(UpgradeableBeacon.upgradeTo.selector), ADMIN_UPGRADER_ROLE);
+        accessManager.setTargetFunctionRole(address(lptBeacon), _sels(UpgradeableBeacon.upgradeTo.selector), ADMIN_UPGRADER_ROLE);
+        accessManager.setTargetFunctionRole(address(kernelBeacon), _sels(UpgradeableBeacon.upgradeTo.selector), ADMIN_UPGRADER_ROLE);
+        accessManager.setTargetFunctionRole(address(accountantBeacon), _sels(UpgradeableBeacon.upgradeTo.selector), ADMIN_UPGRADER_ROLE);
+    }
+
     function _wireRoleGrants() internal {
         // Post-init contract grants
         accessManager.grantRole(SYNC_ROLE, address(accountant), 0);

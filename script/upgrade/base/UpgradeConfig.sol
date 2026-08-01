@@ -46,6 +46,7 @@ abstract contract UpgradeConfig {
     struct MarketAddresses {
         address seniorTranche;
         address juniorTranche;
+        address liquidityProviderTranche;
         address accountant;
         address kernel;
     }
@@ -55,6 +56,8 @@ abstract contract UpgradeConfig {
     // ═══════════════════════════════════════════════════════════════════════════
 
     error UpgradeConfig__FactoryNotRegistered(uint256 chainId);
+    error UpgradeConfig__MarketSyncerNotRegistered(uint256 chainId);
+    error UpgradeConfig__ComponentBeaconsNotRegistered(uint256 chainId);
     error UpgradeConfig__MarketNotFound(string marketName, uint256 chainId);
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -67,6 +70,30 @@ abstract contract UpgradeConfig {
 
     /// @dev (chainId, marketName) → addresses for the market's ST, JT, accountant, and kernel
     mapping(uint256 chainId => mapping(string marketName => MarketAddresses addrs)) internal _markets;
+
+    /**
+     * @notice The per-chain upgrade beacons, one per market component type
+     * @dev Every market on a chain shares these, so a component upgrade is a single call on the relevant beacon
+     * @custom:field seniorTranche - The senior tranche beacon
+     * @custom:field juniorTranche - The junior tranche beacon
+     * @custom:field liquidityProviderTranche - The liquidity provider tranche beacon
+     * @custom:field kernel - The kernel beacon
+     * @custom:field accountant - The accountant beacon
+     */
+    struct ComponentBeacons {
+        address seniorTranche;
+        address juniorTranche;
+        address liquidityProviderTranche;
+        address kernel;
+        address accountant;
+    }
+
+    /// @dev (chainId) → the component beacons every market on that chain resolves its implementations through
+    mapping(uint256 chainId => ComponentBeacons beacons) internal _beacons;
+
+    /// @dev Market syncer singleton per chain. A component beacon upgrade moves every market at once, so the
+    ///      orchestrator settles all of their accounting through this in one batched call beforehand.
+    mapping(uint256 chainId => address marketSyncer) internal _marketSyncers;
 
     /// @dev Chainlink-style aggregators (anything implementing `latestRoundData()`) that need to
     ///      stay "fresh" through the 2-day simulation warp. Before the warp the orchestrator
@@ -95,6 +122,16 @@ abstract contract UpgradeConfig {
     function getMarketAddresses(uint256 _chainId, string memory _marketName) public view returns (MarketAddresses memory addrs) {
         addrs = _markets[_chainId][_marketName];
         require(addrs.kernel != address(0), UpgradeConfig__MarketNotFound(_marketName, _chainId));
+    }
+
+    function getComponentBeacons(uint256 _chainId) public view returns (ComponentBeacons memory beacons) {
+        beacons = _beacons[_chainId];
+        require(beacons.kernel != address(0), UpgradeConfig__ComponentBeaconsNotRegistered(_chainId));
+    }
+
+    function getMarketSyncer(uint256 _chainId) public view returns (address marketSyncer) {
+        marketSyncer = _marketSyncers[_chainId];
+        require(marketSyncer != address(0), UpgradeConfig__MarketSyncerNotRegistered(_chainId));
     }
 
     function getChainlinkOracles(uint256 _chainId) public view returns (address[] memory oracles) {

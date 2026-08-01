@@ -5,6 +5,7 @@ import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.s
 import { AssetClaims, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../../src/tranches/RoycoJuniorTranche.sol";
+import { RoycoLiquidityProviderTranche } from "../../../src/tranches/RoycoLiquidityProviderTranche.sol";
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
 
 import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
@@ -40,49 +41,53 @@ contract UpgradeTrancheModule is UpgradeModuleBase {
     error UpgradeTrancheModule__TotalAssetsNavChanged(NAV_UNIT expected, NAV_UNIT actual);
 
     /// @inheritdoc UpgradeModuleBase
+    /// @dev Upgrades the tranche's chain-wide beacon, which moves that tranche in EVERY market at once. The market in
+    ///      the payload is only the representative whose state the snapshot and verification are taken against
     function prepare(uint256 _chainId, string memory _saltVersion, bytes memory _payload) external view override returns (PreparedUpgrade memory prepared) {
         (string memory marketName, TrancheType trancheType) = abi.decode(_payload, (string, TrancheType));
 
         MarketAddresses memory addrs = getMarketAddresses(_chainId, marketName);
-        address proxy = trancheType == TrancheType.SENIOR ? addrs.seniorTranche : addrs.juniorTranche;
+        ComponentBeacons memory beacons = getComponentBeacons(_chainId);
+        address proxy;
+        address beacon;
+        bytes memory creationCode;
+        bytes32 salt;
+        string memory prefix;
+        if (trancheType == TrancheType.SENIOR) {
+            (proxy, beacon, creationCode) = (addrs.seniorTranche, beacons.seniorTranche, type(RoycoSeniorTranche).creationCode);
+            (salt, prefix) = (keccak256(abi.encodePacked("ROYCO_ST_TRANCHE_IMPLEMENTATION_", _saltVersion)), "ST/");
+        } else if (trancheType == TrancheType.JUNIOR) {
+            (proxy, beacon, creationCode) = (addrs.juniorTranche, beacons.juniorTranche, type(RoycoJuniorTranche).creationCode);
+            (salt, prefix) = (keccak256(abi.encodePacked("ROYCO_JT_TRANCHE_IMPLEMENTATION_", _saltVersion)), "JT/");
+        } else {
+            (proxy, beacon, creationCode) =
+                (addrs.liquidityProviderTranche, beacons.liquidityProviderTranche, type(RoycoLiquidityProviderTranche).creationCode);
+            (salt, prefix) = (keccak256(abi.encodePacked("ROYCO_LPT_TRANCHE_IMPLEMENTATION_", _saltVersion)), "LPT/");
+        }
 
-        // Type validation — reverts if the proxy is not the requested tranche variant
+        // Type validation — reverts if the representative proxy is not the requested tranche variant
         IRoycoVaultTranche t = IRoycoVaultTranche(proxy);
         TrancheType actual = t.TRANCHE_TYPE();
         require(actual == trancheType, UpgradeTrancheModule__TrancheTypeMismatch(trancheType, actual));
+        require(t.asset() != address(0) && t.kernel() != address(0), UpgradeTrancheModule__NotATrancheProxy(proxy));
 
-        // Read constructor immutables off the proxy (delegatecalled into existing impl)
-        address asset = t.asset();
-        address kernel = t.kernel();
-        require(asset != address(0) && kernel != address(0), UpgradeTrancheModule__NotATrancheProxy(proxy));
-
-        address oldImpl = _readImplementation(proxy);
-
-        // Build creation code with the SAME constructor args
-        bytes memory creationCode = trancheType == TrancheType.SENIOR
-            ? abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(asset, kernel))
-            : abi.encodePacked(type(RoycoJuniorTranche).creationCode, abi.encode(asset, kernel));
-
-        // Salt — user owns the version suffix; bump it per upgrade
-        bytes32 salt = trancheType == TrancheType.SENIOR
-            ? keccak256(abi.encodePacked("ROYCO_ST_TRANCHE_IMPLEMENTATION_", _saltVersion))
-            : keccak256(abi.encodePacked("ROYCO_JT_TRANCHE_IMPLEMENTATION_", _saltVersion));
-
+        // The implementation is market-independent, so its creation code carries no constructor args
+        address oldImpl = _readBeaconImplementation(beacon);
         address newImpl = _predictImpl(salt, creationCode);
         require(newImpl != oldImpl, UpgradeTrancheModule__NewImplIdenticalToOld(newImpl));
 
-        string memory label = string.concat(trancheType == TrancheType.SENIOR ? "ST/" : "JT/", marketName);
+        string memory label = string.concat(prefix, "all markets");
 
         prepared = PreparedUpgrade({
-            proxy: proxy,
+            beacon: beacon,
             oldImpl: oldImpl,
             newImpl: newImpl,
             implSalt: salt,
             implCreationCode: creationCode,
             call: UpgradeCall({
                 marketName: marketName,
-                target: proxy,
-                callData: _buildUpgradeCallData(newImpl),
+                target: beacon,
+                callData: _buildBeaconUpgradeCallData(newImpl),
                 description: string.concat("Upgrade ", label, " tranche implementation to ", vm.toString(newImpl))
             }),
             label: label

@@ -124,7 +124,7 @@ contract UpgradeFactoryModule is UpgradeModuleBase, RoleConfigUtils {
         string memory label = "Factory";
 
         prepared = PreparedUpgrade({
-            proxy: proxy,
+            beacon: proxy,
             oldImpl: oldImpl,
             newImpl: newImpl,
             implSalt: salt,

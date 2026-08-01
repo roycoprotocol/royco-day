@@ -21,6 +21,9 @@ import { IERC20 } from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC
 import { RoycoMarketSyncer } from "../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { RoycoDayAccountant } from "../src/accountant/RoycoDayAccountant.sol";
 import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
+import { BeaconProxy } from "../lib/openzeppelin-contracts/contracts/proxy/beacon/BeaconProxy.sol";
+import { UpgradeableBeacon } from "../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import { IRoycoAccessManager } from "../src/interfaces/factory/IRoycoAccessManager.sol";
 import { RoycoDayEntryPoint } from "../src/entrypoint/RoycoDayEntryPoint.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -268,6 +271,11 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // Register (or reuse) the Day template for this kernel type.
         s.template = _getOrRegisterTemplate(s.factory, _config, s.entryPoint, s.marketSyncer);
 
+        // Bind each component beacon's upgrade entrypoint. A beacon governs every market of its type, so this is wired
+        // once per chain rather than per market, and it replaces the per-proxy upgrade bindings the components carried
+        // while they were UUPS.
+        _bindBeaconUpgradeRoles(s.accessManager, s.template);
+
         // The pre-mined marketId for this market against this exact factory (its senior-tranche proxy sorts before the
         // quote asset, so the ST is pool token0).
         s.marketId = getMarketId(_config.marketName, address(s.factory));
@@ -395,9 +403,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     ///      not hold ADMIN_ROLE. MUST run before `_applyRoleGraph`, whose second pass re-points SYNC_ROLE's admin away
     ///      from ADMIN_ROLE and would leave the deployer unable to make the SYNC_ROLE grant below.
     function _wireFactoryRoles(AccessManager _accessManager, address _factory) internal {
-        bytes4[] memory deployerSelectors = new bytes4[](2);
+        bytes4[] memory deployerSelectors = new bytes4[](1);
         deployerSelectors[0] = IRoycoFactory.executeMarketDeployment.selector;
-        deployerSelectors[1] = IRoycoFactory.deployDeterministicProxy.selector;
         _accessManager.setTargetFunctionRole(_factory, deployerSelectors, DEPLOYER_ROLE);
 
         bytes4[] memory adminFactorySelectors = new bytes4[](2);
@@ -576,7 +583,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (_config.kernelType != KernelType.RoycoDayBalancerV3Kernel) revert UnsupportedKernelType(_config.kernelType);
         ChainConfig memory chainConfig = getChainConfig(block.chainid, isTestEnv);
 
-        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _deployImplementationsAndModels(_config, chainConfig);
+        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp =
+            _deployImplementationsAndModels(_config, chainConfig, _factory.ROYCO_AUTHORITY());
         cp.factory = _factory;
         cp.balancerV3PoolFactory = GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory);
         cp.eclpLPOracleFactory = ILPOracleFactoryBase(chainConfig.eclpLPOracleFactory);
@@ -600,38 +608,31 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
      */
     function _deployImplementationsAndModels(
         MarketConfig memory _config,
-        ChainConfig memory _chainConfig
+        ChainConfig memory _chainConfig,
+        address _authority
     )
         internal
         returns (RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp)
     {
-        _logSection("Chain-wide implementations and yield distribution models");
+        _logSection("Chain-wide implementations, beacons, and yield distribution models");
         bool existed;
 
-        (cp.seniorTrancheImplementation, existed) =
-            deployWithSanityChecks(_singletonSalt("ROYCO_SENIOR_TRANCHE_IMPLEMENTATION"), type(RoycoSeniorTranche).creationCode, false);
-        _logDeploy("SeniorTranche (impl)  ", cp.seniorTrancheImplementation, existed);
-
-        (cp.juniorTrancheImplementation, existed) =
-            deployWithSanityChecks(_singletonSalt("ROYCO_JUNIOR_TRANCHE_IMPLEMENTATION"), type(RoycoJuniorTranche).creationCode, false);
-        _logDeploy("JuniorTranche (impl)  ", cp.juniorTrancheImplementation, existed);
-
-        (cp.liquidityProviderTrancheImplementation, existed) = deployWithSanityChecks(
-            _singletonSalt("ROYCO_LIQUIDITY_PROVIDER_TRANCHE_IMPLEMENTATION"), type(RoycoLiquidityProviderTranche).creationCode, false
+        cp.seniorTrancheBeacon =
+            _deployBeacon("SeniorTranche", _singletonSalt("ROYCO_SENIOR_TRANCHE"), type(RoycoSeniorTranche).creationCode, _authority);
+        cp.juniorTrancheBeacon =
+            _deployBeacon("JuniorTranche", _singletonSalt("ROYCO_JUNIOR_TRANCHE"), type(RoycoJuniorTranche).creationCode, _authority);
+        cp.liquidityProviderTrancheBeacon = _deployBeacon(
+            "LPTranche    ", _singletonSalt("ROYCO_LIQUIDITY_PROVIDER_TRANCHE"), type(RoycoLiquidityProviderTranche).creationCode, _authority
         );
-        _logDeploy("LPTranche (impl)      ", cp.liquidityProviderTrancheImplementation, existed);
-
-        (cp.accountantImplementation, existed) =
-            deployWithSanityChecks(_singletonSalt("ROYCO_ACCOUNTANT_IMPLEMENTATION"), type(RoycoDayAccountant).creationCode, false);
-        _logDeploy("Accountant (impl)     ", cp.accountantImplementation, existed);
+        cp.accountantBeacon = _deployBeacon("Accountant   ", _singletonSalt("ROYCO_ACCOUNTANT"), type(RoycoDayAccountant).creationCode, _authority);
 
         // The kernel implementation's only construction input is the chain's Balancer Vault, which is not market-specific
-        (cp.kernelImplementation, existed) = deployWithSanityChecks(
-            _singletonSalt("ROYCO_DAY_BALANCER_V3_KERNEL_IMPLEMENTATION"),
+        cp.kernelBeacon = _deployBeacon(
+            "Kernel       ",
+            _singletonSalt("ROYCO_DAY_BALANCER_V3_KERNEL"),
             abi.encodePacked(type(RoycoDayBalancerV3Kernel).creationCode, abi.encode(GyroECLPPoolFactory(_chainConfig.gyroECLPPoolFactory).getVault())),
-            false
+            _authority
         );
-        _logDeploy("Kernel (impl)         ", cp.kernelImplementation, existed);
 
         (cp.bptOracleConstantPriceFeed, existed) =
             deployWithSanityChecks(_singletonSalt("ROYCO_BPT_ORACLE_CONSTANT_PRICE_FEED"), type(ConstantPriceFeed).creationCode, false);
@@ -642,6 +643,38 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             cp.jtYdms[i] = _deployModel("JT model  ", ydmType, _config.jtYdmTargetUtilizationWAD, TAG_YDM);
             cp.lptYdms[i] = _deployModel("LPT model ", ydmType, _config.lptYdmTargetUtilizationWAD, TAG_LDM);
         }
+    }
+
+    /**
+     * @notice Deploys (or reuses) one component's implementation and the beacon that points at it
+     * @dev Both are CREATE2-deployed at derived singleton salts, so the whole phase is idempotent across re-runs. The
+     *      beacon's address is stable across implementation upgrades, which is what keeps the template address stable
+     * @param _label The log label for this component
+     * @param _baseSalt The component's singleton salt, extended per artifact
+     * @param _implementationCreationCode The implementation's creation code, with constructor args already appended
+     * @param _authority The access manager, set as the beacon's owner so upgrades route through its role and delay machinery
+     * @return beacon The component's beacon
+     */
+    function _deployBeacon(
+        string memory _label,
+        bytes32 _baseSalt,
+        bytes memory _implementationCreationCode,
+        address _authority
+    )
+        internal
+        returns (address beacon)
+    {
+        (address implementation, bool implementationExisted) =
+            deployWithSanityChecks(keccak256(abi.encodePacked(_baseSalt, "_IMPLEMENTATION")), _implementationCreationCode, false);
+        _logDeploy(string.concat(_label, " (impl)  "), implementation, implementationExisted);
+
+        bool beaconExisted;
+        (beacon, beaconExisted) = deployWithSanityChecks(
+            keccak256(abi.encodePacked(_baseSalt, "_BEACON")),
+            abi.encodePacked(type(UpgradeableBeacon).creationCode, abi.encode(implementation, _authority)),
+            false
+        );
+        _logDeploy(string.concat(_label, " (beacon)"), beacon, beaconExisted);
     }
 
     /// @notice Deploys (or reuses) one yield distribution model instance for a shape and tranche slot
@@ -821,6 +854,26 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         _logDeploy(_name, impl, existed);
     }
 
+    /// @notice Binds `upgradeTo` on every component beacon to ADMIN_UPGRADER_ROLE, skipping any already configured
+    /// @dev Beacons are chain-wide, so a second market deployment finds them already bound and skips them: the
+    ///      access manager records every configured target and the gatekeeper rejects reconfiguring one
+    function _bindBeaconUpgradeRoles(AccessManager _accessManager, address _template) internal {
+        RoycoDayBalancerV3MarketDeploymentTemplate t = RoycoDayBalancerV3MarketDeploymentTemplate(_template);
+        address[5] memory beacons = [
+            t.SENIOR_TRANCHE_BEACON(),
+            t.JUNIOR_TRANCHE_BEACON(),
+            t.LIQUIDITY_PROVIDER_TRANCHE_BEACON(),
+            t.KERNEL_BEACON(),
+            t.ACCOUNTANT_BEACON()
+        ];
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = UpgradeableBeacon.upgradeTo.selector;
+        for (uint256 i; i < beacons.length; ++i) {
+            if (IRoycoAccessManager(address(_accessManager)).wasEverConfigured(beacons[i])) continue;
+            _accessManager.setTargetFunctionRole(beacons[i], selectors, ADMIN_UPGRADER_ROLE);
+        }
+    }
+
     /**
      * @notice A market-scoped CREATE2 salt for the one market contract still deployed outside the template
      * @dev Shares the template's `keccak256("ROYCO_MARKET_" ‖ marketId ‖ tag)` preimage so a previously deployed oracle
@@ -873,8 +926,27 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             _marketScopedSalt(_marketId, "COLLATERAL_ASSET_ORACLE_IMPL")
         );
         bytes memory initData = abi.encodeCall(IdleCDOTranchePriceOracle.initialize, (_authority, p.minDeviationWAD, p.lastUpdate));
+
+        // The clock-based oracle is the one per-market component deployed outside the template, and like every other
+        // per-market component it sits behind a beacon so all of them upgrade together
+        (address beacon, bool beaconExisted) = deployWithSanityChecks(
+            _singletonSalt("ROYCO_IDLE_CDO_TRANCHE_PRICE_ORACLE_BEACON"),
+            abi.encodePacked(type(UpgradeableBeacon).creationCode, abi.encode(impl, _authority)),
+            false
+        );
+        _logDeploy("CollateralOracle (beacon)", beacon, beaconExisted);
+        if (!IRoycoAccessManager(_authority).wasEverConfigured(beacon)) {
+            bytes4[] memory beaconSelectors = new bytes4[](1);
+            beaconSelectors[0] = UpgradeableBeacon.upgradeTo.selector;
+            AccessManager(_authority).setTargetFunctionRole(beacon, beaconSelectors, ADMIN_UPGRADER_ROLE);
+        }
+
         bool existed;
-        (oracle, existed) = deployWithSanityChecks(_marketScopedSalt(_marketId, "COLLATERAL_ASSET_ORACLE"), getERC1967ProxyCreationCode(impl, initData), false);
+        (oracle, existed) = deployWithSanityChecks(
+            _marketScopedSalt(_marketId, "COLLATERAL_ASSET_ORACLE"),
+            abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(beacon, initData)),
+            false
+        );
         _logDeploy("CollateralAssetOracle  ", oracle, existed);
     }
 
@@ -886,8 +958,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (_oracleType == OracleType.ChainlinkPrice || _oracleType == OracleType.ERC4626SharePrice || _oracleType == OracleType.MakinaSharePrice) {
             return (selectors, roleIds);
         } else if (_oracleType == OracleType.IdleCDOTranchePrice) {
-            selectors = new bytes4[](5);
-            roleIds = new uint64[](5);
+            selectors = new bytes4[](4);
+            roleIds = new uint64[](4);
             selectors[0] = OracleClockBase.tick.selector;
             roleIds[0] = ADMIN_ORACLE_ROLE;
             selectors[1] = OracleClockBase.setMinDeviationWAD.selector;
@@ -896,8 +968,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             roleIds[2] = ADMIN_PAUSER_ROLE;
             selectors[3] = IRoycoAuth.unpause.selector;
             roleIds[3] = ADMIN_UNPAUSER_ROLE;
-            selectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
-            roleIds[4] = ADMIN_UPGRADER_ROLE;
         } else {
             revert UnsupportedOracleType(_oracleType);
         }

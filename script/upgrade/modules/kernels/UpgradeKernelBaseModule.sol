@@ -69,7 +69,8 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         );
         IRoycoDayKernel(proxy).getState();
 
-        address oldImpl = _readImplementation(proxy);
+        address beacon = getComponentBeacons(_chainId).kernel;
+        address oldImpl = _readBeaconImplementation(beacon);
         bytes memory creationCode = _kernelCreationCode();
         bytes32 salt = keccak256(abi.encodePacked("ROYCO_KERNEL_", _kernelContractName(), "_IMPLEMENTATION_", _saltVersion));
 
@@ -79,15 +80,15 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         string memory label = string.concat("Kernel/", marketName);
 
         prepared = PreparedUpgrade({
-            proxy: proxy,
+            beacon: beacon,
             oldImpl: oldImpl,
             newImpl: newImpl,
             implSalt: salt,
             implCreationCode: creationCode,
             call: UpgradeCall({
                 marketName: marketName,
-                target: proxy,
-                callData: _buildUpgradeCallData(newImpl),
+                target: beacon,
+                callData: _buildBeaconUpgradeCallData(newImpl),
                 description: string.concat("Upgrade ", label, " (", _kernelContractName(), ") implementation to ", vm.toString(newImpl))
             }),
             label: label
