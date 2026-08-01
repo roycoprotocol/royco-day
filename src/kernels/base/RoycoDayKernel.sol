@@ -175,15 +175,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function reinvestLiquidityPremium(uint256 _stShares)
-        external
-        virtual
-        override(IRoycoDayKernel)
-        whenNotPaused
-        restricted
-        nonReentrant
-        withPriceCache
-    {
+    function reinvestLiquidityPremium(uint256 _stShares) external virtual override(IRoycoDayKernel) whenNotPaused restricted nonReentrant withPriceCache {
         AccountingSyncLogic.reinvestLiquidityPremium(_getRoycoDayKernelStorage(), _stShares);
     }
 
