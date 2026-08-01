@@ -45,6 +45,9 @@ import { MakinaSharePriceOracle } from "../../../src/oracle/MakinaSharePriceOrac
 /// @dev Requires a mainnet fork (real Balancer V3 + Gyro E-CLP + the REAL DUSD Makina machine). FAILS (env not
 ///      found) when `MAINNET_RPC_URL` is unset, instead of silently passing.
 contract Test_MakinaMarketDeployment is Test {
+    /// @dev The address that supplies each market's genesis pool liquidity in this suite
+    address internal constant POOL_SEED_FUNDER = address(uint160(uint256(keccak256("POOL_SEED_FUNDER"))));
+
     using Math for uint256;
 
     uint256 internal constant FORK_BLOCK = 25_400_000;
@@ -126,6 +129,13 @@ contract Test_MakinaMarketDeployment is Test {
                 IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer)
             )
         );
+
+        // The template resolves a market's yield distribution models out of its own registry, so bind its registration
+        // surface and register the config's shapes, exactly as the scaffolding phase does.
+        bytes4[] memory ydmSelectors = new bytes4[](1);
+        ydmSelectors[0] = RoycoDayBalancerV3MarketDeploymentTemplate.setYieldDistributionModels.selector;
+        am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
+        deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("snUSD"));
     }
 
     // ─── helpers ───
@@ -135,12 +145,22 @@ contract Test_MakinaMarketDeployment is Test {
         factory.registerTemplate(address(template));
     }
 
+    /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold the quote and
+    ///      have approved the template before `executeMarketDeployment`. Points the seed at a test-controlled funder
+    function _fundPoolSeed(MarketConfig memory _cfg) internal {
+        _cfg.poolInitialization.funder = POOL_SEED_FUNDER;
+        deal(_cfg.gyroECLPPoolParams.quoteAsset, POOL_SEED_FUNDER, _cfg.poolInitialization.quoteAmount);
+        vm.prank(POOL_SEED_FUNDER);
+        IERC20(_cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
+    }
+
     /// @dev Clones the snUSD market config in memory and swaps in the Makina collateral + its share-price oracle.
     ///      The direct-template path must supply the deployed oracle itself (the `deploy()` flow resolves it).
     function _marketConfig(address _machine, address _collateralAsset) internal returns (MarketConfig memory cfg) {
         cfg = deployScript.getMarketConfig("snUSD");
         cfg.collateralAsset = _collateralAsset;
         cfg.collateralAssetOracle = address(new MakinaSharePriceOracle(_machine, USDC_USD_FEED));
+            _fundPoolSeed(cfg);
     }
 
     function _encodedParams(bytes32 _marketId, address _machine, address _collateralAsset) internal returns (bytes memory) {

@@ -15,6 +15,7 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     DEPLOYER_ROLE,
+    LPT_LP_ROLE,
     SYNC_ROLE
 } from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
@@ -87,6 +88,8 @@ library FactoryScaffold {
         // configuration. It holds no authority to configure targets or mint roles: the gatekeeper does both
         _accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, _factory, 0);
         _accessManager.grantRole(SYNC_ROLE, _factory, 0);
+        // The genesis pool seed is a role-gated deposit the template forwards as the factory
+        _accessManager.grantRole(LPT_LP_ROLE, _factory, 0);
     }
 
     function _one(bytes4 _selector) private pure returns (bytes4[] memory selectors) {

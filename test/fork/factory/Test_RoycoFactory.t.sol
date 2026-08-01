@@ -64,6 +64,9 @@ import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 /// @dev Requires a mainnet fork (real Balancer V3 + Gyro E-CLP + snUSD vault). FAILS (env not found) when
 ///      `MAINNET_RPC_URL` is unset, instead of silently passing.
 contract Test_RoycoFactory is Test {
+    /// @dev The address that supplies each market's genesis pool liquidity in this suite
+    address internal constant POOL_SEED_FUNDER = address(uint160(uint256(keccak256("POOL_SEED_FUNDER"))));
+
     uint256 internal constant FORK_BLOCK = 25_400_000;
     address internal constant GYRO_ECLP_POOL_FACTORY = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
 
@@ -143,6 +146,13 @@ contract Test_RoycoFactory is Test {
                 IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer)
             )
         );
+
+        // The template resolves a market's yield distribution models out of its own registry, so bind its registration
+        // surface and register the config's shapes, exactly as the scaffolding phase does.
+        bytes4[] memory ydmSelectors = new bytes4[](1);
+        ydmSelectors[0] = RoycoDayBalancerV3MarketDeploymentTemplate.setYieldDistributionModels.selector;
+        am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
+        deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("snUSD"));
     }
 
     // ─── helpers ───
@@ -152,12 +162,23 @@ contract Test_RoycoFactory is Test {
         factory.registerTemplate(address(template));
     }
 
+    /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold the quote and
+    ///      have approved the template before `executeMarketDeployment`. Points the seed at a test-controlled funder
+    function _fundPoolSeed(MarketConfig memory _cfg) internal {
+        _cfg.poolInitialization.funder = POOL_SEED_FUNDER;
+        deal(_cfg.gyroECLPPoolParams.quoteAsset, POOL_SEED_FUNDER, _cfg.poolInitialization.quoteAmount);
+        vm.prank(POOL_SEED_FUNDER);
+        IERC20(_cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
+    }
+
+
     /// @dev Externally deploys the snUSD market's impls/YDMs/pool and pre-deploys its ST + hook proxies (as the
     ///      deployScript, which holds DEPLOYER_ROLE), then builds the encoded template params from the SAME config.
     ///      `_marketId` must place the senior tranche as pool token0 for this suite's `factory` (see MARKET_ID_A/B).
     function _encodedParams(bytes32 _marketId) internal returns (bytes memory) {
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
+        _fundPoolSeed(cfg);
         return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
     }
 
@@ -302,14 +323,14 @@ contract Test_RoycoFactory is Test {
 
     /// A template constructed against a different factory address is rejected
     function test_RevertIf_TemplateBoundToDifferentFactoryRegistered() external {
-        // A real template bound to a different factory address must be rejected. The template validates its entry
-        // point's factory binding at construction, so the foreign template needs an entry point bound to the foreign
-        // factory: a bare (uninitialized) implementation suffices since ROYCO_FACTORY is a constructor immutable.
-        address otherFactory = makeAddr("OTHER_FACTORY");
-        RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(otherFactory);
+        // A real template bound to a different factory address must be rejected. The foreign factory has to be a real
+        // one: the template reads `ROYCO_AUTHORITY()` off it at construction to set its own access manager. Its entry
+        // point must be bound to that same foreign factory, which the template also validates at construction.
+        (RoycoFactory otherFactory,) = FactoryScaffold.deployFactory(am, keccak256("FOREIGN_FACTORY_PROXY"));
+        RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(address(otherFactory));
         RoycoDayBalancerV3MarketDeploymentTemplate foreign = RoycoDayBalancerV3MarketDeploymentTemplate(
             deployScript.deployTemplateForTest(
-                IRoycoFactory(otherFactory), deployScript.getMarketConfig("snUSD"), address(foreignEntryPoint), address(syncer)
+                IRoycoFactory(address(otherFactory)), deployScript.getMarketConfig("snUSD"), address(foreignEntryPoint), address(syncer)
             )
         );
         vm.prank(FACTORY_ADMIN);
@@ -549,6 +570,7 @@ contract Test_RoycoFactory is Test {
         // A different-model market resolves to different instances: the YDM model is part of the deployed contract type
         MarketConfig memory staticCfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(staticCfg);
+        _fundPoolSeed(staticCfg);
         staticCfg.ydmType = YDMType.StaticCurve;
         bytes32 staticId = MARKET_ID_C;
         bytes memory p = abi.encode(deployScript.buildMarketParams(staticCfg, staticId, PROTOCOL_FEE_RECIPIENT, address(0)));
@@ -808,6 +830,7 @@ contract Test_RoycoFactory is Test {
 
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
+        _fundPoolSeed(cfg);
         cfg.ydmType = YDMType.StaticCurve;
         bytes32 marketId = MARKET_ID_A;
         bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
@@ -836,6 +859,7 @@ contract Test_RoycoFactory is Test {
 
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
+        _fundPoolSeed(cfg);
         cfg.ydmType = YDMType.AdaptiveCurve_V1;
         // V1 takes only (target, full), so re-encode both curves as V1 params — a two-word init blob that binds on the V1 model
         bytes memory v1Params = abi.encode(AdaptiveCurveYDM_V1_Params({ yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 }));

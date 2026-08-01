@@ -43,6 +43,9 @@ import { ChainlinkPriceOracle } from "../../../src/oracle/ChainlinkPriceOracle.s
 ///      COLLATERAL_ASSET identity check, and the feed serves as the live Chainlink-compatible NAV leg. Requires a
 ///      mainnet fork. FAILS (env not found) when `MAINNET_RPC_URL` is unset, instead of silently passing.
 contract Test_ChainlinkOracleMarketDeployment is Test {
+    /// @dev The address that supplies each market's genesis pool liquidity in this suite
+    address internal constant POOL_SEED_FUNDER = address(uint160(uint256(keccak256("POOL_SEED_FUNDER"))));
+
     uint256 internal constant FORK_BLOCK = 25_400_000;
     address internal constant GYRO_ECLP_POOL_FACTORY = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
     address internal constant ECLP_LP_ORACLE_FACTORY = 0x301EDe5Fd4f9d7266B09c3A2E38F97776447154B;
@@ -113,6 +116,13 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
                 IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer)
             )
         );
+
+        // The template resolves a market's yield distribution models out of its own registry, so bind its registration
+        // surface and register the config's shapes, exactly as the scaffolding phase does.
+        bytes4[] memory ydmSelectors = new bytes4[](1);
+        ydmSelectors[0] = RoycoDayBalancerV3MarketDeploymentTemplate.setYieldDistributionModels.selector;
+        am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
+        deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("snUSD"));
     }
 
     // ─── helpers ───
@@ -128,7 +138,18 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
     function _marketConfig(address _oracleCollateralAsset) internal returns (MarketConfig memory cfg) {
         cfg = deployScript.getMarketConfig("snUSD");
         cfg.collateralAssetOracle = address(new ChainlinkPriceOracle(_oracleCollateralAsset, NUSD_REDSTONE_ORACLE));
+            _fundPoolSeed(cfg);
     }
+
+    /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold the quote and
+    ///      have approved the template before `executeMarketDeployment`. Points the seed at a test-controlled funder
+    function _fundPoolSeed(MarketConfig memory _cfg) internal {
+        _cfg.poolInitialization.funder = POOL_SEED_FUNDER;
+        deal(_cfg.gyroECLPPoolParams.quoteAsset, POOL_SEED_FUNDER, _cfg.poolInitialization.quoteAmount);
+        vm.prank(POOL_SEED_FUNDER);
+        IERC20(_cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
+    }
+
 
     function _encodedParams(bytes32 _marketId, address _oracleCollateralAsset) internal returns (bytes memory) {
         MarketConfig memory cfg = _marketConfig(_oracleCollateralAsset);

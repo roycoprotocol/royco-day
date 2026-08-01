@@ -228,7 +228,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // Stand up the chain-level scaffolding (AccessManager, factory, periphery, blacklist, template) and renounce
         // the deployer's admin roles, then deploy + wire the market itself.
         ProtocolScaffolding memory s = _setUpProtocolScaffolding(_config, _factoryAdmin, deployer, _roleAssignments);
-        DeploymentResult memory result = _deployAndExecuteMarket(_config, s, _protocolFeeRecipient);
+        DeploymentResult memory result = _deployAndExecuteMarket(_config, s, _protocolFeeRecipient, deployer);
 
         vm.stopBroadcast();
         return result;
@@ -270,6 +270,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
         // Register (or reuse) the Day template for this kernel type.
         s.template = _getOrRegisterTemplate(s.factory, _config, s.entryPoint, s.marketSyncer);
+
+        // Register the yield distribution models on the template and open its admin surface. Both are chain-wide and
+        // must land before the deployer renounces its admin roles.
+        _registerYieldDistributionModels(s.accessManager, s.template, _config);
 
         // Bind each component beacon's upgrade entrypoint. A beacon governs every market of its type, so this is wired
         // once per chain rather than per market, and it replaces the per-proxy upgrade bindings the components carried
@@ -416,11 +420,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         _accessManager.setTargetFunctionRole(_factory, _sel(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         _accessManager.setTargetFunctionRole(_factory, _sel(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
 
-        // The only two roles the factory retains, both solely so `executeAsFactory` can forward periphery
-        // configuration: `modifyTrancheConfigs` on the entry point and `addMarketKernels` on the syncer. It holds no
-        // authority to configure targets or to mint roles, both of which run through the gatekeeper.
         _accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, _factory, 0);
         _accessManager.grantRole(SYNC_ROLE, _factory, 0);
+        _accessManager.grantRole(LPT_LP_ROLE, _factory, 0);
     }
 
     /// @notice Deploys the market's off-factory contracts, executes the factory wiring transaction, and assembles the
@@ -430,7 +432,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     function _deployAndExecuteMarket(
         MarketConfig memory _config,
         ProtocolScaffolding memory _s,
-        address _protocolFeeRecipient
+        address _protocolFeeRecipient,
+        address _deployer
     )
         internal
         returns (DeploymentResult memory)
@@ -441,6 +444,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             _config.collateralAssetOracle = _deployCollateralAssetOracle(_config, marketId, address(_s.accessManager));
         }
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params = _buildMarketParams(_config, marketId, _protocolFeeRecipient, _s.roycoBlacklist);
+
+        // The template pulls the market's genesis pool liquidity from the configured funder. When that funder is the
+        // broadcasting deployer, approve from inside the broadcast; any other funder must have approved out of band.
+        if (_config.poolInitialization.funder == _deployer) {
+            IERC20(_config.gyroECLPPoolParams.quoteAsset).approve(_s.template, _config.poolInitialization.quoteAmount);
+            uint256 collateralSeed = _config.poolInitialization.collateralAmount;
+            if (collateralSeed != 0) IERC20(_config.collateralAsset).approve(_s.template, collateralSeed);
+        }
+
         IRoycoProtocolTemplate.DeploymentResult memory r = _s.factory.executeMarketDeployment(_s.template, abi.encode(params));
 
         // The template deploys the entire market in this one transaction: every tranche proxy, the Gyro E-CLP pool and
@@ -515,9 +527,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /**
      * @notice Deploys (or reuses) and registers the Day template for a market's kernel type
-     * @dev The template is CREATE2-deployed at a salt derived from its full construction params, so a chain reaches the
-     *      same template for the same implementation and model set, and a different set gets its own template rather
-     *      than silently reusing one wired to different yield distribution models
+     * @dev CREATE2-deployed at a salt derived from its construction params, so a chain reaches the same template for
+     *      the same factory, periphery, and beacon set, and a genuinely different wiring gets its own template rather
+     *      than silently reusing one. The yield distribution models are NOT construction params: they live in the
+     *      template's own storage and are registered separately, so shipping a new model shape does not move it
      */
     function _getOrRegisterTemplate(
         RoycoFactory _factory,
@@ -549,6 +562,23 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         returns (address template)
     {
         (template,) = _deployTemplate(_factory, _config, _entryPoint, _marketSyncer);
+    }
+
+    /**
+     * @notice Deploys and registers the yield distribution models on a template, for tests standing one up by hand
+     * @param _template The template to register the models on
+     * @param _config The market config supplying the model shape and both slots' target utilizations
+     */
+    function registerYieldDistributionModelsForTest(address _template, MarketConfig memory _config) public {
+        RoycoDayBalancerV3MarketDeploymentTemplate t = RoycoDayBalancerV3MarketDeploymentTemplate(_template);
+        for (uint256 i; i < 3; ++i) {
+            YDMType ydmType = YDMType(i);
+            string memory ydmTypeName_ = ydmTypeName(ydmType);
+            address jtYdm = _deployModel("JT model  ", ydmType, _config.jtYdmTargetUtilizationWAD, TAG_YDM);
+            address lptYdm = _deployModel("LPT model ", ydmType, _config.lptYdmTargetUtilizationWAD, TAG_LDM);
+            if (t.jtYdms(ydmTypeName_) == jtYdm && t.lptYdms(ydmTypeName_) == lptYdm) continue;
+            t.setYieldDistributionModels(ydmTypeName_, jtYdm, lptYdm);
+        }
     }
 
     /// @notice Public wrapper over `_buildMarketParams` so tests can construct real template deploy params from a market config
@@ -634,12 +664,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         (cp.bptOracleConstantPriceFeed, existed) =
             deployWithSanityChecks(_singletonSalt("ROYCO_BPT_ORACLE_CONSTANT_PRICE_FEED"), type(ConstantPriceFeed).creationCode, false);
         _logDeploy("ConstantPriceFeed     ", cp.bptOracleConstantPriceFeed, existed);
-
-        for (uint256 i; i < 3; ++i) {
-            YDMType ydmType = YDMType(i);
-            cp.jtYdms[i] = _deployModel("JT model  ", ydmType, _config.jtYdmTargetUtilizationWAD, TAG_YDM);
-            cp.lptYdms[i] = _deployModel("LPT model ", ydmType, _config.lptYdmTargetUtilizationWAD, TAG_LDM);
-        }
     }
 
     /**
@@ -740,9 +764,12 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             chargeYieldFeeOnQuoteAsset: _config.gyroECLPPoolParams.chargeYieldFeeOnQuoteAsset
         });
 
+        // Genesis pool liquidity, seeded by the template as a multi-asset deposit once the market is wired
+        params.poolInitialization = _config.poolInitialization;
+
         // The model shapes this market selects from the template's per-slot instances
-        params.jtYdmType = _config.ydmType;
-        params.lptYdmType = _config.ydmType;
+        params.jtYdmType = ydmTypeName(_config.ydmType);
+        params.lptYdmType = ydmTypeName(_config.ydmType);
 
         // Accountant init params. `jtYDM`/`lptYDM` are overwritten by the template with the deployed instances. BOTH YDMs get
         // initialization data so the accountant initializes each of them. The LPT premium/liquidity overlay is at its zero
@@ -849,6 +876,35 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         bool existed;
         (impl, existed) = deployWithSanityChecks(_implSalt, abi.encodePacked(_creationCode, _ctorArgs), false);
         _logDeploy(_name, impl, existed);
+    }
+
+    /**
+     * @notice Deploys the yield distribution models and registers them on the template, one pair per model shape
+     * @dev Idempotent: the models are CREATE2-deployed at derived salts, and a shape already registered on the
+     *      template is skipped, so a re-run of the script writes nothing
+     * @dev Binds the template's registration surface first, since the deployer needs it to register at all and its
+     *      admin roles are renounced at the end of the scaffolding phase
+     */
+    function _registerYieldDistributionModels(AccessManager _accessManager, address _template, MarketConfig memory _config) internal {
+        RoycoDayBalancerV3MarketDeploymentTemplate t = RoycoDayBalancerV3MarketDeploymentTemplate(_template);
+
+        if (!IRoycoAccessManager(address(_accessManager)).wasEverConfigured(_template)) {
+            bytes4[] memory selectors = new bytes4[](1);
+            selectors[0] = RoycoDayBalancerV3MarketDeploymentTemplate.setYieldDistributionModels.selector;
+            _accessManager.setTargetFunctionRole(_template, selectors, ADMIN_FACTORY_ROLE);
+        }
+
+        registerYieldDistributionModelsForTest(_template, _config);
+        t;
+    }
+
+    /// @notice The canonical registry name for a model shape, shared by registration and market params
+    /// @dev The template keys its registry by name, so this is the single place the enum crosses into that namespace
+    function ydmTypeName(YDMType _ydmType) public pure returns (string memory) {
+        if (_ydmType == YDMType.StaticCurve) return "STATIC_CURVE";
+        if (_ydmType == YDMType.AdaptiveCurve_V1) return "ADAPTIVE_CURVE_V1";
+        if (_ydmType == YDMType.AdaptiveCurve_V2) return "ADAPTIVE_CURVE_V2";
+        revert UnsupportedYDMType(_ydmType);
     }
 
     /// @notice Binds `upgradeTo` on every component beacon to ADMIN_UPGRADER_ROLE, skipping any already configured

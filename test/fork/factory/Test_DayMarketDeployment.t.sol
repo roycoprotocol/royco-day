@@ -84,7 +84,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     // ── Deployed market (RoycoDayTestBase sets FACTORY/ACCESS_MANAGER/ST/JT/KERNEL/ACCOUNTANT/YDM/BLACKLIST via _setDeployedMarket) ──
     IRoycoVaultTranche internal LPT;
     address internal POOL; // the Gyro E-CLP BPT (== kernel.lptAsset())
-    address internal BALANCER_HOOK; // the pool's hooks contract (the kernel-bound RoycoDayBalancerV3Hooks proxy)
     address internal LPT_YDM; // the LDM
     IVault internal VAULT;
     IRoycoDayEntryPoint internal ENTRY_POINT; // the pre-deployed entry point singleton the template configured
@@ -102,10 +101,17 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         // Fork mainnet + create wallets + `new DeployScript()`.
         _setUpRoyco();
 
+        // Every market launches with genesis pool liquidity, pulled from the configured funder. In the script flow the
+        // funder is the broadcasting deployer, which approves the template from inside the broadcast, so the suite only
+        // has to make sure that deployer actually holds the quote.
+        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+        cfg.poolInitialization.funder = DEPLOYER.addr;
+        deal(cfg.gyroECLPPoolParams.quoteAsset, cfg.poolInitialization.funder, cfg.poolInitialization.quoteAmount);
+
         // Deploy the Day-shaped SNUSD market end to end through the real script, sourcing the market config from the config
         // file (single source of truth) — not an inline test fixture.
         DeploymentResult memory result = DEPLOY_SCRIPT.deploy(
-            DEPLOY_SCRIPT.getMarketConfig("snUSD"),
+            cfg,
             FACTORY_ADMIN, // factory admin (holds AccessManager ADMIN_ROLE)
             PROTOCOL_FEE_RECIPIENT_ADDRESS,
             0,
@@ -123,7 +129,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         POOL = KERNEL.lptAsset();
         LPT_YDM = ACCOUNTANT.getState().lptYDM;
         VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
-        BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -132,7 +137,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     /// @notice Every component the deployment must produce is a distinct live contract with code
     function test_Deployment_AllAddressesLive() public view {
-        address[12] memory a = [
+        address[11] memory a = [
             address(FACTORY),
             address(ACCESS_MANAGER),
             address(BLACKLIST),
@@ -143,8 +148,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
             address(ACCOUNTANT),
             address(YDM),
             LPT_YDM,
-            POOL,
-            BALANCER_HOOK
+            POOL
         ];
         for (uint256 i = 0; i < a.length; ++i) {
             assertTrue(a[i] != address(0), "zero address");
@@ -302,7 +306,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(AccessManagedUpgradeable(address(ST)).authority(), am, "ST authority");
         assertEq(AccessManagedUpgradeable(address(JT)).authority(), am, "JT authority");
         assertEq(AccessManagedUpgradeable(address(LPT)).authority(), am, "LPT authority");
-        assertEq(AccessManagedUpgradeable(BALANCER_HOOK).authority(), am, "balancer hook authority");
     }
 
     /**
@@ -343,7 +346,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertTrue(am.wasEverConfigured(address(ST)), "senior tranche must be recorded as configured");
         assertTrue(am.wasEverConfigured(address(JT)), "junior tranche must be recorded as configured");
         assertTrue(am.wasEverConfigured(address(LPT)), "liquidity provider tranche must be recorded as configured");
-        assertTrue(am.wasEverConfigured(BALANCER_HOOK), "balancer hook must be recorded as configured");
         // The shared Balancer governance targets too, which is what makes a second market skip them
         assertTrue(am.wasEverConfigured(address(VAULT)), "the Balancer vault must be recorded as configured");
     }
@@ -435,7 +437,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
             address t = i == 0 ? address(ST) : i == 1 ? address(JT) : address(LPT);
             _assertRole(t, IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
             _assertRole(t, IRoycoAuth.unpause.selector, ADMIN_UNPAUSER_ROLE);
-            _assertRole(t, UUPSUpgradeable.upgradeToAndCall.selector, ADMIN_UPGRADER_ROLE);
             _assertRole(t, ERC20BurnableUpgradeable.burn.selector, BURNER_ROLE);
             _assertRole(t, ERC20BurnableUpgradeable.burnFrom.selector, BURNER_ROLE);
             // `kernelMint` carries NO binding: it is gated by the tranche's own onlyKernel check (per-market, not AM-global).
@@ -461,18 +462,12 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(KERNEL), BalancerV3LiquidityVenue.setMaxReinvestmentSlippage.selector, ADMIN_ORACLE_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setCollateralAssetOracle.selector, ADMIN_ORACLE_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setSequencerUptimeFeed.selector, ADMIN_ORACLE_ROLE);
-
-        _assertRole(BALANCER_HOOK, IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
-        _assertRole(BALANCER_HOOK, IRoycoAuth.unpause.selector, ADMIN_UNPAUSER_ROLE);
-        _assertRole(BALANCER_HOOK, UUPSUpgradeable.upgradeToAndCall.selector, ADMIN_UPGRADER_ROLE);
     }
 
-    /// @notice Key grants exist (accountant+hook can sync, kernel can burn) and every bound role has a live grantee
+    /// @notice Key grants exist (the accountant can sync, the kernel can burn) and every bound role has a live grantee
     function test_Auth_EveryBoundRoleHasALiveGrantee() public view {
         (bool syncAcc,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(ACCOUNTANT));
         assertTrue(syncAcc, "accountant SYNC_ROLE");
-        (bool syncHook,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, BALANCER_HOOK);
-        assertTrue(syncHook, "balancer hook SYNC_ROLE");
         (bool burner,) = ACCESS_MANAGER.hasRole(BURNER_ROLE, address(KERNEL));
         assertTrue(burner, "kernel BURNER_ROLE");
 
