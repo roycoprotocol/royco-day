@@ -87,10 +87,8 @@ contract RoycoFactoryGatekeeper is IRoycoFactoryGatekeeper {
         emit MarketRolesGranted(_roleIds.length);
     }
 
-    /**
-     * @dev A market deployment may only act on a contract that has never been configured before
-     * @param _subject The address a deployment is asking to configure or to grant a role to
-     */
+    /// @dev A market deployment may only act on a contract that has never been configured before
+    /// @param _subject The address a deployment is asking to configure or to grant a role to
     function _requireNotConfigured(address _subject) private view {
         require(_subject != ROYCO_ACCESS_MANAGER && _subject != ROYCO_FACTORY && _subject != address(this), TARGET_FORBIDDEN(_subject));
         require(!IRoycoAccessManager(ROYCO_ACCESS_MANAGER).wasEverConfigured(_subject), TARGET_ALREADY_CONFIGURED(_subject));

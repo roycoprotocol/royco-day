@@ -11,6 +11,7 @@ import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { TAG_ST_PROXY } from "../../src/factory/templates/base/Constants.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
+import { IBalancerV3LiquidityVenue } from "../../src/interfaces/liquidity-venue/IBalancerV3LiquidityVenue.sol";
 import { BalancerV3LiquidityVenue } from "../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { CREATE2_FACTORY_ADDRESS } from "../utils/Create2DeployUtils.sol";
 import {
@@ -290,7 +291,7 @@ abstract contract MarketDeploymentConfig {
             dustTolerance: 5,
             kernelType: KernelType.RoycoDayBalancerV3Kernel,
             kernelSpecificParams: abi.encode(
-                BalancerV3LiquidityVenue.LiquidityVenueInitParams({
+                IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams({
                     bptOracle: address(0), // This is deployed by the script after the pool is created and overwritten by the template
                     maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
                 })

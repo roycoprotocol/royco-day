@@ -79,6 +79,7 @@ import { IYDM } from "../src/interfaces/IYDM.sol";
 import { IRoycoAccessManager } from "../src/interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
+import { IBalancerV3LiquidityVenue } from "../src/interfaces/liquidity-venue/IBalancerV3LiquidityVenue.sol";
 import { RoycoDayBalancerV3Kernel } from "../src/kernels/RoycoDayBalancerV3Kernel.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
 import { BalancerV3PoolCreationParams } from "../src/libraries/logic/liquidity-venue/BalancerV3VenueCreationLogic.sol";
@@ -795,7 +796,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             lptYieldShareProtocolFeeWAD: 0
         });
 
-        params.kernelSpecificParams = _config.kernelSpecificParams; // the venue init params blob (BalancerV3LiquidityVenue.LiquidityVenueInitParams)
+        params.kernelSpecificParams = _config.kernelSpecificParams; // the venue init params blob (IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams)
         params.protocolFeeRecipient = _protocolFeeRecipient;
         params.stSelfLiquidationBonusWAD = _config.stSelfLiquidationBonusWAD;
         params.roycoBlacklist = _roycoBlacklist;

@@ -52,10 +52,8 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory 
         _disableInitializers();
     }
 
-    /**
-     * @notice Initializes the factory proxy against a pre-deployed `RoycoAccessManager`
-     * @param _roycoAccessManager Pre-deployed access manager whose gatekeeper must already point back at this factory
-     */
+    /// @notice Initializes the factory proxy against a pre-deployed `RoycoAccessManager`
+    /// @param _roycoAccessManager Pre-deployed access manager whose gatekeeper must already point back at this factory
     function initialize(address _roycoAccessManager) external initializer {
         require(_roycoAccessManager != address(0), ACCESS_MANAGER_CANNOT_BE_ZERO_ADDRESS());
         require(_roycoAccessManager.code.length > 0, ACCESS_MANAGER_HAS_NO_CODE());

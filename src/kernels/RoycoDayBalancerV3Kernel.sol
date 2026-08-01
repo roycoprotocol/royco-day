@@ -24,7 +24,7 @@ contract RoycoDayBalancerV3Kernel is BalancerV3LiquidityVenue {
      */
     function initialize(
         IRoycoDayKernel.RoycoDayKernelInitParams calldata _standardParams,
-        BalancerV3LiquidityVenue.LiquidityVenueInitParams calldata _liquidityVenueParams
+        BalancerV3LiquidityVenueInitParams calldata _liquidityVenueParams
     )
         external
         initializer

@@ -27,6 +27,7 @@ import { MockReentrancyProbe } from "../../mocks/MockReentrancyProbe.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { zeroLiquidityParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
+import { IBalancerV3LiquidityVenue } from "../../../src/interfaces/liquidity-venue/IBalancerV3LiquidityVenue.sol";
 
 /**
  * @title Test_RedeemReentrancyWindow_Tranches
@@ -346,7 +347,7 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
                     sequencerUptimeFeed: address(0),
                     gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS
                 }),
-                BalancerV3LiquidityVenue.LiquidityVenueInitParams({
+                IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams({
                     bptOracle: address(bptOracle), maxReinvestmentSlippageWAD: params.maxReinvestmentSlippageWAD
                 })
             )

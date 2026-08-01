@@ -539,9 +539,11 @@ interface IRoycoDayKernel {
      */
     function enforceNotBlacklisted(address _account) external view;
 
-    /// @notice Retrieves the market's wiring in one carrier for external consumers (the entry point and other periphery)
-    /// @dev The kernel's delegatecalled logic libraries read the wiring from the kernel's state directly, so this carrier never enters the operation hot paths
-    /// @return immutables The market's tranche set, assets, and accountant
+    /**
+     * @notice Retrieves the market's wiring in one carrier for external consumers (the entry point and other periphery)
+     * @dev The kernel's delegatecalled logic libraries read the wiring from the kernel's state directly, so this carrier never enters the operation hot paths
+     * @return immutables The market's tranche set, assets, and accountant
+     */
     function getImmutableState() external view returns (RoycoDayKernelImmutableState memory immutables);
 
     /// @notice Retrieves the state of the Royco kernel

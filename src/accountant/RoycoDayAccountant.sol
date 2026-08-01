@@ -58,10 +58,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     // Initialization Functions
     // =============================
 
-    /**
-     * @notice Initializes the Royco accountant state
-     * @param _params The initialization parameters for the Royco accountant
-     */
+    /// @notice Initializes the Royco accountant state
+    /// @param _params The initialization parameters for the Royco accountant
     function initialize(RoycoDayAccountantInitParams calldata _params) external initializer {
         // Initialize the base state of the accountant
         __RoycoBase_init(_params.initialAuthority);

@@ -52,6 +52,7 @@ import { MockPriceOracle } from "../mocks/MockPriceOracle.sol";
 import { MockYDM } from "../mocks/MockYDM.sol";
 import { Assertions } from "./Assertions.sol";
 import { FixtureCell, MarketParamsConfig, TokenConfig } from "./FixtureTypes.sol";
+import { IBalancerV3LiquidityVenue } from "../../src/interfaces/liquidity-venue/IBalancerV3LiquidityVenue.sol";
 
 /**
  * @title DayMarketTestBase
@@ -366,7 +367,7 @@ abstract contract DayMarketTestBase is Assertions {
                     sequencerUptimeFeed: address(0),
                     gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS
                 }),
-                BalancerV3LiquidityVenue.LiquidityVenueInitParams({
+                IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams({
                     bptOracle: address(bptOracle), maxReinvestmentSlippageWAD: _params.maxReinvestmentSlippageWAD
                 })
             )

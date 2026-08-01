@@ -66,9 +66,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @dev A simulation never reaches this tail: the operation's result-carrying revert exits the body first
     modifier withLiquidityPremiumReinvestment() {
         _;
-        // Skip the deployment outright when the tranche holds no idle premium
+        // Skip the deployment outright when the tranche holds no idle premium, else attempt to deploy the entire pile
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        if ($.lptOwnedSeniorTrancheShares != 0) AccountingSyncLogic.reinvestLiquidityPremium($, type(uint256).max);
+        uint256 lptOwnedSeniorTrancheShares = $.lptOwnedSeniorTrancheShares;
+        if (lptOwnedSeniorTrancheShares != 0) AccountingSyncLogic.reinvestLiquidityPremium($, lptOwnedSeniorTrancheShares);
     }
 
     // =============================
@@ -188,9 +189,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // Tranche Deposit and Redeem Functions
     // =============================
 
-    /// @inheritdoc IRoycoDayKernel
-    /// @dev ST and JT deposits are enabled only in a PERPETUAL market state, the ST deposit granted that the market's coverage and liquidity requirements are satisfied post-deposit
-    /// @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and enforces no requirements
+    /**
+     * @inheritdoc IRoycoDayKernel
+     * @dev ST and JT deposits are enabled only in a PERPETUAL market state, the ST deposit granted that the market's coverage and liquidity requirements are satisfied post-deposit
+     * @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and enforces no requirements
+     */
     function inkindDeposit(
         DispatchMode _mode,
         TRANCHE_UNIT _assets,
@@ -238,9 +241,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // Liquidity Provider Tranche Multi-Asset Deposit and Redeem Functions
     // =============================
 
-    /// @inheritdoc IRoycoDayKernel
-    /// @dev LPT multi-asset deposits are enabled in a PERPETUAL market state (granted the market's coverage and liquidity requirements are satisfied against the new senior exposure), and in a fixed-term market only for a quote-only deposit that mints no senior shares
-    /// @dev Composed from the shared deposit primitives: an ST deposit seeding the add's senior shares, the venue add, then an LPT deposit of the minted assets
+    /**
+     * @inheritdoc IRoycoDayKernel
+     * @dev LPT multi-asset deposits are enabled in a PERPETUAL market state (granted the market's coverage and liquidity requirements are satisfied against the new senior exposure), and in a fixed-term market only for a quote-only deposit that mints no senior shares
+     * @dev Composed from the shared deposit primitives: an ST deposit seeding the add's senior shares, the venue add, then an LPT deposit of the minted assets
+     */
     function lptDepositMultiAsset(
         DispatchMode _mode,
         TRANCHE_UNIT _collateralAssets,
@@ -292,9 +297,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // Tranche Max Deposit and Redeem Functions
     // =============================
 
-    /// @inheritdoc IRoycoDayKernel
-    /// @dev ST and JT deposits are allowed only in a PERPETUAL market state, the ST deposit granted that the market's coverage and liquidity requirements are satisfied post-deposit
-    /// @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and unbounded
+    /**
+     * @inheritdoc IRoycoDayKernel
+     * @dev ST and JT deposits are allowed only in a PERPETUAL market state, the ST deposit granted that the market's coverage and liquidity requirements are satisfied post-deposit
+     * @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and unbounded
+     */
     function inkindMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernel) onlyTranche returns (TRANCHE_UNIT) {
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         return DepositLogic.inkindMaxDeposit($, _getInvokingTranche($), _receiver);
@@ -487,20 +494,19 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyTranche
         whenNotPaused
     {
-        // Get the Royco kernel state
-        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-
         // Batch screen the involved accounts against the market's blacklist
-        BlacklistLogic._enforceNotBlacklisted($, _caller, _from, _to);
+        BlacklistLogic._enforceNotBlacklisted(_getRoycoDayKernelStorage(), _caller, _from, _to);
 
         // Call the market specific pre-balance update hook
         _preTrancheBalanceUpdate(_caller, _from, _to, _value);
     }
 
-    /// @dev Resolves the calling tranche's type from msg.sender, reverting for any caller that is not one of the market's tranches
-    /// @dev Takes the caller's storage pointer so the tranche set is not re-resolved from the storage root on every dispatch
-    /// @param $ The kernel's state, whose tranche set the caller is matched against
-    /// @return The calling tranche's type
+    /**
+     * @dev Resolves the calling tranche's type from msg.sender, reverting for any caller that is not one of the market's tranches
+     * @dev Takes the caller's storage pointer so the tranche set is not re-resolved from the storage root on every dispatch
+     * @param $ The kernel's state, whose tranche set the caller is matched against
+     * @return The calling tranche's type
+     */
     function _getInvokingTranche(RoycoDayKernelState storage $) private view returns (TrancheType) {
         if (msg.sender == $.seniorTranche) return TrancheType.SENIOR;
         else if (msg.sender == $.juniorTranche) return TrancheType.JUNIOR;

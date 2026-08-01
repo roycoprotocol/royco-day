@@ -21,6 +21,7 @@ import { MockThreeTokenVaultShim } from "../../mocks/MockThreeTokenVaultShim.sol
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
+import { IBalancerV3LiquidityVenue } from "../../../src/interfaces/liquidity-venue/IBalancerV3LiquidityVenue.sol";
 
 /**
  * @title Test_Initialization_Kernel
@@ -50,7 +51,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
     )
         internal
         view
-        returns (IRoycoDayKernel.RoycoDayKernelInitParams memory standardParams, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory venueParams)
+        returns (IRoycoDayKernel.RoycoDayKernelInitParams memory standardParams, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory venueParams)
     {
         standardParams = IRoycoDayKernel.RoycoDayKernelInitParams({
             initialAuthority: address(accessManager),
@@ -69,13 +70,13 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
             sequencerUptimeFeed: address(0),
             gracePeriodSeconds: 1 hours
         });
-        venueParams = BalancerV3LiquidityVenue.LiquidityVenueInitParams({ bptOracle: address(bptOracle), maxReinvestmentSlippageWAD: 0.001e18 });
+        venueParams = IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams({ bptOracle: address(bptOracle), maxReinvestmentSlippageWAD: 0.001e18 });
     }
 
     /// @dev Deploys a kernel proxy over a fresh implementation, expecting the given revert
     function _expectInitRevert(
         IRoycoDayKernel.RoycoDayKernelInitParams memory _standardParams,
-        BalancerV3LiquidityVenue.LiquidityVenueInitParams memory _venueParams,
+        IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory _venueParams,
         bytes4 _selector
     )
         internal
@@ -98,7 +99,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
 
     /// @notice A null senior tranche in the market wiring is rejected before anything else can be mis-set
     function test_RevertIf_KernelInitializedWithNullSeniorTranche() public {
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(collateralAssetOracle), PROTOCOL_FEE_RECIPIENT);
         sp.seniorTranche = address(0);
         _expectInitRevert(sp, vp, IRoycoAuth.NULL_ADDRESS.selector);
@@ -107,7 +108,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
     /// @notice A liquidity provider tranche asset that is not a registered Balancer pool is rejected
     function test_RevertIf_LPTAssetPoolNotRegisteredWithVault() public {
         MockBPT unregisteredBpt = new MockBPT(IVault(address(balancerVault)), "Unregistered BPT", "uBPT");
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(collateralAssetOracle), PROTOCOL_FEE_RECIPIENT);
         sp.lptAsset = address(unregisteredBpt);
         sp.liquidityProviderTranche = _lptCustodying(address(unregisteredBpt));
@@ -121,7 +122,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
         MockERC20C tokenB = new MockERC20C("Token B", "TKB", 6);
         balancerVault.registerPool(address(foreignBpt), [IERC20(address(tokenA)), IERC20(address(tokenB))]);
 
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(collateralAssetOracle), PROTOCOL_FEE_RECIPIENT);
         sp.lptAsset = address(foreignBpt);
         sp.liquidityProviderTranche = _lptCustodying(address(foreignBpt));
@@ -137,7 +138,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
         MockThreeTokenVaultShim shim = new MockThreeTokenVaultShim(three);
         MockBPT shimBpt = new MockBPT(IVault(address(shim)), "Shim BPT", "shBPT");
 
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(collateralAssetOracle), PROTOCOL_FEE_RECIPIENT);
         sp.lptAsset = address(shimBpt);
         sp.liquidityProviderTranche = _lptCustodying(address(shimBpt));
@@ -167,7 +168,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
     function test_RevertIf_KernelInitializedWithMismatchedTrancheAsset() public {
         MockERC4626C foreignVault = new MockERC4626C(address(stJtUnderlying), "Foreign Vault Share", "fSHARE", 18);
         foreignVault.setRate(1e18);
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(collateralAssetOracle), PROTOCOL_FEE_RECIPIENT);
         sp.collateralAsset = address(foreignVault);
         _expectInitRevert(sp, vp, IRoycoDayKernel.TRANCHE_AND_KERNEL_ASSETS_MISMATCH.selector);
@@ -180,7 +181,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
     function test_RevertIf_KernelInitializedWithForeignJuniorTrancheAsset() public {
         MockERC4626C foreignVault = new MockERC4626C(address(stJtUnderlying), "Foreign Vault Share", "fSHARE", 18);
         foreignVault.setRate(1e18);
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(collateralAssetOracle), PROTOCOL_FEE_RECIPIENT);
         sp.juniorTranche = _deployTrancheProxy(address(new RoycoLiquidityProviderTranche()), "Foreign JT", "fJT", address(kernel), address(foreignVault));
         _expectInitRevert(sp, vp, IRoycoDayKernel.TRANCHE_AND_KERNEL_ASSETS_MISMATCH.selector);
@@ -188,7 +189,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
 
     /// @notice A null protocol fee recipient is rejected, sync-time fee mints need a live destination
     function test_RevertIf_KernelInitializedWithNullFeeRecipient() public {
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(collateralAssetOracle), address(0));
         _expectInitRevert(sp, vp, IRoycoAuth.NULL_ADDRESS.selector);
     }
@@ -199,7 +200,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
      *      params would replace the access authority and the fee recipient in one transaction
      */
     function test_RevertIf_KernelReinitializedAfterGenesis() public {
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(collateralAssetOracle), makeAddr("ATTACKER"));
         sp.initialAuthority = makeAddr("ATTACKER_AUTHORITY");
         vm.prank(makeAddr("ATTACKER"));
@@ -213,14 +214,14 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
 
     /// @notice A null collateral asset oracle is rejected, the kernel has no fallback price source
     function test_RevertIf_KernelInitializedWithNullOracle() public {
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(0), PROTOCOL_FEE_RECIPIENT);
         _expectInitRevert(sp, vp, IRoycoAuth.NULL_ADDRESS.selector);
     }
 
     /// @notice A zero staleness threshold is rejected, it would flag every report stale and brick pricing
     function test_RevertIf_KernelInitializedWithZeroStalenessThreshold() public {
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(collateralAssetOracle), PROTOCOL_FEE_RECIPIENT);
         sp.stalenessThresholdSeconds = 0;
         _expectInitRevert(sp, vp, IRoycoDayKernel.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
@@ -229,14 +230,14 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
     /// @notice An oracle pricing a different collateral asset is rejected, the pairing can never mismatch
     function test_RevertIf_KernelInitializedWithMismatchedOracle() public {
         MockPriceOracle foreignOracle = new MockPriceOracle(makeAddr("FOREIGN_ASSET"), 1e18);
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(foreignOracle), PROTOCOL_FEE_RECIPIENT);
         _expectInitRevert(sp, vp, IRoycoDayKernel.COLLATERAL_ASSET_ORACLE_MISMATCH.selector);
     }
 
     /// @notice A sequencer uptime feed with a zero grace period is rejected, a restore needs a settling window
     function test_RevertIf_KernelInitializedWithSequencerFeedAndZeroGracePeriod() public {
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(collateralAssetOracle), PROTOCOL_FEE_RECIPIENT);
         sp.sequencerUptimeFeed = makeAddr("SEQUENCER_UPTIME_FEED");
         sp.gracePeriodSeconds = 0;
@@ -251,7 +252,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
     function test_KernelInitializedWithOracle_PricesThroughItFromGenesis() public {
         MockPriceOracle seededOracle = new MockPriceOracle(address(stJtVault), 3e18);
         DayKernel freshImpl = _freshImpl();
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, BalancerV3LiquidityVenue.LiquidityVenueInitParams memory vp) =
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(seededOracle), PROTOCOL_FEE_RECIPIENT);
         DayKernel seededKernel = DayKernel(address(new ERC1967Proxy(address(freshImpl), abi.encodeCall(freshImpl.initialize, (sp, vp)))));
 

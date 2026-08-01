@@ -20,6 +20,7 @@ import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoAccessManager } from "../../interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
+import { IBalancerV3LiquidityVenue } from "../../interfaces/liquidity-venue/IBalancerV3LiquidityVenue.sol";
 import { RoycoDayBalancerV3Kernel } from "../../kernels/RoycoDayBalancerV3Kernel.sol";
 import { BalancerV3LiquidityVenue } from "../../kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { TrancheType } from "../../libraries/Types.sol";
@@ -203,10 +204,12 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     /// @notice Thrown when a market is deployed without genesis pool liquidity
     error POOL_SEED_REQUIRED();
 
-    /// @notice Emitted when a model shape's instances are registered or replaced
-    /// @param ydmType The model shape's name
-    /// @param jtYdm The junior tranche's model instance for this shape
-    /// @param lptYdm The liquidity provider tranche's model instance for this shape
+    /**
+     * @notice Emitted when a model shape's instances are registered or replaced
+     * @param ydmType The model shape's name
+     * @param jtYdm The junior tranche's model instance for this shape
+     * @param lptYdm The liquidity provider tranche's model instance for this shape
+     */
     event YieldDistributionModelsRegistered(string ydmType, address jtYdm, address lptYdm);
     /// @notice Thrown when a deployed market contract's on-chain wiring does not match the expected configuration
     error MARKET_WIRING_VERIFICATION_FAILED(address subject);
@@ -299,20 +302,24 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         emit YieldDistributionModelsRegistered(_ydmType, _jtYdm, _lptYdm);
     }
 
-    /// @notice Returns the junior tranche's yield distribution model instance for a shape
-    /// @dev Reverts on an unregistered shape rather than returning the null address, which would otherwise reach the
-    ///      accountant's initializer and produce a market wired to no model at all
-    /// @param _ydmType The model shape the market selected
-    /// @return ydm The junior tranche model instance this template deploys markets against
+    /**
+     * @notice Returns the junior tranche's yield distribution model instance for a shape
+     * @dev Reverts on an unregistered shape rather than returning the null address, which would otherwise reach the
+     * accountant's initializer and produce a market wired to no model at all
+     * @param _ydmType The model shape the market selected
+     * @return ydm The junior tranche model instance this template deploys markets against
+     */
     function jtYdmFor(string memory _ydmType) public view returns (address ydm) {
         ydm = jtYdms[_ydmType];
         require(ydm != address(0), YDM_NOT_REGISTERED(_ydmType));
     }
 
-    /// @notice Returns the liquidity provider tranche's yield distribution model instance for a shape
-    /// @dev Reverts on an unregistered shape, for the same reason as `jtYdmFor`
-    /// @param _ydmType The model shape the market selected
-    /// @return ydm The liquidity provider tranche model instance this template deploys markets against
+    /**
+     * @notice Returns the liquidity provider tranche's yield distribution model instance for a shape
+     * @dev Reverts on an unregistered shape, for the same reason as `jtYdmFor`
+     * @param _ydmType The model shape the market selected
+     * @return ydm The liquidity provider tranche model instance this template deploys markets against
+     */
     function lptYdmFor(string memory _ydmType) public view returns (address ydm) {
         ydm = lptYdms[_ydmType];
         require(ydm != address(0), YDM_NOT_REGISTERED(_ydmType));
@@ -337,8 +344,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         virtual
         returns (bytes memory)
     {
-        BalancerV3LiquidityVenue.LiquidityVenueInitParams memory liquidityVenueParams =
-            abi.decode(_kernelSpecificParams, (BalancerV3LiquidityVenue.LiquidityVenueInitParams));
+        IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory liquidityVenueParams =
+            abi.decode(_kernelSpecificParams, (IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams));
         // Set the BPT oracle to the template-deployed oracle
         liquidityVenueParams.bptOracle = _bptOracle;
         return abi.encodeCall(RoycoDayBalancerV3Kernel.initialize, (_kip, liquidityVenueParams));
@@ -653,10 +660,12 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         return RoleBindings({ targetBindings: targetBindings, postInitGrants: grants });
     }
 
-    /// @dev The Day kernel's pricing admin selectors: the Balancer liquidity venue setters and the kernel's collateral
-    ///      asset oracle setters, all bound to ADMIN_ORACLE_ROLE
-    /// @dev Overridable so a kernel variant can restate its pricing surface; the result is appended to the kernel's
-    ///      operational selectors by `_kernelBinding` rather than declared as a second binding on the same target
+    /**
+     * @dev The Day kernel's pricing admin selectors: the Balancer liquidity venue setters and the kernel's collateral
+     * asset oracle setters, all bound to ADMIN_ORACLE_ROLE
+     * @dev Overridable so a kernel variant can restate its pricing surface; the result is appended to the kernel's
+     * operational selectors by `_kernelBinding` rather than declared as a second binding on the same target
+     */
     function _kernelPricingBinding() internal view virtual returns (bytes4[] memory s, uint64[] memory r) {
         s = new bytes4[](4);
         r = new uint64[](4);

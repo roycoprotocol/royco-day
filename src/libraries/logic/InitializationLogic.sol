@@ -5,7 +5,7 @@ import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/in
 import { IRoycoAuth } from "../../interfaces/IRoycoAuth.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { WAD } from "../Constants.sol";
+import { WAD, WAD_DECIMALS } from "../Constants.sol";
 
 /// @title InitializationLogic
 /// @author Waymont
@@ -24,28 +24,6 @@ library InitializationLogic {
                 && _params.accountant != address(0),
             IRoycoAuth.NULL_ADDRESS()
         );
-        // Ensure that the protocol fee recipient is not null (the initial authority is validated by the base initializer)
-        require(_params.protocolFeeRecipient != address(0), IRoycoAuth.NULL_ADDRESS());
-        // Ensure that the ST self-liquidiation bonus is less than 100% of its value
-        require(_params.stSelfLiquidationBonusWAD < WAD, IRoycoDayKernel.INVALID_SELF_LIQUIDATION_BONUS());
-
-        // Set the market's wiring: the tranche set, its assets, and the accountant
-        $.seniorTranche = _params.seniorTranche;
-        $.juniorTranche = _params.juniorTranche;
-        $.liquidityProviderTranche = _params.liquidityProviderTranche;
-        $.collateralAsset = _params.collateralAsset;
-        // Ensure that the collateral asset's decimals are less than or equal to 18
-        uint256 collateralAssetDecimals = IERC20Metadata(_params.collateralAsset).decimals();
-        require(collateralAssetDecimals <= 18, IRoycoDayKernel.INVALID_COLLATERAL_ASSET_DECIMALS());
-        $.oneWholeCollateralAsset = uint64(10 ** collateralAssetDecimals);
-        $.lptAsset = _params.lptAsset;
-        // Ensure that the LPT asset's decimals are less than or equal to 18
-        uint256 lptAssetDecimals = IERC20Metadata(_params.lptAsset).decimals();
-        require(lptAssetDecimals <= 18, IRoycoDayKernel.INVALID_LPT_ASSET_DECIMALS());
-        $.oneWholeLPTAsset = uint64(10 ** lptAssetDecimals);
-        $.quoteAsset = _params.quoteAsset;
-        $.accountant = _params.accountant;
-
         // Ensure that the tranches and their corresponding assets in the kernel match: coinvestment is structural, both the senior and junior tranches deposit the one collateral asset
         require(
             IRoycoVaultTranche(_params.seniorTranche).asset() == _params.collateralAsset
@@ -53,6 +31,26 @@ library InitializationLogic {
                 && IRoycoVaultTranche(_params.liquidityProviderTranche).asset() == _params.lptAsset,
             IRoycoDayKernel.TRANCHE_AND_KERNEL_ASSETS_MISMATCH()
         );
+        // Ensure that the protocol fee recipient is not null (the initial authority is validated by the base initializer)
+        require(_params.protocolFeeRecipient != address(0), IRoycoAuth.NULL_ADDRESS());
+        // Ensure that the ST self-liquidiation bonus is less than 100% of its value
+        require(_params.stSelfLiquidationBonusWAD < WAD, IRoycoDayKernel.INVALID_SELF_LIQUIDATION_BONUS());
+        // Ensure that the collateral and LPT asset decimals are less than or equal to 18
+        uint256 collateralAssetDecimals = IERC20Metadata(_params.collateralAsset).decimals();
+        uint256 lptAssetDecimals = IERC20Metadata(_params.lptAsset).decimals();
+        require(collateralAssetDecimals <= WAD_DECIMALS, IRoycoDayKernel.INVALID_COLLATERAL_ASSET_DECIMALS());
+        require(lptAssetDecimals <= WAD_DECIMALS, IRoycoDayKernel.INVALID_LPT_ASSET_DECIMALS());
+
+        // Set the market's wiring: the tranche set, its assets, and the accountant
+        $.seniorTranche = _params.seniorTranche;
+        $.juniorTranche = _params.juniorTranche;
+        $.liquidityProviderTranche = _params.liquidityProviderTranche;
+        $.collateralAsset = _params.collateralAsset;
+        $.oneWholeCollateralAsset = uint64(10 ** collateralAssetDecimals);
+        $.lptAsset = _params.lptAsset;
+        $.oneWholeLPTAsset = uint64(10 ** lptAssetDecimals);
+        $.quoteAsset = _params.quoteAsset;
+        $.accountant = _params.accountant;
 
         // Set the market's configuration
         $.protocolFeeRecipient = _params.protocolFeeRecipient;
