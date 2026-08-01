@@ -113,7 +113,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IBalan
      * @dev Reverts when the kernel is paused to ensure that the pool never executes operations on a faulty kernel state
      * @dev Values one senior tranche share in NAV units, the rate at which the pool prices its senior share leg
      * @dev Within a synchronized operation the returned rate is the one the pre-op sync cached, so an inline senior share mint or burn (a multi-asset deposit or redemption) cannot transiently move the senior-leg mark before the matching effective NAV is committed
-     * @dev Before the first sync of a transaction the cache is unset, so a standalone pool interaction or an off-chain read previews the fresh rate the next sync would resolve from committed state
+     * @dev Outside a synchronized operation the cache is unset (each operation's price frame clears it on exit), so a standalone pool interaction or an off-chain read previews the fresh rate the next sync would resolve from committed state, even later in a transaction that already ran an operation
      * @dev The rate is floored to a minimum of 1 WAD so the pool never receives a zero rate, which it would reject
      */
     function getRate() external view override(IRateProvider) whenNotPaused returns (uint256 rate) {
@@ -302,11 +302,11 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IBalan
      */
     function setBPTOracle(address _bptOracle, bool _syncBeforeUpdate) external restricted {
         // If specified, sync the tranche accounting against the outgoing oracle before updating it
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCached();
+        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCache();
         // Update the BPT oracle
         _setBPTOracle(_bptOracle);
         // Sync the tranche accounting against the incoming oracle so the committed liquidity provider tranche raw NAV reflects it
-        _preOpSyncTrancheAccountingWithPriceCached();
+        _preOpSyncTrancheAccountingWithPriceCache();
     }
 
     /// @notice Sets the maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT

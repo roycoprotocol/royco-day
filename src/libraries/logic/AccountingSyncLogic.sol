@@ -181,13 +181,13 @@ library AccountingSyncLogic {
 
     /**
      * @notice Reinvests the liquidity provider tranche's idle liquidity-premium senior shares into its market-making inventory
-     * @dev The single reinvestment path for both the operation's settled tail and the standalone entrypoint: it values the pile at the senior share rate the transaction already cached, else syncs to stage any newly accrued premium into the idle pile and produce the fresh rate
-     * @dev A cached rate means the caller already synced this transaction (an operation's post-op or a prior sync), so a tail reinvestment never resyncs while a cold call always does
+     * @dev The single reinvestment path for both the operation's settled tail and the standalone entrypoint: it values the pile at the senior share rate the operation's frame cached, else syncs to stage any newly accrued premium into the idle pile and produce the fresh rate
+     * @dev A cached rate means this call runs inside a synchronized operation's price frame (its settled tail), so a tail reinvestment never resyncs while a standalone call always does
      * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stShares The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
      */
     function reinvestLiquidityPremium(IRoycoDayKernel.RoycoDayKernelState storage $, uint256 _stShares) external {
-        // Value the pile at the senior share rate the transaction already cached, else sync to stage any newly accrued premium and produce the fresh rate
+        // Value the pile at the senior share rate the operation's frame cached, else sync to stage any newly accrued premium and produce the fresh rate
         bool cacheHit;
         uint256 stShareRate;
         (cacheHit, stShareRate) = Cache._read(CacheKey.ST_SHARE_PRICE);

@@ -8,7 +8,7 @@ import { TransientSlot } from "../../lib/openzeppelin-contracts/contracts/utils/
  * @notice Indexes a slot in the unified transient cache: each key occupies the transient slot at the cache base slot offset by the key's ordinal
  * @custom:type COLLATERAL_ASSET_PRICE - The collateral asset's price in NAV units shared by the coinvested senior and junior tranches
  * @custom:type LPT_ASSET_PRICE - The NAV value of one whole LPT asset, cached only by the multi-asset deposit and redemption previews at their venue operation's frame mark
- * @custom:type ST_SHARE_PRICE - The senior tranche share price (senior NAV per share)
+ * @custom:type ST_SHARE_PRICE - The senior tranche share price (senior NAV per share), written by each sync and scoped to the operation: the kernel's price frame clears it on exit so later frames price the settled state live
  * @custom:type IN_MULTI_ASSET_FLOW - Marks a multi-asset composite flow's span: a worsening leg's post-op records a pending liquidity violation instead of reverting and a satisfied final leg clears it
  * @custom:type PENDING_LIQUIDITY_VIOLATION - A liquidity violation a worsening in-flow leg recorded instead of reverting, cleared by a final leg whose settled state satisfies the requirement and enforced at the flow's exit
  * @dev The ordinal is the key's transient slot offset from the cache base slot, so the enum is bounded to 256 members by the reserved ERC-7201 slot window

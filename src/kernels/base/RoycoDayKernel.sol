@@ -51,15 +51,17 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _;
     }
 
-    /// @dev Initializes the operation's collateral price cache at the start of the call and clears it at the end
+    /// @dev Frames the operation's price cache: pokes and caches the collateral price at the start of the call and clears every operation-scoped price at the end
     /// @dev Should be placed on all state mutating functions that use the collateral asset price
-    modifier withCollateralPriceCached() {
+    modifier withPriceCache() {
         // Poke the collateral asset oracle as the operation's first action: can revert as a circuit-breaker
         IRoycoPriceOracle(_getRoycoDayKernelStorage().collateralAssetOracle).poke();
         // Cache the collateral asset price for the operation
         Cache._write(CacheKey.COLLATERAL_ASSET_PRICE, toUint256(queryCollateralAssetOracle()));
         _;
         Cache._delete(CacheKey.COLLATERAL_ASSET_PRICE);
+        // Clear the operation's cached senior share rate so a later frame in the same transaction prices the settled state live
+        Cache._delete(CacheKey.ST_SHARE_PRICE);
     }
 
     /// @dev Deploys the accumulated idle liquidity-premium senior shares once the operation has settled and enforced its requirements
@@ -136,7 +138,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         restricted
         nonReentrant
-        withCollateralPriceCached
+        withPriceCache
         returns (SyncedAccountingState memory state)
     {
         return AccountingSyncLogic.preOpSyncTrancheAccounting(_getRoycoDayKernelStorage());
@@ -150,7 +152,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         restricted
         nonReentrant
-        withCollateralPriceCached
+        withPriceCache
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
         return AccountingSyncLogic.preOpSyncTrancheAccountingFor(_getRoycoDayKernelStorage(), _trancheType);
@@ -180,7 +182,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         restricted
         nonReentrant
-        withCollateralPriceCached
+        withPriceCache
     {
         AccountingSyncLogic.reinvestLiquidityPremium(_getRoycoDayKernelStorage(), _stShares);
     }
@@ -206,7 +208,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlyTranche
         nonReentrant
-        withCollateralPriceCached
+        withPriceCache
         withLiquidityPremiumReinvestment
         returns (uint256 trancheSharesMinted)
     {
@@ -229,7 +231,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlyTranche
         nonReentrant
-        withCollateralPriceCached
+        withPriceCache
         withLiquidityPremiumReinvestment
         returns (AssetClaims memory userAssetClaims)
     {
@@ -260,7 +262,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlyLiquidityProviderTranche
         nonReentrant
-        withCollateralPriceCached
+        withPriceCache
         withLiquidityPremiumReinvestment
         returns (uint256 trancheSharesMinted, TRANCHE_UNIT lptAssetsOut)
     {
@@ -284,7 +286,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         onlyLiquidityProviderTranche
         nonReentrant
-        withCollateralPriceCached
+        withPriceCache
         withLiquidityPremiumReinvestment
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
@@ -361,11 +363,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         restricted
     {
         // If specified, sync the tranche accounting to reflect the PNL up to this point in time at the outgoing oracle's price
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCached();
+        if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCache();
         // Update the collateral asset oracle
         _setCollateralAssetOracle(_collateralAssetOracle, _stalenessThresholdSeconds);
         // Sync the tranche accounting to reflect the PNL from the updated oracle's price (the sync re-initializes the price cache to the new price)
-        _preOpSyncTrancheAccountingWithPriceCached();
+        _preOpSyncTrancheAccountingWithPriceCache();
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -478,7 +480,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @dev Uses the price cache since it is called by admin setters outside a cached operation, so it re-initializes the price cache to the live price before syncing
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function _preOpSyncTrancheAccountingWithPriceCached() internal virtual withCollateralPriceCached returns (SyncedAccountingState memory state) {
+    function _preOpSyncTrancheAccountingWithPriceCache() internal virtual withPriceCache returns (SyncedAccountingState memory state) {
         return AccountingSyncLogic.preOpSyncTrancheAccounting(_getRoycoDayKernelStorage());
     }
 
