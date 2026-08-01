@@ -203,6 +203,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     error INVALID_YDM_TYPE();
     /// @notice Thrown when a market is deployed without genesis pool liquidity
     error POOL_SEED_REQUIRED();
+    /// @notice Thrown when the genesis deposit mints too few shares to cover the dead-share lock
+    error INSUFFICIENT_GENESIS_SHARES(uint256 shares);
 
     /**
      * @notice Emitted when a model shape's instances are registered or replaced
@@ -213,6 +215,16 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     event YieldDistributionModelsRegistered(string ydmType, address jtYdm, address lptYdm);
     /// @notice Thrown when a deployed market contract's on-chain wiring does not match the expected configuration
     error MARKET_WIRING_VERIFICATION_FAILED(address subject);
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CONSTANTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice The genesis LPT shares permanently locked at the dead address on every pool seed, so the tranche supply can never fully exit
+    uint256 public constant DEAD_SHARES = 1e12;
+
+    /// @notice The address the dead shares are locked at
+    address public constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // IMMUTABLES
@@ -447,7 +459,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /**
      * @notice Seeds the market's pool with its genesis liquidity through the liquidity provider tranche's multi-asset deposit
-     * @dev The funder must have approved this template for both legs, and receives the genesis shares
+     * @dev The funder must have approved this template for both legs, and receives the genesis shares net of the dead-share lock
      * @dev The quote leg is mandatory; the collateral leg is optional
      * @param _p The market's params, carrying the funder, the amounts, and the slippage bound
      * @param _liquidityProviderTranche The market's liquidity provider tranche
@@ -461,11 +473,24 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         _pullAndApproveSeedLeg(_p.quoteAsset, init.funder, _liquidityProviderTranche, init.quoteAmount);
         if (init.collateralAmount != 0) _pullAndApproveSeedLeg(_p.collateralAsset, init.funder, _liquidityProviderTranche, init.collateralAmount);
 
-        // Execute the deposit as the factory.
-        ROYCO_FACTORY.executeAsFactory(
-            _liquidityProviderTranche,
-            abi.encodeCall(RoycoLiquidityProviderTranche.depositMultiAsset, (init.collateralAmount, init.quoteAmount, init.minLPTAssetsOut, init.funder))
+        // Execute the deposit as the factory
+        (uint256 lptShares,) = abi.decode(
+            ROYCO_FACTORY.executeAsFactory(
+                _liquidityProviderTranche,
+                abi.encodeCall(
+                    RoycoLiquidityProviderTranche.depositMultiAsset, (init.collateralAmount, init.quoteAmount, init.minLPTAssetsOut, address(ROYCO_FACTORY))
+                )
+            ),
+            (uint256, uint256)
         );
+
+        // Lock the dead shares so the genesis supply can never fully exit (serve as virtual shares for inflation resistance)
+        require(lptShares >= DEAD_SHARES, INSUFFICIENT_GENESIS_SHARES(lptShares));
+        ROYCO_FACTORY.executeAsFactory(_liquidityProviderTranche, abi.encodeCall(IERC20.transfer, (DEAD_ADDRESS, DEAD_SHARES)));
+
+        // Return the remaining genesis shares to the funder
+        uint256 excessLPTShares = lptShares - DEAD_SHARES;
+        if (excessLPTShares > 0) ROYCO_FACTORY.executeAsFactory(_liquidityProviderTranche, abi.encodeCall(IERC20.transfer, (init.funder, excessLPTShares)));
     }
 
     /**
