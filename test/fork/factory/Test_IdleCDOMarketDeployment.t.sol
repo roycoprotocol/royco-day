@@ -160,7 +160,8 @@ contract Test_IdleCDOMarketDeployment is Test {
     /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold the quote and
     ///      have approved the template before `executeMarketDeployment`. Points the seed at a test-controlled funder
     function _fundPoolSeed(MarketConfig memory _cfg) internal {
-        deal(_cfg.gyroECLPPoolParams.quoteAsset, address(this), _cfg.poolInitialization.quoteAmount);
+        deal(_cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER, _cfg.poolInitialization.quoteAmount);
+        vm.prank(DEPLOYER);
         IERC20(_cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
     }
 

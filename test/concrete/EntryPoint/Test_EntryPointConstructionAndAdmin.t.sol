@@ -11,7 +11,6 @@ import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { TrancheType } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
-import { MockRoycoFactory } from "../../mocks/MockRoycoFactory.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
@@ -109,22 +108,24 @@ contract Test_EntryPointConstructionAndAdmin is EntryPointTestBase {
     // ---------------------------------------------------------------------
 
     function test_factoryRoute_modifyTrancheConfigs_succeeds() public {
-        // The factory (holding ADMIN_ENTRY_POINT_ROLE) can apply config changes, as production deployments do
+        // The factory (holding ADMIN_ENTRY_POINT_ROLE) applies config changes from a deployment's hook phase, as
+        // production deployments do: the update rides the real executeMarketDeployment pipeline
         (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
         configs[1].redemptionDelaySeconds = 3 hours;
-        entryPointFactory.executeAsFactory(address(entryPoint), abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
+        _applyTrancheConfigsThroughFactory(tranches, configs);
 
         assertEq(entryPoint.getTrancheConfig(tranches[1]).baseConfig.redemptionDelaySeconds, 3 hours, "the factory-routed config update must be stored");
     }
 
     function test_factoryRoute_revertsWhenFactoryLacksRole() public {
         // Without ADMIN_ENTRY_POINT_ROLE the factory's forwarded call fails the entry point's access check, which
-        // the factory's dispatch bubbles verbatim
+        // the factory's dispatch bubbles verbatim, unwinding the whole deployment
         accessManager.revokeRole(ADMIN_ENTRY_POINT_ROLE, address(entryPointFactory));
 
         (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        registrationTemplate.queueTrancheConfigs(tranches, configs);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(entryPointFactory)));
-        entryPointFactory.executeAsFactory(address(entryPoint), abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
+        entryPointFactory.executeMarketDeployment(address(registrationTemplate), "");
     }
 
     // ---------------------------------------------------------------------

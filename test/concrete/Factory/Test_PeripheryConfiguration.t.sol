@@ -1,73 +1,34 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
 import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/EntryPointConfigurer.sol";
 import { MarketSyncerConfigurer } from "../../../src/factory/templates/periphery/MarketSyncerConfigurer.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
+import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
+import { MockMarketRegistrationTemplate } from "../../mocks/MockMarketRegistrationTemplate.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
- * @title PeripheryConfiguratorHarness
- * @notice A concrete host for the production EntryPointConfigurer + MarketSyncerConfigurer mixins, exposing their
- *         internal helpers so a test can drive the real periphery-configuration code off-fork (the production
- *         template that mixes these in can only be constructed against a live Balancer venue)
- */
-contract PeripheryConfiguratorHarness is EntryPointConfigurer, MarketSyncerConfigurer {
-    IRoycoFactory internal immutable FACTORY;
-
-    constructor(address _entryPoint, address _syncer, IRoycoFactory _factory) EntryPointConfigurer(_entryPoint, _factory) MarketSyncerConfigurer(_syncer) {
-        FACTORY = _factory;
-    }
-
-    function configureTranches(address[] memory _tranches, IRoycoDayEntryPoint.TrancheConfig[] memory _configs) external {
-        _configureEntryPointTrancheConfigs(FACTORY, _tranches, _configs);
-    }
-
-    function registerKernel(address _kernel) external {
-        _registerMarketKernelOnSyncer(FACTORY, _kernel);
-    }
-}
-
-/**
  * @title Test_PeripheryConfiguration
- * @notice Always-running (no-RPC) coverage for the periphery-configuration mixins the deployment template drives
+ * @notice Always-running (no-RPC) coverage for the periphery-configuration mixins a deployment template drives
  *         through the factory: EntryPointConfigurer (per-tranche entry point configs, including the absent-tranche
- *         skip) and MarketSyncerConfigurer (kernel registration). These are otherwise only exercised on the
- *         RPC-gated fork factory suite, since the production template needs a live Balancer venue to construct
- * @dev The harness stands in for that template, hosting the real mixins over the fixture's real entry point, its
- *      registering MockRoycoFactory (which forwards executeAsFactory like the production factory), and a real
- *      RoycoMarketSyncer wired to the same access manager
+ *         skip) and MarketSyncerConfigurer (kernel registration), plus both mixins' constructor validations
+ * @dev The fixture's registration template hosts the REAL mixins over the REAL factory, entry point, and market
+ *      syncer, and every configuration call rides a real executeMarketDeployment window, so this is the production
+ *      periphery path minus only the Balancer-venue market construction the full template needs a fork for
  */
 contract Test_PeripheryConfiguration is EntryPointTestBase {
     uint256 internal collateralUnit;
-
-    RoycoMarketSyncer internal syncer;
-    PeripheryConfiguratorHarness internal harness;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
         collateralUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(100 * collateralUnit, 50 * collateralUnit);
         _deployEntryPoint();
-
-        // Deploy a real market syncer wired to the fixture's access manager, then bind its registration selector to
-        // SYNC_ROLE and grant that role to the registering factory, mirroring the production deployment wiring
-        RoycoMarketSyncer syncerImpl = new RoycoMarketSyncer();
-        syncer = RoycoMarketSyncer(
-            address(new ERC1967Proxy(address(syncerImpl), abi.encodeCall(RoycoMarketSyncer.initialize, (address(accessManager), new address[](0)))))
-        );
-        vm.label(address(syncer), "RoycoMarketSyncer");
-        accessManager.setTargetFunctionRole(address(syncer), _sels(RoycoMarketSyncer.addMarketKernels.selector), SYNC_ROLE);
-        accessManager.grantRole(SYNC_ROLE, address(entryPointFactory), 0);
-
-        // The harness hosts the real mixins over the fixture's entry point and its registering factory
-        harness = new PeripheryConfiguratorHarness(address(entryPoint), address(syncer), IRoycoFactory(address(entryPointFactory)));
     }
 
     /// @dev Builds a TrancheConfig with a marker deposit delay so a test can prove which tranche received which config
@@ -92,18 +53,17 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
         IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](3);
         (configs[0], configs[1], configs[2]) = (_markerConfig(111), _markerConfig(222), _markerConfig(333));
 
-        harness.configureTranches(tranches, configs);
+        // The kernel registers on the syncer through the factory-forwarded, SYNC_ROLE-gated call in the same hook
+        assertFalse(marketSyncer.isMarketKernelRegistered(address(kernel)), "kernel must be unregistered before the deployment");
+        registrationTemplate.queueKernelRegistrationOnSyncer();
+        _applyTrancheConfigsThroughFactory(tranches, configs);
 
         // Each present tranche received its own index-aligned config and resolved to the market's kernel
         assertEq(entryPoint.getTrancheConfig(address(seniorTranche)).baseConfig.depositDelaySeconds, 111, "ST config applied");
         assertEq(entryPoint.getTrancheConfig(address(juniorTranche)).baseConfig.depositDelaySeconds, 222, "JT config applied");
         assertEq(entryPoint.getTrancheConfig(address(liquidityProviderTranche)).baseConfig.depositDelaySeconds, 333, "LPT config applied");
         assertEq(entryPoint.getTrancheConfig(address(seniorTranche)).kernel, address(kernel), "ST resolved to the market kernel");
-
-        // The kernel registers on the syncer through the factory-forwarded, SYNC_ROLE-gated call
-        assertFalse(syncer.isMarketKernelRegistered(address(kernel)), "kernel must be unregistered before the call");
-        harness.registerKernel(address(kernel));
-        assertTrue(syncer.isMarketKernelRegistered(address(kernel)), "kernel must be registered after the call");
+        assertTrue(marketSyncer.isMarketKernelRegistered(address(kernel)), "kernel must be registered after the deployment");
     }
 
     // ---------------------------------------------------------------------
@@ -122,7 +82,7 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
         (configs[0], configs[1], configs[2]) = (_markerConfig(111), _markerConfig(999), _markerConfig(333));
 
         // The absent tranche is dropped so the entry point never sees a zero address (it would revert NULL_ADDRESS)
-        harness.configureTranches(tranches, configs);
+        _applyTrancheConfigsThroughFactory(tranches, configs);
 
         // ST and LPT took their own index-aligned configs, proving the paired config survives the skip
         assertEq(entryPoint.getTrancheConfig(address(seniorTranche)).baseConfig.depositDelaySeconds, 111, "ST took its paired config");
@@ -131,5 +91,35 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
         assertEq(
             entryPoint.getTrancheConfig(address(juniorTranche)).baseConfig.depositDelaySeconds, defaultDelay, "the absent tranche's config was never applied"
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // Mixin constructor validations
+    // ---------------------------------------------------------------------
+
+    /// @notice A template can never be constructed against a zero factory, the base rejects it before either mixin runs
+    function test_RevertIf_TemplateConstructedWithZeroFactory() public {
+        vm.expectRevert(IBaseTemplate.ROYCO_FACTORY_CANNOT_BE_ZERO_ADDRESS.selector);
+        new MockMarketRegistrationTemplate(IRoycoFactory(address(0)), address(entryPoint), address(marketSyncer));
+    }
+
+    /// @notice A zero entry point is rejected: the mixin pins a live singleton, not a placeholder
+    function test_RevertIf_TemplateConstructedWithZeroEntryPoint() public {
+        vm.expectRevert(EntryPointConfigurer.ENTRY_POINT_CANNOT_BE_ZERO_ADDRESS.selector);
+        new MockMarketRegistrationTemplate(IRoycoFactory(address(entryPointFactory)), address(0), address(marketSyncer));
+    }
+
+    /// @notice An entry point bound to a different factory is rejected: its provenance reads would miss every market
+    ///         this template's factory registers
+    function test_RevertIf_TemplateConstructedWithEntryPointBoundToDifferentFactory() public {
+        RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(makeAddr("OTHER_FACTORY"));
+        vm.expectRevert(EntryPointConfigurer.ENTRY_POINT_BOUND_TO_DIFFERENT_FACTORY.selector);
+        new MockMarketRegistrationTemplate(IRoycoFactory(address(entryPointFactory)), address(foreignEntryPoint), address(marketSyncer));
+    }
+
+    /// @notice A zero market syncer is rejected: the mixin pins a live singleton, not a placeholder
+    function test_RevertIf_TemplateConstructedWithZeroSyncer() public {
+        vm.expectRevert(MarketSyncerConfigurer.SYNCER_CANNOT_BE_ZERO_ADDRESS.selector);
+        new MockMarketRegistrationTemplate(IRoycoFactory(address(entryPointFactory)), address(entryPoint), address(0));
     }
 }

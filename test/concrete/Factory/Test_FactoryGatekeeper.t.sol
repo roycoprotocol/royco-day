@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
-import { ADMIN_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ROLE, BURNER_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
 
 /**
@@ -146,6 +146,132 @@ contract Test_FactoryGatekeeper is Test {
         new RoycoFactoryGatekeeper(address(am), address(0));
     }
 
+
+    // ---------------------------------------------------------------------
+    // grantMarketRoles: the constant two-role whitelist and its freshness rule
+    // ---------------------------------------------------------------------
+
+    /// @dev Builds the three index-aligned grant arrays for a single grant
+    function _grantArrays(uint64 _roleId, address _account) internal pure returns (uint64[] memory roleIds, address[] memory accounts, uint32[] memory delays) {
+        roleIds = new uint64[](1);
+        accounts = new address[](1);
+        delays = new uint32[](1);
+        (roleIds[0], accounts[0]) = (_roleId, _account);
+    }
+
+    /// @notice SYNC_ROLE and BURNER_ROLE, the only two roles a market deployment legitimately mints, both land in one
+    ///         batched call and the gatekeeper announces the batch size
+    function test_grantMarketRoles_grantsTheTwoWhitelistedRolesInOneBatch() public {
+        address syncHolder = makeAddr("SYNC_HOLDER");
+        address burnerHolder = makeAddr("BURNER_HOLDER");
+        uint64[] memory roleIds = new uint64[](2);
+        address[] memory accounts = new address[](2);
+        uint32[] memory delays = new uint32[](2);
+        (roleIds[0], accounts[0]) = (SYNC_ROLE, syncHolder);
+        (roleIds[1], accounts[1]) = (BURNER_ROLE, burnerHolder);
+
+        vm.expectEmit(false, false, false, true, address(gatekeeper));
+        emit IRoycoFactoryGatekeeper.MarketRolesGranted(2);
+        vm.prank(FACTORY);
+        gatekeeper.grantMarketRoles(roleIds, accounts, delays);
+
+        (bool syncGranted,) = am.hasRole(SYNC_ROLE, syncHolder);
+        (bool burnerGranted,) = am.hasRole(BURNER_ROLE, burnerHolder);
+        assertTrue(syncGranted, "SYNC_ROLE must be grantable by a deployment");
+        assertTrue(burnerGranted, "BURNER_ROLE must be grantable by a deployment");
+    }
+
+    /// @notice Only the one factory may mint market roles
+    function test_RevertIf_grantMarketRolesCalledByNonFactory() public {
+        (uint64[] memory roleIds, address[] memory accounts, uint32[] memory delays) = _grantArrays(SYNC_ROLE, makeAddr("HOLDER"));
+        vm.prank(STRANGER);
+        vm.expectRevert(IRoycoFactoryGatekeeper.ONLY_FACTORY.selector);
+        gatekeeper.grantMarketRoles(roleIds, accounts, delays);
+    }
+
+    /// @notice All three grant arrays must be index-aligned, in either direction of mismatch
+    function test_RevertIf_grantMarketRolesArraysDiffer() public {
+        vm.startPrank(FACTORY);
+        vm.expectRevert(IRoycoFactoryGatekeeper.LENGTH_MISMATCH.selector);
+        gatekeeper.grantMarketRoles(new uint64[](2), new address[](1), new uint32[](2));
+        vm.expectRevert(IRoycoFactoryGatekeeper.LENGTH_MISMATCH.selector);
+        gatekeeper.grantMarketRoles(new uint64[](2), new address[](2), new uint32[](1));
+        vm.stopPrank();
+    }
+
+    /// @notice Every role outside the two-entry whitelist is refused with the offending id, including the sharpest
+    ///         escalation (ADMIN_ROLE) and an ordinary LP role a deployment has no business minting
+    function test_RevertIf_grantMarketRolesGrantsANonWhitelistedRole() public {
+        (uint64[] memory adminRoleIds, address[] memory adminAccounts, uint32[] memory adminDelays) = _grantArrays(ADMIN_ROLE, makeAddr("HOLDER"));
+        vm.prank(FACTORY);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, ADMIN_ROLE));
+        gatekeeper.grantMarketRoles(adminRoleIds, adminAccounts, adminDelays);
+
+        (uint64[] memory lpRoleIds, address[] memory lpAccounts, uint32[] memory lpDelays) = _grantArrays(ST_LP_ROLE, makeAddr("HOLDER"));
+        vm.prank(FACTORY);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, ST_LP_ROLE));
+        gatekeeper.grantMarketRoles(lpRoleIds, lpAccounts, lpDelays);
+    }
+
+    /// @notice The protocol's own contracts can never receive a market role, the factory above all: a factory holding
+    ///         SYNC or BURNER would let any active template drive those surfaces via executeAsFactory
+    function test_RevertIf_grantMarketRolesTargetsAProtocolContract() public {
+        address[3] memory forbidden = [FACTORY, address(gatekeeper), address(am)];
+        for (uint256 i = 0; i < forbidden.length; ++i) {
+            (uint64[] memory roleIds, address[] memory accounts, uint32[] memory delays) = _grantArrays(SYNC_ROLE, forbidden[i]);
+            vm.prank(FACTORY);
+            vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.TARGET_FORBIDDEN.selector, forbidden[i]));
+            gatekeeper.grantMarketRoles(roleIds, accounts, delays);
+        }
+    }
+
+    /// @notice An account that was ever configured as a target is refused a market role: it existed before this
+    ///         deployment, so the deployment has no claim on it
+    function test_RevertIf_grantMarketRolesAccountWasEverConfigured() public {
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = SELECTOR_A;
+        am.setTargetFunctionRole(FRESH_TARGET, selectors, SYNC_ROLE);
+
+        (uint64[] memory roleIds, address[] memory accounts, uint32[] memory delays) = _grantArrays(SYNC_ROLE, FRESH_TARGET);
+        vm.prank(FACTORY);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.TARGET_ALREADY_CONFIGURED.selector, FRESH_TARGET));
+        gatekeeper.grantMarketRoles(roleIds, accounts, delays);
+    }
+
+    /// @notice A batch is atomic: one forbidden entry unwinds every grant that preceded it
+    function test_grantMarketRoles_batchIsAtomic() public {
+        address legitimateHolder = makeAddr("LEGITIMATE_HOLDER");
+        uint64[] memory roleIds = new uint64[](2);
+        address[] memory accounts = new address[](2);
+        uint32[] memory delays = new uint32[](2);
+        (roleIds[0], accounts[0]) = (SYNC_ROLE, legitimateHolder);
+        (roleIds[1], accounts[1]) = (ADMIN_ROLE, makeAddr("ESCALATION_TARGET"));
+
+        vm.prank(FACTORY);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, ADMIN_ROLE));
+        gatekeeper.grantMarketRoles(roleIds, accounts, delays);
+
+        (bool granted,) = am.hasRole(SYNC_ROLE, legitimateHolder);
+        assertFalse(granted, "a rejected batch must unwind its earlier grants");
+    }
+
+    /// @notice A role grant does not mark the account as configured: grants are membership, not target config, so a
+    ///         deployment can still bind the granted contract's selectors afterwards
+    function test_grantMarketRoles_doesNotMarkTheAccountConfigured() public {
+        address marketKernel = makeAddr("MARKET_KERNEL");
+        (uint64[] memory roleIds, address[] memory accounts, uint32[] memory delays) = _grantArrays(BURNER_ROLE, marketKernel);
+        vm.prank(FACTORY);
+        gatekeeper.grantMarketRoles(roleIds, accounts, delays);
+
+        assertFalse(am.wasEverConfigured(marketKernel), "a grant must not record the account as a configured target");
+
+        // The same deployment can still configure the granted contract as a fresh target
+        bytes4[] memory selectors = new bytes4[](1);
+        uint64[] memory bindRoleIds = new uint64[](1);
+        (selectors[0], bindRoleIds[0]) = (SELECTOR_A, SYNC_ROLE);
+        _bind(marketKernel, selectors, bindRoleIds);
+        assertTrue(am.wasEverConfigured(marketKernel), "the follow-up binding must record it");
+    }
 
     // ---------------------------------------------------------------------
     // Governance is deliberately unaffected

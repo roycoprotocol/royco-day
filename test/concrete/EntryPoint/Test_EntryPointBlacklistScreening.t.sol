@@ -36,14 +36,16 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
         stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
-        roycoBlacklist = RoycoBlacklist(
-            address(
-                new ERC1967Proxy(
-                    address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(accessManager), address(0), new address[](0)))
-                )
-            )
-        );
+        this.deployBlacklistProxyForFixture();
         RECEIVER = _generateEntryPointUser("RECEIVER");
+    }
+
+    /// @dev External self-call so the proxy construction gets its own call frame, keeping setUp under via-ir's stack limit
+    function deployBlacklistProxyForFixture() external {
+        require(msg.sender == address(this), "fixture-internal helper");
+        address blacklistImpl = address(new RoycoBlacklist());
+        bytes memory blacklistInitData = abi.encodeCall(RoycoBlacklist.initialize, (address(accessManager), address(0), new address[](0)));
+        roycoBlacklist = RoycoBlacklist(address(new ERC1967Proxy(blacklistImpl, blacklistInitData)));
     }
 
     /// @dev Wires the blacklist into the market's kernel, the entry point resolves it live through the kernel on every screen

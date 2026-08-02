@@ -139,10 +139,11 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
             _fundPoolSeed(cfg);
     }
 
-    /// @dev Every market is deployed with genesis pool liquidity pulled from the deployment caller (this test
-    ///      contract), so it must hold the quote and have approved the template before `executeMarketDeployment`
+    /// @dev Every market is deployed with genesis pool liquidity pulled from the deployment caller (the pranked
+    ///      DEPLOYER), so it must hold the quote and have approved the template before `executeMarketDeployment`
     function _fundPoolSeed(MarketConfig memory _cfg) internal {
-        deal(_cfg.gyroECLPPoolParams.quoteAsset, address(this), _cfg.poolInitialization.quoteAmount);
+        deal(_cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER, _cfg.poolInitialization.quoteAmount);
+        vm.prank(DEPLOYER);
         IERC20(_cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
     }
 

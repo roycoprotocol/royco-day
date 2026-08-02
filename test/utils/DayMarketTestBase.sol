@@ -11,6 +11,7 @@ import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/I
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { UpgradeableBeacon } from "../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol";
+import { RoycoAccessManager } from "../../src/factory/RoycoAccessManager.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_KERNEL_ROLE,
@@ -252,9 +253,10 @@ abstract contract DayMarketTestBase is Assertions {
         cell = _cell;
         params = _params;
 
-        // 1. Access manager, admin'd by the fixture so role wiring needs no schedule/execute dance
-        accessManager = new AccessManager(address(this));
-        vm.label(address(accessManager), "AccessManager");
+        // 1. Access manager, admin'd by the fixture so role wiring needs no schedule/execute dance. The production
+        //    RoycoAccessManager flavor, so a real factory gatekeeper can read wasEverConfigured off it
+        accessManager = new RoycoAccessManager(address(this));
+        vm.label(address(accessManager), "RoycoAccessManager");
 
         // 2. Tokens: quote stable + ONE ERC4626 vault share over a mock underlying for both ST and JT
         quoteToken = _deployERC20("Quote Stable", "QUOTE", _cell.quoteAsset);

@@ -49,7 +49,7 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
     }
 
     /**
-     * @notice A role grant applied after deployment (e.grant. SYNC_ROLE → accountant)
+     * @notice A role grant applied after deployment (e.g. SYNC_ROLE → accountant)
      * @custom:field roleId - The role id to grant
      * @custom:field account - The account receiving the role
      * @custom:field executionDelay - The access-manager execution delay in seconds applied to the grant
@@ -117,7 +117,7 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
      * @notice Per-market component salt, same `(marketId, componentTag)` always produces the
      *         same address regardless of template
      * @param _marketId Caller-supplied stable identifier for the market
-     * @param _componentTag E.grant. `bytes32("ST")`, `bytes32("JT")`, `bytes32("KERNEL")`,
+     * @param _componentTag E.g. `bytes32("ST")`, `bytes32("JT")`, `bytes32("KERNEL")`,
      *        `bytes32("ACCOUNTANT")`, `bytes32("BALANCER_HOOK")`
      */
     function _marketComponentSalt(bytes32 _marketId, bytes32 _componentTag) internal pure returns (bytes32) {

@@ -4,13 +4,19 @@ pragma solidity ^0.8.28;
 import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { RoycoMarketSyncer } from "../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { RoycoDayEntryPoint } from "../../src/entrypoint/RoycoDayEntryPoint.sol";
+import { RoycoAccessManager } from "../../src/factory/RoycoAccessManager.sol";
+import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
+import { RoycoFactoryGatekeeper } from "../../src/factory/RoycoFactoryGatekeeper.sol";
 import {
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
+    ADMIN_FACTORY_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
+    DEPLOYER_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
     PUBLIC_ROLE,
@@ -20,11 +26,14 @@ import {
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
+import { IRoycoFactory } from "../../src/interfaces/factory/IRoycoFactory.sol";
+import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
-import { MockRoycoFactory } from "../mocks/MockRoycoFactory.sol";
+import { MockMarketRegistrationTemplate } from "../mocks/MockMarketRegistrationTemplate.sol";
 import { DayMarketTestBase } from "./DayMarketTestBase.sol";
+import { FactoryScaffold } from "./FactoryScaffold.sol";
 
 /**
  * @title EntryPointTestBase
@@ -66,8 +75,17 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     /// @notice The entry point proxy
     IRoycoDayEntryPoint internal entryPoint;
 
-    /// @notice The mock factory registering the fixture's tranches for the entry point's provenance validation
-    MockRoycoFactory internal entryPointFactory;
+    /// @notice The REAL factory the entry point reads tranche provenance off, populated through real registration
+    RoycoFactory internal entryPointFactory;
+
+    /// @notice The gatekeeper holding ADMIN_ROLE on the fixture's access manager for the factory
+    RoycoFactoryGatekeeper internal entryPointFactoryGatekeeper;
+
+    /// @notice The real market syncer singleton the registration template's mixin can register kernels on
+    RoycoMarketSyncer internal marketSyncer;
+
+    /// @notice The minimal real template registering the fixture's market components through the factory pipeline
+    MockMarketRegistrationTemplate internal registrationTemplate;
 
     // =============================
     // Actors
@@ -89,15 +107,44 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
      *      delays, grants the entry point the three LP roles, and creates the user/executor/admin actors
      */
     function _deployEntryPoint() internal virtual {
-        // Register the market's tranches on the mock factory so the entry point's provenance validation passes
-        entryPointFactory = new MockRoycoFactory(address(accessManager));
-        entryPointFactory.setTrancheKernel(address(seniorTranche), address(kernel));
-        entryPointFactory.setTrancheKernel(address(juniorTranche), address(kernel));
-        entryPointFactory.setTrancheKernel(address(liquidityProviderTranche), address(kernel));
-        vm.label(address(entryPointFactory), "MockRoycoFactory");
+        // Stand up the REAL access-manager/gatekeeper/factory triangle over the fixture's access manager,
+        // CREATE3-deployed exactly as the deployment script does. The fixture's externally deployed market
+        // components are then registered through the real executeMarketDeployment pipeline below, so the entry
+        // point's provenance reads hit a real factory registry populated by real registration
+        _deployEntryPointFactory();
+        _deployEntryPointProxy();
+        _deploySyncerAndRegistrationTemplate();
+        _wireEntryPointRoleBindings();
 
-        // Deploy the entry point behind an ERC1967 proxy, initialized with no tranche configs: the initial
-        // configuration flows through the factory below, mirroring the production market deployment path
+        // Register the market and apply the initial tranche configs through the REAL deployment pipeline:
+        // executeMarketDeployment registers every tranche against the kernel, then the template's post-registration
+        // hook applies the configs via the factory's ADMIN_ENTRY_POINT_ROLE-gated forwarding, as production does
+        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        _applyTrancheConfigsThroughFactory(tranches, configs);
+
+        // Entry point admin actors
+        ENTRY_POINT_ADMIN = _generateActor("ENTRY_POINT_ADMIN", ADMIN_ENTRY_POINT_ROLE);
+        FEE_COLLECTOR = _generateActor("FEE_COLLECTOR", ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE);
+
+        // User actors, each holding all three LP roles so they can deposit into and redeem from every tranche
+        USER_A = _generateEntryPointUser("USER_A");
+        USER_B = _generateEntryPointUser("USER_B");
+        EXECUTOR = _generateEntryPointUser("EXECUTOR");
+    }
+
+    /// @dev Stands up the real factory triangle and grants the fixture its curation and deployment roles
+    function _deployEntryPointFactory() internal {
+        (entryPointFactory, entryPointFactoryGatekeeper) =
+            FactoryScaffold.deployFactory(RoycoAccessManager(address(accessManager)), keccak256("ENTRY_POINT_FACTORY_PROXY"));
+        vm.label(address(entryPointFactory), "RoycoFactory");
+        // The fixture curates templates and drives deployments itself
+        accessManager.grantRole(ADMIN_FACTORY_ROLE, address(this), 0);
+        accessManager.grantRole(DEPLOYER_ROLE, address(this), 0);
+    }
+
+    /// @dev Deploys the entry point behind an ERC1967 proxy, initialized with no tranche configs: the initial
+    ///      configuration flows through the factory, mirroring the production market deployment path
+    function _deployEntryPointProxy() internal {
         entryPointImpl = new RoycoDayEntryPoint(address(entryPointFactory));
         entryPoint = IRoycoDayEntryPoint(
             address(
@@ -107,10 +154,40 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
             )
         );
         vm.label(address(entryPoint), "EntryPoint");
+    }
 
-        // Wire the production-shaped role bindings on the entry point itself
-        // The array executors are deliberately left unbound: they carry no `restricted` and self-delegatecall into the
-        // single-request selectors, so those bindings govern every batched request against the real caller
+    /// @dev Deploys the real market syncer singleton wired like production, then the minimal real template: canned
+    ///      result naming the fixture's externally deployed components, real BaseDeploymentTemplate registration
+    ///      path, real periphery mixins for the hook-phase configuration
+    function _deploySyncerAndRegistrationTemplate() internal {
+        RoycoMarketSyncer marketSyncerImpl = new RoycoMarketSyncer();
+        marketSyncer = RoycoMarketSyncer(
+            address(new ERC1967Proxy(address(marketSyncerImpl), abi.encodeCall(RoycoMarketSyncer.initialize, (address(accessManager), new address[](0)))))
+        );
+        vm.label(address(marketSyncer), "RoycoMarketSyncer");
+        accessManager.setTargetFunctionRole(address(marketSyncer), _sels(RoycoMarketSyncer.addMarketKernels.selector), SYNC_ROLE);
+
+        registrationTemplate = new MockMarketRegistrationTemplate(IRoycoFactory(address(entryPointFactory)), address(entryPoint), address(marketSyncer));
+        vm.label(address(registrationTemplate), "MockMarketRegistrationTemplate");
+        entryPointFactory.registerTemplate(address(registrationTemplate));
+        registrationTemplate.setDeploymentResult(
+            IRoycoProtocolTemplate.DeploymentResult({
+                seniorTranche: address(seniorTranche),
+                juniorTranche: address(juniorTranche),
+                liquidityProviderTranche: address(liquidityProviderTranche),
+                kernel: address(kernel),
+                accountant: address(accountant),
+                ydm: address(jtYdm),
+                lptYdm: address(lptYdm),
+                extras: ""
+            })
+        );
+    }
+
+    /// @dev Wires the production-shaped role bindings on the entry point itself
+    /// @dev The array executors are deliberately left unbound: they carry no `restricted` and self-delegatecall into
+    ///      the single-request selectors, so those bindings govern every batched request against the real caller
+    function _wireEntryPointRoleBindings() internal {
         address ep = address(entryPoint);
         accessManager.setTargetFunctionRole(
             ep,
@@ -145,21 +222,14 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         accessManager.grantRole(LPT_LP_ROLE, ep, 0);
         // The entry point syncs the kernel to price its request-time references, mirroring the template's entry point SYNC grant
         accessManager.grantRole(SYNC_ROLE, ep, 0);
+    }
 
-        // Apply the initial tranche configs through the factory, as production market deployments do: the factory
-        // holds ADMIN_ENTRY_POINT_ROLE (mirroring RoycoFactory.initialize) and forwards the admin-gated call
-        accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, address(entryPointFactory), 0);
-        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
-        entryPointFactory.executeAsFactory(ep, abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
-
-        // Entry point admin actors
-        ENTRY_POINT_ADMIN = _generateActor("ENTRY_POINT_ADMIN", ADMIN_ENTRY_POINT_ROLE);
-        FEE_COLLECTOR = _generateActor("FEE_COLLECTOR", ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE);
-
-        // User actors, each holding all three LP roles so they can deposit into and redeem from every tranche
-        USER_A = _generateEntryPointUser("USER_A");
-        USER_B = _generateEntryPointUser("USER_B");
-        EXECUTOR = _generateEntryPointUser("EXECUTOR");
+    /// @notice Applies tranche configs on the entry point through the factory's real deployment pipeline
+    /// @dev Queues the configs on the registration template and runs executeMarketDeployment: the registry writes
+    ///      are idempotent re-registrations of the same market, and the hook forwards the configs as the factory
+    function _applyTrancheConfigsThroughFactory(address[] memory _tranches, IRoycoDayEntryPoint.TrancheConfig[] memory _configs) internal {
+        registrationTemplate.queueTrancheConfigs(_tranches, _configs);
+        entryPointFactory.executeMarketDeployment(address(registrationTemplate), "");
     }
 
     /// @notice Builds the default 3-tranche (ST, JT, LPT) config arrays: enabled, default delays, oracle gate disabled
@@ -195,7 +265,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
             redemptionExpirySeconds: _redemptionExpirySeconds,
             gateByOracleUpdate: false
         });
-        entryPointFactory.executeAsFactory(address(entryPoint), abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
+        _applyTrancheConfigsThroughFactory(tranches, configs);
     }
 
     /// @notice Creates a labeled, funded actor holding all three tranche LP roles

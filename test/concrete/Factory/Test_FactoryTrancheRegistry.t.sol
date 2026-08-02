@@ -94,6 +94,18 @@ contract Test_FactoryTrancheRegistry is Test {
         factory.executeMarketDeployment(address(template), "");
     }
 
+    /// A result without a junior tranche is accepted: the validation makes only the kernel, the senior tranche, and
+    /// the liquidity provider tranche mandatory, so a two-tranche market registers its present tranches
+    function test_ExecuteMarketDeployment_JuniorTrancheIsOptional() external {
+        address st = makeAddr("ST_NO_JT");
+        address lt = makeAddr("LPT_NO_JT");
+        address kernel = makeAddr("KERNEL_NO_JT");
+        _deploy(_result(st, address(0), lt, kernel));
+
+        assertEq(factory.trancheToKernel(st), kernel, "senior key -> kernel");
+        assertEq(factory.trancheToKernel(lt), kernel, "liquidity key -> kernel");
+    }
+
     /// A complete result registers all three tranches (senior, junior, liquidity) against the market's kernel
     function test_ExecuteMarketDeployment_AllThreeTranches_RegisterAgainstKernel() external {
         address st = makeAddr("ST");
