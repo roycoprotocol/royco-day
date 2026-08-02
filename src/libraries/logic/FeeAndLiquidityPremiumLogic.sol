@@ -24,43 +24,38 @@ library FeeAndLiquidityPremiumLogic {
      * @dev The premium and ST protocol fee are priced jointly against the pre-sync senior supply, so neither dilutes the other
      * @dev The LPT protocol fee is carved out of the liquidity premium and remitted as senior shares to the protocol, so the LPT receives the premium net of the fee and no LPT shares are minted
      * @dev The minted premium accumulates as idle senior shares and are not reinvested here
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _state The synced accounting state whose accrued liquidity premium and protocol fees are minted
      */
-    function _processFeesAndLiquidityPremium(
-        IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        SyncedAccountingState memory _state
-    )
-        internal
-    {
+    function _processFeesAndLiquidityPremium(IRoycoDayKernel.RoycoDayKernelState storage $, SyncedAccountingState memory _state) internal {
         address protocolFeeRecipient = $.protocolFeeRecipient;
+        address seniorTranche = $.seniorTranche;
 
         // Split the senior effective NAV into its two senior-share carve-outs (the liquidity premium net of the LPT protocol fee, and the ST protocol fee plus that carved-out LPT fee)
         // at one joint price against the pre-sync senior supply, so neither carve-out dilutes the other
         (uint256 liquidityPremiumShares, uint256 stProtocolFeeShares, uint256 stTotalSupplyAfterMints) =
-            _computeSTFeeAndLiquidityPremiumSharesToMint(_state, IERC20(_immutables.seniorTranche).totalSupply());
+            _computeSTFeeAndLiquidityPremiumSharesToMint(_state, IERC20(seniorTranche).totalSupply());
 
         // Cache the senior share price at this sync's post-mint value before any venue mark read consumes it
         Cache._write(CacheKey.ST_SHARE_PRICE, toUint256(ValuationLogic._computeTrancheShareRate(stTotalSupplyAfterMints, _state.stEffectiveNAV)));
 
         // Mint the senior protocol fee shares (the ST protocol fee plus the LPT protocol fee carved out of the premium) to the protocol fee recipient, priced identically to the premium shares minted above
         if (stProtocolFeeShares != 0) {
-            IRoycoVaultTranche(_immutables.seniorTranche).mintProtocolFeeShares(protocolFeeRecipient, stProtocolFeeShares);
+            IRoycoVaultTranche(seniorTranche).mintProtocolFeeShares(protocolFeeRecipient, stProtocolFeeShares);
         }
         // If JT fees were accrued, price them against the post-fee junior NAV (the fee dilutes existing holders) and mint to the recipient
         if (_state.jtProtocolFee != ZERO_NAV_UNITS) {
+            address juniorTranche = $.juniorTranche;
             uint256 jtProtocolFeeShares = ValuationLogic._convertToShares(
-                _state.jtProtocolFee, (_state.jtEffectiveNAV - _state.jtProtocolFee), IERC20(_immutables.juniorTranche).totalSupply(), Math.Rounding.Floor
+                _state.jtProtocolFee, (_state.jtEffectiveNAV - _state.jtProtocolFee), IERC20(juniorTranche).totalSupply(), Math.Rounding.Floor
             );
-            IRoycoVaultTranche(_immutables.juniorTranche).mintProtocolFeeShares(protocolFeeRecipient, jtProtocolFeeShares);
+            IRoycoVaultTranche(juniorTranche).mintProtocolFeeShares(protocolFeeRecipient, jtProtocolFeeShares);
         }
         // Mint the liquidity premium as senior tranche shares held by the kernel on behalf of the liquidity provider tranche
         // The premium is already booked into the senior effective NAV, so minting these shares only reassigns senior appreciation to the LPT
         // The minted shares stay idle here, the operation post-op sync deploys the accumulated pile once the operation has settled
         if (liquidityPremiumShares != 0) {
-            IRoycoSeniorTranche(_immutables.seniorTranche).mintLiquidityPremiumShares(liquidityPremiumShares);
+            IRoycoSeniorTranche(seniorTranche).mintLiquidityPremiumShares(liquidityPremiumShares);
             $.lptOwnedSeniorTrancheShares += liquidityPremiumShares;
         }
     }

@@ -29,9 +29,6 @@ interface IRoycoFactory {
     /// @notice Emitted when a market deployment completes
     event MarketDeploymentCompleted(address indexed template, address indexed deployer, IRoycoProtocolTemplate.DeploymentResult result);
 
-    /// @notice Emitted when a proxy is deployed via `deployDeterministicProxy`
-    event ProxyDeployed(address indexed proxy, address indexed implementation, bytes32 salt);
-
     /// @notice Thrown when a factory primitive is called by anything other than the active template
     error ONLY_ACTIVE_TEMPLATE();
 
@@ -55,9 +52,6 @@ interface IRoycoFactory {
 
     /// @notice Thrown when the template's bound factory is not this factory
     error TEMPLATE_BOUND_TO_DIFFERENT_FACTORY();
-
-    /// @notice Thrown when `deployDeterministicProxy` targets a salt whose CREATE3 address already has code
-    error PROXY_ALREADY_DEPLOYED(address deployed, bytes32 salt);
 
     /// @notice Thrown when deploying via a template that is not enabled
     error TEMPLATE_NOT_ENABLED();
@@ -101,20 +95,9 @@ interface IRoycoFactory {
      */
     function executeMarketDeployment(address _template, bytes calldata _params) external returns (IRoycoProtocolTemplate.DeploymentResult memory result);
 
-    /**
-     * @notice CREATE3-deploys an ERC1967 proxy outside a deployment window, gated to the deployer role
-     * @dev Used to pre-deploy the market proxies (e.g. the senior tranche) that later deployment steps depend on,
-     *      before the market's `executeMarketDeployment` wiring transaction.
-     * @param _implementation The proxy's initial implementation
-     * @param _initData The proxy's initialization calldata (empty skips the delegatecall on construction)
-     * @param _salt The CREATE3 salt
-     * @return deployed The deployed proxy address
-     */
-    function deployDeterministicProxy(address _implementation, bytes calldata _initData, bytes32 _salt) external returns (address deployed);
-
-    /// @notice CREATE3-deploys an ERC1967 proxy, callable only by the active template
+    /// @notice CREATE3-deploys a beacon proxy, callable only by the active template
     function deployDeterministicProxyFromTemplate(
-        address _implementation,
+        address _beacon,
         bytes calldata _initData,
         bytes32 _salt
     )

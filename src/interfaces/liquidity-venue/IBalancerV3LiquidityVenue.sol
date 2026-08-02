@@ -6,27 +6,30 @@ import { DispatchMode } from "../../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
 
 /**
- * @title IBalancerV3VenueCallbacks
+ * @title IBalancerV3LiquidityVenue
  * @author Shivaansh Kapoor, Ankur Dubey
  * @notice Declares the Balancer V3 Vault callbacks the liquidity provider tranche venue logic library encodes and dispatches into
  */
-interface IBalancerV3VenueCallbacks {
+interface IBalancerV3LiquidityVenue {
     /**
-     * @notice The immutable liquidity venue configuration a delegatecalled venue logic function needs, carried in from the kernel mixin
-     * @custom:field vault - The Balancer V3 Vault the kernel's pool is registered with
-     * @custom:field lptAsset - The liquidity provider tranche asset (the Balancer Pool Token) the kernel custodies
-     * @custom:field seniorTranche - The senior tranche share token, one of the pool's two constituents
-     * @custom:field quoteAsset - The quote asset, the pool's other constituent
-     * @custom:field stSharePoolIndex - The senior tranche share token's index in the pool's token registration order
-     * @custom:field quoteAssetPoolIndex - The quote asset's index in the pool's token registration order
+     * @notice The liquidity venue initialization parameters
+     * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity provider tranche
+     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the ST shares minted as a liquidity premium into the Balancer V3 Pool, scaled to WAD precision
      */
-    struct BalancerV3VenueImmutableState {
-        IVault vault;
-        address lptAsset;
-        address seniorTranche;
-        address quoteAsset;
-        uint256 stSharePoolIndex;
-        uint256 quoteAssetPoolIndex;
+    struct BalancerV3LiquidityVenueInitParams {
+        address bptOracle;
+        uint64 maxReinvestmentSlippageWAD;
+    }
+
+    /**
+     * @notice The namespaced storage for the BalancerV3LiquidityVenue
+     * @custom:storage-location erc7201:Royco.storage.BalancerV3LiquidityVenueState
+     * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity provider tranche assets
+     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision, a reinvestment breaching it is skipped and the premium shares remain idle
+     */
+    struct BalancerV3LiquidityVenueState {
+        address bptOracle;
+        uint64 maxReinvestmentSlippageWAD;
     }
 
     /**
@@ -62,7 +65,7 @@ interface IBalancerV3VenueCallbacks {
      * @param _quoteAssetsReceiver The recipient of the quote assets withdrawn
      * @return stShares The senior tranche shares withdrawn back to this kernel by the unwrap
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
-     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, the mark a caller's preview caches for the operation
+     * @return lptAssetPrice The value of 1 whole BPT against the post-remove pool state, produced only for a preview to cache for the operation (zero when settling)
      */
     function removeBalancerV3Liquidity(
         DispatchMode _mode,

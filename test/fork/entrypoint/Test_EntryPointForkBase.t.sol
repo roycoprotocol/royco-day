@@ -8,7 +8,7 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
+import { DeploymentResult, MarketConfig } from "../../../script/config/DeploymentTypes.sol";
 import { ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, JT_LP_ROLE, LPT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
@@ -95,9 +95,18 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         _setupWallets();
         DEPLOY_SCRIPT = new DeployScript();
 
+        // The template pulls the genesis pool seed from the configured funder. Repoint the funder at the broadcasting
+        // deployer, which approves the template from inside the script's broadcast, and fund it with the seed legs
+        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig(_marketName());
+        cfg.poolInitialization.funder = DEPLOYER.addr;
+        deal(cfg.gyroECLPPoolParams.quoteAsset, cfg.poolInitialization.funder, cfg.poolInitialization.quoteAmount);
+        if (cfg.poolInitialization.collateralAmount != 0) {
+            deal(cfg.collateralAsset, cfg.poolInitialization.funder, cfg.poolInitialization.collateralAmount);
+        }
+
         // Deploy the market end-to-end through the real script and capture the production entry point
         DeploymentResult memory result = DEPLOY_SCRIPT.deploy(
-            DEPLOY_SCRIPT.getMarketConfig(_marketName()),
+            cfg,
             OWNER_ADDRESS,
             PROTOCOL_FEE_RECIPIENT_ADDRESS,
             DEPLOY_SCRIPT.getChainConfig(block.chainid, false).scheduledOperationsExpirySeconds,
@@ -108,11 +117,11 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         ENTRY_POINT = IRoycoDayEntryPoint(result.entryPoint);
         vm.label(address(ENTRY_POINT), "EntryPoint");
 
-        COLLATERAL_ASSET = KERNEL.COLLATERAL_ASSET();
-        QUOTE_ASSET = KERNEL.QUOTE_ASSET();
+        COLLATERAL_ASSET = KERNEL.collateralAsset();
+        QUOTE_ASSET = KERNEL.quoteAsset();
         QUOTE_UNIT = 10 ** IERC20Metadata(QUOTE_ASSET).decimals();
-        LPT = IRoycoVaultTranche(KERNEL.LIQUIDITY_PROVIDER_TRANCHE());
-        POOL = KERNEL.LPT_ASSET();
+        LPT = IRoycoVaultTranche(KERNEL.liquidityProviderTranche());
+        POOL = KERNEL.lptAsset();
         VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
         vm.label(address(LPT), "LPT");
         vm.label(POOL, "BalancerPool");
@@ -140,11 +149,22 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         deal(QUOTE_ASSET, EP_LPT_PROVIDER, 1_000_000 * QUOTE_UNIT);
         deal(QUOTE_ASSET, EP_USER, 1_000_000 * QUOTE_UNIT);
 
-        // Seed the market: JT first (the coverage denominator), then ST, then the LPT genesis (the kernel's first
-        // multi-asset add initializes the real E-CLP pool; minLiquidityWAD is 0 so ST never waits on LPT depth)
+        // Seed the market: JT first (the coverage denominator), then ST, then the LPT genesis
+        // (minLiquidityWAD is 0 so ST never waits on LPT depth)
         _depositTranche(JT_ALICE_ADDRESS, JT, 30_000e18);
         _depositTranche(ST_ALICE_ADDRESS, ST, 50_000e18);
-        _seedLPTGenesis(EP_LPT_PROVIDER, 2000e18);
+        // The pool arrives genesis-seeded by the template with the tiny config quote seed, and Balancer caps
+        // invariant growth per add at 5x, so the fixture's LPT genesis ramps geometrically up to the target depth
+        // instead of landing as one oversized add
+        uint256 lptGenesisTarget = 2000e18;
+        uint256 lptGenesisSeeded;
+        uint256 lptGenesisStep = 1e18;
+        while (lptGenesisSeeded < lptGenesisTarget) {
+            if (lptGenesisStep > lptGenesisTarget - lptGenesisSeeded) lptGenesisStep = lptGenesisTarget - lptGenesisSeeded;
+            _seedLPTGenesis(EP_LPT_PROVIDER, lptGenesisStep);
+            lptGenesisSeeded += lptGenesisStep;
+            lptGenesisStep *= 3;
+        }
 
         // Freeze the live feed value into the mock while it is fresh, so later warps can re-stamp it
         _pinOracleFresh();
@@ -437,7 +457,9 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         uint256 shares = _depositTranche(EP_USER, ST, 1000e18);
         (uint256 nonce,,) = _epRequestRedemption(EP_USER, address(ST), shares, EP_RECEIVER, 0, IRoycoDayEntryPoint.RedemptionMode.INKIND);
         uint256 vReq = toUint256(ENTRY_POINT.getRedemptionRequest(EP_USER, nonce).valueAtRequestTime);
-        assertEq(vReq, _valueOf(address(ST), shares), "the stored snapshot must equal the derived pro-rata claim");
+        // The template's genesis pool seed leaves the kernel's stored snapshot and this test's independent
+        // pro-rata rederivation on different floor paths, so tolerate 1 wei
+        assertApproxEqAbs(vReq, _valueOf(address(ST), shares), 1, "the stored snapshot must equal the derived pro-rata claim");
 
         _movePnL(1, 0.05e18);
         _warpIntoRedemptionWindow(address(ST));

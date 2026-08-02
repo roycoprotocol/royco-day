@@ -16,9 +16,9 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *         RoycoDayBalancerV3MarketDeploymentTemplate's role wiring is only asserted in the RPC-gated fork factory suite, so a
  *         standard CI run leaves it unverified; DayMarketTestBase hand-mirrors that wiring
  *         (`_wireTargetFunctionRoles`/`_wireRoleGrants`), and this pins the mirror against drift — including the
- *         grant set that lets a whitelist-enforcing market mint fee and premium shares.
- * @dev Asserts selector->role bindings, the two contract grants, that the kernel and fee recipient DO hold the
- *      tranche LP roles (so their fee/premium mints pass the tranche whitelist screen), and that `mint` is
+ *         grant set that lets a market mint fee and premium shares.
+ * @dev Asserts selector->role bindings, the two contract grants, that the kernel and fee recipient do NOT hold
+ *      the tranche LP roles, and that `mint` is
  *      deliberately unbound (defaults to AccessManager ADMIN_ROLE, the kernel gating it via an immutable
  *      `onlyKernel` check instead).
  */
@@ -70,10 +70,9 @@ contract Test_MockMarketRoleMatrix is DayMarketTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // Kernel and fee recipient do NOT hold the tranche LP roles: the kernel whitelist hook exempts both by address
-    // (_to == address(this) and _to == protocolFeeRecipient), so a whitelist-enforcing market's fee/premium mints
-    // pass the tranche `_update` screen without a standing role grant. Redeeming fee shares is then a separate,
-    // per-recipient whitelisting step the operator performs when needed.
+    // Kernel and fee recipient do NOT hold the tranche LP roles: share receipt is unconditional, so their
+    // fee/premium mints land without a standing role grant. Redeeming those fee shares is then a separate,
+    // per-recipient authorization step the operator performs when needed.
     // ---------------------------------------------------------------------
 
     function test_KernelAndFeeRecipient_DoNotHoldTrancheLPRoles() public view {

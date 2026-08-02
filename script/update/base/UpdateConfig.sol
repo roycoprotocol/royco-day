@@ -109,9 +109,9 @@ abstract contract UpdateConfig {
         require(addrs.kernel != address(0), MarketNotFound(_marketName, block.chainid));
 
         IRoycoDayKernel kernel = IRoycoDayKernel(addrs.kernel);
-        addrs.accountant = kernel.ACCOUNTANT();
-        addrs.seniorTranche = kernel.SENIOR_TRANCHE();
-        addrs.juniorTranche = kernel.JUNIOR_TRANCHE();
+        addrs.accountant = kernel.accountant();
+        addrs.seniorTranche = kernel.seniorTranche();
+        addrs.juniorTranche = kernel.juniorTranche();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

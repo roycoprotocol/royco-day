@@ -45,7 +45,7 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
         address proxy = addrs.accountant;
 
         IRoycoDayAccountant a = IRoycoDayAccountant(proxy);
-        address kernel = a.KERNEL();
+        address kernel = a.getState().kernel;
         require(kernel != address(0), UpgradeAccountantModule__NotAnAccountantProxy(proxy));
 
         // Strong type check: call an accountant-specific view. Reverts if the proxy is not actually
@@ -53,9 +53,10 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
         IRoycoDayKernel k = IRoycoDayKernel(kernel);
         a.previewSyncTrancheAccounting(k.convertCollateralAssetsToValue(k.getState().totalCollateralAssets));
 
-        address oldImpl = _readImplementation(proxy);
+        address beacon = getComponentBeacons(_chainId).accountant;
+        address oldImpl = _readBeaconImplementation(beacon);
 
-        bytes memory creationCode = abi.encodePacked(type(RoycoDayAccountant).creationCode, abi.encode(kernel));
+        bytes memory creationCode = type(RoycoDayAccountant).creationCode;
         bytes32 salt = keccak256(abi.encodePacked("ROYCO_ACCOUNTANT_IMPLEMENTATION_", _saltVersion));
 
         address newImpl = _predictImpl(salt, creationCode);
@@ -64,15 +65,15 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
         string memory label = string.concat("Accountant/", marketName);
 
         prepared = PreparedUpgrade({
-            proxy: proxy,
+            beacon: beacon,
             oldImpl: oldImpl,
             newImpl: newImpl,
             implSalt: salt,
             implCreationCode: creationCode,
             call: UpgradeCall({
                 marketName: marketName,
-                target: proxy,
-                callData: _buildUpgradeCallData(newImpl),
+                target: beacon,
+                callData: _buildBeaconUpgradeCallData(newImpl),
                 description: string.concat("Upgrade ", label, " implementation to ", vm.toString(newImpl))
             }),
             label: label
@@ -82,7 +83,7 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
     /// @inheritdoc UpgradeModuleBase
     function snapshotState(address _proxy) external view override returns (bytes memory) {
         IRoycoDayAccountant a = IRoycoDayAccountant(_proxy);
-        IRoycoDayKernel kernel = IRoycoDayKernel(a.KERNEL());
+        IRoycoDayKernel kernel = IRoycoDayKernel(a.getState().kernel);
 
         NAV_UNIT collateralNAV = kernel.convertCollateralAssetsToValue(kernel.getState().totalCollateralAssets);
 
@@ -99,7 +100,7 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
             abi.decode(_preStateSnapshot, (address, IRoycoDayAccountant.RoycoDayAccountantState, SyncedAccountingState, NAV_UNIT));
 
         IRoycoDayAccountant a = IRoycoDayAccountant(_proxy);
-        require(a.KERNEL() == preKernel, UpgradeAccountantModule__KernelImmutableChanged(preKernel, a.KERNEL()));
+        require(a.getState().kernel == preKernel, UpgradeAccountantModule__KernelImmutableChanged(preKernel, a.getState().kernel));
 
         _assertStateEqual(a.getState(), preState);
 

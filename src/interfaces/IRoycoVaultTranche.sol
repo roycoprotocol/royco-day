@@ -15,11 +15,26 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST", "Royco-JT", or "Royco-LPT")
      * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST", "JT", or "LPT")
      * @custom:field initialAuthority - The initial authority for the tranche
+     * @custom:field kernel - The kernel that handles the core market logic and accounting synchronization
+     * @custom:field asset - The underlying yield bearing asset of the tranche
      */
     struct RoycoTrancheInitParams {
         string name;
         string symbol;
         address initialAuthority;
+        address kernel;
+        address asset;
+    }
+
+    /**
+     * @notice Storage state for the Royco vault tranche
+     * @custom:storage-location erc7201:Royco.storage.RoycoVaultTrancheState
+     * @custom:field kernel - The kernel that handles the core market logic and accounting synchronization
+     * @custom:field asset - The address of the yield bearing asset of the tranche
+     */
+    struct RoycoVaultTrancheState {
+        address kernel;
+        address asset;
     }
 
     /**
@@ -53,7 +68,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
 
     /// @notice Returns the address of the kernel that this tranche is associated with
     /// @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
-    function KERNEL() external view returns (address kernel);
+    function kernel() external view returns (address kernel);
 
     /**
      * @notice Deposits assets into the tranche and mints shares to the receiver

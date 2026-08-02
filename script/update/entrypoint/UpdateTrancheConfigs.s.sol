@@ -100,7 +100,7 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
 
             tranches[3 * i] = addrs.seniorTranche;
             tranches[3 * i + 1] = addrs.juniorTranche;
-            tranches[3 * i + 2] = IRoycoDayKernel(addrs.kernel).LIQUIDITY_PROVIDER_TRANCHE();
+            tranches[3 * i + 2] = IRoycoDayKernel(addrs.kernel).liquidityProviderTranche();
             for (uint256 j = 0; j < 3; j++) {
                 configs[3 * i + j] = IRoycoDayEntryPoint.TrancheConfig({
                     enabled: true,

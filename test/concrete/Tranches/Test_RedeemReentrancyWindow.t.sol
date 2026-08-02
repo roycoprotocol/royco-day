@@ -5,6 +5,7 @@ import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contrac
 import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { UpgradeableBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
@@ -27,6 +28,7 @@ import { MockReentrancyProbe } from "../../mocks/MockReentrancyProbe.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { zeroLiquidityParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
+import { IBalancerV3LiquidityVenue } from "../../../src/interfaces/liquidity-venue/IBalancerV3LiquidityVenue.sol";
 
 /**
  * @title Test_RedeemReentrancyWindow_Tranches
@@ -289,46 +291,38 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
 
         // THE ASSET SWAP: the senior and junior tranches hold the hookable plain ERC20 itself, so a redemption's
         // payout transfer executes receiver code exactly where a callback-bearing production asset would
-        RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(stJtUnderlying), predictedKernel);
-        RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(stJtUnderlying), predictedKernel);
-        RoycoLiquidityProviderTranche lptImpl = new RoycoLiquidityProviderTranche(address(bpt), predictedKernel);
-        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel, 0);
+        UpgradeableBeacon stSwapBeacon = new UpgradeableBeacon(address(new RoycoSeniorTranche()), address(accessManager));
+        UpgradeableBeacon jtSwapBeacon = new UpgradeableBeacon(address(new RoycoJuniorTranche()), address(accessManager));
+        UpgradeableBeacon lptSwapBeacon = new UpgradeableBeacon(address(new RoycoLiquidityProviderTranche()), address(accessManager));
+        RoycoDayAccountant accImpl = new RoycoDayAccountant();
 
-        // Tranche and accountant proxies must exist before the kernel impl (its constructor reads the accountant)
-        seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));
-        juniorTranche = RoycoJuniorTranche(_deployTrancheProxy(address(jtImpl), "Royco Junior Tranche", "RJT"));
-        liquidityProviderTranche = RoycoLiquidityProviderTranche(_deployTrancheProxy(address(lptImpl), "Royco Liquidity Provider Tranche", "RLT"));
+        // Tranche and accountant proxies must exist before the kernel (its initializer reads each tranche's asset)
+        seniorTranche =
+            RoycoSeniorTranche(_deployTrancheProxy(address(stSwapBeacon), "Royco Senior Tranche", "RST", predictedKernel, address(stJtUnderlying)));
+        juniorTranche =
+            RoycoJuniorTranche(_deployTrancheProxy(address(jtSwapBeacon), "Royco Junior Tranche", "RJT", predictedKernel, address(stJtUnderlying)));
+        liquidityProviderTranche = RoycoLiquidityProviderTranche(
+            _deployTrancheProxy(address(lptSwapBeacon), "Royco Liquidity Provider Tranche", "RLT", predictedKernel, address(bpt))
+        );
         accountant = RoycoDayAccountant(
             address(
                 new ERC1967Proxy(
                     address(accImpl),
-                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(params, jtYdmInitData, lptYdmInitData), address(accessManager)))
+                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(params, predictedKernel, jtYdmInitData, lptYdmInitData)))
                 )
             )
         );
 
         // Register the pool before kernel impl construction (the liquidity venue constructor validates the registration),
         // sorted ascending by address exactly as the production vault registers pool tokens
-        bool stSortsFirst = address(seniorTranche) < address(quoteToken);
-        stPoolTokenIndex = stSortsFirst ? 0 : 1;
-        IERC20[2] memory poolTokens =
-            stSortsFirst ? [IERC20(address(seniorTranche)), IERC20(address(quoteToken))] : [IERC20(address(quoteToken)), IERC20(address(seniorTranche))];
-        balancerVault.registerPool(address(bpt), poolTokens);
+        // The venue requires tokens[0] == seniorTranche and tokens[1] == quoteAsset structurally, the ordering the
+        // factory template guarantees in production by mining the market id, so the fixture registers it directly
+        stPoolTokenIndex = 0;
+        balancerVault.registerPool(address(bpt), [IERC20(address(seniorTranche)), IERC20(address(quoteToken))]);
         _initializePoolMinimumSupply();
 
         // The shipped kernel impl over the plain asset (the oracle above carries the whole collateral pricing swap)
-        RoycoDayBalancerV3Kernel kernelImpl = new RoycoDayBalancerV3Kernel(
-            IRoycoDayKernel.RoycoDayKernelConstructionParams({
-                seniorTranche: address(seniorTranche),
-                juniorTranche: address(juniorTranche),
-                collateralAsset: address(stJtUnderlying),
-                accountant: address(accountant),
-                liquidityProviderTranche: address(liquidityProviderTranche),
-                lptAsset: address(bpt),
-                quoteAsset: address(quoteToken),
-                enforceVaultSharesTransferWhitelist: params.enforceWhitelistOnTransfer
-            })
-        );
+        RoycoDayBalancerV3Kernel kernelImpl = new RoycoDayBalancerV3Kernel(IVault(address(balancerVault)));
 
         PROTOCOL_FEE_RECIPIENT = makeAddr("PROTOCOL_FEE_RECIPIENT");
 
@@ -338,6 +332,13 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
             (
                 IRoycoDayKernel.RoycoDayKernelInitParams({
                     initialAuthority: address(accessManager),
+                    seniorTranche: address(seniorTranche),
+                    juniorTranche: address(juniorTranche),
+                    liquidityProviderTranche: address(liquidityProviderTranche),
+                    collateralAsset: address(stJtUnderlying),
+                    lptAsset: address(bpt),
+                    quoteAsset: address(quoteToken),
+                    accountant: address(accountant),
                     protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT,
                     stSelfLiquidationBonusWAD: params.stSelfLiquidationBonusWAD,
                     roycoBlacklist: address(0),
@@ -346,7 +347,7 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
                     sequencerUptimeFeed: address(0),
                     gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS
                 }),
-                BalancerV3LiquidityVenue.LiquidityVenueInitParams({
+                IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams({
                     bptOracle: address(bptOracle), maxReinvestmentSlippageWAD: params.maxReinvestmentSlippageWAD
                 })
             )

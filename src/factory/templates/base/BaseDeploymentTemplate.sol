@@ -128,11 +128,11 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
     // DEPLOYMENT HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys an ERC1967 proxy pointing at `_impl` with `_initData`, via the factory's active-template primitive
+    /// @notice Deploys a beacon proxy reading from `_beacon` with `_initData`, via the factory's active-template primitive
     /// @dev Reverts if a contract already exists at the CREATE3 address, every market proxy must be a fresh deployment
-    function _deployProxy(address _impl, bytes memory _initData, bytes32 _salt) internal returns (address proxy) {
+    function _deployProxy(address _beacon, bytes memory _initData, bytes32 _salt) internal returns (address proxy) {
         bool alreadyDeployed;
-        (proxy, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicProxyFromTemplate(_impl, _initData, _salt);
+        (proxy, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicProxyFromTemplate(_beacon, _initData, _salt);
         require(!alreadyDeployed, MARKET_COMPONENT_ALREADY_DEPLOYED(proxy, _salt));
     }
 
@@ -140,23 +140,39 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
     // INIT DATA BUILDERS (standard Constants)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Builds `initialize(...)` calldata for a tranche proxy from its canonical init params, forcing the market authority
-    /// @dev The caller-supplied `initialAuthority` is ignored/overwritten, the market's authority is always the factory's authority
-    function _encodeTrancheInitData(IRoycoVaultTranche.RoycoTrancheInitParams memory _params) internal view returns (bytes memory) {
+    /**
+     * @notice Builds `initialize(...)` calldata for a tranche proxy from its canonical init params
+     * @param _params The tranche's canonical init params (only `name` and `symbol` are read from the caller)
+     * @param _kernel The market's kernel, which the tranche routes every operation through
+     * @param _asset The tranche's underlying asset
+     */
+    function _encodeTrancheInitData(
+        IRoycoVaultTranche.RoycoTrancheInitParams memory _params,
+        address _kernel,
+        address _asset
+    )
+        internal
+        view
+        returns (bytes memory)
+    {
         _params.initialAuthority = ROYCO_FACTORY.ROYCO_AUTHORITY();
+        _params.kernel = _kernel;
+        _params.asset = _asset;
         return abi.encodeCall(RoycoSeniorTranche.initialize, (_params));
     }
 
     /**
      * @notice Builds `initialize(...)` calldata for an accountant proxy from its canonical init params
      * @dev The caller supplies the full accountant configuration (including both the JT and LPT YDM initialization data, so
-     *      both YDMs are initialized), the template injects only the deployment-derived YDM addresses and the market authority
-     * @param _params The accountant's canonical init params (its `jtYDM`/`lptYDM` fields are overwritten with the deployed instances)
+     *      both YDMs are initialized), the template injects only the deployment-derived addresses and the market authority
+     * @param _params The accountant's canonical init params (its `kernel`/`jtYDM`/`lptYDM` fields are overwritten)
+     * @param _kernel The market's kernel, the only caller permitted to drive the accountant's synchronization
      * @param _jtYdm The JT YDM (risk-premium model) instance
      * @param _lptYdm The LPT YDM (liquidity-premium model / LDM) instance, a distinct instance from `_jtYdm`
      */
     function _encodeAccountantInitData(
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params,
+        address _kernel,
         address _jtYdm,
         address _lptYdm
     )
@@ -164,9 +180,11 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
         view
         returns (bytes memory)
     {
+        _params.kernel = _kernel;
+        _params.initialAuthority = ROYCO_FACTORY.ROYCO_AUTHORITY();
         _params.jtYDM = _jtYdm;
         _params.lptYDM = _lptYdm;
-        return abi.encodeCall(RoycoDayAccountant.initialize, (_params, ROYCO_FACTORY.ROYCO_AUTHORITY()));
+        return abi.encodeCall(RoycoDayAccountant.initialize, (_params));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

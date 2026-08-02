@@ -114,8 +114,9 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
 
     /**
      * Scenario: a seeded market accrues a strictly positive fuzzed yield (so a liquidity premium exists) and a
-     * fuzzed coin flip decides whether the premium stays STAGED (venue slippage armed, reinvestment defers) or
-     * deploys inline at the sync. The split valuation must then hold for any redeemable share slice: convertToAssets prices
+     * fuzzed coin flip decides whether the premium stays STAGED (a standalone sync always leaves the premium
+     * idle) or deploys through the standalone reinvestment entrypoint after the sync. The split valuation must
+     * then hold for any redeemable share slice: convertToAssets prices
      * the pro-rata BPT-only raw NAV with no idle senior-share leg, previewRedeem prices the pro-rata
      * idle-inclusive effective NAV, the convert quote never exceeds the redemption quote (strictly below whenever
      * the pro-rata idle slice carries value), and the two surfaces coincide on every claim leg iff nothing is staged
@@ -134,7 +135,7 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
         uint256 jt = bound(_jtSeed, st / 2, 2 * st); // uniform coverage ratios from 2:1 to 1:2
         uint256 vb = bound(_vaultBps, 1, 10_000); // strictly positive up-only yield (+1 bp to +100%) so a premium accrues
         uint256 elapsed = bound(_elapsed, 1 hours, 365 days); // premium accrual window from an hour to a year
-        bool staged = bound(_stageSeed, 0, 1) == 1; // fair coin flip: the premium stays staged vs deploys inline
+        bool staged = bound(_stageSeed, 0, 1) == 1; // fair coin flip: the premium stays staged vs deploys after the sync
         _seedFlatMarket(st, jt, st.mulDiv(3, 20) / QUOTE_TO_NAV_SCALE + 1);
 
         if (staged) setVenueSlippageMode(true);
@@ -143,9 +144,16 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
         syncVenuePrices();
         _sync();
 
+        // A standalone sync always stages the premium into the idle pile: deployment runs only in an operation's
+        // settled tail or through the standalone entrypoint, so the deployed arm reinvests explicitly here
+        if (!staged) {
+            vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
+            kernel.reinvestLiquidityPremium(type(uint256).max);
+        }
+
         uint256 idle = kernel.getState().lptOwnedSeniorTrancheShares;
-        if (staged) assertGt(idle, 0, "arrange: the armed slippage gate must have left the premium staged");
-        else assertEq(idle, 0, "arrange: the open gate must have deployed the premium inline");
+        if (staged) assertGt(idle, 0, "arrange: the staged arm must leave the premium idle after the standalone sync");
+        else assertEq(idle, 0, "arrange: the reinvestment must have deployed the staged premium");
 
         // Independent recompute of both NAV bases from the just-committed checkpoint (same block as the sync)
         uint256 supply = liquidityProviderTranche.totalSupply();
@@ -154,8 +162,8 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
         uint256 shares = bound(_sharesSeed, 1e6, liquidityProviderTranche.maxRedeem(LPT_PROVIDER));
         uint256 rawNAV = toUint256(accountant.getState().lastLPTRawNAV);
         // The idle senior-share leg is valued through the offset-aware _convertToValue: numerator gains VIRTUAL_VALUE = 1,
-        // denominator gains VIRTUAL_SHARES = 1e6, mirroring src _getLiquidityProviderTrancheEffectiveNAV
-        uint256 idleValue = Math.mulDiv(toUint256(accountant.getState().lastSTEffectiveNAV) + 1, idle, seniorTranche.totalSupply() + 1e6, Math.Rounding.Floor);
+        // denominator gains VIRTUAL_SHARES = 1, mirroring src _getLiquidityProviderTrancheEffectiveNAV
+        uint256 idleValue = Math.mulDiv(toUint256(accountant.getState().lastSTEffectiveNAV) + 1, idle, seniorTranche.totalSupply() + 1, Math.Rounding.Floor);
 
         AssetClaims memory conv = liquidityProviderTranche.convertToAssets(shares);
         AssetClaims memory prev = liquidityProviderTranche.previewRedeem(shares);
@@ -165,19 +173,19 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
         assertEq(conv.stShares, 0, "the convert surface must never report the idle senior-share leg");
         assertEq(
             toUint256(conv.nav),
-            Math.mulDiv(rawNAV + 1, shares, supply + 1e6, Math.Rounding.Floor),
+            Math.mulDiv(rawNAV + 1, shares, supply + 1, Math.Rounding.Floor),
             "convertToAssets must price the virtual-offset BPT-only raw NAV"
         );
         assertEq(
             toUint256(prev.nav),
-            Math.mulDiv(rawNAV + idleValue + 1, shares, supply + 1e6, Math.Rounding.Floor),
+            Math.mulDiv(rawNAV + idleValue + 1, shares, supply + 1, Math.Rounding.Floor),
             "previewRedeem must price the virtual-offset idle-inclusive effective NAV"
         );
         assertLe(toUint256(conv.nav), toUint256(prev.nav), "the convert quote must never exceed the redemption quote");
 
         // Floor superadditivity guarantees the gap is at least the floored idle slice, so strictness holds exactly
         // when the redeemer's pro-rata idle slice carries value (sliced over the same effective supply)
-        if (Math.mulDiv(idleValue, shares, supply + 1e6, Math.Rounding.Floor) > 0) {
+        if (Math.mulDiv(idleValue, shares, supply + 1, Math.Rounding.Floor) > 0) {
             assertGt(toUint256(prev.nav), toUint256(conv.nav), "the redemption quote must be strictly richer whenever the idle slice carries value");
         }
         if (idle == 0) {

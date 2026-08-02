@@ -229,7 +229,7 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
 
     /// @notice QUOTE_ASSET resolves from the registered pool token order to the token that is not the senior tranche share
     function test_Construction_ResolvesQuoteAssetFromRegistration() public view {
-        assertEq(kernel.QUOTE_ASSET(), address(quoteToken), "the quote asset must resolve from the pool registration");
+        assertEq(kernel.quoteAsset(), address(quoteToken), "the quote asset must resolve from the pool registration");
     }
 
     /**
@@ -281,25 +281,28 @@ contract Test_SeniorShareRateProvider_LiquidityVenue is DayMarketTestBase {
     }
 
     /**
-     * @notice Once a sync has cached the senior-share rate, an inline senior-share mint (supply +100%) cannot move it
-     *         for the rest of the transaction: the transaction-scoped cache pins the rate
-     * @dev This is the cache's purpose. Within a synced op (e.g. a multi-asset LPT deposit/redemption that mints or burns
-     *      ST shares inline) the senior-leg mark the pool prices against is fixed at the pre-op sync, so an inline supply
-     *      move cannot shift it before the matching effective NAV commits. The cache is transient storage, which Foundry
-     *      clears between the test contract's top-level calls, so the sync, the inline mint, and the reads must all run in
-     *      a single top-level call to model one on-chain transaction — the harness below bundles them so the cache persists
+     * @notice The rate cache is operation-scoped, not transaction-scoped: a sync's price frame clears it on exit, so a
+     *         senior-share supply move later in the same transaction reprices the senior-leg mark live (supply +100% halves it)
+     * @dev The mid-frame pin (an inline mint or burn inside a synchronized operation cannot move the mark before its
+     *      effective NAV commits) is exercised by the multi-asset flows whose venue legs read getRate mid-frame. This
+     *      test pins the frame's EXIT: after a standalone sync returns, the cache is cleared, so a non-kernel supply
+     *      change (a BURNER_ROLE burn, or the mint modeled here) is visible to the very next pool read instead of the
+     *      pool trading a stale mark for the rest of the transaction. The cache is transient storage, which Foundry
+     *      clears between the test contract's top-level calls, so the sync, the inline mint, and the reads must all run
+     *      in a single top-level call to model one on-chain transaction — the harness below bundles them
      */
-    function test_GetRate_TransactionInvariant_UnderInlineSeniorMint() public {
+    function test_GetRate_OperationScopedCache_InlineSeniorMintAfterSyncRepricesLive() public {
         InlineSeniorMintRateHarness harness = new InlineSeniorMintRateHarness();
 
-        // Run pre-op sync -> read -> inline senior mint (supply +100%) -> read as ONE transaction so the transient cache lives
-        (uint256 cachedRate, uint256 rateAfterInlineMint) = harness.syncMintAndReadRate(
+        // Run sync -> read -> inline senior mint (supply +100%) -> read as ONE transaction so the transient cache would survive if it were never cleared
+        (uint256 rateAfterSync, uint256 rateAfterInlineMint) = harness.syncMintAndReadRate(
             IRateHarnessKernel(address(kernel)), IRateHarnessTranche(address(seniorTranche)), SYNC_OPERATOR, makeAddr("INLINE_MINT_RECIPIENT"), 100e18
         );
 
         // Seed rate = _convertToValue(WAD, 100e18, 100e18) with the offset: floor((100e18 + 1) x 1e18 / (100e18 + 1))
-        assertEq(cachedRate, 1_000_000_000_000_000_000, "arrange: the cached rate at seed must be the offset-aware floor near 1.0");
-        assertEq(rateAfterInlineMint, cachedRate, "the rate must be unchanged by an inline supply move, the cache pins it");
+        assertEq(rateAfterSync, 1_000_000_000_000_000_000, "arrange: the post-sync rate at seed must be the offset-aware floor near 1.0");
+        // The sync's frame cleared the cache on exit, so the read reprices live: floor((100e18 + 1) x 1e18 / (200e18 + 1))
+        assertEq(rateAfterInlineMint, 500_000_000_000_000_000, "a supply move after the operation's frame must reprice the senior-leg mark live");
     }
 
     /**

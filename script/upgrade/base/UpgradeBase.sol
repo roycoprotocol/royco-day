@@ -5,6 +5,9 @@ import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { console2 } from "lib/forge-std/src/console2.sol";
 
+import { IBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/IBeacon.sol";
+import { UpgradeableBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AccessManagerConfigUtils } from "../../utils/AccessManagerConfigUtils.sol";
 import { Create2DeployUtils } from "../../utils/Create2DeployUtils.sol";
@@ -46,8 +49,10 @@ abstract contract UpgradeBase is UpgradeConfig, AccessManagerConfigUtils, Create
     }
 
     /// @dev Pre-upgrade state is not stored — it's captured post-warp via `module.snapshotState`.
+    /// @dev `beacon` is the component's upgrade beacon for a per-market component, or the proxy itself for a
+    ///      self-upgrading singleton like the factory. A beacon upgrade moves every market of that type at once.
     struct PreparedUpgrade {
-        address proxy;
+        address beacon;
         address oldImpl;
         address newImpl;
         bytes32 implSalt;
@@ -69,10 +74,24 @@ abstract contract UpgradeBase is UpgradeConfig, AccessManagerConfigUtils, Create
     // ERC1967 + UPGRADE CALLDATA HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /// @dev Reads a self-upgrading singleton's implementation out of its ERC-1967 slot
+    /// @dev Never point this at a beacon proxy: it writes the beacon slot and leaves the implementation slot empty,
+    ///      so this would return the zero address silently rather than reverting
     function _readImplementation(address _proxy) internal view returns (address) {
         return address(uint160(uint256(vm.load(_proxy, ERC1967_IMPL_SLOT))));
     }
 
+    /// @dev Reads the implementation a component beacon currently points every market's proxy at
+    function _readBeaconImplementation(address _beacon) internal view returns (address) {
+        return IBeacon(_beacon).implementation();
+    }
+
+    /// @dev The upgrade call for a component beacon: moves every market of that type in one call
+    function _buildBeaconUpgradeCallData(address _newImpl) internal pure returns (bytes memory) {
+        return abi.encodeCall(UpgradeableBeacon.upgradeTo, (_newImpl));
+    }
+
+    /// @dev The upgrade call for a self-upgrading singleton (the factory, entry point, and blacklist)
     function _buildUpgradeCallData(address _newImpl) internal pure returns (bytes memory) {
         return abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (_newImpl, ""));
     }
@@ -107,21 +126,13 @@ abstract contract UpgradeBase is UpgradeConfig, AccessManagerConfigUtils, Create
     ///      the batch, or the upgrade is not market-scoped, e.g. a factory upgrade).
     function _deriveSyncKernelsBeforeUpgrades(uint256 _chainId, PreparedUpgrade[] memory _ups) internal view returns (address[] memory syncKernelBefore) {
         syncKernelBefore = new address[](_ups.length);
-        string[] memory seen = new string[](_ups.length);
-        uint256 seenCount = 0;
+        // A component upgrade now moves every market of that type at once, so the accounting of every market on the
+        // chain must be settled against the outgoing implementation first. Only the first such upgrade in the batch
+        // carries the sync: the rest execute in the same transaction sequence with nothing having moved in between.
         for (uint256 i = 0; i < _ups.length; i++) {
-            string memory marketName = _ups[i].call.marketName;
-            if (bytes(marketName).length == 0) continue; // factory / cross-chain singletons have no market scope
-            bool alreadySeen = false;
-            for (uint256 j = 0; j < seenCount; j++) {
-                if (keccak256(bytes(seen[j])) == keccak256(bytes(marketName))) {
-                    alreadySeen = true;
-                    break;
-                }
-            }
-            if (alreadySeen) continue;
-            seen[seenCount++] = marketName;
-            syncKernelBefore[i] = getMarketAddresses(_chainId, marketName).kernel;
+            if (bytes(_ups[i].call.marketName).length == 0) continue; // singletons (the factory) have no market scope
+            syncKernelBefore[i] = getMarketSyncer(_chainId);
+            return syncKernelBefore;
         }
     }
 
@@ -138,7 +149,7 @@ abstract contract UpgradeBase is UpgradeConfig, AccessManagerConfigUtils, Create
 
     function _logOneUpgrade(PreparedUpgrade memory _up) private view {
         console2.log("  ", _up.label);
-        console2.log("    proxy   :", _up.proxy);
+        console2.log("    beacon  :", _up.beacon);
         console2.log("    oldImpl :", _up.oldImpl);
         console2.log("    newImpl :", _up.newImpl, _up.newImpl.code.length != 0 ? "(already deployed)" : "(to deploy)");
     }
@@ -201,21 +212,23 @@ abstract contract UpgradeBase is UpgradeConfig, AccessManagerConfigUtils, Create
     }
 
     function _executeAndVerifyOne(address _factory, PreparedUpgrade memory _up, address _module) private {
-        bytes memory preSnapshot = IUpgradeVerifier(_module).snapshotState(_up.proxy);
+        bytes memory preSnapshot = IUpgradeVerifier(_module).snapshotState(_up.beacon);
         vm.prank(ROOT_MULTISIG);
         IAccessManager(_factory).execute(_up.call.target, _up.call.callData);
-        IUpgradeVerifier(_module).verify(_up.proxy, preSnapshot);
+        IUpgradeVerifier(_module).verify(_up.beacon, preSnapshot);
         console2.log("  [OK] Executed + verified:", _up.label);
     }
 
-    function _syncKernel(address _factory, string memory _marketName, address _kernel) private {
+    function _syncKernel(address _factory, string memory _marketName, address _syncer) private {
         vm.prank(ROOT_MULTISIG);
-        IAccessManager(_factory).execute(_kernel, _buildSyncCallData());
-        console2.log("  [OK] Synced market:", _marketName);
+        IAccessManager(_factory).execute(_syncer, _buildSyncCallData());
+        console2.log("  [OK] Synced every market on the chain before:", _marketName);
     }
 
+    /// @dev Settles every registered market's accounting in one call. `false` so a market that cannot sync fails the
+    ///      batch loudly rather than being upgraded on stale accounting
     function _buildSyncCallData() internal pure returns (bytes memory) {
-        return abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ());
+        return abi.encodeCall(RoycoMarketSyncer.executeBatchAccountingSync, (false));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

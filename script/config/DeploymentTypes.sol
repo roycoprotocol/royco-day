@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
@@ -20,7 +21,9 @@ enum KernelType {
     RoycoDayBalancerV3Kernel
 }
 
-/// @notice YDM types.
+/// @notice The yield distribution model shapes the deployment path can deploy
+/// @dev The template keys its model registry by name rather than by this enum, so a new shape can be registered on a
+///      live template. This enum stays script-side, where it selects the model's creation code and initialization data
 enum YDMType {
     StaticCurve,
     AdaptiveCurve_V1,
@@ -254,7 +257,6 @@ struct MarketConfig {
     KernelType kernelType;
     bytes kernelSpecificParams;
     uint64 stSelfLiquidationBonusWAD;
-    bool enforceVaultSharesTransferWhitelist;
     // Accountant
     uint64 stProtocolFeeWAD;
     uint64 jtProtocolFeeWAD;
@@ -262,6 +264,7 @@ struct MarketConfig {
     uint64 minCoverageWAD;
     uint256 coverageLiquidationUtilizationWAD;
     uint24 fixedTermDurationSeconds;
+    uint24 fixedTermGracePeriodSeconds; // grace period before the market may first commence a fixed term
     YDMType ydmType;
     bytes ydmSpecificParams; // JT YDM curve
     bytes lptYdmSpecificParams; // LDM curve
@@ -269,8 +272,8 @@ struct MarketConfig {
     uint256 lptYdmTargetUtilizationWAD; // LDM target-utilization kink
     // Liquidity provider tranche: the Gyro E-CLP {ST_share, quote} pool the LPT BPT is minted from.
     GyroECLPPoolParams gyroECLPPoolParams;
-    // Whether to deploy the Balancer pool hook
-    bool deployPoolHook;
+    // Genesis pool liquidity
+    RoycoDayBalancerV3MarketDeploymentTemplate.PoolInitializationParams poolInitialization;
     // Entry point config per tranche
     IRoycoDayEntryPoint.TrancheConfig stEntryPointConfig;
     IRoycoDayEntryPoint.TrancheConfig jtEntryPointConfig;

@@ -23,28 +23,26 @@ library AssetLedgerLogic {
     using Math for uint256;
 
     /**
-     * @notice Resolves the specified tranche's contract address from the kernel's immutables
-     * @param _immutables The kernel's immutables carrier resolving the tranche addresses
+     * @notice Resolves the specified tranche's contract address from the kernel's state
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _trancheType An enumerator indicating which tranche's address to resolve
      * @return The specified tranche's contract address
      */
-    function _getTrancheAddress(IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, TrancheType _trancheType) internal pure returns (address) {
-        if (_trancheType == TrancheType.SENIOR) return _immutables.seniorTranche;
-        else if (_trancheType == TrancheType.JUNIOR) return _immutables.juniorTranche;
-        else return _immutables.liquidityProviderTranche;
+    function _getTrancheAddress(IRoycoDayKernel.RoycoDayKernelState storage $, TrancheType _trancheType) internal view returns (address) {
+        if (_trancheType == TrancheType.SENIOR) return $.seniorTranche;
+        else if (_trancheType == TrancheType.JUNIOR) return $.juniorTranche;
+        else return $.liquidityProviderTranche;
     }
 
     /**
      * @notice Derives the cumulative asset claims that the specified tranche is entitled to
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _trancheType An enumerator indicating which tranche to return cumulative claims for
      * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
      * @return claims The cumulative asset claims that the specified tranche is entitled to
      */
     function _deriveTrancheAssetClaims(
         IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         TrancheType _trancheType,
         SyncedAccountingState memory _state
     )
@@ -56,7 +54,7 @@ library AssetLedgerLogic {
             if (_state.lptRawNAV != ZERO_NAV_UNITS) claims.lptAssets = IRoycoDayKernel(address(this)).convertValueToLPTAssets(_state.lptRawNAV);
             claims.stShares = $.lptOwnedSeniorTrancheShares;
             claims.nav = ValuationLogic._getLiquidityProviderTrancheEffectiveNAV(
-                $, _state.stEffectiveNAV, IRoycoVaultTranche(_immutables.seniorTranche).totalSupply(), claims.stShares
+                $, _state.stEffectiveNAV, IRoycoVaultTranche($.seniorTranche).totalSupply(), claims.stShares
             );
         } else {
             // A tranche's claim is its effective NAV, granted in the coinvested collateral asset
@@ -67,7 +65,7 @@ library AssetLedgerLogic {
 
     /**
      * @notice Credits deposited assets to the specified tranche's ledger
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _trancheType An enumerator indicating which tranche's ledger to credit
      * @param _assets The amount of assets to credit, denominated in the tranche's tranche units
      */
@@ -79,7 +77,7 @@ library AssetLedgerLogic {
 
     /**
      * @notice Debits the specified asset claims from the kernel's tranche ledgers
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _claims The collateral assets, LPT assets, and ST shares to debit from the ledgers
      */
     function _debitAssets(IRoycoDayKernel.RoycoDayKernelState storage $, AssetClaims memory _claims) internal {
@@ -92,7 +90,25 @@ library AssetLedgerLogic {
     /**
      * @notice Remits the specified asset claims to the receiver via direct transfers
      * @dev Holds no accounting effects, callers debit the claims from their ledgers first so the transfers can run last (CEI)
-     * @param _immutables The kernel's immutables carrier resolving the claim assets
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _claims The collateral assets, LPT assets, and ST shares to transfer to the specified receiver
+     * @param _receiver The receiver of the asset claims
+     */
+    function _remitClaims(IRoycoDayKernel.RoycoDayKernelState storage $, AssetClaims memory _claims, address _receiver) internal {
+        // Preemptively return if this is a self-remittance
+        if (_receiver == address(this)) return;
+        // Transfer the collateral assets being remitted to the receiver
+        if (_claims.collateralAssets != ZERO_TRANCHE_UNITS) IERC20($.collateralAsset).safeTransfer(_receiver, toUint256(_claims.collateralAssets));
+        // Transfer the LPT assets being remitted to the receiver
+        if (_claims.lptAssets != ZERO_TRANCHE_UNITS) IERC20($.lptAsset).safeTransfer(_receiver, toUint256(_claims.lptAssets));
+        // Transfer the senior tranche shares being remitted to the receiver
+        if (_claims.stShares != 0) IERC20($.seniorTranche).safeTransfer(_receiver, _claims.stShares);
+    }
+
+    /**
+     * @notice Remits the specified asset claims to the receiver via direct transfers, resolving the claim assets from the kernel's immutable-state carrier
+     * @dev The periphery variant of `_remitClaims`: a contract outside the kernel holds no kernel storage pointer, so it remits from the carrier `getImmutableState` returns
+     * @param _immutables The kernel's immutable-state carrier resolving the claim assets
      * @param _claims The collateral assets, LPT assets, and ST shares to transfer to the specified receiver
      * @param _receiver The receiver of the asset claims
      */

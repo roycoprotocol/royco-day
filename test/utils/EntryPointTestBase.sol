@@ -156,7 +156,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         ENTRY_POINT_ADMIN = _generateActor("ENTRY_POINT_ADMIN", ADMIN_ENTRY_POINT_ROLE);
         FEE_COLLECTOR = _generateActor("FEE_COLLECTOR", ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE);
 
-        // User actors, each holding all three LP roles so they can acquire shares and receive them under whitelisting
+        // User actors, each holding all three LP roles so they can deposit into and redeem from every tranche
         USER_A = _generateEntryPointUser("USER_A");
         USER_B = _generateEntryPointUser("USER_B");
         EXECUTOR = _generateEntryPointUser("EXECUTOR");

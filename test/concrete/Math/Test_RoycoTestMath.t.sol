@@ -225,19 +225,20 @@ contract Test_RoycoTestMath is Test {
         assertEq(RoycoTestMath.convertToShares(threshold, 1e18, 1e18), cap, "at the boundary the fair mint equals the cap");
     }
 
-    /// Bind boundary + 1 wei: v = threshold + 1 = 1e30 − 1e18 + 1e12 trips the bind and returns the same
-    /// cap = 1e30 − 1e18 + 1e12 − 1 as the boundary itself (the clamp plateaus, it does not jump).
-    function test_ConvertToShares_ClampBindBoundaryPlusOne_ReturnsSameCap() public pure {
-        assertEq(RoycoTestMath.convertToShares(1e30 - 1e18 + 1e12, 1e18, 1e18), 1e30 - 1e18 + 1e12 - 1, "one wei past the boundary mints the identical cap");
+    /// Healthy price never arms: at a 1:1 price (S = T = 1e18) the collapsed-price predicate
+    /// ⌈(1e18 + 1)·1e6/(1e18 − 1e6)⌉ = 1000002 is nowhere near denom = 1e18 + 1, so even a value one wei past
+    /// the old value-based threshold prices fairly, ⌊(1e18 + 1)·v/(1e18 + 1)⌋ = v (paid-for ownership is not dilution).
+    function test_ConvertToShares_HealthyPriceNeverClamps_HoweverLargeTheValue() public pure {
+        assertEq(RoycoTestMath.convertToShares(1e30 - 1e18 + 1e12, 1e18, 1e18), 1e30 - 1e18 + 1e12, "a healthy-priced mint takes the fair price at any size");
     }
 
-    /// Zero-NAV composition min(effectiveSupply·v, cap) with denom = totalValue + 1 = 1: the mint stays unclamped
-    /// for small values (bind iff ⌈3·1e6/(1e18−1e6)⌉ = 1 > 1 is false ⇒ ⌊(7 + 1)·3/1⌋ = 24), and clamps for
-    /// large ones (v = 1e12: ⌈1e12·1e6/(1e18−1e6)⌉ = 2 > 1 ⇒ cap = ⌊(7 + 1)·(1e18−1e6)/1e6⌋ = 8·(1e12−1)
-    /// = 7999999999992).
-    function test_ConvertToShares_ClampOverZeroNAV_ComposesWithOneWeiDenominator() public pure {
-        assertEq(RoycoTestMath.convertToShares(3, 0, 7), 24, "small dilution mint stays fair-priced");
-        assertEq(RoycoTestMath.convertToShares(1e12, 0, 7), 7_999_999_999_992, "large dilution mint clamps to 8*(1e12-1)");
+    /// Collapsed price arms and returns min(cap, fair): with S = 2e12 over denom = totalValue + 1 = 1 the
+    /// predicate ⌈(2e12 + 1)·1e6/(1e18 − 1e6)⌉ = 3 > 1 arms the clamp, cap = ⌊(2e12 + 1)·(1e18 − 1e6)/1e6⌋
+    /// = 1999999999998999999999999. A small mint stays fair (⌊(2e12 + 1)·10/1⌋ = 20000000000010 below the cap),
+    /// a large one (v = 1e13, fair = 2.000000000001e25) clamps to the cap exactly.
+    function test_ConvertToShares_CollapsedPriceArms_ReturnsMinOfCapAndFair() public pure {
+        assertEq(RoycoTestMath.convertToShares(10, 0, 2e12), 20_000_000_000_010, "an armed small mint below the cap still prices fairly");
+        assertEq(RoycoTestMath.convertToShares(1e13, 0, 2e12), 1_999_999_999_998_999_999_999_999, "an armed runaway mint clamps to the cap");
     }
 
     /// Bootstrap exemption: supply == 0 mints 1:1 no matter how large the value — a first mint dilutes
@@ -252,8 +253,14 @@ contract Test_RoycoTestMath is Test {
 
     /// Empty-with-backing (supply == 0, totalValue > 0) values the redeemer's 5 shares against the virtual-share
     /// supply, ⌊(100 + 1)·5/(0 + 1)⌋ = ⌊505/1⌋ = 505.
-    function test_ConvertToValue_ZeroSupply_ReturnsZero() public pure {
+    function test_ConvertToValue_ZeroSupplyWithBacking_ValuesAgainstVirtualShares() public pure {
         assertEq(RoycoTestMath.convertToValue(5, 100, 0), 505, "floor((100+1)*5/(0+1)) = 505");
+    }
+
+    /// A genuinely fresh tranche (supply == 0, totalValue == 0) values shares 1:1, ⌊(0 + 1)·sh/(0 + 1)⌋ = sh,
+    /// the exact inverse of the fresh mint's 1:1 pricing.
+    function test_ConvertToValue_FreshTranche_InvertsOneToOne() public pure {
+        assertEq(RoycoTestMath.convertToValue(18, 0, 0), 18, "the fresh tranche inverts the 1:1 bootstrap mint");
     }
 
     /// Floor engaged (inputs rescaled to 1e18 magnitude so the virtual-shares offset is negligible and the

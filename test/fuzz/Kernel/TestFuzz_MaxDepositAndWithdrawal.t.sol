@@ -19,7 +19,7 @@ import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
  *      single 1 wei collateral NAV dust tolerance. The senior-deposit max is a NAV amount and stays exact integer
  *      algebra, but the two redemption maxes are SHARE counts: maxRedeem converts its NAV bound to shares through
  *      the virtual-shares offset primitive (supply + VIRTUAL_SHARES over claimNAV + VIRTUAL_VALUE), so shares and
- *      NAV no longer coincide. Each redemption gate binds on the WITHDRAWN NAV (floor(claimNAV x shares / (supply + 1e6))),
+ *      NAV no longer coincide. Each redemption gate binds on the WITHDRAWN NAV (floor(claimNAV x shares / (supply + 1))),
  *      so the tests invert that floor to the largest gate-respecting share count and check one share past it reverts:
  *      - senior deposit: the single dustTolerance = 1 wei of NAV slack on each leg
  *      - junior redemption: the reported share max sits at or below the inverted coverage boundary sStar
@@ -135,7 +135,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // boundary gives the largest redeemable share count sStar; one share past it withdraws boundary + 1 NAV
         // and breaches coverage
         uint256 boundaryNAV = (4 * jt - st) / 4;
-        uint256 sStar = ((boundaryNAV + 1) * (jt + 1e6) - 1) / jt;
+        uint256 sStar = ((boundaryNAV + 1) * (jt + 1) - 1) / jt;
         // The dust-held-back advisory max must never exceed the true coverage-bounded share max
         assertLe(reportedMax, sStar, "the reported max must not advertise past the true coverage-bounded share max");
 
@@ -204,7 +204,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // withdrawn <= depth - requiredFloor. Inverting the floor at that boundary gives the largest redeemable share
         // count sStar; one share past it drops the pool below the floor
         uint256 boundaryNAV = depth - requiredFloor;
-        uint256 sStar = ((boundaryNAV + 1) * (supply + 1e6) - 1) / depth;
+        uint256 sStar = ((boundaryNAV + 1) * (supply + 1) - 1) / depth;
         // The dust-held-back advisory max must never exceed the true liquidity-bounded share max
         assertLe(reportedMax, sStar, "the reported max must not advertise past the true liquidity-bounded share max");
 
