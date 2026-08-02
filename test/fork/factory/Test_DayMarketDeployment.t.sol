@@ -16,7 +16,6 @@ import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-up
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { SafeCast } from "../../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { DeploymentResult, MarketConfig } from "../../../script/config/DeploymentTypes.sol";
@@ -40,6 +39,7 @@ import {
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -49,7 +49,6 @@ import { IRoycoAccessManager } from "../../../src/interfaces/factory/IRoycoAcces
 import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
 import { RoycoDayKernel } from "../../../src/kernels/base/RoycoDayKernel.sol";
 import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
-import { RoycoDayBalancerV3Hooks } from "../../../src/kernels/base/liquidity-venue/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
 import { TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../../src/libraries/Units.sol";
 import { RoycoLiquidityProviderTranche } from "../../../src/tranches/RoycoLiquidityProviderTranche.sol";
@@ -84,8 +83,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     // ── Deployed market (RoycoDayTestBase sets FACTORY/ACCESS_MANAGER/ST/JT/KERNEL/ACCOUNTANT/YDM/BLACKLIST via _setDeployedMarket) ──
     IRoycoVaultTranche internal LPT;
-    address internal POOL; // the Gyro E-CLP BPT (== kernel.LPT_ASSET())
-    address internal BALANCER_HOOK; // the pool's hooks contract (the kernel-bound RoycoDayBalancerV3Hooks proxy)
+    address internal POOL; // the Gyro E-CLP BPT (== kernel.lptAsset())
     address internal LPT_YDM; // the LDM
     IVault internal VAULT;
     IRoycoDayEntryPoint internal ENTRY_POINT; // the pre-deployed entry point singleton the template configured
@@ -103,10 +101,17 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         // Fork mainnet + create wallets + `new DeployScript()`.
         _setUpRoyco();
 
+        // Every market launches with genesis pool liquidity, pulled from the configured funder. In the script flow the
+        // funder is the broadcasting deployer, which approves the template from inside the broadcast, so the suite only
+        // has to make sure that deployer actually holds the quote.
+        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+        cfg.poolInitialization.funder = DEPLOYER.addr;
+        deal(cfg.gyroECLPPoolParams.quoteAsset, cfg.poolInitialization.funder, cfg.poolInitialization.quoteAmount);
+
         // Deploy the Day-shaped SNUSD market end to end through the real script, sourcing the market config from the config
         // file (single source of truth) — not an inline test fixture.
         DeploymentResult memory result = DEPLOY_SCRIPT.deploy(
-            DEPLOY_SCRIPT.getMarketConfig("snUSD"),
+            cfg,
             FACTORY_ADMIN, // factory admin (holds AccessManager ADMIN_ROLE)
             PROTOCOL_FEE_RECIPIENT_ADDRESS,
             0,
@@ -120,11 +125,10 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         MARKET_SYNCER = RoycoMarketSyncer(result.marketSyncer);
 
         // Capture the Day-only addresses the script's DeploymentResult omits, by reading the deployed contracts.
-        LPT = IRoycoVaultTranche(KERNEL.LIQUIDITY_PROVIDER_TRANCHE());
-        POOL = KERNEL.LPT_ASSET();
+        LPT = IRoycoVaultTranche(KERNEL.liquidityProviderTranche());
+        POOL = KERNEL.lptAsset();
         LPT_YDM = ACCOUNTANT.getState().lptYDM;
         VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
-        BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -133,7 +137,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     /// @notice Every component the deployment must produce is a distinct live contract with code
     function test_Deployment_AllAddressesLive() public view {
-        address[12] memory a = [
+        address[11] memory a = [
             address(FACTORY),
             address(ACCESS_MANAGER),
             address(BLACKLIST),
@@ -144,8 +148,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
             address(ACCOUNTANT),
             address(YDM),
             LPT_YDM,
-            POOL,
-            BALANCER_HOOK
+            POOL
         ];
         for (uint256 i = 0; i < a.length; ++i) {
             assertTrue(a[i] != address(0), "zero address");
@@ -159,15 +162,15 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     /// @notice The kernel, the three tranches, and the accountant all point at each other with the right tranche types
     function test_Linkage_KernelTranchesAccountant() public view {
-        assertEq(KERNEL.SENIOR_TRANCHE(), address(ST), "kernel ST");
-        assertEq(KERNEL.JUNIOR_TRANCHE(), address(JT), "kernel JT");
-        assertEq(KERNEL.LIQUIDITY_PROVIDER_TRANCHE(), address(LPT), "kernel LPT");
-        assertEq(KERNEL.ACCOUNTANT(), address(ACCOUNTANT), "kernel accountant");
-        assertEq(address(IRoycoDayAccountant(ACCOUNTANT).KERNEL()), address(KERNEL), "accountant kernel");
+        assertEq(KERNEL.seniorTranche(), address(ST), "kernel ST");
+        assertEq(KERNEL.juniorTranche(), address(JT), "kernel JT");
+        assertEq(KERNEL.liquidityProviderTranche(), address(LPT), "kernel LPT");
+        assertEq(KERNEL.accountant(), address(ACCOUNTANT), "kernel accountant");
+        assertEq(ACCOUNTANT.getState().kernel, address(KERNEL), "accountant kernel");
 
-        assertEq(ST.KERNEL(), address(KERNEL), "ST kernel");
-        assertEq(JT.KERNEL(), address(KERNEL), "JT kernel");
-        assertEq(LPT.KERNEL(), address(KERNEL), "LPT kernel");
+        assertEq(ST.kernel(), address(KERNEL), "ST kernel");
+        assertEq(JT.kernel(), address(KERNEL), "JT kernel");
+        assertEq(LPT.kernel(), address(KERNEL), "LPT kernel");
 
         assertTrue(ST.TRANCHE_TYPE() == TrancheType.SENIOR, "ST type");
         assertTrue(JT.TRANCHE_TYPE() == TrancheType.JUNIOR, "JT type");
@@ -177,8 +180,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     /// @notice ST/JT coinvest the snUSD vault as the kernel's single collateral asset and the LPT holds the Gyro E-CLP BPT
     function test_Linkage_TrancheAssets() public view {
         // The kernel carries ONE collateral asset for both coinvested tranches (ST_ASSET/JT_ASSET collapsed).
-        assertEq(KERNEL.COLLATERAL_ASSET(), SNUSD_VAULT, "kernel collateral asset");
-        assertEq(KERNEL.LPT_ASSET(), POOL, "kernel LPT asset == pool");
+        assertEq(KERNEL.collateralAsset(), SNUSD_VAULT, "kernel collateral asset");
+        assertEq(KERNEL.lptAsset(), POOL, "kernel LPT asset == pool");
         assertEq(ST.asset(), SNUSD_VAULT, "ST asset");
         assertEq(JT.asset(), SNUSD_VAULT, "JT asset");
         assertEq(LPT.asset(), POOL, "LPT asset == pool");
@@ -231,20 +234,9 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(VAULT.getStaticSwapFeePercentage(POOL), SWAP_FEE, "swap fee");
     }
 
-    /// The pool's hooks proxy was upgraded to the kernel-bound implementation with the registration-frozen flags
-    function test_Pool_HookUpgradedAndBound() public view {
-        HooksConfig memory hc = VAULT.getHooksConfig(POOL);
-        assertEq(hc.hooksContract, BALANCER_HOOK, "pool hook mismatch");
-        // The stand-in advertised the real hook's flags; they are frozen at registration.
-        assertTrue(hc.shouldCallBeforeSwap, "beforeSwap flag");
-        assertTrue(hc.shouldCallBeforeAddLiquidity, "beforeAdd flag");
-        assertTrue(hc.shouldCallBeforeRemoveLiquidity, "beforeRemove flag");
-
-        // The proxy was upgraded to the real kernel-bound hook and initialized.
-        RoycoDayBalancerV3Hooks hook = RoycoDayBalancerV3Hooks(BALANCER_HOOK);
-        assertEq(hook.ROYCO_DAY_KERNEL(), address(KERNEL), "hook -> kernel");
-        assertEq(hook.LIQUIDITY_PROVIDER_TRANCHE_BALANCER_V3_POOL(), POOL, "hook -> pool");
-        assertEq(AccessManagedUpgradeable(BALANCER_HOOK).authority(), address(ACCESS_MANAGER), "hook authority");
+    /// The pool carries no hooks contract: the kernel is its senior-leg rate provider and nothing else is registered
+    function test_Pool_IsHookless() public view {
+        assertEq(VAULT.getHooksConfig(POOL).hooksContract, address(0), "pool must be hookless");
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -291,7 +283,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(s.fixedTermDurationSeconds, 0, "fixedTerm");
     }
 
-    /// @notice The kernel fee recipient, senior tranche self-liquidation bonus, tranche names/symbols, and whitelist flag match the config
+    /// @notice The kernel fee recipient, senior tranche self-liquidation bonus, and tranche names/symbols match the config
     function test_KernelAndTranches_ParamsMatchMarketConfigFile() public view {
         IRoycoDayKernel.RoycoDayKernelState memory ks = KERNEL.getState();
         assertEq(ks.protocolFeeRecipient, PROTOCOL_FEE_RECIPIENT_ADDRESS, "protocolFeeRecipient");
@@ -300,8 +292,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(ST.name(), "Royco Senior Tranche snUSD", "ST name");
         assertEq(ST.symbol(), "ROY-ST-snUSD", "ST symbol");
         assertEq(LPT.symbol(), "ROY-LPT-snUSD", "LPT symbol");
-        // The transfer-whitelist gate is a kernel immutable now (enforced in kernel.preTrancheBalanceUpdateHook), not per-tranche.
-        assertFalse(RoycoDayKernel(address(KERNEL)).ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER(), "kernel enforce flag");
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -316,7 +306,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(AccessManagedUpgradeable(address(ST)).authority(), am, "ST authority");
         assertEq(AccessManagedUpgradeable(address(JT)).authority(), am, "JT authority");
         assertEq(AccessManagedUpgradeable(address(LPT)).authority(), am, "LPT authority");
-        assertEq(AccessManagedUpgradeable(BALANCER_HOOK).authority(), am, "balancer hook authority");
     }
 
     /**
@@ -357,7 +346,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertTrue(am.wasEverConfigured(address(ST)), "senior tranche must be recorded as configured");
         assertTrue(am.wasEverConfigured(address(JT)), "junior tranche must be recorded as configured");
         assertTrue(am.wasEverConfigured(address(LPT)), "liquidity provider tranche must be recorded as configured");
-        assertTrue(am.wasEverConfigured(BALANCER_HOOK), "balancer hook must be recorded as configured");
         // The shared Balancer governance targets too, which is what makes a second market skip them
         assertTrue(am.wasEverConfigured(address(VAULT)), "the Balancer vault must be recorded as configured");
     }
@@ -449,11 +437,10 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
             address t = i == 0 ? address(ST) : i == 1 ? address(JT) : address(LPT);
             _assertRole(t, IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
             _assertRole(t, IRoycoAuth.unpause.selector, ADMIN_UNPAUSER_ROLE);
-            _assertRole(t, UUPSUpgradeable.upgradeToAndCall.selector, ADMIN_UPGRADER_ROLE);
             _assertRole(t, ERC20BurnableUpgradeable.burn.selector, BURNER_ROLE);
             _assertRole(t, ERC20BurnableUpgradeable.burnFrom.selector, BURNER_ROLE);
-            // `mint` carries NO binding: it is gated by the tranche's own onlyKernel check (per-market, not AM-global).
-            _assertRole(t, IRoycoVaultTranche.mint.selector, 0);
+            // `kernelMint` carries NO binding: it is gated by the tranche's own onlyKernel check (per-market, not AM-global).
+            _assertRole(t, IRoycoVaultTranche.kernelMint.selector, 0);
         }
     }
 
@@ -475,22 +462,20 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(KERNEL), BalancerV3LiquidityVenue.setMaxReinvestmentSlippage.selector, ADMIN_ORACLE_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setCollateralAssetOracle.selector, ADMIN_ORACLE_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setSequencerUptimeFeed.selector, ADMIN_ORACLE_ROLE);
-
-        _assertRole(BALANCER_HOOK, IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
-        _assertRole(BALANCER_HOOK, IRoycoAuth.unpause.selector, ADMIN_UNPAUSER_ROLE);
-        _assertRole(BALANCER_HOOK, UUPSUpgradeable.upgradeToAndCall.selector, ADMIN_UPGRADER_ROLE);
     }
 
-    /// @notice Key grants exist (accountant+hook can sync, kernel can burn) and every bound role has a live grantee
+    /// @notice Key grants exist (the accountant can sync) and every operationally bound role has a live grantee
     function test_Auth_EveryBoundRoleHasALiveGrantee() public view {
         (bool syncAcc,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(ACCOUNTANT));
         assertTrue(syncAcc, "accountant SYNC_ROLE");
-        (bool syncHook,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, BALANCER_HOOK);
-        assertTrue(syncHook, "balancer hook SYNC_ROLE");
+        // The kernel burns through the tranches' kernelBurn, an onlyKernel immutable-address check, so the deployment
+        // grants BURNER_ROLE to nobody. The tranches' burn/burnFrom surface stays bound to BURNER_ROLE as a
+        // dormant-by-design admin surface, grantable later by governance.
         (bool burner,) = ACCESS_MANAGER.hasRole(BURNER_ROLE, address(KERNEL));
-        assertTrue(burner, "kernel BURNER_ROLE");
+        assertFalse(burner, "kernel must not hold BURNER_ROLE, it burns via onlyKernel kernelBurn");
 
-        // Every bound role has a live grantee at deploy end (no memberless-role liveness cliffs).
+        // Every bound role has a live grantee at deploy end (no memberless-role liveness cliffs), except the
+        // dormant-by-design BURNER_ROLE above.
         (bool unpauser,) = ACCESS_MANAGER.hasRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS);
         assertTrue(unpauser, "unpauser granted");
         (bool lptLp,) = ACCESS_MANAGER.hasRole(LPT_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS);
@@ -515,10 +500,10 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     /// mint is an immutable-address check on THIS market's kernel, not an AccessManager role (cross-market bleed defense)
     function test_RevertIf_NonKernelMintsTrancheShares() public {
-        // Cross-market bleed defense: mint is an immutable-address check on THIS market's kernel, not an AM role.
+        // Cross-market bleed defense: kernelMint is an immutable-address check on THIS market's kernel, not an AM role.
         vm.prank(address(0xBAD));
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
-        ST.mint(address(0xBAD), 1);
+        ST.kernelMint(address(0xBAD), 1);
     }
 
     /// The template deployed the BPT oracle through Balancer's E-CLP oracle factory, priced on this market's pool with 1.0 rate-provider feeds
@@ -545,26 +530,30 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         }
     }
 
-    /// Pinned real-stack behavior: computeTVL reverts on the unseeded pool while the kernel's zero-supply short-circuit stays immune
-    function test_BPTOracle_ComputeTVLRevertsOnUnseededPool_KernelShortCircuits() public {
-        // Pinned real-stack behavior: on the freshly deployed, UNSEEDED pool the E-CLP invariant math produces a small
-        // negative intermediate on zero balances, so a direct computeTVL() call reverts with a SafeCast int->uint
-        // overflow (argument value depends on the curve params, so only the selector is pinned). The kernel is immune:
-        // both LPT conversion directions short-circuit to zero on a zero BPT supply BEFORE reading the oracle
-        // (BalancerV3LiquidityVenue's convertLPTAssetsToValue/convertValueToLPTAssets), asserted against the real oracle below.
+    /// Pinned real-stack behavior: the template mandates a genesis seed and locks DEAD_SHARES at 0xdEaD, so a live
+    /// market's pool is never unseeded and the whole TVL path answers. The old unseeded computeTVL revert pin is
+    /// unreachable through the factory. The pre-seed protection ("an uninitialized venue is never queried", the
+    /// kernel's empty-ledger short-circuit) is pinned by the unit suites (Test_VenueBPTOracle)
+    function test_BPTOracle_LiveOnGenesisSeededPool() public view {
         address bptOracle = BalancerV3LiquidityVenue(address(KERNEL)).getBalancerV3LiquidityVenueState().bptOracle;
-        vm.expectPartialRevert(SafeCast.SafeCastOverflowedIntToUint.selector);
-        LPOracleBase(bptOracle).computeTVL();
 
-        assertEq(
-            TRANCHE_UNIT.unwrap(BalancerV3LiquidityVenue(address(KERNEL)).convertValueToLPTAssets(NAV_UNIT.wrap(1e18))),
-            0,
-            "zero-supply short-circuit must protect the NAV->BPT direction"
-        );
-        assertEq(
+        // Genesis-seeded: BPT minted, and the template's DEAD_SHARES (1e12) LPT lock parked at the dead address
+        assertGt(IERC20(POOL).totalSupply(), 0, "pool must be genesis-seeded at deploy end");
+        assertEq(IERC20(address(LPT)).balanceOf(0x000000000000000000000000000000000000dEaD), 1e12, "DEAD_SHARES must be locked at 0xdEaD");
+
+        // The real oracle answers a positive TVL on the seeded pool
+        assertGt(LPOracleBase(bptOracle).computeTVL(), 0, "computeTVL must answer a positive TVL on the seeded pool");
+
+        // Both kernel LPT conversion directions price against the live oracle without reverting
+        assertGt(
             NAV_UNIT.unwrap(BalancerV3LiquidityVenue(address(KERNEL)).convertLPTAssetsToValue(TRANCHE_UNIT.wrap(1e18))),
             0,
-            "zero-supply short-circuit must protect the BPT->NAV direction"
+            "the BPT->NAV direction must price on the seeded pool"
+        );
+        assertGt(
+            TRANCHE_UNIT.unwrap(BalancerV3LiquidityVenue(address(KERNEL)).convertValueToLPTAssets(NAV_UNIT.wrap(1e18))),
+            0,
+            "the NAV->BPT direction must price on the seeded pool"
         );
     }
 
@@ -607,5 +596,107 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     function _assertRole(address _target, bytes4 _selector, uint64 _expectedRole) internal view {
         assertEq(ACCESS_MANAGER.getTargetFunctionRole(_target, _selector), _expectedRole, "role binding");
+    }
+}
+
+/**
+ * @title Test_DayMarketDeployment_GenesisSeedBoundary
+ * @notice The template's genesis-seed floor on the real stack: `_seedPool` deposits the genesis seed through the
+ *         LPT's multi-asset deposit, requires the minted shares to cover DEAD_SHARES (1e12), locks DEAD_SHARES at
+ *         0xdEaD, and transfers the remainder to the funder. This suite pins the revert path a dust seed takes and
+ *         the share split a barely-sufficient seed produces.
+ * @dev Share-count derivation for a quote-only seed of q USDC wei on the real Balancer stack: the Vault's
+ *      `initialize` computes the E-CLP invariant of the scaled seed (q x 1e12 at the constant-1.0 feeds), burns
+ *      POOL_MINIMUM_TOTAL_SUPPLY (1e6) dead BPT to address(0), and mints `invariant - 1e6` BPT to the kernel. The
+ *      LPT genesis mint then prices that BPT at the oracle mark (floor(1e18 x TVL / bptSupply) per whole BPT, with
+ *      TVL ~= q x 1e12) through the virtual-shares bootstrap (1 share-wei per NAV-wei on an empty tranche), so
+ *      lptShares ~= q x 1e12 x (invariant - 1e6) / invariant, STRICTLY below q x 1e12 because of the vault's dead
+ *      BPT slice and the floor roundings. At this market's E-CLP params the one-wei seed's invariant measures
+ *      ~2.66e8, so the dead slice shaves ~0.376% and the mint lands at ~0.99624e12 shares, just under the
+ *      dead-share lock, tripping INSUFFICIENT_GENESIS_SHARES. minted(q) steps by ~0.99624e12 per quote wei and
+ *      never lands on exactly 1e12, so the exact-equality boundary (funder left with zero shares) is not
+ *      constructible on the fork and the nearest constructible property is pinned instead: funder balance ==
+ *      minted - DEAD_SHARES for a small seed.
+ * @dev Guard ordering pinned by the dust test: neither the entry floor (MUST_MINT_NON_ZERO_SHARES needs the
+ *      deposit to price to ZERO shares, but a one-wei seed prices to ~0.996e12) nor Balancer's
+ *      minimum-total-supply check (needs invariant < 1e6, but the one-wei seed's invariant is ~2.66e8) fires
+ *      first, so the template's own INSUFFICIENT_GENESIS_SHARES is the operative dust-seed boundary.
+ */
+contract Test_DayMarketDeployment_GenesisSeedBoundary is RoycoDayTestBase {
+    address internal constant FACTORY_ADMIN = 0x7c405bbD131e42af506d14e752f2e59B19D49997; // ROOT_MULTISIG
+    address internal constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+    uint256 internal constant DEAD_SHARES = 1e12;
+
+    function _forkConfiguration() internal view override returns (uint256 forkBlock, string memory forkRpcUrl) {
+        // No skip: the suite FAILS (env not found) when MAINNET_RPC_URL is unset, instead of silently passing.
+        forkRpcUrl = vm.envString("MAINNET_RPC_URL");
+        forkBlock = vm.envOr("FORK_BLOCK", uint256(25_400_000));
+    }
+
+    /// @dev Fork + wallets + script only: each test runs its own deployment with a modified genesis seed
+    function setUp() public {
+        _setUpRoyco();
+    }
+
+    /// @dev The snUSD market config repointed at the funded deployer with the specified quote-only genesis seed
+    function _seededConfig(uint256 _quoteAmount) internal returns (MarketConfig memory cfg) {
+        cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+        cfg.poolInitialization.funder = DEPLOYER.addr;
+        cfg.poolInitialization.quoteAmount = _quoteAmount;
+        deal(cfg.gyroECLPPoolParams.quoteAsset, cfg.poolInitialization.funder, _quoteAmount);
+    }
+
+    /**
+     * @notice A one-USDC-wei genesis seed mints just under DEAD_SHARES LPT shares, so the whole deployment must
+     *         revert with the template's INSUFFICIENT_GENESIS_SHARES carrying the sub-1e12 mint
+     * @dev The carried share count also pins the guard ordering: a nonzero count proves the deposit's entry floor
+     *      (MUST_MINT_NON_ZERO_SHARES) did not fire, and reaching the template's check at all proves Balancer's
+     *      minimum-total-supply check passed, so the template's floor is the operative dust boundary
+     */
+    function test_RevertIf_DustGenesisSeedMintsFewerThanDeadShares() public {
+        MarketConfig memory cfg = _seededConfig(1);
+        try DEPLOY_SCRIPT.deploy(cfg, FACTORY_ADMIN, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0, _generateRoleAssignments(), DEPLOYER.privateKey) {
+            fail("a dust genesis seed minting fewer than DEAD_SHARES must revert the deployment");
+        } catch (bytes memory err) {
+            bytes4 sel;
+            uint256 mintedShares;
+            assembly ("memory-safe") {
+                sel := mload(add(err, 0x20))
+                mintedShares := mload(add(err, 0x24))
+            }
+            assertEq(
+                sel,
+                RoycoDayBalancerV3MarketDeploymentTemplate.INSUFFICIENT_GENESIS_SHARES.selector,
+                "the dust seed must trip the template's genesis-share floor, not an earlier guard"
+            );
+            // A near-miss band, not merely nonzero: the mint sits ~0.376% below the lock (the vault's 1e6 dead
+            // BPT out of the ~2.66e8 invariant), proving the entry floor was nowhere near firing
+            assertGt(mintedShares, 0.99e12, "the dust seed must price to a near-miss mint, so the entry floor was not the operative guard");
+            assertLt(mintedShares, DEAD_SHARES, "the dust seed's mint must fall below the dead-share lock");
+        }
+    }
+
+    /**
+     * @notice A two-USDC-wei genesis seed clears the floor: the deployment succeeds, exactly DEAD_SHARES sit at
+     *         0xdEaD, and the funder holds exactly the minted remainder (minted - DEAD_SHARES, itself sub-1e12)
+     * @dev The exact-equality boundary (a seed minting exactly DEAD_SHARES, funder left with zero) is not
+     *      constructible on the fork: minted(q) ~= q x 1e12 net of the vault's 1e6 dead BPT slice never lands on
+     *      1e12 for an integer q, so this pins the nearest constructible property instead (see the contract natspec)
+     */
+    function test_GenesisSeed_SmallSeedLocksDeadSharesAndFunderHoldsRemainder() public {
+        MarketConfig memory cfg = _seededConfig(2);
+        DeploymentResult memory result =
+            DEPLOY_SCRIPT.deploy(cfg, FACTORY_ADMIN, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0, _generateRoleAssignments(), DEPLOYER.privateKey);
+
+        IERC20 lpt = IERC20(result.kernel.liquidityProviderTranche());
+        uint256 minted = lpt.totalSupply();
+
+        // The genesis mint is the tranche's only mint, split exactly between the dead lock and the funder
+        assertEq(lpt.balanceOf(DEAD_ADDRESS), DEAD_SHARES, "DEAD_SHARES must be locked at 0xdEaD");
+        assertEq(lpt.balanceOf(cfg.poolInitialization.funder), minted - DEAD_SHARES, "the funder must hold exactly the minted remainder");
+        assertGe(minted, DEAD_SHARES, "a seed that deployed must have covered the dead-share lock");
+        // The small seed brackets the boundary: the funder's remainder stays below one DEAD_SHARES unit, so the
+        // deployment lives within one quote wei of the revert threshold the dust test pins from below
+        assertLt(minted, 2 * DEAD_SHARES, "a two-wei seed must mint under twice the dead-share lock");
     }
 }

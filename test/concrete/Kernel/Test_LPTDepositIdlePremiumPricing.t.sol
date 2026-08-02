@@ -38,7 +38,7 @@ contract Test_LPTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
      *         the idle senior shares valued at the senior share rate, not the pool depth alone
      * @dev Arms venue slippage so a +10% senior gain's premium mints but cannot reinvest, leaving
      *      lptOwnedSeniorTrancheShares nonzero. The tranche's previewDeposit quote must then price the shares at
-     *      lptRawNAV + floor(idleShares x (stEff + 1) / (stSupply + 1e6)), the exact effective-NAV pricing. A regression that
+     *      lptRawNAV + floor(idleShares x (stEff + 1) / (stSupply + 1)), the exact effective-NAV pricing. A regression that
      *      priced LPT deposits off pool depth alone would drop the idle term and undercharge depositors
      */
     function test_LPTDeposit_PriceIncludesIdlePremiumLeg() public {
@@ -48,8 +48,8 @@ contract Test_LPTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         (SyncedAccountingState memory st,,) = kernel.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
 
         // Independently value the idle leg at the senior share rate through the virtual-share/asset offset:
-        // convertToValue = floor((stEff + 1) x idleShares / (stSupply + 1e6))
-        uint256 idleValue = Math.mulDiv(idleShares, toUint256(st.stEffectiveNAV) + 1, seniorTranche.totalSupply() + 1e6, Math.Rounding.Floor);
+        // convertToValue = floor((stEff + 1) x idleShares / (stSupply + 1))
+        uint256 idleValue = Math.mulDiv(idleShares, toUint256(st.stEffectiveNAV) + 1, seniorTranche.totalSupply() + 1, Math.Rounding.Floor);
         assertTrue(idleValue != 0, "the idle liquidity premium senior shares must carry a nonzero value");
 
         // Quote an in-kind LPT deposit of one BPT through the tranche preview. The one BPT's NAV at the oracle mark
@@ -59,10 +59,10 @@ contract Test_LPTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         uint256 quotedShares = liquidityProviderTranche.previewDeposit(toTrancheUnits(1e18));
 
         // The deposit price is pool depth plus the idle leg, priced through the offset: convertToShares mints
-        // floor((lptSupply + 1e6) x value / (lptRawNAV + idleValue + 1)) shares, strictly fewer than pool-depth-only pricing would grant
+        // floor((lptSupply + 1) x value / (lptRawNAV + idleValue + 1)) shares, strictly fewer than pool-depth-only pricing would grant
         assertEq(
             quotedShares,
-            Math.mulDiv(lptSupply + 1e6, depositValue, toUint256(st.lptRawNAV) + idleValue + 1, Math.Rounding.Floor),
+            Math.mulDiv(lptSupply + 1, depositValue, toUint256(st.lptRawNAV) + idleValue + 1, Math.Rounding.Floor),
             "the quoted shares must be priced on lptRawNAV plus the idle premium leg value"
         );
         assertLt(
@@ -93,26 +93,26 @@ contract Test_LPTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         //   protocol, so the LPT's idle premium leg is the net 0.9e18 and no LPT shares are minted for the fee. The
         //   net premium and the pooled senior fee (0.7e18 ST + 0.1e18 LPT) share mints are both priced on the NAV
         //   the pre-existing shares retain, 108e18 - 1e18 - 0.7e18 = 106.3e18, over the pre-sync 100e18 supply,
-        //   through the virtual-share/asset offset (effective supply 100e18 + 1e6, denominator 106.3e18 + 1):
-        //     premium shares = floor((100e18 + 1e6) x 0.9e18 / (106.3e18 + 1)) = 846660395108192850
-        //     fee shares     = floor((100e18 + 1e6) x 0.8e18 / (106.3e18 + 1)) = 752587017873949200
-        //   post-mint senior supply = 100e18 + 846660395108192850 + 752587017873949200 = 101599247412982142050
-        assertEq(idleShares, 846_660_395_108_192_850, "the staged premium must be the hand-derived senior share count net of the LPT protocol fee");
-        assertEq(seniorTranche.totalSupply(), 101_599_247_412_982_142_050, "the senior supply must carry exactly the net premium and pooled fee mints");
+        //   through the virtual-share/asset offset (effective supply 100e18 + 1, denominator 106.3e18 + 1):
+        //     premium shares = floor((100e18 + 1) x 0.9e18 / (106.3e18 + 1)) = 846660395108184383
+        //     fee shares     = floor((100e18 + 1) x 0.8e18 / (106.3e18 + 1)) = 752587017873941674
+        //   post-mint senior supply = 100e18 + 846660395108184383 + 752587017873941674 = 101599247412982126057
+        assertEq(idleShares, 846_660_395_108_184_383, "the staged premium must be the hand-derived senior share count net of the LPT protocol fee");
+        assertEq(seniorTranche.totalSupply(), 101_599_247_412_982_126_057, "the senior supply must carry exactly the net premium and pooled fee mints");
 
         (SyncedAccountingState memory st,,) = kernel.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
         assertEq(toUint256(st.stEffectiveNAV), 108e18, "the senior effective NAV must be exactly seed plus residual gain plus premium");
         assertEq(toUint256(st.lptRawNAV), 6e18, "the pool depth must be exactly the untouched auto-seed");
         assertEq(liquidityProviderTranche.totalSupply(), 6e18, "the LPT supply must be exactly the auto-seed's 1:1 bootstrap mint");
         // Idle leg value (convertToValue through the offset) =
-        // floor((108e18 + 1) x 846660395108192850 / (101599247412982142050 + 1e6)) = 899999999999999999:
+        // floor((108e18 + 1) x 846660395108184383 / (101599247412982126057 + 1)) = 899999999999999999:
         // the net 0.9e18 premium minus one wei lost across the two floor roundings (share mint, then valuation), so
         // the deposit price is 6e18 + (0.9e18 - 1) = 6899999999999999999 and the rounding wei stays with the pool.
         // One BPT values to exactly 1e18 at the pool's 1.0 NAV per BPT, so the tranche's previewDeposit must quote
-        // convertToShares = floor((6e18 + 1e6) x 1e18 / (6899999999999999999 + 1)) = 869565217391449275 shares
+        // convertToShares = floor((6e18 + 1) x 1e18 / (6899999999999999999 + 1)) = 869565217391304347 shares
         assertEq(
             liquidityProviderTranche.previewDeposit(toTrancheUnits(1e18)),
-            869_565_217_391_449_275,
+            869_565_217_391_304_347,
             "the quoted shares must be priced at pool depth plus the net idle leg, one wei under 6.9e18"
         );
     }
@@ -123,7 +123,7 @@ contract Test_LPTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
      *         pricing would grant, so the entrant cannot dilute existing holders out of their undeployed premium claim
      * @dev Attacker intent: deposit between the premium mint and its reinvestment, when the pool depth understates the
      *      LPT's effective NAV, and capture a slice of the idle senior shares for free. Expected shares are derived
-     *      independently: floor((lptSupply + 1e6) x depositValue / (lptRawNAV + idleValue + 1))
+     *      independently: floor((lptSupply + 1) x depositValue / (lptRawNAV + idleValue + 1))
      */
     function test_LPTDeposit_WhileIdlePremiumOutstanding_CannotDiluteExistingHolders() public {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
@@ -141,18 +141,18 @@ contract Test_LPTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
 
         // Independent expected values from committed state and the mock venue's ledger (never the kernel's own preview):
         //   depositValue  = floor(TVL x depositBpt / bptSupply)                    the BPT's NAV at the oracle mark
-        //   idleValue     = floor((stEff + 1) x idleShares / (stSupply + 1e6))     the idle premium leg (convertToValue, offset)
+        //   idleValue     = floor((stEff + 1) x idleShares / (stSupply + 1))     the idle premium leg (convertToValue, offset)
         //   ownedValue    = floor(TVL x lptOwnedBpt / bptSupply)                    the LPT's pool depth (lptRawNAV)
-        //   fair shares   = floor((lptSupply + 1e6) x depositValue / (ownedValue + idleValue + 1))   convertToShares, offset
+        //   fair shares   = floor((lptSupply + 1) x depositValue / (ownedValue + idleValue + 1))   convertToShares, offset
         uint256 tvl = bptOracle.computeTVL();
         uint256 bptSupply = balancerVault.totalSupply(address(bpt));
         uint256 depositValue = Math.mulDiv(tvl, depositBpt, bptSupply, Math.Rounding.Floor);
         uint256 idleValue =
-            Math.mulDiv(idleShares, toUint256(accountant.getState().lastSTEffectiveNAV) + 1, seniorTranche.totalSupply() + 1e6, Math.Rounding.Floor);
+            Math.mulDiv(idleShares, toUint256(accountant.getState().lastSTEffectiveNAV) + 1, seniorTranche.totalSupply() + 1, Math.Rounding.Floor);
         uint256 ownedBptBefore = toUint256(kernel.getState().totalLPTAssets);
         uint256 ownedValue = Math.mulDiv(tvl, ownedBptBefore, bptSupply, Math.Rounding.Floor);
         uint256 lptSupply = liquidityProviderTranche.totalSupply();
-        uint256 expectedShares = Math.mulDiv(lptSupply + 1e6, depositValue, ownedValue + idleValue + 1, Math.Rounding.Floor);
+        uint256 expectedShares = Math.mulDiv(lptSupply + 1, depositValue, ownedValue + idleValue + 1, Math.Rounding.Floor);
 
         vm.startPrank(entrant);
         bpt.approve(address(liquidityProviderTranche), depositBpt);
@@ -231,9 +231,9 @@ contract Test_LPTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
 
         // One whole quote adds 1e18 NAV at the fixture's 1.0 NAV-per-BPT, minting exactly 1e18 BPT priced at the
         // 6e18 pool depth (no premium accrues on a covered loss, so there is no idle premium leg): the quoted
-        // shares are convertToShares(1e18, 6e18, lptSupply) = floor((lptSupply + 1e6) x 1e18 / (6e18 + 1)), exactly the execution path's mint
+        // shares are convertToShares(1e18, 6e18, lptSupply) = floor((lptSupply + 1) x 1e18 / (6e18 + 1)), exactly the execution path's mint
         (uint256 shares,) = liquidityProviderTranche.previewDepositMultiAsset(0, quoteUnit);
-        assertEq(shares, Math.mulDiv(liquidityProviderTranche.totalSupply() + 1e6, 1e18, 6e18 + 1), "the quote-only preview must price at the 6e18 pool depth");
+        assertEq(shares, Math.mulDiv(liquidityProviderTranche.totalSupply() + 1, 1e18, 6e18 + 1), "the quote-only preview must price at the 6e18 pool depth");
     }
 
     // =============================

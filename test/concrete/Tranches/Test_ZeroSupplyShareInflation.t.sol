@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { LPT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { MAX_MINT_DILUTION_WAD, VIRTUAL_SHARES, WAD } from "../../../src/libraries/Constants.sol";
 import { NAV_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -98,11 +99,12 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
             cap,
             "the largest non-binding value must price fair to exactly the cap"
         );
-        // One more wei crosses into the clamp branch and returns the same cap
+        // One more wei prices one wei higher, at this supply the clamp arm is value-independent and never binds, so
+        // pricing stays fair with no discontinuity
         assertEq(
             ValuationLogic._convertToShares(toNAVUnits(boundaryValue + 1), toNAVUnits(backing), supply, Math.Rounding.Floor),
-            cap,
-            "one wei past the boundary must clamp to the same cap"
+            cap + 1,
+            "one wei past the boundary prices fair to exactly the cap plus one wei"
         );
     }
 
@@ -154,16 +156,17 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
         uint256 daveBpt = 1e18;
         _mintBptTo(dave, daveBpt, quoteUnit);
         uint256 daveDepositNAV = toUint256(kernel.convertLPTAssetsToValue(toTrancheUnits(daveBpt)));
+        // The tiny deposit's NAV sits below the staged liquidity premium, so under VS=1 it prices to zero shares
+        assertGt(daveDepositNAV, 0, "precondition: the deposit carries real NAV yet still floors to zero shares");
 
+        // Under VIRTUAL_SHARES=1 the first LPT depositor whose deposit NAV is below the staged premium prices to 0
+        // shares and reverts. This is the intended VS=1 tradeoff: the premium stays stranded to the phantom share
+        // and the sub-premium depositor is turned away rather than minting a windfall
         vm.startPrank(dave);
         bpt.approve(address(liquidityProviderTranche), daveBpt);
-        uint256 daveShares = liquidityProviderTranche.deposit(toTrancheUnits(daveBpt), dave);
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
+        liquidityProviderTranche.deposit(toTrancheUnits(daveBpt), dave);
         vm.stopPrank();
-
-        // Dave's own redeemable claim (not the tranche total): the staged premium must stay stranded to the phantom
-        // shares, so Dave can only redeem ~his deposit
-        uint256 daveClaimNAV = toUint256(liquidityProviderTranche.previewRedeem(daveShares).nav);
-        assertLe(daveClaimNAV, daveDepositNAV + daveDepositNAV / 100, "LPT-WINDFALL: first LPT depositor must not capture the staged premium");
     }
     // NOTE: the "wiped JT + fresh deposit captures the recovery" scenario is intentionally NOT a test here. Once
     // jtEffectiveNAV hits zero the existing JT shares back zero NAV and are correctly diluted, a fresh depositor

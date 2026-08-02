@@ -13,10 +13,7 @@ interface IRoycoFactory {
      * @notice Storage state for the template-driven factory
      * @custom:storage-location erc7201:Royco.storage.RoycoFactoryV2State
      * @custom:field isTemplateEnabled - Whether a template is registered + enabled
-     * @custom:field trancheToKernel - Maps each of a market's tranches (senior, junior, and liquidity) to the market's
-     *                kernel
-     *                The kernel's immutables carry the full tranche set, so any one tranche resolves the whole
-     *                market.
+     * @custom:field trancheToKernel - Maps each of a market's tranches (senior, junior, and liquidity) to the market's kernel
      */
     struct RoycoFactoryState {
         mapping(address template => bool enabled) isTemplateEnabled;
@@ -25,47 +22,57 @@ interface IRoycoFactory {
 
     /// @notice Emitted when a template is registered and enabled
     event TemplateRegistered(address indexed template);
+
     /// @notice Emitted when a template is disabled
     event TemplateDisabled(address indexed template);
+
     /// @notice Emitted when a market deployment completes
     event MarketDeploymentCompleted(address indexed template, address indexed deployer, IRoycoProtocolTemplate.DeploymentResult result);
-    /// @notice Emitted when a proxy is deployed via `deployDeterministicProxy`
-    event ProxyDeployed(address indexed proxy, address indexed implementation, bytes32 salt);
 
     /// @notice Thrown when a factory primitive is called by anything other than the active template
     error ONLY_ACTIVE_TEMPLATE();
+
     /// @notice Thrown when the supplied access manager is the zero address
     error ACCESS_MANAGER_CANNOT_BE_ZERO_ADDRESS();
+
     /// @notice Thrown when the supplied access manager has no code
     error ACCESS_MANAGER_HAS_NO_CODE();
+
     /// @notice Thrown when this factory's gatekeeper holds authority over a different access manager
     error FACTORY_GATEKEEPER_MISMATCH();
+
     /// @notice Thrown when constructing the factory without a gatekeeper
     error FACTORY_GATEKEEPER_CANNOT_BE_ZERO_ADDRESS();
+
     /// @notice Thrown when registering the zero address as a template
     error TEMPLATE_CANNOT_BE_ZERO_ADDRESS();
+
     /// @notice Thrown when registering an already-registered template
     error TEMPLATE_ALREADY_REGISTERED();
+
     /// @notice Thrown when the template's bound factory is not this factory
     error TEMPLATE_BOUND_TO_DIFFERENT_FACTORY();
-    /// @notice Thrown when `deployDeterministicProxy` targets a salt whose CREATE3 address already has code
-    error PROXY_ALREADY_DEPLOYED(address deployed, bytes32 salt);
+
     /// @notice Thrown when deploying via a template that is not enabled
     error TEMPLATE_NOT_ENABLED();
+
     /// @notice Thrown when a deployment is started while another is in progress
     error NO_ACTIVE_TEMPLATE();
+
     /// @notice Thrown when a factory-forwarded call targets the access manager, which is only administrable through the typed role primitives
     error FACTORY_CALL_TARGET_FORBIDDEN();
-    /// @notice Thrown when a market role grant targets ADMIN_ROLE, which no template ever legitimately mints
-    error FACTORY_GRANT_ROLE_FORBIDDEN();
 
     /// @notice Thrown when a template returns a deployment result with a zero tranche or kernel address
     error INVALID_DEPLOYMENT_RESULT();
+
     /// @notice Thrown when index-aligned array arguments have mismatched lengths
     error LENGTH_MISMATCH();
 
     /// @notice Returns the AccessManager that governs this factory and its markets
     function ROYCO_AUTHORITY() external view returns (address);
+
+    /// @notice The gatekeeper this factory routes market target configuration through, fixed at construction
+    function ROYCO_FACTORY_GATEKEEPER() external view returns (address gatekeeper);
 
     /**
      * @notice Registers + enables a pre-initialized template
@@ -88,28 +95,14 @@ interface IRoycoFactory {
      */
     function executeMarketDeployment(address _template, bytes calldata _params) external returns (IRoycoProtocolTemplate.DeploymentResult memory result);
 
-    /**
-     * @notice CREATE3-deploys an ERC1967 proxy outside a deployment window, gated to the deployer role
-     * @dev Used to pre-deploy the market proxies (e.g. the senior tranche) that later deployment steps depend on,
-     *      before the market's `executeMarketDeployment` wiring transaction.
-     * @param _implementation The proxy's initial implementation
-     * @param _initData The proxy's initialization calldata (empty skips the delegatecall on construction)
-     * @param _salt The CREATE3 salt
-     * @return deployed The deployed proxy address
-     */
-    function deployDeterministicProxy(address _implementation, bytes calldata _initData, bytes32 _salt) external returns (address deployed);
-
-    /// @notice CREATE3-deploys an ERC1967 proxy, callable only by the active template
+    /// @notice CREATE3-deploys a beacon proxy, callable only by the active template
     function deployDeterministicProxyFromTemplate(
-        address _implementation,
+        address _beacon,
         bytes calldata _initData,
         bytes32 _salt
     )
         external
         returns (address deployed, bool alreadyDeployed);
-
-    /// @notice The gatekeeper this factory routes market target configuration through, fixed at construction
-    function ROYCO_FACTORY_GATEKEEPER() external view returns (address gatekeeper);
 
     /// @notice Predicts the CREATE3 address for a salt
     function predictDeterministicAddress(bytes32 _salt) external view returns (address);
@@ -149,6 +142,10 @@ interface IRoycoFactory {
      * @return juniorTranche The market's junior tranche (zero if `_tranche` is unknown)
      * @return liquidityProviderTranche The market's liquidity provider tranche (zero if `_tranche` is unknown)
      * @return kernel The market's kernel (zero if `_tranche` is unknown)
+     * @return accountant The market's accountant (zero if `_tranche` is unknown)
      */
-    function getMarket(address _tranche) external view returns (address seniorTranche, address juniorTranche, address liquidityProviderTranche, address kernel);
+    function getMarket(address _tranche)
+        external
+        view
+        returns (address seniorTranche, address juniorTranche, address liquidityProviderTranche, address kernel, address accountant);
 }

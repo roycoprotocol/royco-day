@@ -12,14 +12,14 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  * @title TestFuzz_DepositPricing_Kernel
  * @notice Fuzzes deposit share pricing through the full production stack for all three tranches: the minted
  *         shares must equal the offset-aware floor((supply + VIRTUAL_SHARES) x value / (effectiveNAV + VIRTUAL_VALUE))
- *         (VIRTUAL_SHARES = 1e6, VIRTUAL_VALUE = 1) where the deposit's value is derived by hand through the
+ *         (VIRTUAL_SHARES = 1, VIRTUAL_VALUE = 1) where the deposit's value is derived by hand through the
  *         pricing path (the WAD collateral oracle price for ST/JT, pool TVL over BPT supply for LPT), and a
  *         depositor can never come out ahead by immediately redeeming what it just minted
  * @dev The no-gain half is asserted two ways: the depositor's immediate redemption preview never exceeds the
  *      deposited value, and the pre-existing holders' NAV-per-share never decreases. Because the redemption side also
  *      prices against the effective supply, the incumbent invariant is checked in cross-multiplied, offset-aware form
- *      (effNAVAfter x (supplyBefore + 1e6) >= effNAVBefore x (supplyAfter + 1e6)) so no division rounding can hide a
- *      leak. Both follow from shares = floor((supply + 1e6) x value / (effNAV + 1)): the floor means the depositor's
+ *      (effNAVAfter x (supplyBefore + 1) >= effNAVBefore x (supplyAfter + 1)) so no division rounding can hide a
+ *      leak. Both follow from shares = floor((supply + 1) x value / (effNAV + 1)): the floor means the depositor's
  *      claim on the enlarged pot is at most the value it brought
  */
 contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
@@ -77,7 +77,7 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
         // the offset-aware floor floor((supply + VIRTUAL_SHARES) x value / (effNAV + VIRTUAL_VALUE)); the mirror proves
         // the clamp is inert rather than the test assuming it (a bind would diverge from this inline formula)
         uint256 expectedShares = RoycoTestMath.convertToShares(value, stEffBefore, supplyBefore);
-        assertEq(expectedShares, (supplyBefore + 1e6).mulDiv(value, stEffBefore + 1), "clamp must be inert at live-market deposit sizes");
+        assertEq(expectedShares, (supplyBefore + 1).mulDiv(value, stEffBefore + 1), "clamp must be inert at live-market deposit sizes");
 
         // Execute inline (not via the helper) so the Deposit event lands directly after expectEmit
         stJtVault.mintShares(ST_PROVIDER, assets);
@@ -87,17 +87,17 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
         emit IRoycoVaultTranche.Deposit(ST_PROVIDER, ST_PROVIDER, toTrancheUnits(assets), expectedShares);
         uint256 minted = seniorTranche.deposit(toTrancheUnits(assets), ST_PROVIDER);
         vm.stopPrank();
-        assertEq(minted, expectedShares, "senior deposit must mint exactly floor((supply + 1e6) x value / (stEffectiveNAV + 1))");
+        assertEq(minted, expectedShares, "senior deposit must mint exactly floor((supply + 1) x value / (stEffectiveNAV + 1))");
 
         // No-gain, redeemer side: immediately unwinding the fresh shares can never return more NAV than deposited
         assertLe(toUint256(seniorTranche.previewRedeem(minted).nav), value, "immediately redeeming the minted shares must never exceed the deposited value");
         // No-gain, incumbent side: NAV-per-share of pre-existing holders never decreases. The redemption side prices a
         // share against the EFFECTIVE supply (supply + VIRTUAL_SHARES), so the offset-aware invariant is
-        // effNAVAfter x (supplyBefore + 1e6) >= effNAVBefore x (supplyAfter + 1e6) (cross-multiplied, no division rounding)
+        // effNAVAfter x (supplyBefore + 1) >= effNAVBefore x (supplyAfter + 1) (cross-multiplied, no division rounding)
         uint256 stEffAfter = toUint256(accountant.getState().lastSTEffectiveNAV);
         assertGe(
-            stEffAfter * (supplyBefore + 1e6),
-            stEffBefore * (supplyBefore + minted + 1e6),
+            stEffAfter * (supplyBefore + 1),
+            stEffBefore * (supplyBefore + minted + 1),
             "pre-existing senior holders must never be diluted below their prior NAV-per-share"
         );
     }
@@ -146,7 +146,7 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
         // The clamp-aware mirror proves the clamp is inert at live-market deposit sizes; the fair branch is the
         // offset-aware floor floor((supply + VIRTUAL_SHARES) x value / (effNAV + VIRTUAL_VALUE)) (see the senior variant)
         uint256 expectedShares = RoycoTestMath.convertToShares(value, jtEffBefore, supplyBefore);
-        assertEq(expectedShares, (supplyBefore + 1e6).mulDiv(value, jtEffBefore + 1), "clamp must be inert at live-market deposit sizes");
+        assertEq(expectedShares, (supplyBefore + 1).mulDiv(value, jtEffBefore + 1), "clamp must be inert at live-market deposit sizes");
 
         // Execute inline (not via the helper) so the Deposit event lands directly after expectEmit
         stJtVault.mintShares(JT_PROVIDER, assets);
@@ -156,14 +156,14 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
         emit IRoycoVaultTranche.Deposit(JT_PROVIDER, JT_PROVIDER, toTrancheUnits(assets), expectedShares);
         uint256 minted = juniorTranche.deposit(toTrancheUnits(assets), JT_PROVIDER);
         vm.stopPrank();
-        assertEq(minted, expectedShares, "junior deposit must mint exactly floor((supply + 1e6) x value / (jtEffectiveNAV + 1))");
+        assertEq(minted, expectedShares, "junior deposit must mint exactly floor((supply + 1) x value / (jtEffectiveNAV + 1))");
 
         assertLe(toUint256(juniorTranche.previewRedeem(minted).nav), value, "immediately redeeming the minted shares must never exceed the deposited value");
         // Incumbent side, offset-aware (redemption prices against supply + VIRTUAL_SHARES; see the senior variant)
         uint256 jtEffAfter = toUint256(accountant.getState().lastJTEffectiveNAV);
         assertGe(
-            jtEffAfter * (supplyBefore + 1e6),
-            jtEffBefore * (supplyBefore + minted + 1e6),
+            jtEffAfter * (supplyBefore + 1),
+            jtEffBefore * (supplyBefore + minted + 1),
             "pre-existing junior holders must never be diluted below their prior NAV-per-share"
         );
     }
@@ -213,7 +213,7 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
         // The clamp-aware mirror proves the clamp is inert at live-market deposit sizes; the fair branch is the
         // offset-aware floor floor((supply + VIRTUAL_SHARES) x value / (effNAV + VIRTUAL_VALUE)) (see the senior variant)
         uint256 expectedShares = RoycoTestMath.convertToShares(value, lptEffBefore, supplyBefore);
-        assertEq(expectedShares, (supplyBefore + 1e6).mulDiv(value, lptEffBefore + 1), "clamp must be inert at live-market deposit sizes");
+        assertEq(expectedShares, (supplyBefore + 1).mulDiv(value, lptEffBefore + 1), "clamp must be inert at live-market deposit sizes");
 
         vm.startPrank(LPT_PROVIDER);
         bpt.approve(address(liquidityProviderTranche), bptIn);
@@ -221,7 +221,7 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
         emit IRoycoVaultTranche.Deposit(LPT_PROVIDER, LPT_PROVIDER, toTrancheUnits(bptIn), expectedShares);
         uint256 minted = liquidityProviderTranche.deposit(toTrancheUnits(bptIn), LPT_PROVIDER);
         vm.stopPrank();
-        assertEq(minted, expectedShares, "liquidity deposit must mint exactly floor((supply + 1e6) x value / (lptEffectiveNAV + 1))");
+        assertEq(minted, expectedShares, "liquidity deposit must mint exactly floor((supply + 1) x value / (lptEffectiveNAV + 1))");
 
         // No-gain, redeemer side: previewRedeem simulates the real redemption and bubbles every execution gate,
         // so a down-repriced quote leg can leave the fresh position beyond the liquidity-respecting max. The
@@ -237,8 +237,8 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
         // the pot grew by at least the value the mint was priced on
         uint256 lptEffAfter = poolTVL.mulDiv(lptOwnedBPT + bptIn, bptSupply);
         assertGe(
-            lptEffAfter * (supplyBefore + 1e6),
-            lptEffBefore * (supplyBefore + minted + 1e6),
+            lptEffAfter * (supplyBefore + 1),
+            lptEffBefore * (supplyBefore + minted + 1),
             "pre-existing liquidity holders must never be diluted below their prior NAV-per-share"
         );
     }

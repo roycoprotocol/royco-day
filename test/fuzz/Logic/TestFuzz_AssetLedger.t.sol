@@ -4,11 +4,11 @@ pragma solidity ^0.8.28;
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { TrancheClaimsLogic } from "../../../src/libraries/logic/TrancheClaimsLogic.sol";
+import { AssetLedgerLogic } from "../../../src/libraries/logic/AssetLedgerLogic.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
- * @title TestFuzz_TrancheClaims_Logic
+ * @title TestFuzz_AssetLedger_Logic
  * @notice Fuzz properties for the pro-rata claim scaling a redemption applies to all four claim legs
  *         (collateral assets, LPT assets, idle liquidity premium senior shares, NAV): exact four-field
  *         equality against the independent RoycoTestMath mirror, the pro-rata ceiling, and floor-dust
@@ -16,7 +16,7 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  * @dev Pure-library layer, no market deploy. Production is asserted against RoycoTestMath or a hand-derived
  *      bound, never against a second call of the function under test
  */
-contract TestFuzz_TrancheClaims_Logic is Test {
+contract TestFuzz_AssetLedger_Logic is Test {
     /// @notice Suite-wide NAV, tranche-unit, and share-supply ceiling
     uint256 internal constant MAX_NAV = 1e30;
 
@@ -66,7 +66,7 @@ contract TestFuzz_TrancheClaims_Logic is Test {
         _shares = bound(_shares, 0, _totalShares); // full redeemer slice range: 0 through the entire supply
 
         AssetClaims memory total = _claims(_collateral, _lt, _stShares, _nav);
-        AssetClaims memory scaled = TrancheClaimsLogic._scaleAssetClaims(total, _shares, _totalShares, true);
+        AssetClaims memory scaled = AssetLedgerLogic._scaleAssetClaims(total, _shares, _totalShares, true);
 
         RoycoTestMath.Claims memory want = RoycoTestMath.scaleClaims(
             RoycoTestMath.Claims({ collateralAssets: _collateral, lptAssets: _lt, stShares: _stShares, nav: _nav }), _shares, _totalShares
@@ -113,9 +113,9 @@ contract TestFuzz_TrancheClaims_Logic is Test {
         uint256 sharesC = _totalShares - _sharesA - _sharesB; // third slice completes the exact partition
 
         AssetClaims memory total = _claims(_collateral, _lt, _stShares, _nav);
-        AssetClaims memory a = TrancheClaimsLogic._scaleAssetClaims(total, _sharesA, _totalShares, true);
-        AssetClaims memory b = TrancheClaimsLogic._scaleAssetClaims(total, _sharesB, _totalShares, true);
-        AssetClaims memory c = TrancheClaimsLogic._scaleAssetClaims(total, sharesC, _totalShares, true);
+        AssetClaims memory a = AssetLedgerLogic._scaleAssetClaims(total, _sharesA, _totalShares, true);
+        AssetClaims memory b = AssetLedgerLogic._scaleAssetClaims(total, _sharesB, _totalShares, true);
+        AssetClaims memory c = AssetLedgerLogic._scaleAssetClaims(total, sharesC, _totalShares, true);
 
         // Per-field bound: the withheld virtual-share sliver ceil(field*VIRTUAL_SHARES/(totalShares+VIRTUAL_SHARES))
         // plus < 3 floor dust from the three slices (integer bound + 2).

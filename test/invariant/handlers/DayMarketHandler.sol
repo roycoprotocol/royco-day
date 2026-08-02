@@ -49,6 +49,9 @@ contract DayMarketHandler is DayMarketTestBase {
     /// @dev One whole quote token in its native decimals
     uint256 internal QUOTE_UNIT;
 
+    /// @dev One whole LPT asset in its native decimals, the kernel's per-pool-token price quantum
+    uint256 internal LPT_UNIT;
+
     /// @dev The pinned instantaneous junior yield share the mock model returns on every query
     uint256 internal JT_PINNED_SHARE_WAD;
 
@@ -228,11 +231,10 @@ contract DayMarketHandler is DayMarketTestBase {
     }
 
     bytes4 internal constant SEL_DISABLED_FT = IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector;
-    bytes4 internal constant SEL_COVERAGE = IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector;
-    bytes4 internal constant SEL_LIQUIDITY = IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
+    bytes4 internal constant SEL_COVERAGE = IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector;
+    bytes4 internal constant SEL_LIQUIDITY = IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
     bytes4 internal constant SEL_INVALID_POST_OP = IRoycoDayAccountant.INVALID_POST_OP_STATE.selector;
-    bytes4 internal constant SEL_ZERO_SHARES = IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector;
-    bytes4 internal constant SEL_ZERO_VALUE = IRoycoVaultTranche.INVALID_DEPOSIT_NAV.selector;
+    bytes4 internal constant SEL_ZERO_SHARES = IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector;
     bytes4 internal constant SEL_ERC20_BALANCE = IERC20Errors.ERC20InsufficientBalance.selector;
     bytes4 internal constant SEL_AMOUNT_OUT_BELOW_MIN = IVaultErrors.AmountOutBelowMin.selector;
     bytes4 internal constant SEL_PANIC = bytes4(0x4e487b71);
@@ -286,6 +288,7 @@ contract DayMarketHandler is DayMarketTestBase {
         _deployMarket(cellA(), p);
 
         QUOTE_UNIT = 10 ** uint256(cell.quoteAsset.decimals);
+        LPT_UNIT = uint256(kernel.getState().oneWholeLPTAsset);
         JT_PINNED_SHARE_WAD = uint256(params.jtCurve[1]);
         LPT_PINNED_SHARE_WAD = uint256(params.lptCurve[1]);
         ghost_windowMaxJTShareWAD = params.maxJTYieldShareWAD;
@@ -361,10 +364,8 @@ contract DayMarketHandler is DayMarketTestBase {
                 _expect(p, SEL_DISABLED_FT);
             } else {
                 uint256 collateralAfter = _quoteCollateralUnits(s.collateralOwned + assets);
-                if (collateralAfter == s.collateralNAV || value == 0) {
-                    _expect(p, SEL_INVALID_POST_OP);
-                    _expect(p, SEL_ZERO_VALUE);
-                }
+                // A zero-value deposit prices to zero shares before the post-op delta requirement can fire
+                if (value != 0 && collateralAfter == s.collateralNAV) _expect(p, SEL_INVALID_POST_OP);
                 bool mintPanics;
                 (predShares, mintPanics) = _mirrorMintShares(value, s.jtEffectiveNAV, s.jtSupply);
                 // Past the supply-inflation cliff the clamped mint's cap computation itself overflows: mirror
@@ -373,12 +374,14 @@ contract DayMarketHandler is DayMarketTestBase {
                 else if (predShares == 0) _expect(p, SEL_ZERO_SHARES);
             }
             stJtVault.mintShares(actor, assets);
+            uint256 poolSenior0 = seniorTranche.balanceOf(address(balancerVault));
             vm.startPrank(actor);
             stJtVault.approve(address(juniorTranche), assets);
             try juniorTranche.deposit(toTrancheUnits(assets), actor) returns (uint256 gotShares) {
                 _recordSuccess("jtDeposit");
                 ghost_transferredIn[address(stJtVault)] += assets;
                 _flag(gotShares == predShares, "jtDeposit minted shares diverge from the floor mirror");
+                _recordTailDeployment(poolSenior0);
             } catch (bytes memory err) {
                 _classify("jtDeposit", err, p);
             }
@@ -421,20 +424,20 @@ contract DayMarketHandler is DayMarketTestBase {
             Pred memory p;
             uint256 value = _quoteLPTUnits(bptAmt);
             uint256 navAt = RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(s.lptRawNAV, s.lptOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
-            if (_quoteLPTUnits(s.lptOwned + bptAmt) == s.lptRawNAV || value == 0) {
-                _expect(p, SEL_INVALID_POST_OP);
-                _expect(p, SEL_ZERO_VALUE);
-            }
+            // A zero-value deposit prices to zero shares before the post-op delta requirement can fire
+            if (value != 0 && _quoteLPTUnits(s.lptOwned + bptAmt) == s.lptRawNAV) _expect(p, SEL_INVALID_POST_OP);
             (uint256 predShares, bool mintPanics) = _mirrorMintShares(value, navAt, s.lptSupply);
             // The mint-dilution clamp's residual overflow cliff: past the supply-inflation point the mint itself must panic
             if (mintPanics) _expect(p, SEL_PANIC);
             else if (predShares == 0) _expect(p, SEL_ZERO_SHARES);
+            uint256 poolSenior0 = seniorTranche.balanceOf(address(balancerVault));
             vm.startPrank(actor);
             bpt.approve(address(liquidityProviderTranche), bptAmt);
             try liquidityProviderTranche.deposit(toTrancheUnits(bptAmt), actor) returns (uint256 gotShares) {
                 _recordSuccess("lptDeposit");
                 ghost_transferredIn[address(bpt)] += bptAmt;
                 _flag(gotShares == predShares, "lptDeposit minted shares diverge from the floor mirror");
+                _recordTailDeployment(poolSenior0);
             } catch (bytes memory err) {
                 _classify("lptDeposit", err, p);
             }
@@ -660,7 +663,7 @@ contract DayMarketHandler is DayMarketTestBase {
         address actor = stActors[bound(_actorSeed, 0, stActors.length - 1)];
         Snap memory s = _syncAndVerify("pre:aimedMaxST");
         if (s.ok) {
-            uint256 maxAssets = toUint256(kernel.stMaxDeposit(actor));
+            uint256 maxAssets = toUint256(seniorTranche.maxDeposit(actor));
             if (maxAssets == 0) {
                 // No capacity: a one-unit deposit must be rejected by one of the gates
                 _execStDeposit(actor, 1e12, s);
@@ -828,10 +831,8 @@ contract DayMarketHandler is DayMarketTestBase {
             _expect(p, SEL_DISABLED_FT);
         } else {
             uint256 collateralAfter = _quoteCollateralUnits(s.collateralOwned + _assets);
-            if (collateralAfter == s.collateralNAV || value == 0) {
-                _expect(p, SEL_INVALID_POST_OP);
-                _expect(p, SEL_ZERO_VALUE);
-            }
+            // A zero-value deposit prices to zero shares before the post-op delta requirement can fire
+            if (value != 0 && collateralAfter == s.collateralNAV) _expect(p, SEL_INVALID_POST_OP);
             uint256 stEffAfter = s.stEffectiveNAV + (collateralAfter - s.collateralNAV);
             if (RoycoTestMath.computeCoverageUtilization(collateralAfter, s.minCoverageWAD, s.jtEffectiveNAV) > WAD) _expect(p, SEL_COVERAGE);
             if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, s.lptRawNAV) > WAD) _expect(p, SEL_LIQUIDITY);
@@ -842,12 +843,14 @@ contract DayMarketHandler is DayMarketTestBase {
             else if (predShares == 0) _expect(p, SEL_ZERO_SHARES);
         }
         stJtVault.mintShares(_actor, _assets);
+        uint256 poolSenior0 = seniorTranche.balanceOf(address(balancerVault));
         vm.startPrank(_actor);
         stJtVault.approve(address(seniorTranche), _assets);
         try seniorTranche.deposit(toTrancheUnits(_assets), _actor) returns (uint256 gotShares) {
             _recordSuccess("stDeposit");
             ghost_transferredIn[address(stJtVault)] += _assets;
             _flag(gotShares == predShares, "stDeposit minted shares diverge from the floor mirror");
+            _recordTailDeployment(poolSenior0);
         } catch (bytes memory err) {
             _classify("stDeposit", err, p);
         }
@@ -870,10 +873,12 @@ contract DayMarketHandler is DayMarketTestBase {
             if (_shares > seniorTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
         }
         uint256 outBefore = stJtVault.balanceOf(_actor);
+        uint256 poolSenior0 = seniorTranche.balanceOf(address(balancerVault));
         vm.prank(_actor);
         try seniorTranche.redeem(_shares, _actor, _actor) {
             _recordSuccess("stRedeem");
             ghost_transferredOut[address(stJtVault)] += stJtVault.balanceOf(_actor) - outBefore;
+            _recordTailDeployment(poolSenior0);
         } catch (bytes memory err) {
             _classify("stRedeem", err, p);
         }
@@ -901,11 +906,13 @@ contract DayMarketHandler is DayMarketTestBase {
             if (_shares > juniorTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
         }
         uint256 outBefore = stJtVault.balanceOf(_actor);
+        uint256 poolSenior0 = seniorTranche.balanceOf(address(balancerVault));
         vm.prank(_actor);
         try juniorTranche.redeem(_shares, _actor, _actor) {
             _recordSuccess("jtRedeem");
             ghost_transferredOut[address(stJtVault)] += stJtVault.balanceOf(_actor) - outBefore;
-            // The JT_REDEEM postOp IL scaling is deleted: a junior exit only settles in PERPETUAL where the
+            _recordTailDeployment(poolSenior0);
+            // The JT_REDEMPTION postOp IL scaling is deleted: a junior exit only settles in PERPETUAL where the
             // ledger is already zero, so a successful redeem must leave the committed value untouched
             _flag(toUint256(accountant.getState().lastJTImpermanentLoss) == ghost_jtImpermanentLossReplay, "jtRedeem moved the impermanent-loss ledger");
         } catch (bytes memory err) {
@@ -940,11 +947,13 @@ contract DayMarketHandler is DayMarketTestBase {
         }
         uint256 bptBefore = bpt.balanceOf(_actor);
         uint256 idleBefore = seniorTranche.balanceOf(_actor);
+        uint256 poolSenior0 = seniorTranche.balanceOf(address(balancerVault));
         vm.prank(_actor);
         try liquidityProviderTranche.redeem(_shares, _actor, _actor) {
             _recordSuccess("lptRedeem");
             ghost_transferredOut[address(bpt)] += bpt.balanceOf(_actor) - bptBefore;
             ghost_idlePremiumSeniorSharesPaidToRedeemers += seniorTranche.balanceOf(_actor) - idleBefore;
+            _recordTailDeployment(poolSenior0);
         } catch (bytes memory err) {
             _classify("lptRedeem", err, p);
         }
@@ -960,11 +969,7 @@ contract DayMarketHandler is DayMarketTestBase {
             // The residual overflow cliff on the senior leg: past the supply-inflation point the ST mint panics
             if (v.stMintPanics) _expect(p, SEL_PANIC);
             if (_collateralAssets > 0 && !v.stMintPanics && v.stSharesMinted == 0) _expect(p, SEL_ZERO_SHARES);
-            if (v.valueAllocated == 0) {
-                _expect(p, SEL_ZERO_VALUE);
-                _expect(p, SEL_INVALID_POST_OP);
-            }
-            if (v.lptRawAfter <= s.lptRawNAV) _expect(p, SEL_INVALID_POST_OP);
+            if (v.valueAllocated == 0 || v.lptRawAfter <= s.lptRawNAV) _expect(p, SEL_INVALID_POST_OP);
             uint256 navAt = RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(s.lptRawNAV, s.lptOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
             (uint256 predLptShares, bool lptMintPanics) = _mirrorMintShares(v.valueAllocated, navAt, s.lptSupply);
             if (lptMintPanics) _expect(p, SEL_PANIC);
@@ -988,21 +993,27 @@ contract DayMarketHandler is DayMarketTestBase {
         try liquidityProviderTranche.depositMultiAsset(_collateralAssets, _quoteAssets, 0, _actor) {
             _recordSuccess("lptDepositMultiAsset");
             ghost_transferredIn[address(stJtVault)] += _collateralAssets;
+            // The settled op's tail deploys the entire idle premium pile into the pool, so the idle ledger
+            // may fall by exactly the deployment and never rise (the same-block sync stages no new premium)
+            uint256 idleLedgerAfter = kernel.getState().lptOwnedSeniorTrancheShares;
+            _flag(idleLedgerAfter <= idleLedgerBefore, "lptDepositMultiAsset: a deposit grew the idle liquidity premium ledger");
+            uint256 idleDeployed = idleLedgerBefore > idleLedgerAfter ? idleLedgerBefore - idleLedgerAfter : 0;
+            ghost_liquidityPremiumSharesReinvested += idleDeployed;
+            ghost_stSharesDeployedSinceLastPriceCheck += idleDeployed;
             // Reconcile the venue's ACTUAL token movements, independently of the pricing mirror above,
             // so a pricing bug shared by the mock venue and its mirror still surfaces as a token flow
             // that does not balance. A multi-asset deposit moves value one way only: the quote leg must
-            // land in the pool in full, every senior share the deposit minted must land in the pool
-            // (none stranded with the kernel or the depositor), a deposit must never touch the idle
-            // liquidity premium ledger, and every pool token the add minted must sit in kernel custody
+            // land in the pool in full, every senior share the deposit minted plus the tail's deployed
+            // idle pile must land in the pool (none stranded with the kernel or the depositor), and every
+            // pool token the add minted must sit in kernel custody
             _flag(
                 quoteToken.balanceOf(address(balancerVault)) == f.venueQuote0 + _quoteAssets,
                 "lptDepositMultiAsset: the deposited quote leg did not land in the pool in full"
             );
             _flag(
-                seniorTranche.totalSupply() + f.venueSenior0 == f.stSupply0 + seniorTranche.balanceOf(address(balancerVault)),
-                "lptDepositMultiAsset: minted senior shares do not reconcile with the pool's senior inflow"
+                seniorTranche.totalSupply() + f.venueSenior0 + idleDeployed == f.stSupply0 + seniorTranche.balanceOf(address(balancerVault)),
+                "lptDepositMultiAsset: minted senior shares plus the deployed idle pile do not reconcile with the pool's senior inflow"
             );
-            _flag(kernel.getState().lptOwnedSeniorTrancheShares == idleLedgerBefore, "lptDepositMultiAsset: a deposit moved the idle liquidity premium ledger");
             _flag(
                 bpt.balanceOf(address(kernel)) + f.bptSupply0 == f.kernelBpt0 + bpt.totalSupply(),
                 "lptDepositMultiAsset: pool tokens minted by the add do not reconcile with the kernel's custody"
@@ -1018,14 +1029,18 @@ contract DayMarketHandler is DayMarketTestBase {
      *      With _probeQuoteMin set, the call carries a quote floor one wei above the venue's guaranteed
      *      proportional output, an amount the redeemer can never receive, so an honestly enforced
      *      slippage bound must reject the call. The removal runs unconditionally (a zero venue slice
-     *      removes zero units and outputs zeros), so its per-token floor check fires before the share
-     *      burn, the senior unwind, and every post-op gate on every exit: the venue's floor rejection
-     *      is the only admissible outcome for an armed probe regardless of the venue slice
+     *      removes zero units and outputs zeros), and its per-token floor check fires before the senior
+     *      unwind and every post-op gate on every exit. The one step ahead of it is the LPT leg's own
+     *      share burn, so a redeemer without the shares fails on the balance before the floor can reject
      */
     function _execLptRedeemMultiAsset(address _actor, uint256 _shares, bool _probeQuoteMin, Snap memory s) internal {
         Pred memory p;
         uint256 minQuoteOut;
         bool probeMustRevert;
+        // The redeemer's idle premium slice, mirrored exactly (same floor over the same effective supply as
+        // production's _scaleAssetClaims), so the ledger's total move splits into the slice unwound for the
+        // redeemer and the tail's deployment of the remaining pile
+        uint256 predIdleSlice;
         if (s.fixedTerm) {
             _expect(p, SEL_DISABLED_FT);
         } else if (s.lptSupply == 0 || s.stSupply == 0) {
@@ -1037,6 +1052,7 @@ contract DayMarketHandler is DayMarketTestBase {
             _expect(p, SEL_ERC20_BALANCE);
         } else {
             RemovalMirror memory r = _mirrorVenueRemoval(s, _shares);
+            predIdleSlice = s.lptOwnedSeniorTrancheShares.mulDiv(_shares, s.lptSupply + RoycoTestMath.VIRTUAL_SHARES);
             if (r.bonusNAV > 0) ghost_jtLossSinceLastCheck = true;
             // A redemption legitimately hits the no-op-exit guard (INVALID_POST_OP_STATE, RoycoDayAccountant.sol:263)
             // whenever its BPT and idle-premium slices floor to zero at the src's SHARE granularity. This
@@ -1054,13 +1070,16 @@ contract DayMarketHandler is DayMarketTestBase {
                 // The probe must revert and the exit must not settle: the removal always runs, so either its
                 // quote-floor check rejects the unmeetable minimum (AMOUNT_OUT_BELOW_MIN), or a dust slice
                 // whose NAV move floors to zero trips the post-op no-op guard (INVALID_POST_OP_STATE) before
-                // the floor check runs. Narrow to exactly those two rejections, a success or any other
+                // the floor check runs. Narrow to exactly those rejections, a success or any other
                 // revert is a recorded violation
                 minQuoteOut = r.quoteOut + 1;
                 Pred memory onlyRevert;
                 p = onlyRevert;
                 _expect(p, SEL_AMOUNT_OUT_BELOW_MIN);
                 _expect(p, SEL_INVALID_POST_OP);
+                // The LPT leg's share burn precedes the removal, so a redeemer without the shares (the
+                // empty-balance actor degraded to a single share) fails on the balance before the armed floor
+                if (_shares > liquidityProviderTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
                 probeMustRevert = true;
             }
         }
@@ -1075,9 +1094,17 @@ contract DayMarketHandler is DayMarketTestBase {
             _recordSuccess("lptRedeemMultiAsset");
             ghost_transferredOut[address(stJtVault)] += stJtVault.balanceOf(_actor) - vaultSharesBefore;
             ghost_transferredOut[address(quoteToken)] += quoteToken.balanceOf(_actor) - quoteBefore;
-            // The redeemer's slice of the idle liquidity premium senior shares is unwound on its behalf rather than handed over as shares
-            uint256 idleUnwound = idleLedgerBefore - kernel.getState().lptOwnedSeniorTrancheShares;
-            ghost_idlePremiumSeniorSharesPaidToRedeemers += idleUnwound;
+            // The idle ledger moves twice in a settled exit: the redeemer's slice is unwound on its behalf
+            // in the ST leg, then the tail deploys the remaining pile into the pool. The slice mirror above
+            // is exact, so the ledger's total move splits into exactly those two parts
+            uint256 idleLedgerAfter = kernel.getState().lptOwnedSeniorTrancheShares;
+            _flag(idleLedgerAfter <= idleLedgerBefore, "lptRedeemMultiAsset: a redemption grew the idle liquidity premium ledger");
+            uint256 idleUnwound = idleLedgerBefore > idleLedgerAfter ? idleLedgerBefore - idleLedgerAfter : 0;
+            _flag(predIdleSlice <= idleUnwound, "lptRedeemMultiAsset: the idle ledger moved by less than the redeemer's mirrored slice");
+            uint256 idleDeployed = idleUnwound > predIdleSlice ? idleUnwound - predIdleSlice : 0;
+            ghost_idlePremiumSeniorSharesPaidToRedeemers += idleUnwound - idleDeployed;
+            ghost_liquidityPremiumSharesReinvested += idleDeployed;
+            ghost_stSharesDeployedSinceLastPriceCheck += idleDeployed;
             // Reconcile the venue's ACTUAL token movements, independently of the pricing mirror above,
             // so a pricing bug shared by the mock venue and its mirror still surfaces as a token flow
             // that does not balance. Written additively so a flow moving the wrong way fails the check
@@ -1767,6 +1794,9 @@ contract DayMarketHandler is DayMarketTestBase {
     }
 
     /// @dev Re-prices the kernel's pool tokens by hand: pool balances at the pinned senior rate and the oracle quote price
+    /// @dev Quantizes through the kernel's own two-step pricing: queryLPTAssetOracle floors the price of ONE whole
+    ///      pool token first, then convertLPTAssetsToValue floors the owned amount at that quantized price, so the
+    ///      committed mark sits up to lptOwned / LPT_UNIT NAV wei below the exact single-mulDiv value
     function _mirrorLptRawNAV(uint256 _lptOwned, uint256 _stEff, uint256 _stSupply) internal view returns (uint256) {
         uint256 supply = bpt.totalSupply();
         if (supply == 0) return 0;
@@ -1774,7 +1804,8 @@ contract DayMarketHandler is DayMarketTestBase {
         uint256[2] memory balances = balancerVault.getPoolBalances(address(bpt));
         uint256 tvl =
             balances[stPoolTokenIndex].mulDiv(rate, WAD) + balances[1 - stPoolTokenIndex].mulDiv(bptOracle.getPriceWAD(address(quoteToken)), QUOTE_UNIT);
-        return _lptOwned.mulDiv(tvl, supply);
+        uint256 lptUnitPrice = LPT_UNIT.mulDiv(tvl, supply);
+        return _lptOwned.mulDiv(lptUnitPrice, LPT_UNIT);
     }
 
     /// @dev The OZ virtual-shares share price floor((effNAV + VIRTUAL_VALUE) * WAD / (supply + VIRTUAL_SHARES)),
@@ -1853,6 +1884,20 @@ contract DayMarketHandler is DayMarketTestBase {
         // No overflow risk in the sum: a non-panicking mint already guarantees supply + shares fits
         if (mintPanics || _supply + shares > TRANCHE_SUPPLY_CAMPAIGN_BOUND) return 1;
         return _assets;
+    }
+
+    /**
+     * @dev Credits an operation tail's idle premium deployment, measured at the pool's own senior balance.
+     *      Every kernel operation entrypoint ends in withLiquidityPremiumReinvestment, which deploys the
+     *      entire idle pile once the op settles, so across an in-kind op the pool's senior balance can only
+     *      grow, and it grows by exactly the tail's deployment (the op itself never moves pool senior shares)
+     */
+    function _recordTailDeployment(uint256 _poolSenior0) internal {
+        uint256 poolSenior1 = seniorTranche.balanceOf(address(balancerVault));
+        _flag(poolSenior1 >= _poolSenior0, "an in-kind operation removed senior shares from the pool");
+        uint256 deployed = poolSenior1 > _poolSenior0 ? poolSenior1 - _poolSenior0 : 0;
+        ghost_liquidityPremiumSharesReinvested += deployed;
+        ghost_stSharesDeployedSinceLastPriceCheck += deployed;
     }
 
     /// @dev Adds one selector to the op's allowed revert set

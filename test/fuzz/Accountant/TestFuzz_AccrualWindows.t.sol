@@ -244,7 +244,7 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     function _stepDeposit(bool _seniorSide, uint256 _add) internal {
         Operation op = _seniorSide ? Operation.ST_DEPOSIT : Operation.JT_DEPOSIT;
         collateralNAV += _add;
-        kernel.doPostOp(op, toNAVUnits(collateralNAV), toNAVUnits(lptRawNAV), ZERO_NAV_UNITS, false);
+        kernel.doPostOp(op, toNAVUnits(collateralNAV), toNAVUnits(lptRawNAV), ZERO_NAV_UNITS);
     }
 
     /// @dev Asserts the accountant's window bookkeeping equals the model and satisfies the contiguity closed form

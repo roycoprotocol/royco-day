@@ -24,7 +24,7 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
     uint256 internal constant MAX_NAV = 1e30;
 
     /// @notice The virtual-shares offset each ST share mint prices against (mirrors src Constants.VIRTUAL_SHARES)
-    uint256 internal constant VIRTUAL_SHARES = 1e6;
+    uint256 internal constant VIRTUAL_SHARES = 1;
 
     /// @dev Builds the minimal synced state the pure share-mint computation reads
     function _syncedState(uint256 _stEff, uint256 _premium, uint256 _fee) internal pure returns (SyncedAccountingState memory s) {
@@ -107,10 +107,14 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
      *     shrinks supplyAfter, so every post-mint share (including this leg's) is worth more than the
      *     fair derivation assumed — so it asserts its exact floor formula shares == floor((preSupply + VIRTUAL_SHARES)*leg/denom);
      *   - only when NEITHER leg binds does the two-sided value bound apply, with its original derivation.
-     * The bind predicate is recomputed here from first principles at the protocol constant:
-     * leg binds iff legNAV * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD, with denom the
-     * retained NAV plus VIRTUAL_VALUE (= retained + 1, which also pins it to 1 wei when retained is zero;
-     * the integer-equivalent form of production's ordering)
+     * The bind predicate is recomputed here from first principles at the protocol constant. A leg binds iff BOTH
+     *   armed:  (preSupply + VIRTUAL_SHARES) * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD,
+     *     the collapsed-price regime that computes the cap at all (shared by both legs: same supply, same denom), and
+     *   fair >= cap:  legNAV * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD,
+     *     so production's min(cap, fair) resolves to the cap (integer lemma),
+     * with denom the retained NAV plus VIRTUAL_VALUE (= retained + 1, which also pins it to 1 wei when retained
+     * is zero). An armed leg whose fair price sits below the cap still mints the exact fair floor, which the
+     * non-binding arms below assert unchanged
      */
     function testFuzz_FeeAndLiquidityPremiumShareMint_MintedValueMatchesMintedNAVWithinDerivedDust(
         uint256 _stEff,
@@ -136,9 +140,10 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
         // virtual-value offset the denominator is retained + VIRTUAL_VALUE (= retained + 1), which also pins it
         // to 1 wei when retained is zero.
         uint256 denom = (_stEff - _prem - _fee) + 1;
-        // No overflow: legNAV <= 1e30, denom <= 1e30 + 1 and WAD - MAX_MINT_DILUTION_WAD = 1e6, so both products stay below 1e48
-        bool premBinds = _prem * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD;
-        bool feeBinds = _fee * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD;
+        // No overflow: legNAV and preSupply + VIRTUAL_SHARES <= ~1e30, denom <= 1e30 + 1 against factors <= 1e18, so every product stays below 1e49
+        bool armed = (_preSupply + VIRTUAL_SHARES) * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD;
+        bool premBinds = armed && _prem * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD;
+        bool feeBinds = armed && _fee * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD;
         // Offset-aware cap floor((preSupply + VIRTUAL_SHARES) * MAX / (WAD - MAX)); still < 1e43, far below the overflow cliff
         uint256 cap = Math.mulDiv(_preSupply + VIRTUAL_SHARES, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
 

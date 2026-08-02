@@ -6,8 +6,9 @@ import { IRoycoDayAccountant } from "../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
 import { MAX_NAV_UNITS, MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
-import { MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
+import { DispatchMode, MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
 import { Math, RoycoUnitsMath, toNAVUnits } from "../libraries/Units.sol";
+import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
 import { UtilizationLogic } from "../libraries/logic/UtilizationLogic.sol";
 
 /**
@@ -19,34 +20,33 @@ import { UtilizationLogic } from "../libraries/logic/UtilizationLogic.sol";
 contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for uint256;
+    using DispatchLogic for address;
 
     /// @dev Storage slot for RoycoDayAccountantState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayAccountantState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_DAY_ACCOUNTANT_STORAGE_SLOT = 0x3eb9440b0208b8d20dc454b361ed9d3f272aa9a4fb2bcc89d823d3b8e5663200;
 
-    /// @inheritdoc IRoycoDayAccountant
-    address public immutable override(IRoycoDayAccountant) KERNEL;
-
     /// @dev Permissions the function to only be callable by the market's kernel
     /// @dev Should be placed on all state mutating NAV synchronization functions
     modifier onlyRoycoKernel() {
-        require(msg.sender == KERNEL, ONLY_ROYCO_KERNEL());
+        require(msg.sender == _getRoycoDayAccountantStorage().kernel, ONLY_ROYCO_KERNEL());
         _;
     }
 
     /// @dev Synchronizes the market's accounting to reconcile unrealized PNL at the start of the call
     /// @dev Ensures that any parameter changes to the coverage or liquidity configurations are safe
     modifier withSyncedAccounting() {
+        address kernel = _getRoycoDayAccountantStorage().kernel;
         // Cache the state of the accountant after the pre-operation accounting synchronization
-        SyncedAccountingState memory preOp = IRoycoDayKernel(KERNEL).syncTrancheAccounting();
+        SyncedAccountingState memory preOp = IRoycoDayKernel(kernel).syncTrancheAccounting();
         _;
         // Retrieve the result of the accounting synchronization after the paramter change
-        SyncedAccountingState memory postOp = IRoycoDayKernel(KERNEL).syncTrancheAccounting();
+        SyncedAccountingState memory postOp = IRoycoDayKernel(kernel).syncTrancheAccounting();
         // Check that the coverage utilization is at most 100% or it didn't increase/worsen
-        // Check that the coverage liquidation utilization remained static or this parameter change did not send the market into a liquidation state
+        // Check that the coverage liquidation utilization didn't get worse or this parameter change did not send the market into a liquidation state
         require(
             (postOp.coverageUtilizationWAD <= WAD || (postOp.coverageUtilizationWAD <= preOp.coverageUtilizationWAD))
-                && ((preOp.coverageLiquidationUtilizationWAD == postOp.coverageLiquidationUtilizationWAD)
+                && ((preOp.coverageLiquidationUtilizationWAD <= postOp.coverageLiquidationUtilizationWAD)
                     || (postOp.coverageLiquidationUtilizationWAD > postOp.coverageUtilizationWAD)),
             INVALID_COVERAGE_CONFIG()
         );
@@ -55,26 +55,18 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     // =============================
-    // Construction and Initialization Functions
+    // Initialization Functions
     // =============================
 
-    /// @dev Constructs the accountant with the specified kernel
-    /// @param _kernel The kernel that this accountant maintains mark-to-market NAV, JT impermanent loss, and fee accounting for
-    constructor(address _kernel) {
-        // Ensure the specified kernel is not null and immutably set it
-        require((KERNEL = _kernel) != address(0), NULL_ADDRESS());
-    }
-
-    /**
-     * @notice Initializes the Royco accountant state
-     * @param _params The initialization parameters for the Royco accountant
-     * @param _initialAuthority The initial authority for the Royco accountant
-     */
-    function initialize(RoycoDayAccountantInitParams calldata _params, address _initialAuthority) external initializer {
+    /// @notice Initializes the Royco accountant state
+    /// @param _params The initialization parameters for the Royco accountant
+    function initialize(RoycoDayAccountantInitParams calldata _params) external initializer {
         // Initialize the base state of the accountant
-        __RoycoBase_init(_initialAuthority);
+        __RoycoBase_init(_params.initialAuthority);
 
         // Validate the accountant initialization parameters
+        // Ensure that the kernel is not null
+        require(_params.kernel != address(0), NULL_ADDRESS());
         // Ensure that the protocol fee percentages are valid
         require(
             _params.stProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _params.jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD
@@ -106,7 +98,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Set the fields in slot 1 of storage
         $.minCoverageWAD = _params.minCoverageWAD;
         $.fixedTermDurationSeconds = _params.fixedTermDurationSeconds;
-        emit CoverageUpdated(_params.minCoverageWAD);
+        emit MinCoverageUpdated(_params.minCoverageWAD);
         emit FixedTermDurationUpdated(_params.fixedTermDurationSeconds);
 
         // Set the fields in slot 2 of storage
@@ -117,12 +109,17 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         $.lptYDM = _params.lptYDM;
         $.minLiquidityWAD = _params.minLiquidityWAD;
         emit LiquidityProviderTrancheYDMUpdated(_params.lptYDM);
-        emit LiquidityUpdated(_params.minLiquidityWAD);
+        emit MinLiquidityUpdated(_params.minLiquidityWAD);
 
         // Set the maximum yield shares in slot 4 and slot 5 of storage (their time-weighted accumulators are zero-initialized)
         $.maxJTYieldShareWAD = _params.maxJTYieldShareWAD;
         $.maxLPTYieldShareWAD = _params.maxLPTYieldShareWAD;
         emit MaxYieldSharesUpdated(_params.maxJTYieldShareWAD, _params.maxLPTYieldShareWAD);
+
+        // Set the fields in slot 5 of storage
+        $.kernel = _params.kernel;
+        $.fixedTermCommenceableAtTimestamp = uint64(block.timestamp + _params.fixedTermGracePeriodSeconds);
+        emit FixedTermCommenceableAt($.fixedTermCommenceableAtTimestamp);
 
         // Set the rest of the fields
         $.coverageLiquidationUtilizationWAD = _params.coverageLiquidationUtilizationWAD;
@@ -204,8 +201,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         Operation _op,
         NAV_UNIT _collateralNAV,
         NAV_UNIT _lptRawNAV,
-        NAV_UNIT _stSelfLiquidationBonusNAV,
-        bool _enforceCoverageAndLiquidityRequirements
+        NAV_UNIT _stSelfLiquidationBonusNAV
     )
         public
         override(IRoycoDayAccountant)
@@ -228,38 +224,28 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             require(deltaCollateralNAV > 0 && deltaLPTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             // New ST deposits are treated as an addition to the future ST exposure
             stEffectiveNAV = (stEffectiveNAV + toNAVUnits(deltaCollateralNAV));
+        } else if (_op == Operation.ST_REDEMPTION) {
+            // A senior redemption leaves the liquidity provider tranche mark untouched and always redeems collateral value
+            require(deltaCollateralNAV < 0 && deltaLPTRawNAV == 0, INVALID_POST_OP_STATE(_op));
+            // Reduce JT effective NAV by the bonus provided from its assets
+            jtEffectiveNAV = (jtEffectiveNAV - _stSelfLiquidationBonusNAV);
+            // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
+            stEffectiveNAV = (stEffectiveNAV - (toNAVUnits(-deltaCollateralNAV) - _stSelfLiquidationBonusNAV));
         } else if (_op == Operation.JT_DEPOSIT) {
             require(deltaCollateralNAV > 0 && deltaLPTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             // New JT deposits are treated as an addition to the future loss-absorption buffer
             jtEffectiveNAV = (jtEffectiveNAV + toNAVUnits(deltaCollateralNAV));
+        } else if (_op == Operation.JT_REDEMPTION) {
+            // JT cannot get a bonus from its own NAV, and a junior redemption leaves the senior exposure and supply untouched so it cannot move the liquidity provider tranche mark
+            require(deltaCollateralNAV < 0 && deltaLPTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+            // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
+            jtEffectiveNAV = (jtEffectiveNAV - toNAVUnits(-deltaCollateralNAV));
         } else if (_op == Operation.LPT_DEPOSIT) {
             // An in-kind LPT deposit only adds market-making inventory, the collateral cannot move
             require(deltaLPTRawNAV > 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-        } else if (_op == Operation.LPT_MULTI_ASSET_DEPOSIT) {
-            // A multi-asset LPT deposit adds market-making inventory and can mint and deploy new ST shares for its senior leg
-            require(deltaLPTRawNAV > 0 && deltaCollateralNAV >= 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-            stEffectiveNAV = (stEffectiveNAV + toNAVUnits(deltaCollateralNAV));
-        } else if (_op == Operation.LPT_REDEEM) {
+        } else if (_op == Operation.LPT_REDEMPTION) {
             // An in-kind LPT redemption only transfers out market-making inventory and idle premium shares, the collateral cannot move and no bonus is paid
-            require(deltaLPTRawNAV <= 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-        } else {
-            // Compute the total value redeemed from the collateral
-            NAV_UNIT collateralRedemptionNAV = toNAVUnits(-deltaCollateralNAV);
-            if (_op == Operation.ST_REDEEM || _op == Operation.LPT_MULTI_ASSET_REDEEM) {
-                if (_op == Operation.ST_REDEEM) require(deltaLPTRawNAV == 0 && collateralRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-                else require(deltaLPTRawNAV <= 0, INVALID_POST_OP_STATE(_op));
-                // Reduce JT effective NAV by the bonus provided from its assets
-                jtEffectiveNAV = (jtEffectiveNAV - _stSelfLiquidationBonusNAV);
-                // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
-                stEffectiveNAV = (stEffectiveNAV - (collateralRedemptionNAV - _stSelfLiquidationBonusNAV));
-            } else if (_op == Operation.JT_REDEEM) {
-                // JT cannot get a bonus from its own NAV, and a junior redemption leaves the senior exposure and supply untouched so it cannot move the liquidity provider tranche mark
-                require(
-                    deltaLPTRawNAV == 0 && collateralRedemptionNAV > ZERO_NAV_UNITS && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op)
-                );
-                // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
-                jtEffectiveNAV = (jtEffectiveNAV - collateralRedemptionNAV);
-            }
+            require(deltaLPTRawNAV < 0 && deltaCollateralNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
         }
 
         // Enforce the NAV conservation invariant
@@ -295,21 +281,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             coverageLiquidationUtilizationWAD: $.coverageLiquidationUtilizationWAD,
             minLiquidityWAD: minLiquidityWAD
         });
-
-        // Preemptively return if the kernel specified that the market's requirements don't need to be enforced
-        if (!_enforceCoverageAndLiquidityRequirements) return state;
-
-        // Enforce the coverage requirement for operations that can violate it (add senior exposure or remove the junior loss-absorption buffer)
-        // An in-kind LPT deposit cannot add senior exposure, only the multi-asset variant mints a senior leg
-        if (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_MULTI_ASSET_DEPOSIT || _op == Operation.JT_REDEEM) {
-            require(state.coverageUtilizationWAD <= WAD, COVERAGE_REQUIREMENT_VIOLATED());
-        }
-
-        // Enforce the liquidity requirement for operations that can violate it (raise the senior exposure or reduce the depth of the liquidity provider tranche)
-        // An in-kind LPT deposit only deepens liquidity so it is exempt, both LPT redemption variants remove depth
-        if (_op == Operation.ST_DEPOSIT || _op == Operation.LPT_MULTI_ASSET_DEPOSIT || _op == Operation.LPT_REDEEM || _op == Operation.LPT_MULTI_ASSET_REDEEM) {
-            require(state.liquidityUtilizationWAD <= WAD, LIQUIDITY_REQUIREMENT_VIOLATED());
-        }
     }
 
     // =============================
@@ -564,14 +535,16 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             uint256 fixedTermDurationSeconds = $.fixedTermDurationSeconds;
             // The market must be in a perpetual state if any of the following hold:
             // 1. The market is permanently perpetual (fixed-term duration 0), so it never enters a JT observation period
-            // 2. The junior buffer is wiped (partially collateralized or a total wipe), so its dead restoration claim is extinguished, ST needs to be able to withdraw to avoid/book losses, and the YDM needs to kick in to reinstate proper collateralization
-            // 3. The JT impermanent loss is within the dust tolerance (fully repaid or dust-sized), so JT provides its loss-absorption buffer and needs no observation period: dust ST or JT losses (eg. rounding in the underlying NAVs) never lock or keep locking the market
-            // 4. The current fixed-term has elapsed, so the transient JT observation period is complete
-            // 5. The coverage utilization breached the liquidation threshold, so the market forces open senior exits
+            // 2. There is no senior capital to protect in this market
+            // 3. The junior buffer is wiped (partially collateralized or a total wipe), so its dead restoration claim is extinguished, ST needs to be able to withdraw to avoid/book losses, and the YDM needs to kick in to reinstate proper collateralization
+            // 4. The JT impermanent loss is within the dust tolerance (fully repaid or dust-sized), so JT provides its loss-absorption buffer and needs no observation period: dust ST or JT losses (eg. rounding in the underlying NAVs) never lock or keep locking the market
+            // 5. The current fixed-term has elapsed, so the transient JT observation period is complete
+            // 6. The coverage utilization breached the liquidation threshold, so the market forces open senior exits
+            // 7. The market is still within its post-deployment fixed-term grace period, so it cannot enter it no matter what
             if (
-                fixedTermDurationSeconds == 0 || jtEffectiveNAV == ZERO_NAV_UNITS || jtImpermanentLoss <= dustTolerance
+                fixedTermDurationSeconds == 0 || stEffectiveNAV == ZERO_NAV_UNITS || jtEffectiveNAV == ZERO_NAV_UNITS || jtImpermanentLoss <= dustTolerance
                     || (initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp)
-                    || coverageUtilizationWAD >= coverageLiquidationUtilizationWAD
+                    || coverageUtilizationWAD >= coverageLiquidationUtilizationWAD || block.timestamp < $.fixedTermCommenceableAtTimestamp
             ) {
                 // A perpetual commit always clears the JT impermanent loss ledger and the term, so a perpetual market never carries a drawdown
                 jtImpermanentLossErased = jtImpermanentLoss;
@@ -700,7 +673,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         require(_jtYDM != $.lptYDM, YDMS_CANNOT_BE_IDENTICAL());
         // Best-effort sync to settle unrealized PNL under the outgoing JT YDM
         // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking JT YDM
-        KERNEL.call(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
+        $.kernel._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
         // Initialize and set the new JT YDM for this market
         _initializeYDM(_jtYDM, _jtYDMInitializationData);
         $.jtYDM = _jtYDM;
@@ -714,7 +687,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         require(_lptYDM != $.jtYDM, YDMS_CANNOT_BE_IDENTICAL());
         // Best-effort sync to settle unrealized PNL under the outgoing LPT YDM
         // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking LPT YDM
-        KERNEL.call(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
+        $.kernel._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
         // Initialize and set the new LPT YDM for this market
         _initializeYDM(_lptYDM, _lptYDMInitializationData);
         $.lptYDM = _lptYDM;
@@ -759,7 +732,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // The coverage requirement must leave headroom for the junior tranche to provide coverage (the liquidation threshold is unchanged and already valid)
         require(_minCoverageWAD < WAD, INVALID_COVERAGE_CONFIG());
         $.minCoverageWAD = _minCoverageWAD;
-        emit CoverageUpdated(_minCoverageWAD);
+        emit MinCoverageUpdated(_minCoverageWAD);
     }
 
     /// @inheritdoc IRoycoDayAccountant
@@ -781,7 +754,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // The liquidity requirement must leave headroom (minLiquidity < WAD)
         require(_minLiquidityWAD < WAD, INVALID_LIQUIDITY_CONFIG());
         _getRoycoDayAccountantStorage().minLiquidityWAD = _minLiquidityWAD;
-        emit LiquidityUpdated(_minLiquidityWAD);
+        emit MinLiquidityUpdated(_minLiquidityWAD);
     }
 
     /// @inheritdoc IRoycoDayAccountant
@@ -831,6 +804,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
     /**
      * @notice Initializes the YDM (Yield Distribution Model) if required for this market
+     * @dev A failing initialization bubbles the YDM's revert verbatim through the shared dispatch primitive
      * @param _ydm The new YDM address to set
      * @param _ydmInitializationData The data used to initialize the new YDM for this market
      */
@@ -838,10 +812,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Ensure that the YDM is not null
         require(_ydm != address(0), NULL_ADDRESS());
         // Initialize the YDM if required
-        if (_ydmInitializationData.length != 0) {
-            (bool success, bytes memory data) = _ydm.call(_ydmInitializationData);
-            require(success, FAILED_TO_INITIALIZE_YDM(data));
-        }
+        if (_ydmInitializationData.length != 0) _ydm._dispatch(DispatchMode.EXECUTE, _ydmInitializationData);
     }
 
     // =============================

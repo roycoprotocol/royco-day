@@ -41,6 +41,10 @@ contract FeeAndLiquidityPremiumHarness {
         JT_LEDGER = new MockTrancheShareLedger();
         LPT_LEDGER = new MockTrancheShareLedger();
         kernelState.protocolFeeRecipient = PROTOCOL_FEE_RECIPIENT;
+        // The library reads the tranche wiring from the kernel state, so the mock ledgers are wired there directly
+        kernelState.seniorTranche = address(ST_LEDGER);
+        kernelState.juniorTranche = address(JT_LEDGER);
+        kernelState.liquidityProviderTranche = address(LPT_LEDGER);
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -78,7 +82,7 @@ contract FeeAndLiquidityPremiumHarness {
 
     /// @notice Drives the full post-sync fee and liquidity premium mint orchestration against the harness state
     function processFeesAndLiquidityPremium(SyncedAccountingState memory _state) external {
-        FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium(kernelState, _immutables(), _state);
+        FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium(kernelState, _state);
     }
 
     /// @notice The LPT effective NAV view: LPT raw NAV plus the idle liquidity premium senior shares valued at the senior share price
@@ -104,16 +108,5 @@ contract FeeAndLiquidityPremiumHarness {
     /// @dev Identity conversion so the harness LPT raw NAV equals totalLPTAssets in NAV units
     function convertLPTAssetsToValue(TRANCHE_UNIT _lptAssets) external pure returns (NAV_UNIT value) {
         return toNAVUnits(toUint256(_lptAssets));
-    }
-
-    /*//////////////////////////////////////////////////////////////////////
-                            INTERNAL HELPERS
-    //////////////////////////////////////////////////////////////////////*/
-
-    /// @dev The immutables carrier wired to the three mock ledgers (asset and accountant slots are unused by these libraries)
-    function _immutables() internal view returns (IRoycoDayKernel.RoycoDayKernelImmutableState memory immutables) {
-        immutables.seniorTranche = address(ST_LEDGER);
-        immutables.juniorTranche = address(JT_LEDGER);
-        immutables.liquidityProviderTranche = address(LPT_LEDGER);
     }
 }

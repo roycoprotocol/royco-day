@@ -8,8 +8,10 @@ import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
 import { RoycoAccessManager } from "../../src/factory/RoycoAccessManager.sol";
 import { RoycoCreate3Deployer } from "../../src/factory/RoycoCreate3Deployer.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { TAG_ST_PROXY } from "../../src/factory/templates/base/Constants.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
+import { IBalancerV3LiquidityVenue } from "../../src/interfaces/liquidity-venue/IBalancerV3LiquidityVenue.sol";
 import { BalancerV3LiquidityVenue } from "../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { CREATE2_FACTORY_ADDRESS } from "../utils/Create2DeployUtils.sol";
 import {
@@ -68,7 +70,7 @@ abstract contract MarketDeploymentConfig {
     /// @dev CREATE2 salt for a protocol singleton (AccessManager, factory, etc.), suffixed with the environment so a
     ///      test deployment and a production deployment never collide on a deterministic address.
     function _singletonSalt(string memory _seed) internal view returns (bytes32) {
-        return keccak256(abi.encodePacked(_seed, isTestEnv ? "_TEST" : "_PROD"));
+        return keccak256(abi.encodePacked(_seed, isTestEnv ? "_TEST_324324" : "_PROD"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -141,6 +143,7 @@ abstract contract MarketDeploymentConfig {
         // snUSD against the test-environment factory ("_TEST" salts, prod deployer key).
         address testEnvFactory = _predictFactoryProxy(DEPLOYER, true);
         _marketIds[snUSDHash][testEnvFactory] = _mineMarketId(SNUSD, testEnvFactory, USDC[MAINNET]);
+        _marketIds[snUSDHash][address(0xcEC7f6E54b89fBd283382921A90Cf8C7A13dD62f)] = _mineMarketId(SNUSD, testEnvFactory, USDC[MAINNET]);
     }
 
     /// @notice The mined marketId for `_marketName` against `_factory`. Reverts if none is configured.
@@ -288,12 +291,11 @@ abstract contract MarketDeploymentConfig {
             dustTolerance: 5,
             kernelType: KernelType.RoycoDayBalancerV3Kernel,
             kernelSpecificParams: abi.encode(
-                BalancerV3LiquidityVenue.LiquidityVenueInitParams({
+                IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams({
                     bptOracle: address(0), // This is deployed by the script after the pool is created and overwritten by the template
                     maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
                 })
             ),
-            enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.005e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
@@ -301,6 +303,7 @@ abstract contract MarketDeploymentConfig {
             minCoverageWAD: 0.1e18,
             coverageLiquidationUtilizationWAD: 1.0009009e18,
             fixedTermDurationSeconds: 0, // stable market, no fixed term
+            fixedTermGracePeriodSeconds: 0,
             ydmType: YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })
@@ -310,6 +313,14 @@ abstract contract MarketDeploymentConfig {
             ),
             jtYdmTargetUtilizationWAD: 0.9e18,
             lptYdmTargetUtilizationWAD: 0.9e18,
+            // Genesis pool liquidity. The deployer funds and approves the template for these amounts before running
+            // the market deployment, and receives the genesis liquidity provider shares.
+            poolInitialization: RoycoDayBalancerV3MarketDeploymentTemplate.PoolInitializationParams({
+                funder: DEPLOYER,
+                collateralAmount: 0, // no collateral leg: the genesis liquidity is quote-only
+                quoteAmount: 1e6, // 10,000 USDC of quote depth
+                minLPTAssetsOut: 0
+            }),
             gyroECLPPoolParams: GyroECLPPoolParams({
                 name: _poolName(SNUSD, USDC[block.chainid]),
                 symbol: _poolSymbol(SNUSD, USDC[block.chainid]),
@@ -339,7 +350,6 @@ abstract contract MarketDeploymentConfig {
                 chargeYieldFeeOnSeniorTrancheShares: false,
                 chargeYieldFeeOnQuoteAsset: false
             }),
-            deployPoolHook: true, // the production default: external pool ops sync-then-execute and stay pausable
             stEntryPointConfig: _defaultEntryPointTrancheConfig(),
             jtEntryPointConfig: _defaultEntryPointTrancheConfig(),
             lptEntryPointConfig: _defaultEntryPointTrancheConfig()

@@ -49,12 +49,18 @@ abstract contract AccountantTestBase is Test {
     AccessManager internal authority;
     address internal stranger;
 
+    /// @dev The fixed-term grace period the next `_deploy` initializes the accountant with
+    uint24 internal fixedTermGracePeriodSeconds;
+
     /*//////////////////////////////////////////////////////////////////////
                             DEPLOY HELPERS
     //////////////////////////////////////////////////////////////////////*/
 
-    /// @dev Default init params with null YDM slots that _deploy fills with fresh mocks
+    /// @dev Default init params with null kernel and YDM slots that the deploy helpers fill in
     function _defaultParams() internal pure returns (IRoycoDayAccountant.RoycoDayAccountantInitParams memory p) {
+        p.kernel = address(0);
+        p.initialAuthority = address(0);
+        p.fixedTermGracePeriodSeconds = 0;
         p.minCoverageWAD = DEFAULT_MIN_COVERAGE_WAD;
         p.coverageLiquidationUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
         p.minLiquidityWAD = DEFAULT_MIN_LIQUIDITY_WAD;
@@ -72,18 +78,27 @@ abstract contract AccountantTestBase is Test {
         p.lptYieldShareProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
     }
 
-    /// @dev Default init params with two fresh mock YDMs pre-filled (for direct initialize tests)
+    /// @dev Default init params with two fresh mock YDMs and the suite's kernel pre-filled (for direct initialize tests)
     function _paramsWithFreshYDMs() internal returns (IRoycoDayAccountant.RoycoDayAccountantInitParams memory p) {
         p = _defaultParams();
+        p.kernel = address(kernel);
         p.jtYDM = address(new MockRecordingYDM());
         p.lptYDM = address(new MockRecordingYDM());
     }
 
     /// @dev Deploys a fresh kernel, authority, implementation, and un-initialized ERC1967 proxy (RoycoBase disables initializers on the implementation)
     function _deployUninitialized() internal returns (RoycoDayAccountant acct) {
+        return _deployUninitializedWithGrace(0);
+    }
+
+    /// @dev As _deployUninitialized, but records a nonzero fixed-term grace period so the young-market lock-out is
+    ///      exercisable. The grace period is now an initialization parameter rather than an implementation immutable,
+    ///      so it is applied when the proxy is initialized, and the anchor is the initializing block's timestamp
+    function _deployUninitializedWithGrace(uint24 _fixedTermGracePeriodSeconds) internal returns (RoycoDayAccountant acct) {
         kernel = new MockAccountantKernel();
         authority = new AccessManager(address(this));
-        implementation = new RoycoDayAccountant(address(kernel));
+        implementation = new RoycoDayAccountant();
+        fixedTermGracePeriodSeconds = _fixedTermGracePeriodSeconds;
         acct = RoycoDayAccountant(address(new UninitializedERC1967Proxy(address(implementation))));
         kernel.setAccountant(address(acct));
     }
@@ -93,12 +108,27 @@ abstract contract AccountantTestBase is Test {
      * @dev Null YDM slots in the params are filled with fresh MockRecordingYDM instances, otherwise the passed addresses are adopted as the suite's mocks
      */
     function _deploy(IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params) internal returns (RoycoDayAccountant acct) {
-        acct = _deployUninitialized();
+        return _deployWithGrace(_params, 0);
+    }
+
+    /// @dev As _deploy, but with a nonzero fixed-term grace period baked into the implementation
+    function _deployWithGrace(
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params,
+        uint24 _fixedTermGracePeriodSeconds
+    )
+        internal
+        returns (RoycoDayAccountant acct)
+    {
+        acct = _deployUninitializedWithGrace(_fixedTermGracePeriodSeconds);
         if (_params.jtYDM == address(0)) _params.jtYDM = address(new MockRecordingYDM());
         if (_params.lptYDM == address(0)) _params.lptYDM = address(new MockRecordingYDM());
         jtYDM = MockRecordingYDM(_params.jtYDM);
         lptYDM = MockRecordingYDM(_params.lptYDM);
-        acct.initialize(_params, address(authority));
+        // The kernel and the grace period are initialization parameters now, not implementation immutables
+        _params.kernel = address(kernel);
+        _params.initialAuthority = address(authority);
+        _params.fixedTermGracePeriodSeconds = _fixedTermGracePeriodSeconds;
+        acct.initialize(_params);
         accountant = acct;
     }
 
@@ -122,8 +152,8 @@ abstract contract AccountantTestBase is Test {
     function _seedState(uint256 _stEff, uint256 _jtEff, uint256 _il, uint256 _lptRaw, MarketState _targetState) internal {
         assertTrue(!(_jtEff == 0 && _il > 0), "seed: jtEffectiveNAV 0 with il > 0 unreachable");
 
-        if (_stEff > 0) kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(_stEff), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
-        if (_jtEff + _il > 0) kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(_stEff + _jtEff + _il), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        if (_stEff > 0) kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(_stEff), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        if (_jtEff + _il > 0) kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(_stEff + _jtEff + _il), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         // Covered loss of exactly il: JT absorbs both attribution legs so the effective NAVs land on target
         if (_il > 0) kernel.doPreOp(toNAVUnits(_stEff + _jtEff));
 

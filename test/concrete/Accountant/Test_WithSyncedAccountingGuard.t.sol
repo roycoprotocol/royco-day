@@ -159,12 +159,21 @@ contract Test_WithSyncedAccountingGuard is DayMarketTestBase {
         accountant.setDustTolerance(toNAVUnits(uint256(2)));
         assertEq(toUint256(accountant.getState().dustTolerance), 2, "an unrelated setter must remain operable while liquidating");
 
-        // Re-pointing the threshold to another armed value changes nothing and must be rejected
+        // Lowering the threshold while the market is liquidating must be rejected: the bracket only admits a
+        // threshold that did not decrease or a change whose settled state is no longer liquidating
+        uint256 armedThreshold = accountant.getState().coverageLiquidationUtilizationWAD;
         vm.prank(ACCOUNTANT_ADMIN);
         vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
-        accountant.setLiquidationCoverageUtilization(liveUtil - 0.1e18);
+        accountant.setLiquidationCoverageUtilization(armedThreshold - 0.01e18);
 
-        // Raising the threshold above live utilization disarms the regime, the one legitimate threshold move here
+        // A partial raise that stays below live utilization is admissible and leaves the regime armed: it cannot
+        // worsen the live state, it only eases a future disarm
+        vm.prank(ACCOUNTANT_ADMIN);
+        accountant.setLiquidationCoverageUtilization(liveUtil - 0.1e18);
+        SyncedAccountingState memory stillArmed = _sync();
+        assertGe(stillArmed.coverageUtilizationWAD, stillArmed.coverageLiquidationUtilizationWAD, "a partial raise must leave the regime armed");
+
+        // Raising the threshold above live utilization disarms the regime
         vm.prank(ACCOUNTANT_ADMIN);
         accountant.setLiquidationCoverageUtilization(liveUtil + 0.1e18);
         SyncedAccountingState memory post = _sync();

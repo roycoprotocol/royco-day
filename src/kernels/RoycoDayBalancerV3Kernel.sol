@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import { BalancerPoolToken } from "../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
+import { IVault } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
-import { RoycoDayKernel } from "./base/RoycoDayKernel.sol";
 import { BalancerV3LiquidityVenue } from "./base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 
 /**
@@ -14,12 +13,9 @@ import { BalancerV3LiquidityVenue } from "./base/liquidity-venue/balancer-v3/Bal
  * @dev LPT NAV computations value the pool position (BPT) using a manipulation-resistant Balancer V3 oracle, and the pool prices the senior share leg via this kernel's senior share rate provider
  */
 contract RoycoDayBalancerV3Kernel is BalancerV3LiquidityVenue {
-    /// @notice Constructs the kernel state and resolves the quote asset from the liquidity provider tranche's Balancer V3 pool
-    /// @param _params The standard construction parameters for the Royco Day kernel
-    constructor(IRoycoDayKernel.RoycoDayKernelConstructionParams memory _params)
-        RoycoDayKernel(_params)
-        BalancerV3LiquidityVenue(BalancerPoolToken(_params.lptAsset).getVault())
-    { }
+    /// @notice Constructs the kernel state
+    /// @param _balancerV3Vault The instance of the singleton Balancer V3 Vault the market's pool is registered with
+    constructor(IVault _balancerV3Vault) BalancerV3LiquidityVenue(_balancerV3Vault) { }
 
     /**
      * @notice Initializes the Royco Day kernel and its liquidity venue
@@ -28,7 +24,7 @@ contract RoycoDayBalancerV3Kernel is BalancerV3LiquidityVenue {
      */
     function initialize(
         IRoycoDayKernel.RoycoDayKernelInitParams calldata _standardParams,
-        BalancerV3LiquidityVenue.LiquidityVenueInitParams calldata _liquidityVenueParams
+        BalancerV3LiquidityVenueInitParams calldata _liquidityVenueParams
     )
         external
         initializer

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -175,15 +176,27 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
         entryPoint.modifyTrancheConfigs(tranches, configs);
     }
 
-    function test_request_rejectsFutureReportingOracle() public {
+    function test_request_queuesAgainstFutureReportingOracle_executionFailsShutUntilHonest() public {
         // The oracle turns future-reporting after the gate is enabled (e.g. a migration to a broken feed): the
-        // request-time poke must fail shut rather than queue against an oracle that can falsely open the gate
+        // request-time refresh moved into the kernel sync, which does not classify a future stamp as
+        // circuit-broken, so the request queues. The future check is load-bearing at the execution-gate poke,
+        // which fails shut for as long as the stamp stays ahead of real time, so the broken feed can never
+        // falsely open the gate
         _setOracleGate(true);
         collateralAssetOracle.setUpdatedAt(block.timestamp + 1 days);
 
+        (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
+
+        // The delay elapses but the stamp is still ahead of real time: execution fails shut on the future check
+        vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
         vm.expectRevert(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE.selector);
         vm.prank(USER_A);
-        entryPoint.requestDeposit(address(juniorTranche), toTrancheUnits(10 * stUnit), USER_A, 0);
+        entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
+
+        // An honest post-request update reopens execution
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
+        uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
+        assertGt(sharesMinted, 0, "an honest update must reopen execution");
     }
 
     function test_deadOracle_executionWaitsForRevival() public {
@@ -228,14 +241,23 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
         entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
     }
 
-    function test_requestRedemption_rejectsFutureReportingOracle() public {
+    function test_requestRedemption_queuesAgainstFutureReportingOracle_executionFailsShutUntilHonest() public {
+        // The redemption mirror: the request queues through the kernel sync's poke, and the execution-gate
+        // poke fails shut on the future stamp until an honest update lands
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
         _setOracleGate(true);
         collateralAssetOracle.setUpdatedAt(block.timestamp + 1 days);
 
+        (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
+
+        vm.warp(block.timestamp + DEFAULT_REDEMPTION_DELAY + 1);
         vm.expectRevert(IRoycoDayEntryPoint.COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE.selector);
         vm.prank(USER_A);
-        entryPoint.requestRedemption(address(juniorTranche), shares, USER_A, 0, IRoycoDayEntryPoint.RedemptionMode.INKIND);
+        entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
+
+        collateralAssetOracle.setUpdatedAt(block.timestamp);
+        AssetClaims memory claims = _executeRedemptionMax(USER_A, USER_A, nonce);
+        assertGt(toUint256(claims.nav), 0, "an honest update must reopen execution");
     }
 
     // ---------------------------------------------------------------------
@@ -267,18 +289,38 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
         assertEq(vm.getRecordedLogs().length, 0, "an ungated poke must emit nothing");
     }
 
-    function test_request_emitsCollateralAssetOraclePoked() public {
-        // The request-time poke refreshes the oracle and announces the reading it lands on
+    function test_request_pokesOracleThroughKernelSync_circuitBreakerFailsRequestShut() public {
+        // The request-time poke moved into the kernel sync's first action: the entry point no longer emits
+        // CollateralAssetOraclePoked on request (that event marks the config, standalone, and execution-gate
+        // pokes), but a circuit-breaking oracle still fails the request shut through the sync
         _setOracleGate(true);
         collateralAssetOracle.setUpdatedAt(block.timestamp);
 
-        // Fund and approve first: the emit expectation must bind to the request call itself
+        // A successful request emits no entry point poke event
         uint256 amount = 10 * stUnit;
         _fundTrancheAssets(USER_A, address(juniorTranche), amount);
         vm.startPrank(USER_A);
         stJtVault.approve(address(entryPoint), amount);
-        vm.expectEmit(address(entryPoint));
-        emit IRoycoDayEntryPoint.CollateralAssetOraclePoked(address(juniorTranche), uint32(block.timestamp));
+        vm.recordLogs();
+        entryPoint.requestDeposit(address(juniorTranche), toTrancheUnits(amount), USER_A, 0);
+        vm.stopPrank();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; ++i) {
+            if (logs[i].emitter == address(entryPoint)) {
+                assertNotEq(
+                    logs[i].topics[0],
+                    IRoycoDayEntryPoint.CollateralAssetOraclePoked.selector,
+                    "the request must not emit the entry point poke event, the refresh flows through the kernel sync"
+                );
+            }
+        }
+
+        // The sync pokes the oracle as its first action: a circuit-broken oracle fails the request shut
+        collateralAssetOracle.setRevertMode(true);
+        _fundTrancheAssets(USER_A, address(juniorTranche), amount);
+        vm.startPrank(USER_A);
+        stJtVault.approve(address(entryPoint), amount);
+        vm.expectRevert(MockPriceOracle.ORACLE_REVERT_MODE.selector);
         entryPoint.requestDeposit(address(juniorTranche), toTrancheUnits(amount), USER_A, 0);
         vm.stopPrank();
     }

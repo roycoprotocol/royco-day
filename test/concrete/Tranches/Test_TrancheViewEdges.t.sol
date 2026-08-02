@@ -2,6 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { VIRTUAL_SHARES } from "../../../src/libraries/Constants.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -67,22 +69,25 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice When the LPT's pool-depth mark is zero, maxRedeem conservatively reports zero even with claimable idle
-     *         liquidity-premium senior shares outstanding
-     * @dev A zero TVL against live supply is unreachable on the real venue, so only the view-level conservatism is pinned
+     * @notice When the LPT's pool-depth mark reads zero against a live BPT supply, the oracle fails loud rather than
+     *         degrading gracefully, so maxRedeem reverts INVALID_PRICE
+     * @dev A zero TVL against live supply is unreachable on the real venue. The oracle now treats a zero mark as a
+     *      bad price and reverts INVALID_PRICE (BalancerV3LiquidityVenue.sol:286), so every valuation surface built
+     *      on it, maxRedeem included, propagates the revert instead of underreporting zero
      */
-    function test_LPTMaxRedeem_UnderreportsZeroOnZeroPoolMark() public {
+    function test_LPTMaxRedeem_RevertsInvalidPriceOnZeroPoolMark() public {
         _deployZeroMinLiquidityMarketWithPremium();
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
         require(idleShares != 0, "setup: the idle premium pile must be nonzero");
 
         // Mark the entire pool worthless through the oracle: the LPT's raw NAV (its pool-depth mark) reads zero
-        // while the idle senior shares remain a live leg of the LPT's effective NAV
+        // against a live BPT supply, which the oracle rejects as an invalid price
         bptOracle.setTVL(0);
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
 
-        // The view underreport: with the pool depth marking zero, maxRedeem claims nothing is redeemable
-        assertEq(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), 0, "maxRedeem must report zero when the pool-depth mark is zero");
+        // The zero mark fails loud: maxRedeem reverts INVALID_PRICE rather than reporting zero redeemable
+        vm.expectRevert(IRoycoDayKernel.INVALID_PRICE.selector);
+        liquidityProviderTranche.maxRedeem(LPT_PROVIDER);
     }
 
     /**
@@ -110,9 +115,9 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         assertEq(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), balance, "maxRedeem must report the full balance when no liquidity floor constrains the exit");
 
         // Each payout leg is an independent pro-rata slice of the pre-redeem ledgers, scaled by the effective
-        // supply (totalSupply + 1e6 virtual shares) the claim scaler now carries
-        uint256 expectedBptSlice = Math.mulDiv(balance, ownedBpt, totalSupply + 1e6, Math.Rounding.Floor);
-        uint256 expectedIdleSlice = Math.mulDiv(balance, idleShares, totalSupply + 1e6, Math.Rounding.Floor);
+        // supply (totalSupply + VIRTUAL_SHARES virtual shares) the claim scaler now carries
+        uint256 expectedBptSlice = Math.mulDiv(balance, ownedBpt, totalSupply + VIRTUAL_SHARES, Math.Rounding.Floor);
+        uint256 expectedIdleSlice = Math.mulDiv(balance, idleShares, totalSupply + VIRTUAL_SHARES, Math.Rounding.Floor);
         assertGt(expectedBptSlice, 0, "the pooled BPT slice must be nonzero");
         assertGt(expectedIdleSlice, 0, "the idle senior share slice must be nonzero");
 

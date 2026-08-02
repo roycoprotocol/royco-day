@@ -336,7 +336,7 @@ contract Test_SeniorTrancheSelfLiquidationBonus_Accountant is AccountantTestBase
 
         // Execute the redemption: the claim and the bonus leave the collateral together
         SyncedAccountingState memory post =
-            kernel.doPostOp(Operation.ST_REDEEM, toNAVUnits(uint256(985e18)), toNAVUnits(uint256(100e18)), toNAVUnits(uint256(5e18)), true);
+            kernel.doPostOp(Operation.ST_REDEMPTION, toNAVUnits(uint256(985e18)), toNAVUnits(uint256(100e18)), toNAVUnits(uint256(5e18)));
         assertEq(toUint256(post.jtEffectiveNAV), 85e18, "jtEffectiveNAV reduced by exactly the bonus");
         assertEq(toUint256(post.stEffectiveNAV), 900e18, "stEffectiveNAV reduced by the claim net of the bonus");
         assertEq(post.coverageUtilizationWAD, 1_158_823_529_411_764_706, "hand-derived post coverageUtilization");

@@ -169,26 +169,26 @@ contract Test_RoycoTestMath is Test {
     /// prices against the virtual-share supply so pre-seeded backing cannot be captured 1:1.
     function test_ConvertToShares_ZeroSupply_MintsOneToOne() public pure {
         assertEq(RoycoTestMath.convertToShares(123e18, 0, 0), 123e18, "fresh tranche mints 1:1");
-        assertEq(RoycoTestMath.convertToShares(5, 999, 0), 5000, "empty-with-backing prices vs virtual shares: floor((0+1e6)*5/(999+1)) = 5000");
+        assertEq(RoycoTestMath.convertToShares(5, 999, 0), 0, "empty-with-backing prices vs virtual shares: floor((0+1)*5/(999+1)) = 0");
     }
 
     /// Live supply over zero NAV pins the denominator to 1 wei (totalValue + VIRTUAL_VALUE = 0 + 1):
-    /// ⌊(7 + 1e6)·3/(0 + 1)⌋ = 3·1000007 = 3000021.
+    /// ⌊(7 + 1)·3/(0 + 1)⌋ = 8·3 = 24.
     function test_ConvertToShares_ZeroTotalValue_UsesOneWeiDenominator() public pure {
-        assertEq(RoycoTestMath.convertToShares(3, 0, 7), 3_000_021, "floor((7+1e6)*3/1) = 3000021");
+        assertEq(RoycoTestMath.convertToShares(3, 0, 7), 24, "floor((7+1)*3/1) = 24");
     }
 
-    /// Floor engaged over the virtual-shares offset: ⌊(5 + 1e6)·3/(7 + 1)⌋ = ⌊3000015/8⌋ = ⌊375001.875⌋ = 375001
+    /// Floor engaged over the virtual-shares offset: ⌊(5 + 1)·3/(7 + 1)⌋ = ⌊18/8⌋ = ⌊2.25⌋ = 2
     /// (the fractional dust stays with existing holders).
     function test_ConvertToShares_FloorRounding_FavorsExistingHolders() public pure {
-        assertEq(RoycoTestMath.convertToShares(3, 7, 5), 375_001, "floor((5+1e6)*3/(7+1)) = floor(3000015/8) = 375001");
+        assertEq(RoycoTestMath.convertToShares(3, 7, 5), 2, "floor((5+1)*3/(7+1)) = floor(18/8) = 2");
     }
 
     /// The base ratio divides cleanly (200e18·10e18/100e18 = 20e18); the virtual-shares offset lifts the numerator
-    /// supply by 1e6 and the denominator by 1, adding a small floored residual:
-    /// ⌊(200e18 + 1e6)·10e18/(100e18 + 1)⌋ = 20000000000000099999.
+    /// supply by 1 and the denominator by 1, and the floor now trims one wei:
+    /// ⌊(200e18 + 1)·10e18/(100e18 + 1)⌋ = 19999999999999999999.
     function test_ConvertToShares_CleanDivision() public pure {
-        assertEq(RoycoTestMath.convertToShares(10e18, 100e18, 200e18), 20_000_000_000_000_099_999, "floor((200e18+1e6)*10e18/(100e18+1))");
+        assertEq(RoycoTestMath.convertToShares(10e18, 100e18, 200e18), 19_999_999_999_999_999_999, "floor((200e18+1)*10e18/(100e18+1))");
     }
 
     /// Zero value mints zero shares against a live market: ⌊(50 + 1e6)·0/(100 + 1)⌋ = 0.
@@ -203,10 +203,10 @@ contract Test_RoycoTestMath is Test {
         assertEq(RoycoTestMath.convertToShares(1, 1e30, 1), 0, "floor((1+1e6)*1/(1e30+1)) = 0");
     }
 
-    /// Max realistic near par: the virtual-share numerator lifts the mint just above par at scale —
-    /// ⌊(1e30 + 1e6)·1e30/(1e30 + 1)⌋ = 1000000000000000000000000999998.
+    /// Max realistic near par: the virtual-share numerator and denominator both lift by 1, so the mint is exactly
+    /// par at scale: ⌊(1e30 + 1)·1e30/(1e30 + 1)⌋ = 1e30.
     function test_ConvertToShares_MaxRealistic() public pure {
-        assertEq(RoycoTestMath.convertToShares(MAX_NAV, MAX_NAV, MAX_NAV), 1_000_000_000_000_000_000_000_000_999_998, "floor((1e30+1e6)*1e30/(1e30+1))");
+        assertEq(RoycoTestMath.convertToShares(MAX_NAV, MAX_NAV, MAX_NAV), 1e30, "floor((1e30+1)*1e30/(1e30+1))");
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -214,30 +214,31 @@ contract Test_RoycoTestMath is Test {
     //////////////////////////////////////////////////////////////////////////*/
 
     /// Bind boundary, exact (continuity) under the virtual-shares offset. With supply S = 1e18, totalValue T = 1e18,
-    /// clamp width w = WAD − MAX = 1e6: effectiveSupply = S + 1e6, denom = T + 1 = 1e18 + 1, and
-    ///   cap = ⌊effectiveSupply·MAX/w⌋ = ⌊(1e18 + 1e6)·(1e18 − 1e6)/1e6⌋ = 1e30 − 1e6.
+    /// clamp width w = WAD − MAX = 1e6: effectiveSupply = S + 1 = 1e18 + 1, denom = T + 1 = 1e18 + 1, and
+    ///   cap = ⌊effectiveSupply·MAX/w⌋ = ⌊(1e18 + 1)·(1e18 − 1e6)/1e6⌋ = 1e30 − 1e18 + 1e12 − 1.
     /// The largest non-binding value is threshold = ⌊denom·MAX/w⌋ = ⌊(1e18 + 1)·(1e18 − 1e6)/1e6⌋
-    ///   = 1e30 − 1e18 + 1e12 − 1. At v = threshold the fair mint ⌊effectiveSupply·threshold/denom⌋ equals the cap
-    /// exactly, so the clamp is continuous at the boundary.
+    ///   = 1e30 − 1e18 + 1e12 − 1 (equal to the cap, since effectiveSupply == denom). At v = threshold the fair mint
+    ///   ⌊effectiveSupply·threshold/denom⌋ equals the cap exactly, so the clamp is continuous at the boundary.
     function test_ConvertToShares_ClampBindBoundary_FairEqualsCapExactly() public pure {
         uint256 threshold = 1e30 - 1e18 + 1e12 - 1;
-        uint256 cap = 1e30 - 1e6;
+        uint256 cap = 1e30 - 1e18 + 1e12 - 1;
         assertEq(RoycoTestMath.convertToShares(threshold, 1e18, 1e18), cap, "at the boundary the fair mint equals the cap");
     }
 
-    /// Bind boundary + 1 wei: v = threshold + 1 = 1e30 − 1e18 + 1e12 trips the bind and returns the same
-    /// cap = 1e30 − 1e6 as the boundary itself (the clamp plateaus, it does not jump).
-    function test_ConvertToShares_ClampBindBoundaryPlusOne_ReturnsSameCap() public pure {
-        assertEq(RoycoTestMath.convertToShares(1e30 - 1e18 + 1e12, 1e18, 1e18), 1e30 - 1e6, "one wei past the boundary mints the identical cap");
+    /// Healthy price never arms: at a 1:1 price (S = T = 1e18) the collapsed-price predicate
+    /// ⌈(1e18 + 1)·1e6/(1e18 − 1e6)⌉ = 1000002 is nowhere near denom = 1e18 + 1, so even a value one wei past
+    /// the old value-based threshold prices fairly, ⌊(1e18 + 1)·v/(1e18 + 1)⌋ = v (paid-for ownership is not dilution).
+    function test_ConvertToShares_HealthyPriceNeverClamps_HoweverLargeTheValue() public pure {
+        assertEq(RoycoTestMath.convertToShares(1e30 - 1e18 + 1e12, 1e18, 1e18), 1e30 - 1e18 + 1e12, "a healthy-priced mint takes the fair price at any size");
     }
 
-    /// Zero-NAV composition min(effectiveSupply·v, cap) with denom = totalValue + 1 = 1: the mint stays unclamped
-    /// for small values (bind iff ⌈3·1e6/(1e18−1e6)⌉ = 1 > 1 is false ⇒ ⌊(7 + 1e6)·3/1⌋ = 3000021), and clamps for
-    /// large ones (v = 1e12: ⌈1e12·1e6/(1e18−1e6)⌉ = 2 > 1 ⇒ cap = ⌊(7 + 1e6)·(1e18−1e6)/1e6⌋ = 1000007·(1e12−1)
-    /// = 1000006999998999993).
-    function test_ConvertToShares_ClampOverZeroNAV_ComposesWithOneWeiDenominator() public pure {
-        assertEq(RoycoTestMath.convertToShares(3, 0, 7), 3_000_021, "small dilution mint stays fair-priced");
-        assertEq(RoycoTestMath.convertToShares(1e12, 0, 7), 1_000_006_999_998_999_993, "large dilution mint clamps to 1000007*(1e12-1)");
+    /// Collapsed price arms and returns min(cap, fair): with S = 2e12 over denom = totalValue + 1 = 1 the
+    /// predicate ⌈(2e12 + 1)·1e6/(1e18 − 1e6)⌉ = 3 > 1 arms the clamp, cap = ⌊(2e12 + 1)·(1e18 − 1e6)/1e6⌋
+    /// = 1999999999998999999999999. A small mint stays fair (⌊(2e12 + 1)·10/1⌋ = 20000000000010 below the cap),
+    /// a large one (v = 1e13, fair = 2.000000000001e25) clamps to the cap exactly.
+    function test_ConvertToShares_CollapsedPriceArms_ReturnsMinOfCapAndFair() public pure {
+        assertEq(RoycoTestMath.convertToShares(10, 0, 2e12), 20_000_000_000_010, "an armed small mint below the cap still prices fairly");
+        assertEq(RoycoTestMath.convertToShares(1e13, 0, 2e12), 1_999_999_999_998_999_999_999_999, "an armed runaway mint clamps to the cap");
     }
 
     /// Bootstrap exemption: supply == 0 mints 1:1 no matter how large the value — a first mint dilutes
@@ -250,27 +251,33 @@ contract Test_RoycoTestMath is Test {
                             convertToValue
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// Empty-with-backing (supply == 0, totalValue > 0) values a tiny slice at 0: the redeemer's 5 shares price
-    /// against the virtual-share supply, ⌊(100 + 1)·5/(0 + 1e6)⌋ = ⌊505/1e6⌋ = 0.
-    function test_ConvertToValue_ZeroSupply_ReturnsZero() public pure {
-        assertEq(RoycoTestMath.convertToValue(5, 100, 0), 0, "floor((100+1)*5/(0+1e6)) = 0");
+    /// Empty-with-backing (supply == 0, totalValue > 0) values the redeemer's 5 shares against the virtual-share
+    /// supply, ⌊(100 + 1)·5/(0 + 1)⌋ = ⌊505/1⌋ = 505.
+    function test_ConvertToValue_ZeroSupplyWithBacking_ValuesAgainstVirtualShares() public pure {
+        assertEq(RoycoTestMath.convertToValue(5, 100, 0), 505, "floor((100+1)*5/(0+1)) = 505");
+    }
+
+    /// A genuinely fresh tranche (supply == 0, totalValue == 0) values shares 1:1, ⌊(0 + 1)·sh/(0 + 1)⌋ = sh,
+    /// the exact inverse of the fresh mint's 1:1 pricing.
+    function test_ConvertToValue_FreshTranche_InvertsOneToOne() public pure {
+        assertEq(RoycoTestMath.convertToValue(18, 0, 0), 18, "the fresh tranche inverts the 1:1 bootstrap mint");
     }
 
     /// Floor engaged (inputs rescaled to 1e18 magnitude so the virtual-shares offset is negligible and the
-    /// intended flooring — dust stays with remaining holders — is still exercised):
-    /// ⌊(7e18 + 1)·2e18/(3e18 + 1e6)⌋ = 4666666666665111111.
+    /// intended flooring, dust stays with remaining holders, is still exercised):
+    /// ⌊(7e18 + 1)·2e18/(3e18 + 1)⌋ = 4666666666666666665.
     function test_ConvertToValue_FloorRounding_FavorsRemainingHolders() public pure {
-        assertEq(RoycoTestMath.convertToValue(2e18, 7e18, 3e18), 4_666_666_666_665_111_111, "floor((7e18+1)*2e18/(3e18+1e6))");
+        assertEq(RoycoTestMath.convertToValue(2e18, 7e18, 3e18), 4_666_666_666_666_666_665, "floor((7e18+1)*2e18/(3e18+1))");
     }
 
     /// Full supply (shares == supply) no longer redeems the whole pot: the virtual-share sliver stays behind.
-    /// Rescaled to 1e18 magnitude, ⌊(7e18 + 1)·3e18/(3e18 + 1e6)⌋ = 6999999999997666667, leaving a 2333333-wei
+    /// Rescaled to 1e18 magnitude, ⌊(7e18 + 1)·3e18/(3e18 + 1)⌋ = 6999999999999999998, leaving a 2-wei
     /// virtual-dust sliver of the 7e18 pot with the remaining (virtual) holders.
     function test_ConvertToValue_FullSupply_Exact() public pure {
         assertEq(
             RoycoTestMath.convertToValue(3e18, 7e18, 3e18),
-            6_999_999_999_997_666_667,
-            "full exit leaves the virtual-share sliver: floor((7e18+1)*3e18/(3e18+1e6))"
+            6_999_999_999_999_999_998,
+            "full exit leaves the virtual-share sliver: floor((7e18+1)*3e18/(3e18+1))"
         );
     }
 
@@ -280,53 +287,53 @@ contract Test_RoycoTestMath is Test {
         assertEq(RoycoTestMath.convertToValue(3, 0, 7), 0, "floor((0+1)*3/(7+1e6)) = 0");
     }
 
-    /// Boundaries under the offset: a 1e18 share of a 1e30 tranche recovers ⌊(1e30 + 1)·1e18/(1e30 + 1e6)⌋ = 1e18 − 1
-    /// (one wei short — the virtual-share sliver), and the full max slice ⌊(1e30 + 1)·1e30/(1e30 + 1e6)⌋ =
-    /// 999999999999999999999999000001 sits just below par at scale.
+    /// Boundaries under the offset: a 1e18 share of a 1e30 tranche recovers ⌊(1e30 + 1)·1e18/(1e30 + 1)⌋ = 1e18
+    /// exactly (numerator and denominator offsets cancel), and the full max slice ⌊(1e30 + 1)·1e30/(1e30 + 1)⌋ =
+    /// 1e30 sits exactly at par at scale.
     function test_ConvertToValue_Boundaries() public pure {
-        assertEq(RoycoTestMath.convertToValue(1e18, 1e30, 1e30), 999_999_999_999_999_999, "floor((1e30+1)*1e18/(1e30+1e6)) = 1e18 - 1");
-        assertEq(RoycoTestMath.convertToValue(MAX_NAV, MAX_NAV, MAX_NAV), 999_999_999_999_999_999_999_999_000_001, "floor((1e30+1)*1e30/(1e30+1e6))");
+        assertEq(RoycoTestMath.convertToValue(1e18, 1e30, 1e30), 1e18, "floor((1e30+1)*1e18/(1e30+1)) = 1e18");
+        assertEq(RoycoTestMath.convertToValue(MAX_NAV, MAX_NAV, MAX_NAV), 1e30, "floor((1e30+1)*1e30/(1e30+1))");
     }
 
     /*//////////////////////////////////////////////////////////////////////////
                     computeSTFeeAndLiquidityPremiumSharesToMint
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// Near-clean division: the base ratios divide evenly (30e18, 20e18) but each leg is a convertToShares mint over
-    /// the virtual-shares offset, so each is lifted by a small floored residual.
+    /// Near-clean division: the base ratios divide evenly (30e18, 20e18) and each leg is a convertToShares mint over
+    /// the virtual-shares offset, exact here because retained equals the pre-sync supply.
     ///   retained      = 1050e18 − 30e18 − 20e18 = 1000e18
-    ///   premiumShares = ⌊(1000e18 + 1e6)·30e18/(1000e18 + 1)⌋ = 30000000000000029999
-    ///   feeShares     = ⌊(1000e18 + 1e6)·20e18/(1000e18 + 1)⌋ = 20000000000000019999
-    ///   supplyAfter   = 1000e18 + premiumShares + feeShares  = 1050000000000000049998
+    ///   premiumShares = ⌊(1000e18 + 1)·30e18/(1000e18 + 1)⌋ = 30e18
+    ///   feeShares     = ⌊(1000e18 + 1)·20e18/(1000e18 + 1)⌋ = 20e18
+    ///   supplyAfter   = 1000e18 + premiumShares + feeShares  = 1050e18
     function test_ComputeSTFeeAndLiquidityPremiumSharesToMint_CleanDivision() public pure {
         (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) =
             RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(1050e18, 30e18, 20e18, 1000e18);
-        assertEq(premiumShares, 30_000_000_000_000_029_999, "floor((1000e18+1e6)*30e18/(1000e18+1))");
-        assertEq(feeShares, 20_000_000_000_000_019_999, "floor((1000e18+1e6)*20e18/(1000e18+1))");
-        assertEq(supplyAfter, 1_050_000_000_000_000_049_998, "1000e18 + premiumShares + feeShares");
+        assertEq(premiumShares, 30e18, "floor((1000e18+1)*30e18/(1000e18+1))");
+        assertEq(feeShares, 20e18, "floor((1000e18+1)*20e18/(1000e18+1))");
+        assertEq(supplyAfter, 1050e18, "1000e18 + premiumShares + feeShares");
     }
 
-    /// Floor engaged (inputs rescaled to 1e18 magnitude so the virtual-shares offset no longer swamps the ratio;
+    /// Floor engaged (inputs rescaled to 1e18 magnitude so the virtual-shares offset no longer swamps the ratio,
     /// each leg floors toward the pre-existing ST holders):
     ///   retained      = 10e18 − 3e18 − 2e18 = 5e18
-    ///   premiumShares = ⌊(3e18 + 1e6)·3e18/(5e18 + 1)⌋ = 1800000000000599999
-    ///   feeShares     = ⌊(3e18 + 1e6)·2e18/(5e18 + 1)⌋ = 1200000000000399999
-    ///   supplyAfter   = 3e18 + premiumShares + feeShares = 6000000000000999998
+    ///   premiumShares = ⌊(3e18 + 1)·3e18/(5e18 + 1)⌋ = 1800000000000000000
+    ///   feeShares     = ⌊(3e18 + 1)·2e18/(5e18 + 1)⌋ = 1200000000000000000
+    ///   supplyAfter   = 3e18 + premiumShares + feeShares = 6000000000000000000
     function test_ComputeSTFeeAndLiquidityPremiumSharesToMint_FloorRounding_FavorsPreExistingST() public pure {
         (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) = RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(10e18, 3e18, 2e18, 3e18);
-        assertEq(premiumShares, 1_800_000_000_000_599_999, "floor((3e18+1e6)*3e18/(5e18+1))");
-        assertEq(feeShares, 1_200_000_000_000_399_999, "floor((3e18+1e6)*2e18/(5e18+1))");
-        assertEq(supplyAfter, 6_000_000_000_000_999_998, "3e18 + premiumShares + feeShares");
+        assertEq(premiumShares, 1_800_000_000_000_000_000, "floor((3e18+1)*3e18/(5e18+1))");
+        assertEq(feeShares, 1_200_000_000_000_000_000, "floor((3e18+1)*2e18/(5e18+1))");
+        assertEq(supplyAfter, 6_000_000_000_000_000_000, "3e18 + premiumShares + feeShares");
     }
 
     /// A degenerate mint consuming all of stEffectiveNAV routes through convertToShares's 1-wei denominator
-    /// (retained + VIRTUAL_VALUE = 0 + 1) at effective supply 100 + 1e6:
-    ///   retained = 10 − 7 − 3 = 0 ⇒ premiumShares = ⌊(100 + 1e6)·7/1⌋ = 7000700, feeShares = ⌊(100 + 1e6)·3/1⌋ = 3000300.
+    /// (retained + VIRTUAL_VALUE = 0 + 1) at effective supply 100 + 1:
+    ///   retained = 10 − 7 − 3 = 0 ⇒ premiumShares = ⌊(100 + 1)·7/1⌋ = 707, feeShares = ⌊(100 + 1)·3/1⌋ = 303.
     function test_ComputeSTFeeAndLiquidityPremiumSharesToMint_RetainedZero_OneWeiDenominator() public pure {
         (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) = RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(10, 7, 3, 100);
-        assertEq(premiumShares, 7_000_700, "floor((100+1e6)*7/1) = 7000700");
-        assertEq(feeShares, 3_000_300, "floor((100+1e6)*3/1) = 3000300");
-        assertEq(supplyAfter, 10_001_100, "100 + 7000700 + 3000300");
+        assertEq(premiumShares, 707, "floor((100+1)*7/1) = 707");
+        assertEq(feeShares, 303, "floor((100+1)*3/1) = 303");
+        assertEq(supplyAfter, 1110, "100 + 707 + 303");
     }
 
     /// Pre-sync supply 0 mints 1:1 ONLY through convertToShares' genuinely-fresh branch (supply == 0 AND
@@ -349,23 +356,23 @@ contract Test_RoycoTestMath is Test {
 
     /// Max realistic (clamp inert): retained = 1e30 − 5e29 = 5e29, a 100%-of-retained premium nearly doubles the
     /// supply, lifted by the virtual-shares residual:
-    ///   premiumShares = ⌊(1e30 + 1e6)·5e29/(5e29 + 1)⌋ = 1000000000000000000000000999997
-    ///   supplyAfter   = 1e30 + premiumShares                = 2000000000000000000000000999997
+    ///   premiumShares = ⌊(1e30 + 1)·5e29/(5e29 + 1)⌋ = 999999999999999999999999999999
+    ///   supplyAfter   = 1e30 + premiumShares                = 1999999999999999999999999999999
     function test_ComputeSTFeeAndLiquidityPremiumSharesToMint_MaxRealistic() public pure {
         (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) = RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(1e30, 5e29, 0, 1e30);
-        assertEq(premiumShares, 1_000_000_000_000_000_000_000_000_999_997, "floor((1e30+1e6)*5e29/(5e29+1))");
+        assertEq(premiumShares, 999_999_999_999_999_999_999_999_999_999, "floor((1e30+1)*5e29/(5e29+1))");
         assertEq(feeShares, 0, "no fee");
-        assertEq(supplyAfter, 2_000_000_000_000_000_000_000_000_999_997, "1e30 + premiumShares");
+        assertEq(supplyAfter, 1_999_999_999_999_999_999_999_999_999_999, "1e30 + premiumShares");
     }
 
     /// Degenerate mint under the clamp: retained = 0 pins the 1-wei denominator, both legs bind and each clamps to
-    /// cap = ⌊(1e18 + 1e6)·(1e18 − 1e6)/1e6⌋ = 1e30 − 1e6 — the per-mint residual guarantee lifted by the virtual
-    /// shares.
+    /// cap = ⌊(1e18 + 1)·(1e18 − 1e6)/1e6⌋ = 1e30 − 1e18 + 1e12 − 1, the per-mint residual guarantee lifted by the
+    /// virtual shares.
     function test_ComputeSTFeeAndLiquidityPremiumSharesToMint_RetainedZero_ClampsBothLegsToCap() public pure {
         (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) = RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(10e18, 4e18, 6e18, 1e18);
-        assertEq(premiumShares, 1e30 - 1e6, "premium leg clamps to the cap = (1e18+1e6)*(1e18-1e6)/1e6");
-        assertEq(feeShares, 1e30 - 1e6, "fee leg clamps to the same cap");
-        assertEq(supplyAfter, 1e18 + 2 * (1e30 - 1e6), "supply identity across two capped mints");
+        assertEq(premiumShares, 1e30 - 1e18 + 1e12 - 1, "premium leg clamps to the cap = (1e18+1)*(1e18-1e6)/1e6");
+        assertEq(feeShares, 1e30 - 1e18 + 1e12 - 1, "fee leg clamps to the same cap");
+        assertEq(supplyAfter, 1e18 + 2 * (1e30 - 1e18 + 1e12 - 1), "supply identity across two capped mints");
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -387,17 +394,17 @@ contract Test_RoycoTestMath is Test {
     }
 
     /// Full shares (shares == totalShares) is NO LONGER the identity under the virtual-shares offset: each field
-    /// leaves a virtual-dust sliver behind. With shares == totalShares == 1e18 (effective supply 1e18 + 1e6),
-    /// scaled = ⌊field·1e18/(1e18 + 1e6)⌋ = field − field/1e12, so each field drops exactly field/1e12 wei
-    /// (1e6, 2e6, 3e6, 4e6 respectively).
+    /// leaves a virtual-dust sliver behind. With shares == totalShares == 1e18 (effective supply 1e18 + 1),
+    /// scaled = ⌊field·1e18/(1e18 + 1)⌋, so each asset field drops a few wei
+    /// (1, 2, 3 respectively) and the NAV leg carries its own numerator offset.
     function test_ScaleClaims_FullShares_Identity() public pure {
         RoycoTestMath.Claims memory total = RoycoTestMath.Claims({ collateralAssets: 1e18, lptAssets: 2e18, stShares: 3e18, nav: 4e18 });
         RoycoTestMath.Claims memory scaled = RoycoTestMath.scaleClaims(total, 1e18, 1e18);
-        assertEq(scaled.collateralAssets, 999_999_999_999_000_000, "floor(1e18*1e18/(1e18+1e6)) = 1e18 - 1e6");
-        assertEq(scaled.lptAssets, 1_999_999_999_998_000_000, "floor(2e18*1e18/(1e18+1e6)) = 2e18 - 2e6");
-        assertEq(scaled.stShares, 2_999_999_999_997_000_000, "floor(3e18*1e18/(1e18+1e6)) = 3e18 - 3e6");
-        // The NAV leg carries the VIRTUAL_VALUE numerator offset (the convertToValue shape): floor((4e18+1)*1e18/(1e18+1e6))
-        assertEq(scaled.nav, 3_999_999_999_996_000_001, "floor((4e18+1)*1e18/(1e18+1e6)) = 4e18 - 4e6 + 1");
+        assertEq(scaled.collateralAssets, 999_999_999_999_999_999, "floor(1e18*1e18/(1e18+1)) = 1e18 - 1");
+        assertEq(scaled.lptAssets, 1_999_999_999_999_999_998, "floor(2e18*1e18/(1e18+1)) = 2e18 - 2");
+        assertEq(scaled.stShares, 2_999_999_999_999_999_997, "floor(3e18*1e18/(1e18+1)) = 3e18 - 3");
+        // The NAV leg carries the VIRTUAL_VALUE numerator offset (the convertToValue shape): floor((4e18+1)*1e18/(1e18+1))
+        assertEq(scaled.nav, 3_999_999_999_999_999_997, "floor((4e18+1)*1e18/(1e18+1)) = 4e18 - 3");
     }
 
     /// Zero shares scale every field to zero.
@@ -411,15 +418,15 @@ contract Test_RoycoTestMath is Test {
     }
 
     /// Max realistic: a lone 1-wei slice of a 1e30 tranche now floors to 0 (swallowed by the virtual-share
-    /// sliver), so the minimal slice that still recovers 1 wei per field is 2 shares:
-    /// ⌊1e30·2/(1e30 + 1e6)⌋ = 1 (the offset raises the minimal value-recovering slice from 1 to 2).
+    /// sliver), so the minimal slice that still recovers 1 wei per asset field is 2 shares:
+    /// ⌊1e30·2/(1e30 + 1)⌋ = 1. The NAV leg carries the VIRTUAL_VALUE numerator offset, so ⌊(1e30 + 1)·2/(1e30 + 1)⌋ = 2.
     function test_ScaleClaims_MaxRealistic_OneWeiSlice() public pure {
         RoycoTestMath.Claims memory total = RoycoTestMath.Claims({ collateralAssets: 1e30, lptAssets: 1e30, stShares: 1e30, nav: 1e30 });
         RoycoTestMath.Claims memory scaled = RoycoTestMath.scaleClaims(total, 2, 1e30);
-        assertEq(scaled.collateralAssets, 1, "floor(1e30*2/(1e30+1e6)) = 1");
-        assertEq(scaled.lptAssets, 1, "floor(1e30*2/(1e30+1e6)) = 1");
-        assertEq(scaled.stShares, 1, "floor(1e30*2/(1e30+1e6)) = 1");
-        assertEq(scaled.nav, 1, "floor(1e30*2/(1e30+1e6)) = 1");
+        assertEq(scaled.collateralAssets, 1, "floor(1e30*2/(1e30+1)) = 1");
+        assertEq(scaled.lptAssets, 1, "floor(1e30*2/(1e30+1)) = 1");
+        assertEq(scaled.stShares, 1, "floor(1e30*2/(1e30+1)) = 1");
+        assertEq(scaled.nav, 2, "floor((1e30+1)*2/(1e30+1)) = 2");
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -432,21 +439,21 @@ contract Test_RoycoTestMath is Test {
     }
 
     /// Idle valuation over the offset: the idle leg is a convertToValue mint priced against effective supply
-    /// 1000e18 + 1e6, so 100e18 + ⌊(2000e18 + 1)·10e18/(1000e18 + 1e6)⌋ = 100e18 + 19999999999999980000
-    /// = 119999999999999980000 (just under the pre-offset 120e18).
+    /// 1000e18 + 1, so 100e18 + ⌊(2000e18 + 1)·10e18/(1000e18 + 1)⌋ = 100e18 + 19999999999999999999
+    /// = 119999999999999999999 (just under the pre-offset 120e18).
     function test_GetLiquidityProviderTrancheEffectiveNAV_CleanIdleValuation() public pure {
         assertEq(
             RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(100e18, 10e18, 2000e18, 1000e18),
-            119_999_999_999_999_980_000,
-            "lptRawNAV + floor((2000e18+1)*10e18/(1000e18+1e6))"
+            119_999_999_999_999_999_999,
+            "lptRawNAV + floor((2000e18+1)*10e18/(1000e18+1))"
         );
     }
 
     /// Floor on the idle leg (inputs rescaled to 1e18 magnitude so the offset is negligible and the floor still
-    /// favors the pool leg): 5e18 + ⌊(7e18 + 1)·3e18/(2e18 + 1e6)⌋ = 5e18 + 10499999999994750001
-    /// = 15499999999994750001.
+    /// favors the pool leg): 5e18 + ⌊(7e18 + 1)·3e18/(2e18 + 1)⌋ = 5e18 + 10499999999999999996
+    /// = 15499999999999999996.
     function test_GetLiquidityProviderTrancheEffectiveNAV_FloorRounding_FavorsPoolLeg() public pure {
-        assertEq(RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(5e18, 3e18, 7e18, 2e18), 15_499_999_999_994_750_001, "5e18 + floor((7e18+1)*3e18/(2e18+1e6))");
+        assertEq(RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(5e18, 3e18, 7e18, 2e18), 15_499_999_999_999_999_996, "5e18 + floor((7e18+1)*3e18/(2e18+1))");
     }
 
     /// A genuinely fresh ST tranche (stSupply == 0 AND stEffectiveNAV == 0) values the idle leg at 0, so effective
@@ -457,9 +464,9 @@ contract Test_RoycoTestMath is Test {
     }
 
     /// Zero pool leg with staged premium only (inputs rescaled to 1e18 magnitude so the offset is negligible):
-    /// 0 + ⌊(7e18 + 1)·3e18/(2e18 + 1e6)⌋ = 10499999999994750001.
+    /// 0 + ⌊(7e18 + 1)·3e18/(2e18 + 1)⌋ = 10499999999999999996.
     function test_GetLiquidityProviderTrancheEffectiveNAV_ZeroLptRaw_IdleLegOnly() public pure {
-        assertEq(RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(0, 3e18, 7e18, 2e18), 10_499_999_999_994_750_001, "floor((7e18+1)*3e18/(2e18+1e6))");
+        assertEq(RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(0, 3e18, 7e18, 2e18), 10_499_999_999_999_999_996, "floor((7e18+1)*3e18/(2e18+1))");
     }
 
     /*//////////////////////////////////////////////////////////////////////////

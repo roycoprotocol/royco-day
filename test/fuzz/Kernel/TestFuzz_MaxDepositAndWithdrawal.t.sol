@@ -7,6 +7,7 @@ import { WAD } from "../../../src/libraries/Constants.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title TestFuzz_MaxDepositAndWithdrawal_Kernel
@@ -18,7 +19,7 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  *      single 1 wei collateral NAV dust tolerance. The senior-deposit max is a NAV amount and stays exact integer
  *      algebra, but the two redemption maxes are SHARE counts: maxRedeem converts its NAV bound to shares through
  *      the virtual-shares offset primitive (supply + VIRTUAL_SHARES over claimNAV + VIRTUAL_VALUE), so shares and
- *      NAV no longer coincide. Each redemption gate binds on the WITHDRAWN NAV (floor(claimNAV x shares / (supply + 1e6))),
+ *      NAV no longer coincide. Each redemption gate binds on the WITHDRAWN NAV (floor(claimNAV x shares / (supply + 1))),
  *      so the tests invert that floor to the largest gate-respecting share count and check one share past it reverts:
  *      - senior deposit: the single dustTolerance = 1 wei of NAV slack on each leg
  *      - junior redemption: the reported share max sits at or below the inverted coverage boundary sStar
@@ -88,7 +89,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // One wei past the boundary trips whichever gate binds: coverage is checked before liquidity, so the
         // coverage error surfaces whenever covBound <= liqBound, otherwise only liquidity is violated
         bytes4 expectedError =
-            covBound <= liqBound ? IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector : IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
+            covBound <= liqBound ? IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector : IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
         vm.expectRevert(expectedError);
         seniorTranche.previewDeposit(toTrancheUnits(uint256(1)));
         stJtVault.mintShares(ST_PROVIDER, 1);
@@ -134,16 +135,16 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // boundary gives the largest redeemable share count sStar; one share past it withdraws boundary + 1 NAV
         // and breaches coverage
         uint256 boundaryNAV = (4 * jt - st) / 4;
-        uint256 sStar = ((boundaryNAV + 1) * (jt + 1e6) - 1) / jt;
+        uint256 sStar = ((boundaryNAV + 1) * (jt + 1) - 1) / jt;
         // The dust-held-back advisory max must never exceed the true coverage-bounded share max
         assertLe(reportedMax, sStar, "the reported max must not advertise past the true coverage-bounded share max");
 
         // One share past the true max makes the withdrawn NAV exceed floor((4jt - st)/4) and violates the coverage
         // requirement, from the preview and the execution alike (both from the untouched pre-redemption state, the
         // reverting calls mutate nothing)
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         juniorTranche.previewRedeem(sStar + 1);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         vm.prank(JT_PROVIDER);
         juniorTranche.redeem(sStar + 1, JT_PROVIDER, JT_PROVIDER);
 
@@ -203,15 +204,15 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // withdrawn <= depth - requiredFloor. Inverting the floor at that boundary gives the largest redeemable share
         // count sStar; one share past it drops the pool below the floor
         uint256 boundaryNAV = depth - requiredFloor;
-        uint256 sStar = ((boundaryNAV + 1) * (supply + 1e6) - 1) / depth;
+        uint256 sStar = ((boundaryNAV + 1) * (supply + 1) - 1) / depth;
         // The dust-held-back advisory max must never exceed the true liquidity-bounded share max
         assertLe(reportedMax, sStar, "the reported max must not advertise past the true liquidity-bounded share max");
 
         // One share past the true max drops the retained depth below the required floor and violates the liquidity
         // requirement, from the preview and the execution alike (both from the untouched pre-redemption state)
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.previewRedeem(sStar + 1);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         vm.prank(LPT_PROVIDER);
         liquidityProviderTranche.redeem(sStar + 1, LPT_PROVIDER, LPT_PROVIDER);
 

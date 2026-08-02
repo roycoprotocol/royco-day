@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
+import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
@@ -8,8 +10,9 @@ import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
-import { AssetClaims, MarketState } from "../../../src/libraries/Types.sol";
+import { AssetClaims, DispatchMode, MarketState, Operation } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, toUint256 } from "../../../src/libraries/Units.sol";
+import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
 import { MockBalancerVault } from "../../mocks/MockBalancerVault.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
@@ -123,13 +126,23 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertGt(maxShares, 0, "the fixture must leave multi-asset redemption capacity");
 
         // The advertised maximum executes even though the redemption's own sync could have deployed the pile pre-fix
+        vm.recordLogs();
         vm.prank(LPT_PROVIDER);
         liquidityProviderTranche.redeemMultiAsset(maxShares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
+
+        // The reinvestment tail fires exactly once for the settled operation, never per intermediate leg
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 reinvestCount;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter == address(kernel) && logs[i].topics[0] == IRoycoDayKernel.LiquidityPremiumReinvested.selector) reinvestCount++;
+        }
+        assertEq(reinvestCount, 1, "the reinvestment tail must emit LiquidityPremiumReinvested exactly once for the operation");
+
         _sync();
         assertLe(_liquidityUtilization(), WAD, "the executed maximum must respect the liquidity requirement");
 
-        // The post-op deployed the entire remaining pile through the open gate once the redemption settled
-        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the post-op must deploy the whole pile through the open gate");
+        // The tail deployed the entire remaining pile through the open gate once the redemption settled
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the reinvestment tail must deploy the whole pile through the open gate");
     }
 
     /// @notice The reported maximum is a true maximum at the liquidity gate: it executes, and a hair more reverts
@@ -143,7 +156,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         uint256 breachShares =
             maxShares + Math.mulDiv(2e12 + 1, liquidityProviderTranche.totalSupply(), toUint256(accountant.getState().lastLPTRawNAV), Math.Rounding.Ceil) + 2;
         vm.prank(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.redeemMultiAsset(breachShares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
 
         // The advertised maximum itself must clear the gate and leave the market at or below full utilization
@@ -162,7 +175,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         // In-kind hands the pool tokens away without touching the senior tranche, so only the requirement's
         // supply side shrinks, at the wedge size it must breach the gate
         vm.prank(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.redeem(wedgeShares, LPT_PROVIDER, LPT_PROVIDER);
 
         // The same size clears multi-asset because the requirement shrinks alongside the withdrawal
@@ -175,7 +188,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
     /// @notice The multi-asset bound weakly dominates the in-kind bound in every state, strictly once the
     ///         idle liquidity premium pile adds senior-share relief
     function test_MaxRedeemMultiAsset_WeaklyDominatesInKindAcrossStates() public {
-        assertGe(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), liquidityProviderTranche.maxRedeem(LPT_PROVIDER), "dominance must hold at the seeded state");
+        assertGe(
+            liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER),
+            liquidityProviderTranche.maxRedeem(LPT_PROVIDER),
+            "dominance must hold at the seeded state"
+        );
 
         // A staged un-reinvested premium adds relief on top of the pool's senior leg: dominance turns strict
         _accumulateIdleLiquidityPremiumSeniorShares();
@@ -189,7 +206,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         applyLPTPnL(-3000);
         _sync();
         assertGt(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), 0, "the drawdown fixture must keep in-kind capacity open");
-        assertGe(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), liquidityProviderTranche.maxRedeem(LPT_PROVIDER), "dominance must hold through a drawdown");
+        assertGe(
+            liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER),
+            liquidityProviderTranche.maxRedeem(LPT_PROVIDER),
+            "dominance must hold through a drawdown"
+        );
     }
 
     /// @notice With no senior-share value in the removal and no idle premium, the two maxima coincide exactly:
@@ -224,7 +245,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         // Sweep the acquisition cushion so the pool holds every circulating senior share. Under the virtual-shares
         // offset a wei-scale ST redemption values to zero NAV (convertToValue(1, supply, value) floors to 0 once
         // supply carries the +VIRTUAL_SHARES buffer), and the accountant rejects a zero-NAV ST redemption with
-        // INVALID_POST_OP_STATE(ST_REDEEM). So the dust residue cannot be burned via redeem; it is swept by transfer
+        // INVALID_POST_OP_STATE(ST_REDEMPTION). So the dust residue cannot be burned via redeem; it is swept by transfer
         // into the pool instead, which keeps the invariant "every circulating senior share sits in the pool" exact.
         uint256 residue = seniorTranche.balanceOf(address(this));
         if (residue != 0) seniorTranche.transfer(address(balancerVault), residue);
@@ -245,7 +266,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         // The whole balance breaches: the removal cannot reach the reserve's senior sliver, so senior backing
         // survives the exit while the market-making depth does not
         vm.prank(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.redeemMultiAsset(balance, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
 
         // The reported maximum itself executes, leaving the market at or below full utilization
@@ -269,7 +290,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
         uint256 balance = liquidityProviderTranche.balanceOf(LPT_PROVIDER);
         assertEq(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), balance, "a waived requirement must report the full balance");
-        assertEq(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), liquidityProviderTranche.maxRedeem(LPT_PROVIDER), "both maxima must agree under the waiver");
+        assertEq(
+            liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER),
+            liquidityProviderTranche.maxRedeem(LPT_PROVIDER),
+            "both maxima must agree under the waiver"
+        );
 
         vm.prank(LPT_PROVIDER);
         liquidityProviderTranche.redeemMultiAsset(balance, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
@@ -300,7 +325,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
         // A full exit past the bounded maximum reverts on the enforced liquidity gate
         vm.prank(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.redeemMultiAsset(balance, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
 
         // Redeeming exactly the advertised maximum succeeds and leaves the liquidity floor at or below 100%
@@ -349,7 +374,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertEq(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), 0, "the in-kind maximum must mirror the zero");
         vm.prank(UNPAUSER);
         kernel.unpause();
-        assertGe(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), liquidityProviderTranche.maxRedeem(LPT_PROVIDER), "unpausing must restore the dominant maximum");
+        assertGe(
+            liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER),
+            liquidityProviderTranche.maxRedeem(LPT_PROVIDER),
+            "unpausing must restore the dominant maximum"
+        );
     }
 
     /// @notice A market with no liquidity provider tranche deposits reports a zero maximum instead of reverting on the empty venue preview
@@ -357,10 +386,9 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         // Redeploy without seeding: the kernel holds no LPT assets, so the bound must short-circuit the venue preview
         _deployMarket(cellA(), defaultParams());
 
+        // The internal claim and withdrawable NAV getter (lptMaxWithdrawableMultiAsset) was removed from the kernel, so the
+        // zero-share public result is now the observable contract for an empty liquidity provider tranche
         assertEq(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), 0, "an empty liquidity provider tranche must report a zero multi-asset maximum");
-        (NAV_UNIT claimOnLPTNAV, NAV_UNIT lptMaxWithdrawableNAV,) = kernel.lptMaxWithdrawableMultiAsset(LPT_PROVIDER);
-        assertEq(toUint256(claimOnLPTNAV), 0, "an empty liquidity provider tranche must carry no LPT claims");
-        assertEq(toUint256(lptMaxWithdrawableNAV), 0, "an empty liquidity provider tranche must report zero withdrawable NAV");
     }
 
     /// @notice The boundary holds without the dust tolerance: the bound's safety must rest on its own floor
@@ -419,11 +447,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertLe(_liquidityUtilization(), WAD, "the executed maximum must respect the liquidity requirement under the conservative mark");
     }
 
-    /// @notice The wiped-mark corner: with the LPT mark at zero, an un-reinvested premium pile, and the liquidity
-    ///         requirement waived, a multi-asset redemption still executes through the accountant's zero-delta
-    ///         carve-out (senior redemption NAV flows in-flow) while the in-kind path cannot, and both maxima
-    ///         conservatively report zero rather than advertising the carve-out
-    function test_MaxRedeemMultiAsset_WipedMarkWithPremium_BothMaximaReportConservativeZero() public {
+    /// @notice The wiped-mark corner fails loud at the sync: a zero pool mark against a live BPT supply can never be
+    ///         committed, the venue oracle rejects the bad price outright (INVALID_PRICE), so the market cannot even
+    ///         reach a state where the maxima would degrade to a conservative zero, premium pile and waived requirement
+    ///         notwithstanding
+    function test_MaxRedeemMultiAsset_WipedMarkWithPremium_SyncRevertsInvalidPrice() public {
         // Waive only the liquidity requirement: the zero-liquidity preset also zeroes the LPT yield share,
         // which would starve the premium pile this corner needs
         MarketParamsConfig memory params = defaultParams();
@@ -434,15 +462,13 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         _sync();
         _accumulateIdleLiquidityPremiumSeniorShares();
 
-        // Wipe the LPT mark to exactly zero while the premium pile persists
+        // Wipe the LPT mark to exactly zero while the premium pile persists: the sync that would commit the zero mark
+        // fails loud instead, the venue oracle rejects a zero price against a live BPT supply
         bptOracle.setTVL(0);
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
-        _sync();
-        require(kernel.getState().lptOwnedSeniorTrancheShares != 0, "setup: expected the premium pile to persist through the wipe");
-
-        // Both maxima report the conservative zero: the tranche has no claims at the wiped mark
-        assertEq(liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER), 0, "the wiped mark must zero the multi-asset maximum");
-        assertEq(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), 0, "the in-kind maximum must mirror the zero");
+        vm.prank(SYNC_OPERATOR);
+        vm.expectRevert(IRoycoDayKernel.INVALID_PRICE.selector);
+        kernel.syncTrancheAccounting();
     }
 
     // =============================
@@ -473,6 +499,32 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         );
         assertEq(quoteOut, previewQuote, "the returned quote must match the preview");
         assertEq(keccak256(abi.encode(claims)), keccak256(abi.encode(previewClaims)), "the returned claims must match the preview leg for leg");
+    }
+
+    /// @notice Preview parity holds in the wedge past the in-kind maximum, where the LPT leg records a transient
+    ///         liquidity violation only the ST leg's settled state can heal: the preview must judge that healing
+    ///         leg at the same settled post-remove venue mark execution prices live, so it quotes instead of reverting
+    /// @dev The regression cell for the preview's cached venue mark: the removal leg settles in preview and
+    ///      execution alike (the kernel custodies the BPT), so the mark the preview caches must be read off the
+    ///      settled post-remove venue. A zeroed or stale mark deflates the healing leg's LPT raw NAV, the recorded
+    ///      violation never clears, and the preview reverts LIQUIDITY_REQUIREMENT_VIOLATED on a size execution accepts
+    function test_LPTRedeemMultiAsset_WedgePreviewParity_HealedViolationQuotesLikeExecution() public {
+        uint256 wedgeShares = liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER);
+        // The wedge premise: this size breaches the in-kind gate outright, so the multi-asset flow's LPT leg
+        // must record a pending violation instead and ride on its ST leg's heal
+        assertGt(wedgeShares, liquidityProviderTranche.maxRedeem(LPT_PROVIDER), "the wedge window between the two bounds must be real");
+        vm.prank(LPT_PROVIDER);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        liquidityProviderTranche.redeem(wedgeShares, LPT_PROVIDER, LPT_PROVIDER);
+
+        // The preview must clear the healed gate and quote the wedge size instead of reverting on it
+        (AssetClaims memory previewClaims, uint256 previewQuote) = liquidityProviderTranche.previewRedeemMultiAsset(wedgeShares);
+
+        vm.prank(LPT_PROVIDER);
+        (AssetClaims memory claims, uint256 quoteOut) = liquidityProviderTranche.redeemMultiAsset(wedgeShares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
+
+        assertEq(quoteOut, previewQuote, "the wedge quote leg must land exactly as previewed");
+        assertEq(keccak256(abi.encode(claims)), keccak256(abi.encode(previewClaims)), "the wedge claims must match the preview leg for leg");
     }
 
     /// @notice Preview equals execution on the deposit side: the venue mints exactly the previewed pool tokens
@@ -510,7 +562,6 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         liquidityProviderTranche.previewRedeemMultiAsset(liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 3);
         liquidityProviderTranche.previewDepositMultiAsset(50e18, 50 * QUOTE_UNIT);
         liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER);
-        kernel.lptMaxWithdrawableMultiAsset(LPT_PROVIDER);
         assertEq(_marketDigest(LPT_PROVIDER), digestBefore, "a preview left a trace on the market");
     }
 
@@ -525,15 +576,16 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
     /// @notice Zero and dust share previews return zero outputs without reverting: a slice too small to carry
     ///         any LPT assets never reaches the venue
-    function test_MultiAssetPreviews_ZeroAndDustShares_ReturnZeroOutputsWithoutReverting() public {
-        (AssetClaims memory zeroClaims, uint256 zeroQuote) = liquidityProviderTranche.previewRedeemMultiAsset(0);
-        assertEq(zeroQuote, 0, "a zero-share preview must carry no quote leg");
-        assertEq(toUint256(zeroClaims.nav), 0, "a zero-share preview must carry no claim value");
+    function test_MultiAssetPreviews_ZeroAndDustShares_MirrorExecution() public {
+        // Previews run the real redemption flow through the execute-and-revert seam, so a zero-share preview reverts at
+        // the same non-zero-shares guard execution hits, rather than returning zero outputs
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
+        liquidityProviderTranche.previewRedeemMultiAsset(0);
 
-        // One share-wei of a roughly fifteen-thousand-NAV pool floors every constituent leg to zero
-        (AssetClaims memory dustClaims, uint256 dustQuote) = liquidityProviderTranche.previewRedeemMultiAsset(1);
-        assertEq(dustQuote, 0, "a dust preview must floor the quote leg to zero");
-        assertEq(toUint256(dustClaims.nav), 0, "a dust preview must floor the claim value to zero");
+        // One share-wei of a roughly fifteen-thousand-NAV pool floors every constituent leg to zero, so the LPT leg moves
+        // no raw NAV and the strict op-shape guard fires, the preview reverting exactly as execution does
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LPT_REDEMPTION));
+        liquidityProviderTranche.previewRedeemMultiAsset(1);
     }
 
     /// @notice A dust ST leg that floors to zero senior shares reverts the multi-asset preview and the execution identically
@@ -550,7 +602,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         uint256 quoteAssets = 100 * QUOTE_UNIT;
 
         // The preview bubbles the zero-share senior mint's revert, quoting nothing for a deposit that deterministically reverts
-        vm.expectRevert(IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.previewDepositMultiAsset(dustSTLeg, quoteAssets);
 
         // The execution reverts on the same zero-share senior mint
@@ -559,7 +611,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         vm.startPrank(LPT_PROVIDER);
         stJtVault.approve(address(liquidityProviderTranche), dustSTLeg);
         quoteToken.approve(address(liquidityProviderTranche), quoteAssets);
-        vm.expectRevert(IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.depositMultiAsset(dustSTLeg, quoteAssets, 0, LPT_PROVIDER);
         vm.stopPrank();
 
@@ -630,11 +682,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
     /// @notice The zero-leg guard fires from the preview exactly as from the execution, both legs empty quotes nothing
     function test_RevertIf_DepositMultiAssetBothLegsZero_PreviewAndExecution() public {
-        vm.expectRevert(IRoycoDayKernel.MUST_DEPOSIT_NON_ZERO_ASSETS.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.previewDepositMultiAsset(0, 0);
 
         vm.prank(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayKernel.MUST_DEPOSIT_NON_ZERO_ASSETS.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.depositMultiAsset(0, 0, 0, LPT_PROVIDER);
     }
 
@@ -653,14 +705,125 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
         // The preview bubbles the post-op liquidity gate for the doomed size, leaving every ledger untouched
         bytes32 digestBefore = _marketDigest(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.previewRedeemMultiAsset(breachShares);
         assertEq(_marketDigest(LPT_PROVIDER), digestBefore, "the gate-reverted preview left a trace on the market");
 
         // The same size executes into the same post-op liquidity gate
         vm.prank(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.redeemMultiAsset(breachShares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
+    }
+
+    /// @notice Execution burn-exactness at the supply layer: the LPT supply falls by exactly the redeemed shares
+    ///         and the ST supply falls by exactly the ST leg's single burn (the removal's withdrawn senior shares
+    ///         plus the redeemer's pro-rata idle premium slice), while the tail's redeployment of the remaining
+    ///         pile is a transfer that never touches the ST supply and strands no senior shares in the kernel
+    /// @dev The tripwire for a skipped burn in execution, the caller-keyed design's failure mode: inkindRedeem
+    ///      burns only for a nonzero caller (RedemptionLogic.sol), so a regression that starves an execution's
+    ///      burn of its caller leaves both supplies standing and fails these deltas on the first assert
+    function test_RedeemMultiAsset_Execution_BurnExactness_SupplyDeltas() public {
+        // Stage the idle premium pile, then disarm the venue slippage so the settled tail's gate is open
+        _accumulateIdleLiquidityPremiumSeniorShares();
+        setVenueSlippageMode(false);
+
+        uint256 shares = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 4;
+        uint256 lptSupplyBefore = liquidityProviderTranche.totalSupply();
+        uint256 stSupplyBefore = seniorTranche.totalSupply();
+        uint256 idleBefore = kernel.getState().lptOwnedSeniorTrancheShares;
+        uint256 poolSeniorBefore = seniorTranche.balanceOf(address(balancerVault));
+
+        // Spec-derived legs of the ST burn: the LPT leg's claim round-trips the venue mark
+        // (convertValueToLPTAssets of convertLPTAssetsToValue) and scales by shares over the effective supply
+        // (supply plus the one virtual share, floor, AssetLedgerLogic._scaleAssetClaims), the proportional
+        // removal pays floor(poolSenior * slice / bptSupply), and the idle slice scales by the same primitive
+        uint256 bptSlice = toUint256(kernel.convertValueToLPTAssets(kernel.convertLPTAssetsToValue(kernel.getState().totalLPTAssets)));
+        bptSlice = Math.mulDiv(bptSlice, shares, lptSupplyBefore + 1);
+        uint256 stSharesWithdrawn = Math.mulDiv(poolSeniorBefore, bptSlice, bpt.totalSupply());
+        uint256 idleSlice = Math.mulDiv(idleBefore, shares, lptSupplyBefore + 1);
+        assertGt(idleSlice, 0, "the fixture must give the redeemer a live idle premium slice");
+
+        vm.prank(LPT_PROVIDER);
+        liquidityProviderTranche.redeemMultiAsset(shares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
+
+        // The LPT burn is exact: the supply falls by precisely the redeemed shares
+        assertEq(lptSupplyBefore - liquidityProviderTranche.totalSupply(), shares, "the LPT supply must fall by exactly the redeemed shares");
+
+        // The open gate deployed the whole remaining pile and the kernel retains nothing beyond the idle ledger
+        uint256 idleAfter = kernel.getState().lptOwnedSeniorTrancheShares;
+        assertEq(idleAfter, 0, "the settled tail must deploy the entire remaining pile through the open gate");
+        assertEq(seniorTranche.balanceOf(address(kernel)), idleAfter, "the kernel must retain no senior shares beyond the post-tail idle ledger");
+
+        // Ledger split (the invariant handler's pattern): the idle ledger's move is the redeemer's slice plus
+        // the tail's deployment, so the pool's senior delta measures the removal's withdrawal independently
+        uint256 deployedByTail = (idleBefore - idleAfter) - idleSlice;
+        uint256 stWithdrawnMeasured = poolSeniorBefore + deployedByTail - seniorTranche.balanceOf(address(balancerVault));
+        assertEq(stWithdrawnMeasured, stSharesWithdrawn, "the pool's senior delta must measure exactly the spec-derived proportional withdrawal");
+
+        // The ST burn is exact: one kernelBurn of (withdrawn plus idle slice), the tail's redeployment is a
+        // transfer into the pool and must never register as a burn
+        assertEq(
+            stSupplyBefore - seniorTranche.totalSupply(),
+            stSharesWithdrawn + idleSlice,
+            "the ST supply must fall by exactly the venue-withdrawn shares plus the redeemer's idle slice"
+        );
+    }
+
+    /// @notice Preview and execution reject an unmeetable removal slippage floor with the IDENTICAL vault error,
+    ///         argument for argument, for both _minSTSharesOut and _minQuoteAssetsOut: the SIMULATE removal frame
+    ///         is a new code path for floor enforcement and must reject exactly like the settled one
+    /// @dev The seam that carries the floors in preview mode: the public previewRedeemMultiAsset entrypoint
+    ///      carries none (it dispatches with zero minimums, RoycoLiquidityProviderTranche.sol), so the parity
+    ///      surface is the kernel's lptRedeemMultiAsset(SIMULATE, ...) self-dispatch, exercised here directly as
+    ///      the liquidity provider tranche with the simulation's null caller and owner. Both modes enforce the
+    ///      floor inside the venue removal (the Vault's AmountOutBelowMin), whose revert the simulation transport
+    ///      bubbles verbatim because only SIMULATION_RESULT decodes as a result
+    function test_RevertIf_RedeemMultiAssetRemovalFloorUnmeetable_PreviewAndExecutionRaiseIdenticalVaultError() public {
+        uint256 shares = liquidityProviderTranche.balanceOf(LPT_PROVIDER) / 4;
+
+        // The venue's guaranteed proportional outputs for the redeemed slice, derived from the spec: the claim
+        // round-trips the venue mark, scales by shares over the effective supply (supply plus the one virtual
+        // share, floor), and the proportional removal pays floor(poolBalance * slice / bptSupply) per token
+        uint256 bptSlice = toUint256(kernel.convertValueToLPTAssets(kernel.convertLPTAssetsToValue(kernel.getState().totalLPTAssets)));
+        bptSlice = Math.mulDiv(bptSlice, shares, liquidityProviderTranche.totalSupply() + 1);
+        uint256[2] memory poolBalances = balancerVault.getPoolBalances(address(bpt));
+        uint256 guaranteedST = Math.mulDiv(poolBalances[stPoolTokenIndex], bptSlice, bpt.totalSupply());
+        uint256 guaranteedQuote = Math.mulDiv(poolBalances[1 - stPoolTokenIndex], bptSlice, bpt.totalSupply());
+        assertGt(guaranteedST, 0, "the fixture must give the removal a live senior leg");
+        assertGt(guaranteedQuote, 0, "the fixture must give the removal a live quote leg");
+
+        // One wei above the guaranteed senior output: preview and execution raise the identical vault error
+        bytes memory stFloorError =
+            abi.encodeWithSelector(IVaultErrors.AmountOutBelowMin.selector, address(seniorTranche), guaranteedST, guaranteedST + 1);
+        vm.prank(address(liquidityProviderTranche));
+        vm.expectRevert(stFloorError);
+        kernel.lptRedeemMultiAsset(DispatchMode.SIMULATE, shares, guaranteedST + 1, 0, address(0), address(0), address(kernel));
+        vm.prank(LPT_PROVIDER);
+        vm.expectRevert(stFloorError);
+        liquidityProviderTranche.redeemMultiAsset(shares, guaranteedST + 1, 0, LPT_PROVIDER, LPT_PROVIDER);
+
+        // One wei above the guaranteed quote output: the same identical-error parity on the quote floor
+        bytes memory quoteFloorError =
+            abi.encodeWithSelector(IVaultErrors.AmountOutBelowMin.selector, address(quoteToken), guaranteedQuote, guaranteedQuote + 1);
+        vm.prank(address(liquidityProviderTranche));
+        vm.expectRevert(quoteFloorError);
+        kernel.lptRedeemMultiAsset(DispatchMode.SIMULATE, shares, 0, guaranteedQuote + 1, address(0), address(0), address(kernel));
+        vm.prank(LPT_PROVIDER);
+        vm.expectRevert(quoteFloorError);
+        liquidityProviderTranche.redeemMultiAsset(shares, 0, guaranteedQuote + 1, LPT_PROVIDER, LPT_PROVIDER);
+
+        // Sharpness: at exactly the guaranteed outputs the preview clears both floors (its frame exits through
+        // the result-carrying revert) and the execution settles, so the probes above were minimally unmeetable
+        vm.prank(address(liquidityProviderTranche));
+        try kernel.lptRedeemMultiAsset(DispatchMode.SIMULATE, shares, guaranteedST, guaranteedQuote, address(0), address(0), address(kernel)) returns (
+            AssetClaims memory, uint256
+        ) {
+            fail("the SIMULATE dispatch must exit through its result-carrying revert");
+        } catch (bytes memory err) {
+            assertEq(bytes4(err), DispatchLogic.SIMULATION_RESULT.selector, "the exact floors must clear in preview mode");
+        }
+        vm.prank(LPT_PROVIDER);
+        liquidityProviderTranche.redeemMultiAsset(shares, guaranteedST, guaranteedQuote, LPT_PROVIDER, LPT_PROVIDER);
     }
 
     /// @notice Post-op gate parity on the deposit side: an ST leg sized past the market's senior capacity reverts
@@ -674,7 +837,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
         // The preview bubbles the post-op coverage gate for the doomed deposit, leaving every ledger untouched
         bytes32 digestBefore = _marketDigest(LPT_PROVIDER);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.previewDepositMultiAsset(stLeg, 0);
         assertEq(_marketDigest(LPT_PROVIDER), digestBefore, "the gate-reverted preview left a trace on the market");
 
@@ -682,7 +845,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         stJtVault.mintShares(LPT_PROVIDER, stLeg);
         vm.startPrank(LPT_PROVIDER);
         stJtVault.approve(address(liquidityProviderTranche), stLeg);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         liquidityProviderTranche.depositMultiAsset(stLeg, 0, 0, LPT_PROVIDER);
         vm.stopPrank();
     }

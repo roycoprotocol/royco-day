@@ -103,14 +103,14 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
 
         // Deposit exactly the reported max: the post-op liquidity utilization already reads WAD by ceil
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(1300e18) + toUint256(max)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(1300e18) + toUint256(max)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS);
         assertEq(state.liquidityUtilizationWAD, WAD, "the exact max lands liquidity utilization on WAD via the ceil");
         // Consume the 10 wei dust slack, landing exactly on the algebraic boundary
-        state = kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+        state = kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS);
         assertEq(state.liquidityUtilizationWAD, WAD, "the slack consumed lands exactly on WAD");
-        // One wei beyond max + slack violates the liquidity requirement
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2300e18 + 1)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+        // The one-wei-past-max liquidity revert is enforced by the kernel, not the accountant, so it is re-homed onto
+        // the real kernel harness in test/concrete/Kernel/Test_MaxDepositAndWithdrawalGateEnforcement.t.sol
+        // (test_STDeposit_LiquidityDustSlackGate_ConsumesSlackThenReverts)
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -178,18 +178,18 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
 
         // Redeem exactly max: coverage utilization reads WAD by ceil
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(stEff + 200e18 - toUint256(jtW)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.JT_REDEMPTION, toNAVUnits(stEff + 200e18 - toUint256(jtW)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS);
         assertEq(state.coverageUtilizationWAD, WAD, "the exact max lands coverage utilization on WAD");
 
         // Consume the remaining ceil slack down to the boundary ceil(stEffectiveNAV / 9), retention 0.9 folds the 0.1
         // coverage into the /9
         uint256 minPassingJTEff = Math.ceilDiv(stEff, 9);
-        state = kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(stEff + minPassingJTEff), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+        state = kernel.doPostOp(Operation.JT_REDEMPTION, toNAVUnits(stEff + minPassingJTEff), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS);
         assertEq(state.coverageUtilizationWAD, WAD, "the boundary jtEffectiveNAV still passes at WAD");
 
-        // One wei past the boundary reads coverage utilization WAD + 1 and violates
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(stEff + minPassingJTEff - 1), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+        // The one-wei-past-boundary coverage revert is enforced by the kernel, not the accountant, so it is re-homed
+        // onto the real kernel harness in test/concrete/Kernel/Test_MaxDepositAndWithdrawalGateEnforcement.t.sol
+        // (test_JTRedemption_CeilRequiredCoverageGate_OneSharePastMaxReverts)
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -255,14 +255,14 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
 
         // Redeem exactly the reported max
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(100e18 - toUint256(max)), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.LPT_REDEMPTION, toNAVUnits(uint256(1200e18)), toNAVUnits(100e18 - toUint256(max)), ZERO_NAV_UNITS);
         assertEq(state.liquidityUtilizationWAD, WAD, "the exact max lands liquidity utilization on WAD via the ceil");
         // Consume the 1 wei of ceil slack, landing exactly on the algebraic boundary
-        state = kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(uint256(50e18)), ZERO_NAV_UNITS, true);
+        state = kernel.doPostOp(Operation.LPT_REDEMPTION, toNAVUnits(uint256(1200e18)), toNAVUnits(uint256(50e18)), ZERO_NAV_UNITS);
         assertEq(state.liquidityUtilizationWAD, WAD, "the slack consumed lands exactly on WAD");
-        // One wei beyond max + slack violates the liquidity requirement
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(uint256(50e18 - 1)), ZERO_NAV_UNITS, true);
+        // The one-wei-past-max liquidity revert is enforced by the kernel, not the accountant, so it is re-homed onto
+        // the real kernel harness in test/concrete/Kernel/Test_MaxDepositAndWithdrawalGateEnforcement.t.sol
+        // (test_LPTRedemption_DustSlackLiquidityGate_OneSharePastMaxReverts)
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -326,10 +326,11 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         NAV_UNIT max = accountant.maxSTDeposit(_checkpointState());
         assertEq(toUint256(max), 800e18, "coverage leg binds at the independently derived value");
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + toUint256(max)), toNAVUnits(uint256(1000e18)), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + toUint256(max)), toNAVUnits(uint256(1000e18)), ZERO_NAV_UNITS);
         assertEq(state.coverageUtilizationWAD, WAD, "the exact max lands coverage utilization on WAD");
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + toUint256(max) + 1), toNAVUnits(uint256(1000e18)), ZERO_NAV_UNITS, true);
+        // The one-wei-past-max coverage revert is enforced by the kernel, not the accountant, so it is re-homed onto
+        // the real kernel harness in test/concrete/Kernel/Test_MaxDepositAndWithdrawalGateEnforcement.t.sol
+        // (test_STDeposit_CoverageBindingGate_OneWeiPastMaxReverts)
     }
 
     /**
@@ -343,10 +344,11 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         NAV_UNIT max = accountant.maxSTDeposit(_checkpointState());
         assertEq(toUint256(max), 1000e18, "liquidity leg binds at the independently derived value");
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(1300e18 + toUint256(max)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(1300e18 + toUint256(max)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS);
         assertEq(state.liquidityUtilizationWAD, WAD, "the exact max lands liquidity utilization on WAD");
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(1300e18 + toUint256(max) + 1), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+        // The one-wei-past-max liquidity revert is enforced by the kernel, not the accountant, so it is re-homed onto
+        // the real kernel harness in test/concrete/Kernel/Test_MaxDepositAndWithdrawalGateEnforcement.t.sol
+        // (test_STDeposit_LiquidityBindingGate_OneWeiPastMaxReverts)
     }
 
     /**
@@ -362,14 +364,14 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         NAV_UNIT max = accountant.maxSTDeposit(_checkpointState());
         assertEq(toUint256(max), 800e18 - 10, "coverage leg minus the dust slack");
         // Deposit exactly the reported max
-        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + toUint256(max)), toNAVUnits(uint256(1000e18)), ZERO_NAV_UNITS, true);
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + toUint256(max)), toNAVUnits(uint256(1000e18)), ZERO_NAV_UNITS);
         // Consume the 10 wei dust slack, landing coverage utilization exactly on WAD
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2000e18)), toNAVUnits(uint256(1000e18)), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2000e18)), toNAVUnits(uint256(1000e18)), ZERO_NAV_UNITS);
         assertEq(state.coverageUtilizationWAD, WAD, "the slack consumed lands exactly on WAD");
-        // One wei beyond max + slack violates
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2000e18 + 1)), toNAVUnits(uint256(1000e18)), ZERO_NAV_UNITS, true);
+        // The one-wei-past-max coverage revert is enforced by the kernel, not the accountant, so it is re-homed onto
+        // the real kernel harness in test/concrete/Kernel/Test_MaxDepositAndWithdrawalGateEnforcement.t.sol
+        // (test_STDeposit_CoverageDustSlackGate_ConsumesSlackThenReverts)
     }
 
     /**
@@ -415,11 +417,11 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         NAV_UNIT jtW = accountant.maxJTWithdrawal(_checkpointState());
         assertEq(toUint256(jtW), RoycoTestMath.maxJTWithdrawal(SEED_ST_EFF + SEED_JT_EFF, SEED_JT_EFF, 0.1e18, 0), "RTM parity");
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF - toUint256(jtW)), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.JT_REDEMPTION, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF - toUint256(jtW)), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS);
         assertEq(state.coverageUtilizationWAD, WAD, "the exact max lands coverage utilization on WAD");
-        // One wei beyond max crosses the boundary ceil(SEED_ST_EFF / 9) and violates
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF - toUint256(jtW) - 1), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, true);
+        // The one-wei-past-max coverage revert is enforced by the kernel, not the accountant, so it is re-homed onto
+        // the real kernel harness in test/concrete/Kernel/Test_MaxDepositAndWithdrawalGateEnforcement.t.sol
+        // (test_JTRedemption_CoverageGate_OneSharePastMaxReverts)
     }
 
     /**
@@ -436,10 +438,11 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         assertEq(toUint256(jtW), 111_111_111_111_111_111_111, "hand literal at the non-flat seed");
         assertEq(toUint256(jtW), RoycoTestMath.maxJTWithdrawal(1200e18, 220e18, 0.1e18, 0), "RTM parity");
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(1200e18 - toUint256(jtW)), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.JT_REDEMPTION, toNAVUnits(1200e18 - toUint256(jtW)), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS);
         assertEq(state.coverageUtilizationWAD, WAD, "the exact max lands coverage utilization on WAD");
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(1200e18 - toUint256(jtW) - 1), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS, true);
+        // The one-wei-past-max coverage revert is enforced by the kernel, not the accountant, so it is re-homed onto
+        // the real kernel harness in test/concrete/Kernel/Test_MaxDepositAndWithdrawalGateEnforcement.t.sol
+        // (test_JTRedemption_CoverageGate_OneSharePastMaxReverts, the non-flat seed shares the same coverage gate)
     }
 
     /**
@@ -479,7 +482,7 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
     }
 
     /**
-     * the exact boundary of the LPT_REDEEM liquidity gate — redeeming exactly maxLPTWithdrawal passes with
+     * the exact boundary of the LPT_REDEMPTION liquidity gate — redeeming exactly maxLPTWithdrawal passes with
      * enforcement landing liquidity utilization exactly on WAD, and one more wei violates
      * Derivation: max = 100e18 - ceil(1000e18 * 0.05e18 / 1e18) = 50e18 with zero dust
      */
@@ -488,9 +491,10 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         NAV_UNIT max = accountant.maxLPTWithdrawal(_checkpointState());
         assertEq(toUint256(max), 50e18, "closed form at the flat seed");
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF), toNAVUnits(SEED_LPT_RAW - toUint256(max)), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.LPT_REDEMPTION, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF), toNAVUnits(SEED_LPT_RAW - toUint256(max)), ZERO_NAV_UNITS);
         assertEq(state.liquidityUtilizationWAD, WAD, "the exact max lands liquidity utilization on WAD");
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.LPT_REDEEM, toNAVUnits(SEED_ST_EFF + SEED_JT_EFF), toNAVUnits(SEED_LPT_RAW - toUint256(max) - 1), ZERO_NAV_UNITS, true);
+        // The one-wei-past-max liquidity revert is enforced by the kernel, not the accountant, so it is re-homed onto
+        // the real kernel harness in test/concrete/Kernel/Test_MaxDepositAndWithdrawalGateEnforcement.t.sol
+        // (test_LPTRedemption_LiquidityGate_OneSharePastMaxReverts)
     }
 }

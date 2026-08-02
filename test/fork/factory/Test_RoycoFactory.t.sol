@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { ILPOracleFactoryBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
 import { IProtocolFeeController } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IProtocolFeeController.sol";
 import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
 import { IVaultAdmin } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultAdmin.sol";
@@ -10,9 +11,6 @@ import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
-import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
-import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -39,11 +37,12 @@ import {
     DEPLOYER_ROLE,
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
+import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
+import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
+import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { TAG_JT_PROXY } from "../../../src/factory/templates/base/Constants.sol";
-import {
-    RoycoDayBalancerV3MarketDeploymentTemplate
-} from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/EntryPointConfigurer.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
@@ -55,6 +54,7 @@ import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOr
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
+import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 
 /// @title Test_RoycoFactory
 /// @notice Fork tests for `RoycoFactory` driven by the REAL Day market template
@@ -65,6 +65,9 @@ import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
 /// @dev Requires a mainnet fork (real Balancer V3 + Gyro E-CLP + snUSD vault). FAILS (env not found) when
 ///      `MAINNET_RPC_URL` is unset, instead of silently passing.
 contract Test_RoycoFactory is Test {
+    /// @dev The address that supplies each market's genesis pool liquidity in this suite
+    address internal constant POOL_SEED_FUNDER = address(uint160(uint256(keccak256("POOL_SEED_FUNDER"))));
+
     uint256 internal constant FORK_BLOCK = 25_400_000;
     address internal constant GYRO_ECLP_POOL_FACTORY = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
 
@@ -136,14 +139,21 @@ contract Test_RoycoFactory is Test {
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
         // The real Day template, bound to this factory. `deployScript` externally deploys each market's impls/YDMs/pool
-        // and pre-deploys its ST + hook proxies (`deployMarketContractsForTest`), then builds the template params
-        // (`buildMarketParams`) — the factory + template above are the units under test. Its nested `deployDeterministicProxy` calls run
-        // with `msg.sender == address(deployScript)`, so the deployScript must hold DEPLOYER_ROLE.
+        // The template deploys every market contract itself, so the script only builds the params (`buildMarketParams`).
         deployScript = new DeployScript();
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
-        template = new RoycoDayBalancerV3MarketDeploymentTemplate(
-            IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(entryPoint), address(syncer)
+        template = RoycoDayBalancerV3MarketDeploymentTemplate(
+            deployScript.deployTemplateForTest(
+                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer)
+            )
         );
+
+        // The template resolves a market's yield distribution models out of its own registry, so bind its registration
+        // surface and register the config's shapes, exactly as the scaffolding phase does.
+        bytes4[] memory ydmSelectors = new bytes4[](1);
+        ydmSelectors[0] = RoycoDayBalancerV3MarketDeploymentTemplate.setYieldDistributionModels.selector;
+        am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
+        deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("snUSD"));
     }
 
     // ─── helpers ───
@@ -153,15 +163,31 @@ contract Test_RoycoFactory is Test {
         factory.registerTemplate(address(template));
     }
 
+    /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold each seed leg and
+    ///      have approved the template before `executeMarketDeployment`. Points the seed at a test-controlled funder.
+    ///      The collateral leg is optional, so it is funded only when the config asks for it
+    function _fundPoolSeed(MarketConfig memory _cfg) internal {
+        _cfg.poolInitialization.funder = POOL_SEED_FUNDER;
+        _fundSeedLeg(_cfg.gyroECLPPoolParams.quoteAsset, _cfg.poolInitialization.quoteAmount);
+        if (_cfg.poolInitialization.collateralAmount != 0) _fundSeedLeg(_cfg.collateralAsset, _cfg.poolInitialization.collateralAmount);
+    }
+
+    /// @dev Deals one seed leg to the funder and approves the template to pull it
+    function _fundSeedLeg(address _asset, uint256 _amount) internal {
+        deal(_asset, POOL_SEED_FUNDER, _amount);
+        vm.prank(POOL_SEED_FUNDER);
+        IERC20(_asset).approve(address(template), _amount);
+    }
+
+
     /// @dev Externally deploys the snUSD market's impls/YDMs/pool and pre-deploys its ST + hook proxies (as the
     ///      deployScript, which holds DEPLOYER_ROLE), then builds the encoded template params from the SAME config.
     ///      `_marketId` must place the senior tranche as pool token0 for this suite's `factory` (see MARKET_ID_A/B).
     function _encodedParams(bytes32 _marketId) internal returns (bytes memory) {
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
-            deployScript.deployMarketContractsForTest(cfg, _marketId, factory, address(template), address(am));
-        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        _fundPoolSeed(cfg);
+        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
     }
 
     /// @dev The `deploy()` flow resolves an unset config oracle itself; the direct-template path must supply it, so
@@ -181,6 +207,33 @@ contract Test_RoycoFactory is Test {
         bytes memory p = _encodedParams(_marketId);
         vm.prank(DEPLOYER);
         return factory.executeMarketDeployment(address(template), p);
+    }
+
+    /// The genesis seed's collateral leg is optional. When the config asks for one, the multi-asset deposit mints it
+    /// into senior shares, so the pool opens with depth on BOTH legs rather than quote alone.
+    /// @dev The market must set `minCoverageWAD` to zero for this to be reachable: the seed is the market's FIRST
+    ///      deposit, so the junior tranche is still empty and any senior mint under a nonzero coverage floor takes
+    ///      coverage utilization above WAD and reverts `COVERAGE_REQUIREMENT_VIOLATED` inside the deployment
+    function test_ExecuteMarketDeployment_SeedsBothPoolLegsWhenCollateralIsConfigured() external {
+        _register();
+
+        MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
+        cfg.minCoverageWAD = 0;
+        cfg.poolInitialization.collateralAmount = 10_000e18;
+        _fundPoolSeed(cfg);
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT, address(0)));
+
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
+
+        IVault vault = IVault(address(GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY).getVault()));
+        (,, uint256[] memory balances,) = vault.getPoolTokenInfo(IRoycoDayKernel(r.kernel).lptAsset());
+        assertGt(balances[0], 0, "senior leg opened with no genesis depth");
+        assertGt(balances[1], 0, "quote leg opened with no genesis depth");
+        // The collateral leg is the only source of senior shares here, and the funder receives the genesis LP shares
+        assertGt(IERC20(r.seniorTranche).totalSupply(), 0, "collateral leg minted no senior shares");
+        assertGt(IERC20(r.liquidityProviderTranche).balanceOf(POOL_SEED_FUNDER), 0, "funder holds no genesis liquidity shares");
     }
 
     /// The single wiring transaction must fit under EIP-7825's per-transaction gas cap (the reason the deployment
@@ -305,13 +358,15 @@ contract Test_RoycoFactory is Test {
 
     /// A template constructed against a different factory address is rejected
     function test_RevertIf_TemplateBoundToDifferentFactoryRegistered() external {
-        // A real template bound to a different factory address must be rejected. The template validates its entry
-        // point's factory binding at construction, so the foreign template needs an entry point bound to the foreign
-        // factory: a bare (uninitialized) implementation suffices since ROYCO_FACTORY is a constructor immutable.
-        address otherFactory = makeAddr("OTHER_FACTORY");
-        RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(otherFactory);
-        RoycoDayBalancerV3MarketDeploymentTemplate foreign = new RoycoDayBalancerV3MarketDeploymentTemplate(
-            IRoycoFactory(otherFactory), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(foreignEntryPoint), address(syncer)
+        // A real template bound to a different factory address must be rejected. The foreign factory has to be a real
+        // one: the template reads `ROYCO_AUTHORITY()` off it at construction to set its own access manager. Its entry
+        // point must be bound to that same foreign factory, which the template also validates at construction.
+        (RoycoFactory otherFactory,) = FactoryScaffold.deployFactory(am, keccak256("FOREIGN_FACTORY_PROXY"));
+        RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(address(otherFactory));
+        RoycoDayBalancerV3MarketDeploymentTemplate foreign = RoycoDayBalancerV3MarketDeploymentTemplate(
+            deployScript.deployTemplateForTest(
+                IRoycoFactory(address(otherFactory)), deployScript.getMarketConfig("snUSD"), address(foreignEntryPoint), address(syncer)
+            )
         );
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(IRoycoFactory.TEMPLATE_BOUND_TO_DIFFERENT_FACTORY.selector);
@@ -321,10 +376,26 @@ contract Test_RoycoFactory is Test {
     /// A template constructed with an entry point bound to a different factory is rejected at construction
     function test_RevertIf_TemplateConstructedWithMisboundEntryPoint() external {
         RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(makeAddr("OTHER_FACTORY"));
+        // Construct directly so the raw constructor error is observable. The script's CREATE2 path routes through the
+        // deterministic deployer, which swallows constructor revert data, and its params argument is an external
+        // getMarketConfig call that expectRevert would match instead of the construction. The chain-wide params are
+        // read off the known-good template from setUp, only the entry point is swapped for the misbound one
+        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = RoycoDayBalancerV3MarketDeploymentTemplate
+            .TemplateConstructionParams({
+            factory: IRoycoFactory(address(factory)),
+            balancerV3PoolFactory: template.BALANCER_V3_POOL_FACTORY(),
+            eclpLPOracleFactory: template.ECLP_LP_ORACLE_FACTORY(),
+            bptOracleConstantPriceFeed: template.BPT_ORACLE_CONSTANT_PRICE_FEED(),
+            roycoDayEntryPoint: address(foreignEntryPoint),
+            roycoMarketSyncer: address(syncer),
+            seniorTrancheBeacon: template.SENIOR_TRANCHE_BEACON(),
+            juniorTrancheBeacon: template.JUNIOR_TRANCHE_BEACON(),
+            liquidityProviderTrancheBeacon: template.LIQUIDITY_PROVIDER_TRANCHE_BEACON(),
+            kernelBeacon: template.KERNEL_BEACON(),
+            accountantBeacon: template.ACCOUNTANT_BEACON()
+        });
         vm.expectRevert(EntryPointConfigurer.ENTRY_POINT_BOUND_TO_DIFFERENT_FACTORY.selector);
-        new RoycoDayBalancerV3MarketDeploymentTemplate(
-            IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(foreignEntryPoint), address(syncer)
-        );
+        new RoycoDayBalancerV3MarketDeploymentTemplate(cp);
     }
 
     /// Registration is blocked while the factory is paused
@@ -550,11 +621,10 @@ contract Test_RoycoFactory is Test {
         // A different-model market resolves to different instances: the YDM model is part of the deployed contract type
         MarketConfig memory staticCfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(staticCfg);
+        _fundPoolSeed(staticCfg);
         staticCfg.ydmType = YDMType.StaticCurve;
         bytes32 staticId = MARKET_ID_C;
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory staticMc =
-            deployScript.deployMarketContractsForTest(staticCfg, staticId, factory, address(template), address(am));
-        bytes memory p = abi.encode(deployScript.buildMarketParams(staticCfg, staticId, PROTOCOL_FEE_RECIPIENT, address(0), staticMc));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(staticCfg, staticId, PROTOCOL_FEE_RECIPIENT, address(0)));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory s = factory.executeMarketDeployment(address(template), p);
         assertTrue(s.ydm != a.ydm, "a different YDM model must not share the adaptive markets' JT YDM instance");
@@ -592,7 +662,7 @@ contract Test_RoycoFactory is Test {
         internal
         view
     {
-        address pool = IRoycoDayKernel(_r.kernel).LPT_ASSET();
+        address pool = IRoycoDayKernel(_r.kernel).lptAsset();
         IVault vault = IVault(address(GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY).getVault()));
         (IERC20[] memory tokens, TokenInfo[] memory info,,) = vault.getPoolTokenInfo(pool);
 
@@ -610,11 +680,12 @@ contract Test_RoycoFactory is Test {
 
     /// @dev Asserts `getMarket(key)` returns exactly the deployed market's full component set.
     function _assertGetMarketResolves(IRoycoProtocolTemplate.DeploymentResult memory _r, address _key, string memory _ctx) internal view {
-        (address st, address jt, address lt, address kernel) = factory.getMarket(_key);
+        (address st, address jt, address lt, address kernel, address accountant) = factory.getMarket(_key);
         assertEq(st, _r.seniorTranche, string.concat(_ctx, ": senior"));
         assertEq(jt, _r.juniorTranche, string.concat(_ctx, ": junior"));
         assertEq(lt, _r.liquidityProviderTranche, string.concat(_ctx, ": liquidity"));
         assertEq(kernel, _r.kernel, string.concat(_ctx, ": kernel"));
+        assertEq(accountant, _r.accountant, string.concat(_ctx, ": accountant"));
     }
 
     /// Only DEPLOYER_ROLE may execute a market deployment
@@ -672,23 +743,7 @@ contract Test_RoycoFactory is Test {
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
         factory.executeAsFactory(address(this), "");
 
-        // `deployDeterministicProxy` is NOT active-template gated: it is a standalone deployer primitive bound to DEPLOYER_ROLE, so a
-        // caller without that role is rejected by the AccessManager (never with ONLY_ACTIVE_TEMPLATE). The init data is
-        // a harmless view call: the hardened ERC1967Proxy rejects empty init data.
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, STRANGER));
-        factory.deployDeterministicProxy(address(template), abi.encodeCall(IBaseTemplate.ROYCO_FACTORY, ()), keccak256("z"));
-
         vm.stopPrank();
-
-        // A DEPLOYER_ROLE holder CAN call `deployDeterministicProxy` outside a deployment window: it deploys a live ERC1967 proxy
-        // at the CREATE3 address derived from the salt (which is itself the proxy's provenance — only the factory can
-        // deploy there). (Init data is a non-empty no-op view call — the hardened ERC1967Proxy rejects empty init data.)
-        vm.prank(DEPLOYER);
-        address proxy = factory.deployDeterministicProxy(address(template), abi.encodeCall(IBaseTemplate.ROYCO_FACTORY, ()), keccak256("standalone-proxy"));
-        assertGt(proxy.code.length, 0, "deployDeterministicProxy must produce a live proxy");
-        assertEq(
-            proxy, factory.predictDeterministicAddress(keccak256("standalone-proxy")), "deployDeterministicProxy must deploy at the salt's CREATE3 address"
-        );
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -698,11 +753,12 @@ contract Test_RoycoFactory is Test {
     /// Unknown tranches resolve to the zero market: the registry never fabricates a mapping
     function test_GetMarket_ZeroForUnknownTranche() external {
         assertEq(factory.trancheToKernel(makeAddr("UNKNOWN")), address(0), "unknown tranche->kernel");
-        (address st, address jt, address lt, address kernel) = factory.getMarket(makeAddr("UNKNOWN"));
+        (address st, address jt, address lt, address kernel, address accountant) = factory.getMarket(makeAddr("UNKNOWN"));
         assertEq(st, address(0), "unknown senior");
         assertEq(jt, address(0), "unknown junior");
         assertEq(lt, address(0), "unknown liquidity");
         assertEq(kernel, address(0), "unknown kernel");
+        assertEq(accountant, address(0), "unknown accountant");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -803,13 +859,13 @@ contract Test_RoycoFactory is Test {
         IRoycoProtocolTemplate.DeploymentResult memory first = _deploy(MARKET_ID_A);
         assertGt(first.kernel.code.length, 0, "first market is live");
 
-        // The deterministic component addresses are a pure function of the marketId, so a second run with the same id
-        // cannot even re-deploy the market's contracts: the senior tranche proxy already exists at its CREATE3 address,
-        // so the factory's `deployDeterministicProxy` rejects the collision before the wiring transaction is ever reached. Match on
-        // the selector only: the exact (address, salt) payload is an internal detail.
-        MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
-        vm.expectPartialRevert(IRoycoFactory.PROXY_ALREADY_DEPLOYED.selector);
-        deployScript.deployMarketContractsForTest(cfg, marketId, factory, address(template), address(am));
+        // The deterministic component addresses are a pure function of the marketId, so a second deployment under the
+        // same id collides on the very first proxy the template deploys: the senior tranche already exists at its
+        // CREATE3 address. Match on the selector only: the exact (address, salt) payload is an internal detail.
+        bytes memory p = _encodedParams(marketId);
+        vm.prank(DEPLOYER);
+        vm.expectPartialRevert(BaseDeploymentTemplate.MARKET_COMPONENT_ALREADY_DEPLOYED.selector);
+        factory.executeMarketDeployment(address(template), p);
 
         // Atomicity: the failed redeploy left the first market's registry entry exactly as it was.
         _assertGetMarketResolves(first, first.seniorTranche, "first market intact after failed redeploy");
@@ -825,11 +881,10 @@ contract Test_RoycoFactory is Test {
 
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
+        _fundPoolSeed(cfg);
         cfg.ydmType = YDMType.StaticCurve;
         bytes32 marketId = MARKET_ID_A;
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
-            deployScript.deployMarketContractsForTest(cfg, marketId, factory, address(template), address(am));
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -855,15 +910,14 @@ contract Test_RoycoFactory is Test {
 
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
+        _fundPoolSeed(cfg);
         cfg.ydmType = YDMType.AdaptiveCurve_V1;
         // V1 takes only (target, full), so re-encode both curves as V1 params — a two-word init blob that binds on the V1 model
         bytes memory v1Params = abi.encode(AdaptiveCurveYDM_V1_Params({ yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 }));
         cfg.ydmSpecificParams = v1Params;
         cfg.lptYdmSpecificParams = v1Params;
         bytes32 marketId = MARKET_ID_A;
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
-            deployScript.deployMarketContractsForTest(cfg, marketId, factory, address(template), address(am));
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);

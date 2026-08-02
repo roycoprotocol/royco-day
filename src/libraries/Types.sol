@@ -27,6 +27,17 @@ enum MarketState {
 }
 
 /**
+ * @title DispatchMode
+ * @dev Defines how a dispatched operation runs
+ * @custom:type SIMULATE - Computes the operation's result under real execution semantics, then unwinds every mutation by reverting with the ABI encoded result
+ * @custom:type EXECUTE - Executes and settles the operation
+ */
+enum DispatchMode {
+    SIMULATE,
+    EXECUTE
+}
+
+/**
  * @title AssetClaims
  * @dev A struct representing claims on collateral assets, liquidity provider tranche assets, senior tranche shares, and NAV
  * @custom:field collateralAssets - The claim on the coinvested collateral assets denominated in tranche units (only applicable for the ST and JT)
@@ -92,23 +103,19 @@ struct SyncedAccountingState {
  * @title Operation
  * @dev Defines the type of operation being executed by the user
  * @custom:type ST_DEPOSIT - A senior tranche deposit that increases ST's effective NAV
- * @custom:type ST_REDEEM - A senior tranche redemption that decreases ST's effective NAV
+ * @custom:type ST_REDEMPTION - A senior tranche redemption that decreases ST's effective NAV
  * @custom:type JT_DEPOSIT - A junior tranche deposit that increases JT's effective NAV
- * @custom:type JT_REDEEM - A junior tranche redemption that decreases JT's effective NAV
+ * @custom:type JT_REDEMPTION - A junior tranche redemption that decreases JT's effective NAV
  * @custom:type LPT_DEPOSIT - An in-kind liquidity provider tranche deposit that only adds market-making inventory
- * @custom:type LPT_REDEEM - An in-kind liquidity provider tranche redemption that only removes market-making inventory and idle premium shares
- * @custom:type LPT_MULTI_ASSET_DEPOSIT - A multi-asset liquidity provider tranche deposit that can also mint and deploy senior exposure via its senior leg
- * @custom:type LPT_MULTI_ASSET_REDEEM - A multi-asset liquidity provider tranche redemption that also unwinds senior exposure and can pay a self-liquidation bonus
+ * @custom:type LPT_REDEMPTION - An in-kind liquidity provider tranche redemption that only removes market-making inventory and idle premium shares
  */
 enum Operation {
     ST_DEPOSIT,
-    ST_REDEEM,
+    ST_REDEMPTION,
     JT_DEPOSIT,
-    JT_REDEEM,
+    JT_REDEMPTION,
     LPT_DEPOSIT,
-    LPT_REDEEM,
-    LPT_MULTI_ASSET_DEPOSIT,
-    LPT_MULTI_ASSET_REDEEM
+    LPT_REDEMPTION
 }
 
 /**
@@ -122,5 +129,27 @@ enum TrancheType {
     SENIOR,
     JUNIOR,
     LIQUIDITY_PROVIDER
+}
+
+/**
+ * @notice Maps the specified tranche to its deposit operation
+ * @param _trancheType The tranche to return the deposit operation for
+ * @return The deposit operation committed by the specified tranche's in-kind deposit
+ */
+function toDepositOperation(TrancheType _trancheType) pure returns (Operation) {
+    if (_trancheType == TrancheType.SENIOR) return Operation.ST_DEPOSIT;
+    else if (_trancheType == TrancheType.JUNIOR) return Operation.JT_DEPOSIT;
+    else return Operation.LPT_DEPOSIT;
+}
+
+/**
+ * @notice Maps the specified tranche to its redemption operation
+ * @param _trancheType The tranche to return the redemption operation for
+ * @return The redemption operation committed by the specified tranche's in-kind redemption
+ */
+function toRedemptionOperation(TrancheType _trancheType) pure returns (Operation) {
+    if (_trancheType == TrancheType.SENIOR) return Operation.ST_REDEMPTION;
+    else if (_trancheType == TrancheType.JUNIOR) return Operation.JT_REDEMPTION;
+    else return Operation.LPT_REDEMPTION;
 }
 

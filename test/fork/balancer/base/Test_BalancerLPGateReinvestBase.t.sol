@@ -5,7 +5,10 @@ import { PausableUpgradeable } from "../../../../lib/openzeppelin-contracts-upgr
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 
+import { IGyroECLPPool } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { IRouter } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IRouter.sol";
+import { GyroECLPPool } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPool.sol";
+import { GyroECLPMath } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/lib/GyroECLPMath.sol";
 import { BasePoolMath } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BasePoolMath.sol";
 
 import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
@@ -85,8 +88,9 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     // EXTERNAL LP THROUGH THE CANONICAL ROUTER
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice an external unbalanced add syncs the kernel through the hook exactly once and never
-    ///         touches the kernel's owned-BPT ledger; the minted BPT lands with the external actor.
+    /// @notice an external unbalanced add on the hookless pool runs no kernel sync and never touches the
+    ///         kernel's owned-BPT ledger; the minted BPT lands with the external actor. The add still prices
+    ///         its senior leg through the kernel rate provider live, so no sync is needed for freshness.
     function test_ExternalAddUnbalanced_syncs_kernelLedgerUntouched() public {
         _seedForSwaps();
         _sync();
@@ -102,7 +106,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 bptOut = _externalAddUnbalanced(actor, stShares, quoteAssets, 0);
         (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(KERNEL), IRoycoDayKernel.PreOpTrancheAccountingSynced.selector);
 
-        assertEq(syncCount, 1, "the before-add hook must sync the kernel exactly once");
+        assertEq(syncCount, 0, "a hookless external add must run no kernel sync");
         assertEq(toUint256(KERNEL.getState().totalLPTAssets), lptOwned0, "an external add must not move the kernel's owned-BPT ledger");
         assertEq(IERC20(POOL).balanceOf(actor), bptOut, "the minted BPT must land with the external actor");
         assertEq(_bptSupply(), supply0 + bptOut, "the BPT supply must grow by exactly the external mint");
@@ -139,18 +143,38 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         assertGe(toUint256(_liveLPTRawNAV()) + _tol2(), lptRaw0, "an external add can never dilute the kernel's LPT mark");
     }
 
-    /// @notice an external PROPORTIONAL add is value-neutral to everyone else: NAV-per-BPT and the
-    ///         kernel's LPT raw NAV are unchanged (up to pool-favoring rounding).
+    /**
+     * @notice an external PROPORTIONAL add is value-neutral to everyone else: NAV-per-BPT and the
+     *         kernel's LPT raw NAV are unchanged up to the E-CLP invariant computation's own error bound.
+     * @dev Tolerance derivation: the amounts in round UP in the pool's favor, but the oracle TVL is
+     *      invariant-based and Gyro's fixed-point invariant carries a documented calculation error
+     *      (`calculateInvariantWithError`'s err term). Two independent invariant computations bracket the true
+     *      value within that error each, so NAV per BPT can wobble by up to the error's share of the invariant
+     *      in each direction even on a perfectly proportional move (measured 297 wei on ~3.7e21 here, ~8e-20
+     *      relative, well inside the bound).
+     */
     function test_ExternalAddProportional_navPerBPTConstant() public {
         _seedForSwaps();
         _sync();
         uint256 navPerBPT0 = _navPerBPTWAD();
         uint256 lptRaw0 = toUint256(_liveLPTRawNAV());
+        uint256 invariantErrTolerance = _navPerBPTInvariantErrorTolerance(navPerBPT0);
 
         _externalProportionalPosition("EXTERNAL_PROPORTIONAL_ADDER", _bptSupply() / 10);
 
-        assertGe(_navPerBPTWAD() + 2, navPerBPT0, "a proportional add must not dilute NAV per BPT (rounding favors the pool)");
+        assertGe(
+            _navPerBPTWAD() + invariantErrTolerance, navPerBPT0, "a proportional add must not dilute NAV per BPT beyond the invariant computation error"
+        );
         assertApproxEqAbs(toUint256(_liveLPTRawNAV()), lptRaw0, _tol2(), "a proportional add must leave the kernel's LPT mark unchanged");
+    }
+
+    /// @dev The E-CLP invariant computation's error bound scaled to a NAV-per-BPT tolerance: `computeTVL` is
+    ///      invariant-based, so two independent fixed-point invariant computations can each miss the true value
+    ///      by up to Gyro's reported err, wobbling NAV per BPT by that share of the invariant per computation.
+    function _navPerBPTInvariantErrorTolerance(uint256 _navPerBPT) internal view returns (uint256) {
+        (IGyroECLPPool.EclpParams memory params, IGyroECLPPool.DerivedEclpParams memory derived) = GyroECLPPool(POOL).getECLPParams();
+        (int256 invariant, int256 err) = GyroECLPMath.calculateInvariantWithError(_liveBalances(), params, derived);
+        return Math.mulDiv(_navPerBPT, 2 * uint256(err) + 2, uint256(invariant)) + 2;
     }
 
     /**
@@ -237,8 +261,9 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         assertApproxEqAbs(valueWith, valueWithout, 2 * _tol2(), "a kernel redemption's value must be independent of external depth");
     }
 
-    /// @notice a paused hook blocks BOTH external add and external remove (the `router != kernel` path of
-    ///         each before-hook syncs `whenNotPaused`), completing the pause blast-radius picture of the hook-pause swap test.
+    /// @notice a paused KERNEL blocks external add and external remove on the hookless pool: every Vault
+    ///         liquidity op reads the WITH_RATE leg's rate provider, whose `whenNotPaused` revert bubbles,
+    ///         completing the pause blast-radius picture of the kernel-pause swap test.
     /// @dev The Router calls are inlined (amounts prebuilt) so `expectRevert` targets the Router call itself
     ///      and not a helper's read of the Vault.
     function test_RevertIf_ExternalAddRemoveWhileHookPaused() public {
@@ -252,7 +277,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 bptToBurn = IERC20(POOL).balanceOf(actor) / 2;
         IRouter router = IRouter(_balancerV3Router());
 
-        _pauseHook();
+        _pauseKernel();
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         vm.prank(actor);
         router.addLiquidityUnbalanced(POOL, exactAmountsIn, 0, false, "");
@@ -335,7 +360,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(testConfig.stAsset).approve(address(ST), breachAssets);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
 
@@ -358,14 +383,14 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         // Depth-reducing LPT redemption: blocked.
         uint256 shares = LPT.balanceOf(LPT_ALICE_ADDRESS) / 10;
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
 
         // Senior entry: blocked while under-provisioned.
         uint256 stAssets = testConfig.initialFunding / 1000;
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(testConfig.stAsset).approve(address(ST), stAssets);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(stAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
 
@@ -731,8 +756,9 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     // FIXED_TERM x THE POOL
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice the pool is NOT frozen by a fixed term: external swaps execute in-term, the hook still
-    ///         syncs, and the fee still accrues to the BPT within the derived band.
+    /// @notice the pool is NOT frozen by a fixed term: external swaps execute in-term on the hookless pool
+    ///         (no kernel sync runs, the rate provider prices the senior leg live in every market state) and
+    ///         the fee still accrues to the BPT within the derived band.
     function test_FixedTerm_externalSwap_functionsAndSyncs() public {
         _seedForSwaps();
         _enterFixedTerm();
@@ -744,7 +770,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         assertGt(amountOut, 0, "an in-term external swap must execute");
 
         (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(KERNEL), IRoycoDayKernel.PreOpTrancheAccountingSynced.selector);
-        assertEq(syncCount, 1, "the hook must still sync in-term");
+        assertEq(syncCount, 0, "a hookless in-term swap must run no kernel sync");
         (uint256 lo, uint256 hi) = _swapFeeTVLBound(_quoteToNAV(amountIn));
         uint256 tvlDelta = _poolTVL() - tvl0;
         assertGe(tvlDelta, lo, "the in-term swap fee must still accrue to the BPT (band floor)");
@@ -836,7 +862,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         assertGt(_committedLiquidityUtilization(), WAD, "doubling the real depth does not move the committed utilization");
         uint256 shares = LPT.balanceOf(LPT_ALICE_ADDRESS) / 10;
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
     }
 }

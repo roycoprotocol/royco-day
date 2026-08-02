@@ -45,6 +45,9 @@ import { MakinaSharePriceOracle } from "../../../src/oracle/MakinaSharePriceOrac
 /// @dev Requires a mainnet fork (real Balancer V3 + Gyro E-CLP + the REAL DUSD Makina machine). FAILS (env not
 ///      found) when `MAINNET_RPC_URL` is unset, instead of silently passing.
 contract Test_MakinaMarketDeployment is Test {
+    /// @dev The address that supplies each market's genesis pool liquidity in this suite
+    address internal constant POOL_SEED_FUNDER = address(uint160(uint256(keccak256("POOL_SEED_FUNDER"))));
+
     using Math for uint256;
 
     uint256 internal constant FORK_BLOCK = 25_400_000;
@@ -118,14 +121,21 @@ contract Test_MakinaMarketDeployment is Test {
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
         // The real Day template, bound to this factory. `deployScript` externally deploys each market's impls/YDMs/pool
-        // and pre-deploys its ST + hook proxies (`deployMarketContractsForTest`), then builds the template params
-        // (`buildMarketParams`). Its nested `deployDeterministicProxy` calls run with `msg.sender == address(deployScript)`,
-        // so the deployScript must hold DEPLOYER_ROLE.
+        // The template deploys every market contract itself, so the script only builds the params (`buildMarketParams`).
         deployScript = new DeployScript();
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
-        template = new RoycoDayBalancerV3MarketDeploymentTemplate(
-            IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(entryPoint), address(syncer)
+        template = RoycoDayBalancerV3MarketDeploymentTemplate(
+            deployScript.deployTemplateForTest(
+                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer)
+            )
         );
+
+        // The template resolves a market's yield distribution models out of its own registry, so bind its registration
+        // surface and register the config's shapes, exactly as the scaffolding phase does.
+        bytes4[] memory ydmSelectors = new bytes4[](1);
+        ydmSelectors[0] = RoycoDayBalancerV3MarketDeploymentTemplate.setYieldDistributionModels.selector;
+        am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
+        deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("snUSD"));
     }
 
     // ─── helpers ───
@@ -135,19 +145,27 @@ contract Test_MakinaMarketDeployment is Test {
         factory.registerTemplate(address(template));
     }
 
+    /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold the quote and
+    ///      have approved the template before `executeMarketDeployment`. Points the seed at a test-controlled funder
+    function _fundPoolSeed(MarketConfig memory _cfg) internal {
+        _cfg.poolInitialization.funder = POOL_SEED_FUNDER;
+        deal(_cfg.gyroECLPPoolParams.quoteAsset, POOL_SEED_FUNDER, _cfg.poolInitialization.quoteAmount);
+        vm.prank(POOL_SEED_FUNDER);
+        IERC20(_cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
+    }
+
     /// @dev Clones the snUSD market config in memory and swaps in the Makina collateral + its share-price oracle.
     ///      The direct-template path must supply the deployed oracle itself (the `deploy()` flow resolves it).
     function _marketConfig(address _machine, address _collateralAsset) internal returns (MarketConfig memory cfg) {
         cfg = deployScript.getMarketConfig("snUSD");
         cfg.collateralAsset = _collateralAsset;
         cfg.collateralAssetOracle = address(new MakinaSharePriceOracle(_machine, USDC_USD_FEED));
+            _fundPoolSeed(cfg);
     }
 
     function _encodedParams(bytes32 _marketId, address _machine, address _collateralAsset) internal returns (bytes memory) {
         MarketConfig memory cfg = _marketConfig(_machine, _collateralAsset);
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
-            deployScript.deployMarketContractsForTest(cfg, _marketId, factory, address(template), address(am));
-        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -161,9 +179,7 @@ contract Test_MakinaMarketDeployment is Test {
     function test_ExecuteMarketDeployment_MakinaOracleKernelWiring() external {
         _register();
         MarketConfig memory cfg = _marketConfig(MAKINA_MACHINE, DUSD);
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketContracts memory mc =
-            deployScript.deployMarketContractsForTest(cfg, MARKET_ID, factory, address(template), address(am));
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(0)));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
@@ -189,7 +205,7 @@ contract Test_MakinaMarketDeployment is Test {
 
         // The template deployed the BPT oracle through Balancer's E-CLP LP oracle factory and injected it into the
         // kernel's liquidity venue, overwriting the null placeholder in the params blob.
-        address pool = IRoycoDayKernel(r.kernel).LPT_ASSET();
+        address pool = IRoycoDayKernel(r.kernel).lptAsset();
         address bptOracle = BalancerV3LiquidityVenue(r.kernel).getBalancerV3LiquidityVenueState().bptOracle;
         assertTrue(bptOracle != address(0), "bptOracle unset");
         assertGt(bptOracle.code.length, 0, "bptOracle has no code");

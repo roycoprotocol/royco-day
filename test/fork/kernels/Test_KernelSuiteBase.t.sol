@@ -23,7 +23,7 @@ import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../../src/interfaces/IYDM.sol";
 import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../src/libraries/Constants.sol";
-import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
+import { AssetClaims, DispatchMode, MarketState, Operation, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { IKernelTestHooks } from "../../utils/IKernelTestHooks.sol";
@@ -43,15 +43,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /// @notice The concrete kernel's static test configuration (assets, fork, funding).
     TestConfig internal testConfig;
 
-    /// @notice The single coinvested collateral asset backing both ST and JT (== `KERNEL.COLLATERAL_ASSET()`).
+    /// @notice The single coinvested collateral asset backing both ST and JT (== `KERNEL.collateralAsset()`).
     address internal COLLATERAL_ASSET;
 
     // ── Day market-topology addresses the script's `DeploymentResult` does not surface ──
     /// @notice The liquidity provider tranche (holds the Gyro E-CLP BPT).
     IRoycoVaultTranche internal LPT;
-    /// @notice The liquidity provider tranche's Gyro E-CLP pool (the BPT, == `KERNEL.LPT_ASSET()`).
+    /// @notice The liquidity provider tranche's Gyro E-CLP pool (the BPT, == `KERNEL.lptAsset()`).
     address internal POOL;
-    /// @notice The pool's kernel-bound hook (the upgraded `RoycoDayBalancerV3Hooks` proxy).
+    /// @notice The pool's hooks contract, always address(0): the pool is hookless by design (the template
+    ///         validates it) and the kernel serves as the pool's senior-leg rate provider instead.
     address internal BALANCER_HOOK;
     /// @notice The liquidity-premium model (LDM), distinct from the JT YDM.
     address internal LPT_YDM;
@@ -123,20 +124,20 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _setDeployedMarket(_deployKernelAndMarket());
 
         // The coinvestment collapse leaves one collateral asset, so the config's two hook assets must be it
-        COLLATERAL_ASSET = KERNEL.COLLATERAL_ASSET();
+        COLLATERAL_ASSET = KERNEL.collateralAsset();
         assertEq(testConfig.stAsset, COLLATERAL_ASSET, "setup: the configured ST asset must be the kernel's collateral asset");
         assertEq(testConfig.jtAsset, COLLATERAL_ASSET, "setup: the configured JT asset must be the kernel's collateral asset");
 
         // Capture the Day LPT topology the script result omits, by reading the deployed contracts.
         if (testConfig.hasLiquidityProviderTranche) {
-            LPT = IRoycoVaultTranche(KERNEL.LIQUIDITY_PROVIDER_TRANCHE());
-            POOL = KERNEL.LPT_ASSET();
+            LPT = IRoycoVaultTranche(KERNEL.liquidityProviderTranche());
+            POOL = KERNEL.lptAsset();
             LPT_YDM = ACCOUNTANT.getState().lptYDM;
             VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
             BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
+            assertEq(BALANCER_HOOK, address(0), "setup: the pool must deploy hookless, the kernel rate provider replaces the hook");
             vm.label(address(LPT), "LPT");
             vm.label(POOL, "BalancerPool");
-            vm.label(BALANCER_HOOK, "BalancerHook");
             vm.label(LPT_YDM, "LDM");
         }
 
@@ -381,42 +382,36 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     // ── Independent expected-value math (pure, Math.mulDiv only) ──
 
-    /**
-     * @dev The share-pricing denominator used when a tranche has live supply but zero effective NAV.
-     *      Mirrors `ValuationLogic._convertToShares`, which substitutes ONE_NAV_UNIT (1 wei of NAV) so
-     *      new depositors dilute the existing unbacked holders (src/libraries/logic/ValuationLogic.sol).
-     */
-    uint256 internal constant ZERO_NAV_SHARE_PRICING_DENOMINATOR = 1;
-
     /// @dev The max mint dilution, restated from Constants.sol (MAX_MINT_DILUTION_WAD = WAD − 1e6):
     ///      a single mint owns at most (1 − 1e-12) of the post-mint supply
     uint256 internal constant MAX_MINT_DILUTION = 1e18 - 1e6;
 
-    /// @dev The OZ ERC4626 virtual-shares/value offset (Constants.sol VIRTUAL_SHARES / VIRTUAL_VALUE): every
-    ///      non-fresh share conversion prices against the effective supply (supply + 1e6) over the effective
-    ///      value (totalValue + 1). Restated here (not imported) so a silent src change diverges loudly
-    uint256 internal constant VIRTUAL_SHARES = 1e6;
+    /// @dev The virtual-shares/value offset (Constants.sol VIRTUAL_SHARES / VIRTUAL_VALUE): every share
+    ///      conversion prices against the effective supply (supply + 1) over the effective value
+    ///      (totalValue + 1), which also makes the fresh-tranche mint exactly 1:1 with no special case.
+    ///      Restated here (not imported) so a silent src change diverges loudly
+    uint256 internal constant VIRTUAL_SHARES = 1;
     uint256 internal constant VIRTUAL_VALUE = 1;
 
     /// @notice Expected shares minted for `_value` against `_supply` shares backed by `_totalNAV` (floor).
-    /// @dev Mirrors `ValuationLogic._convertToShares` including its fresh-tranche exemption, the virtual
-    ///      shares/value offset, and the mint-dilution clamp (bind iff
-    ///      value·(WAD − MAX_MINT_DILUTION) > denominator·MAX_MINT_DILUTION, products fit on the suite domain).
+    /// @dev Mirrors `ValuationLogic._convertToShares`: the fair virtual-shares price, clamped only in the
+    ///      collapsed-price regime. The clamp arms on the supply-based predicate
+    ///      ceil(effectiveSupply * (WAD − MAX_MINT_DILUTION) / MAX_MINT_DILUTION) > denominator (fair pricing
+    ///      itself would mint runaway share counts there) and the armed result is min(cap, fair), so a mint
+    ///      into a healthily priced tranche always prices fairly at any size.
     function _expectedShares(NAV_UNIT _value, uint256 _supply, NAV_UNIT _totalNAV) internal pure returns (uint256) {
-        // A genuinely fresh tranche (no shares AND no backing) mints 1:1, every other state prices through the offset
-        if (_supply == 0 && toUint256(_totalNAV) == 0) return toUint256(_value);
         uint256 effectiveSupply = _supply + VIRTUAL_SHARES;
         uint256 denominator = toUint256(_totalNAV) + VIRTUAL_VALUE;
-        if (toUint256(_value) * (WAD - MAX_MINT_DILUTION) > denominator * MAX_MINT_DILUTION) {
-            return Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION, WAD - MAX_MINT_DILUTION);
+        uint256 clampedShares = type(uint256).max;
+        if (Math.mulDiv(effectiveSupply, WAD - MAX_MINT_DILUTION, MAX_MINT_DILUTION, Math.Rounding.Ceil) > denominator) {
+            clampedShares = Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION, WAD - MAX_MINT_DILUTION);
         }
-        return Math.mulDiv(toUint256(_value), effectiveSupply, denominator);
+        return Math.min(clampedShares, Math.mulDiv(toUint256(_value), effectiveSupply, denominator));
     }
 
     /// @notice Expected value redeemed for `_shares` against `_supply` shares backed by `_totalNAV` (floor).
-    /// @dev Mirrors `ValuationLogic._convertToValue` including its fresh-tranche exemption and the offset.
+    /// @dev Mirrors `ValuationLogic._convertToValue` exactly (the offset covers the fresh tranche too).
     function _expectedValue(uint256 _shares, uint256 _supply, NAV_UNIT _totalNAV) internal pure returns (NAV_UNIT) {
-        if (_supply == 0 && toUint256(_totalNAV) == 0) return toNAVUnits(uint256(0));
         return toNAVUnits(Math.mulDiv(toUint256(_totalNAV) + VIRTUAL_VALUE, _shares, _supply + VIRTUAL_SHARES));
     }
 
@@ -1070,28 +1065,27 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /**
-     * @notice Simulates the kernel's preview-mode LPT multi-asset deposit flow.
-     * @dev Pranked as the liquidity provider tranche (the flow's only permitted caller) with the preview flag set, so the
-     *      previewed `lptAssetsOut` (the venue add's mint) is observable for event expectations. The flagged flow
-     *      unwinds itself via its result-carrying revert, whose payload carries the previewed returns.
+     * @notice Simulates the kernel's SIMULATE-mode LPT multi-asset deposit flow.
+     * @dev Pranked as the liquidity provider tranche (the flow's only permitted caller) with the null synthetic
+     *      caller (the simulation key). The flow unwinds itself via its result-carrying revert, whose payload
+     *      is the flow's own return tuple: the minted LPT tranche shares and the venue add's LPT assets out.
      */
     function _previewKernelDepositLPTMulti(
         uint256 _collateralAssets,
         uint256 _quoteAssets
     )
         internal
-        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT lptAssetsOut, uint256 lptTotalSupplyAfterMints)
+        returns (uint256 trancheSharesMinted, TRANCHE_UNIT lptAssetsOut)
     {
         vm.prank(address(LPT), address(0));
+        // SIMULATE dispatch: the null synthetic caller, this contract the deposit receiver
         (bool ok, bytes memory ret) = address(KERNEL)
-            .call(abi.encodeCall(IRoycoDayKernel.lptDepositMultiAsset, (true, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(0))));
+            .call(abi.encodeCall(IRoycoDayKernel.lptDepositMultiAsset, (DispatchMode.SIMULATE, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(0), address(0), address(this))));
         assertFalse(ok, "the flagged flow must unwind via its result-carrying revert");
         if (bytes4(ret) != DispatchLogic.SIMULATION_RESULT.selector) _bubbleRevert(ret);
         bytes memory simulationResult;
         assembly ("memory-safe") { simulationResult := add(ret, 0x44) }
-        (depositNAV, effectiveNAV, lptAssetsOut) = abi.decode(simulationResult, (NAV_UNIT, NAV_UNIT, TRANCHE_UNIT));
-        // The sync mints no LPT shares, so the live supply is the post-sync supply the share quote prices against
-        lptTotalSupplyAfterMints = LPT.totalSupply();
+        (trancheSharesMinted, lptAssetsOut) = abi.decode(simulationResult, (uint256, TRANCHE_UNIT));
     }
 
     /// @notice Sizes a quote-asset amount whose near-peg value approximates `_value` (one whole quote token per WAD of NAV).
@@ -1313,11 +1307,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertCommittedConservation();
     }
 
-    /// @notice A zero-asset ST deposit reverts with the accountant's exact-arg `INVALID_POST_OP_STATE(ST_DEPOSIT)`.
-    /// @dev The post-op sync's `deltaCollateralNAV > 0` requirement fires before the tranche's `INVALID_DEPOSIT_NAV` check can.
+    /// @notice A zero-asset ST deposit reverts with the kernel's `MUST_MINT_NON_ZERO_SHARES`.
+    /// @dev The kernel's zero-share check fires right after share pricing, before the post-op sync's `deltaCollateralNAV > 0` requirement can.
     function test_RevertIf_STDepositZeroAssets() public {
         vm.prank(ST_ALICE_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         ST.deposit(ZERO_TRANCHE_UNITS, ST_ALICE_ADDRESS);
     }
 
@@ -1374,7 +1368,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 breachAssets = toUint256(maxAssets) + _stMaxDepositBreachSlackAssets();
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(ST), breachAssets);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
         _assertMarketUnchanged(pre);
@@ -1409,7 +1403,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(assets), ST_BOB_ADDRESS);
         vm.stopPrank();
         _assertMarketUnchanged(pre);
@@ -1434,7 +1428,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 breachAssets = toUint256(maxAssets) + _stMaxDepositBreachSlackAssets();
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(ST), breachAssets);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -1477,7 +1471,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 breachAssets = toUint256(maxAssets) + _stMaxDepositBreachSlackAssets();
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(ST), breachAssets);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -1609,11 +1603,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertCommittedConservation();
     }
 
-    /// @notice A zero-asset JT deposit reverts with the accountant's exact-arg `INVALID_POST_OP_STATE(JT_DEPOSIT)`.
-    /// @dev The post-op sync's `deltaCollateralNAV > 0` requirement fires before the tranche's `INVALID_DEPOSIT_NAV` check can.
+    /// @notice A zero-asset JT deposit reverts with the kernel's `MUST_MINT_NON_ZERO_SHARES`.
+    /// @dev The kernel's zero-share check fires right after share pricing, before the post-op sync's `deltaCollateralNAV > 0` requirement can.
     function test_RevertIf_JTDepositZeroAssets() public {
         vm.prank(JT_ALICE_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         JT.deposit(ZERO_TRANCHE_UNITS, JT_ALICE_ADDRESS);
     }
 
@@ -1657,30 +1651,35 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ── LPT deposits ──
 
     /**
-     * @notice The first LPT multi-asset deposit mints LPT shares 1:1 with the minted BPT value, mints the senior leg
-     *         at the committed senior rate, and emits an exact-args `MultiAssetDeposit`.
-     * @dev The freshly initialized venue holds only dust depth and Balancer bounds each unbalanced add's invariant
-     *      growth, so the first entry is capped at the live venue depth (each leg at most the whole pool's value)
-     *      rather than a funding-derived constant. `minLPTAssetsOut` is set to the previewed venue mint, doubling as
-     *      a min-out-passes-at-equality check.
+     * @notice The first post-genesis LPT multi-asset deposit prices exactly against the seeded pool: shares are
+     *         floor-priced at the pre-deposit LPT NAV marked at the venue's settled post-add price, the senior
+     *         leg mints at the committed senior rate, and an exact-args `MultiAssetDeposit` is emitted.
+     * @dev The deploy template's `_seedPool` runs at deployment, so the pool is NEVER uninitialized here: the
+     *      genesis seed leaves a nonzero LPT supply with `DEAD_SHARES` locked at 0xdEaD (the arrange pins the
+     *      topology). The seeded venue holds only dust depth and Balancer bounds each unbalanced add's invariant
+     *      growth, so the entry is capped at the live venue depth. `minLPTAssetsOut` is set to the previewed
+     *      venue mint, doubling as a min-out-passes-at-equality check.
      */
     function test_LPTDepositMultiAsset_firstDeposit_exactPricing() public whenLPT {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _setupLPTProviders();
-        _initializeLPTVenueIfNeeded();
         _sync();
 
+        // Genesis topology: the pool is seeded at deploy, the dead shares are locked, and only the kernel holds BPT
+        uint256 lptSupplyPre = LPT.totalSupply();
+        assertGt(lptSupplyPre, 0, "arrange: the genesis seed must leave a live LPT supply");
+        assertEq(LPT.balanceOf(0x000000000000000000000000000000000000dEaD), 1e12, "arrange: the genesis dead shares must be locked at 0xdEaD");
+
         uint256 depthCapAssets = toUint256(KERNEL.convertValueToCollateralAssets(KERNEL.convertLPTAssetsToValue(toTrancheUnits(IERC20(POOL).totalSupply()))));
-        assertGt(depthCapAssets, 0, "arrange: the initialized venue must carry nonzero depth");
+        assertGt(depthCapAssets, 0, "arrange: the seeded venue must carry nonzero depth");
         uint256 collateralAssets = Math.min(testConfig.initialFunding / 1_000_000, depthCapAssets);
         NAV_UNIT collateralValue = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssets));
         uint256 quoteAssets = _quoteAssetsForValue(collateralValue);
         assertGt(quoteAssets, 0, "arrange: the quote leg must be nonzero");
         uint256 expectedSTSharesMinted = _expectedShares(collateralValue, ST.totalSupply(), ACCOUNTANT.getState().lastSTEffectiveNAV);
-        (NAV_UNIT previewValue,, TRANCHE_UNIT previewLptAssetsOut, uint256 previewLptSupply) = _previewKernelDepositLPTMulti(collateralAssets, quoteAssets);
-        assertEq(previewLptSupply, 0, "arrange: the first LPT mint must price against zero supply");
-        uint256 expectedShares = toUint256(previewValue);
+        (uint256 previewShares, TRANCHE_UNIT previewLptAssetsOut) = _previewKernelDepositLPTMulti(collateralAssets, quoteAssets);
         MarketSnapshot memory pre = _snap();
+        assertEq(pre.lptOwnedSeniorTrancheShares, 0, "arrange: no staged premium may exist");
         uint256 quoteBalPre = IERC20(testConfig.quoteAsset).balanceOf(LPT_ALICE_ADDRESS);
 
         vm.startPrank(LPT_ALICE_ADDRESS);
@@ -1688,7 +1687,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         IERC20(testConfig.quoteAsset).approve(address(LPT), quoteAssets);
         vm.expectEmit(true, true, false, true, address(LPT));
         emit IRoycoLiquidityProviderTranche.MultiAssetDeposit(
-            LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS, collateralAssets, quoteAssets, toUint256(previewLptAssetsOut), expectedShares
+            LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS, collateralAssets, quoteAssets, toUint256(previewLptAssetsOut), previewShares
         );
         (uint256 shares,) =
             IRoycoLiquidityProviderTranche(address(LPT)).depositMultiAsset(collateralAssets, quoteAssets, toUint256(previewLptAssetsOut), LPT_ALICE_ADDRESS);
@@ -1696,10 +1695,15 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertSolvency();
 
         MarketSnapshot memory post = _snap();
-        // The independent first-mint pin: shares equal the EXECUTED venue mint valued through the pricing path (an
-        // input), so a shared preview/execution valuation bug cannot hide. The preview equality below is parity only
-        assertEq(shares, toUint256(KERNEL.convertLPTAssetsToValue(post.lptOwned - pre.lptOwned)), "the first LPT mint must be 1:1 with the minted BPT value");
-        assertEq(shares, expectedShares, "the previewed depositNAV must equal the executed mint (parity)");
+        // The independent pricing pin: the LPT leg prices the deposit (the EXECUTED venue mint) against the
+        // pre-deposit holdings, both marked at the venue's settled post-add price, over the pre-deposit supply.
+        // Both conversions are read at the settled pool, so they carry the exact in-flow mark
+        assertEq(
+            shares,
+            _expectedShares(KERNEL.convertLPTAssetsToValue(post.lptOwned - pre.lptOwned), lptSupplyPre, KERNEL.convertLPTAssetsToValue(pre.lptOwned)),
+            "the LPT mint must floor-price the venue mint against the pre-deposit NAV at the post-add mark"
+        );
+        assertEq(shares, previewShares, "the simulated flow must quote the executed mint exactly (parity)");
         assertEq(LPT.balanceOf(LPT_ALICE_ADDRESS), shares, "receiver LPT share balance");
         assertEq(post.lptOwned, pre.lptOwned + previewLptAssetsOut, "lptOwned must grow by exactly the previewed venue mint");
         assertEq(post.collateralOwned, pre.collateralOwned + toTrancheUnits(collateralAssets), "collateralOwned must grow by the senior leg");
@@ -1723,7 +1727,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 collateralAssets = testConfig.initialFunding / 500;
         uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssets)));
         uint256 previewShares = _previewDepositLPTMulti(collateralAssets, quoteAssets);
-        (,, TRANCHE_UNIT previewLptAssetsOut,) = _previewKernelDepositLPTMulti(collateralAssets, quoteAssets);
+        (, TRANCHE_UNIT previewLptAssetsOut) = _previewKernelDepositLPTMulti(collateralAssets, quoteAssets);
 
         OpReceipt memory r = _doDepositLPTMulti(LPT_BOB_ADDRESS, collateralAssets, quoteAssets, 0);
         assertEq(r.shares, previewShares, "the previewed shares must equal execution exactly");
@@ -1732,13 +1736,19 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertCommittedConservation();
     }
 
-    /// @notice A multi-asset LPT deposit with zero of both constituent legs reverts with `MUST_DEPOSIT_NON_ZERO_ASSETS`.
-    /// @dev The selector is declared identically on `IRoycoDayKernel` and `IRoycoLiquidityProviderTranche`, the kernel's declaration reverts.
+    /// @notice A multi-asset LPT deposit with zero of both constituent legs reverts, leaving the market untouched.
+    /// @dev SRC SMELL, traced 2026-08: DepositLogic.lptDepositMultiAsset (src/libraries/logic/DepositLogic.sol:128-134)
+    ///      skips the senior leg for a zero collateral amount but still forwards the zero/zero add into the venue,
+    ///      where Balancer's Vault.addLiquidity dies with panic 0x11 (arithmetic underflow) instead of a clean
+    ///      kernel guard. The user sees a panic on pure zero input where a MUST_MINT_NON_ZERO_SHARES revert
+    ///      would be the clean spec. Pinned here as the CURRENT behavior so the smell is loud when fixed.
     function test_RevertIf_LPTDepositMultiAssetBothLegsZero() public whenLPT {
         _setupLPTProviders();
+        MarketSnapshot memory pre = _snap();
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayKernel.MUST_DEPOSIT_NON_ZERO_ASSETS.selector);
+        vm.expectRevert(abi.encodeWithSignature("Panic(uint256)", 0x11));
         IRoycoLiquidityProviderTranche(address(LPT)).depositMultiAsset(0, 0, 0, LPT_ALICE_ADDRESS);
+        _assertMarketUnchanged(pre);
     }
 
     /**
@@ -1753,7 +1763,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 collateralAssets = testConfig.initialFunding / 500;
         uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssets)));
-        (,, TRANCHE_UNIT previewLptAssetsOut,) = _previewKernelDepositLPTMulti(collateralAssets, quoteAssets);
+        (, TRANCHE_UNIT previewLptAssetsOut) = _previewKernelDepositLPTMulti(collateralAssets, quoteAssets);
         uint256 breachingMinOut = toUint256(previewLptAssetsOut) + 1;
         MarketSnapshot memory pre = _snap();
 
@@ -1781,8 +1791,14 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         OpReceipt memory r = _doDepositLPTMulti(LPT_BOB_ADDRESS, 0, quoteAssets, 0);
         assertEq(r.shares, previewShares, "the quote-only preview must equal execution");
+        // The LPT leg prices at the venue's settled post-add mark: the single-sided add moves the pool price, so
+        // both the deposit value and the pre-deposit holdings are marked post-add (read at the settled pool)
         NAV_UNIT depositNAV = KERNEL.convertLPTAssetsToValue(r.post.lptOwned - r.pre.lptOwned);
-        assertEq(r.shares, _expectedShares(depositNAV, lptSupplyPre, pre.lastLPTRawNAV), "quote-only shares must price at the pre-deposit LPT effective NAV");
+        assertEq(
+            r.shares,
+            _expectedShares(depositNAV, lptSupplyPre, KERNEL.convertLPTAssetsToValue(r.pre.lptOwned)),
+            "quote-only shares must price at the pre-deposit LPT NAV marked post-add"
+        );
         assertEq(r.post.stSupply, r.pre.stSupply, "a quote-only deposit must mint no senior shares");
         assertEq(r.post.collateralOwned, r.pre.collateralOwned, "a quote-only deposit must add no collateral assets");
         assertTrue(r.post.marketState == MarketState.FIXED_TERM, "the market must remain in the fixed term");
@@ -1905,7 +1921,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.startPrank(LPT_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(LPT), breachAssets);
         IERC20(testConfig.quoteAsset).approve(address(LPT), quoteAssets);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         IRoycoLiquidityProviderTranche(address(LPT)).depositMultiAsset(breachAssets, quoteAssets, 0, LPT_BOB_ADDRESS);
         vm.stopPrank();
         _assertMarketUnchanged(pre);
@@ -1945,7 +1961,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.startPrank(LPT_BOB_ADDRESS);
         IERC20(COLLATERAL_ASSET).approve(address(LPT), collateralAssets);
         IERC20(testConfig.quoteAsset).approve(address(LPT), quoteAssets);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         IRoycoLiquidityProviderTranche(address(LPT)).depositMultiAsset(collateralAssets, quoteAssets, 0, LPT_BOB_ADDRESS);
         vm.stopPrank();
         _assertMarketUnchanged(pre);
@@ -1959,7 +1975,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice Derives a tranche's cumulative asset claims independently from the committed checkpoint plus pricing
-     *         conversions, mirroring `TrancheClaimsLogic._deriveTrancheAssetClaims`.
+     *         conversions, mirroring `AssetLedgerLogic._deriveTrancheAssetClaims`.
      * @dev A tranche's claim IS its effective NAV converted once into the collateral asset, no raw-leg
      *      decomposition exists. The pricing conversions of the claim NAVs are inputs, not the function under test.
      *      Callers must have synced in the same block so the committed checkpoint equals the live state.
@@ -1977,7 +1993,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice Floor-scales every claims field by `_shares / (_totalShares + VIRTUAL_SHARES)`, mirroring
-    ///         `TrancheClaimsLogic._scaleAssetClaims`, which now divides by the effective supply so a sole holder
+    ///         `AssetLedgerLogic._scaleAssetClaims`, which now divides by the effective supply so a sole holder
     ///         can never redeem the whole tranche 1:1 (the virtual-share sliver stays behind). The NAV numerator
     ///         carries the matching VIRTUAL_VALUE offset (the convertToValue shape).
     function _scaleExpectedClaims(AssetClaims memory _claims, uint256 _shares, uint256 _totalShares) internal pure returns (AssetClaims memory scaled) {
@@ -2138,10 +2154,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertCommittedConservation();
     }
 
-    /// @notice A zero-share ST redemption reverts with `MUST_REQUEST_NON_ZERO_SHARES`.
+    /// @notice A zero-share ST redemption reverts with the kernel's `MUST_REDEMPTION_NON_ZERO_SHARES`.
     function test_RevertIf_STRedeemZeroShares() public {
         vm.prank(ST_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
         ST.redeem(0, ST_ALICE_ADDRESS, ST_ALICE_ADDRESS);
     }
 
@@ -2334,21 +2350,20 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertLt(JT.maxRedeem(JT_ALICE_ADDRESS), shares, "arrange: the redemption must exceed the reported maximum");
 
         vm.prank(JT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         JT.redeem(shares, JT_ALICE_ADDRESS, JT_ALICE_ADDRESS);
         _assertMarketUnchanged(pre);
     }
 
-    /// @notice In a fixed-term market a JT redemption reverts with `DISABLED_IN_FIXED_TERM_STATE`, `maxRedeem`
-    ///         reports zero, and the junior max-withdrawable view zeroes.
+    /// @notice In a fixed-term market a JT redemption reverts with `DISABLED_IN_FIXED_TERM_STATE` and `maxRedeem`
+    ///         reports zero.
     function test_RevertIf_JTRedeemInFixedTerm() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         uint256 shares = JT.balanceOf(JT_ALICE_ADDRESS) / 2;
         _enterFixedTerm();
 
+        // maxRedeem carries the fixed-term gate, the removed kernel NAV-tuple getter did not survive the API unification
         assertEq(JT.maxRedeem(JT_ALICE_ADDRESS), 0, "jtMaxRedeem must report zero in a fixed term");
-        (, NAV_UNIT jtMaxWithdrawableNAV,) = KERNEL.jtMaxWithdrawable(JT_ALICE_ADDRESS);
-        assertEq(jtMaxWithdrawableNAV, ZERO_NAV_UNITS, "the junior max-withdrawable NAV must zero in a fixed term");
 
         vm.prank(JT_ALICE_ADDRESS);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
@@ -2400,7 +2415,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertLe(breachShares, JT.balanceOf(JT_ALICE_ADDRESS), "arrange: the breach redemption must be affordable");
 
         vm.prank(JT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         JT.redeem(breachShares, JT_ALICE_ADDRESS, JT_ALICE_ADDRESS);
     }
 
@@ -2546,7 +2561,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertSliceWouldBreachLiquidity(shares, minLiquidityWAD, pre);
 
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
         _assertMarketUnchanged(pre);
     }
@@ -2572,7 +2587,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // The in-kind redemption only shrinks the pool depth, so it cannot relax its own floor and reverts
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
         _assertMarketUnchanged(pre);
     }
@@ -2609,7 +2624,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertLe(breachShares, LPT.balanceOf(LPT_ALICE_ADDRESS), "arrange: the breach redemption must be affordable");
 
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(breachShares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
     }
 
@@ -2678,16 +2693,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertMarketUnchanged(preBreach);
     }
 
-    /// @notice A zero-share LPT redemption reverts with `MUST_REQUEST_NON_ZERO_SHARES` on both the in-kind and the
-    ///         multi-asset flow.
+    /// @notice A zero-share LPT redemption reverts with the kernel's `MUST_REDEMPTION_NON_ZERO_SHARES` on both the
+    ///         in-kind and the multi-asset flow.
     function test_RevertIf_LPTRedeemZeroShares() public whenLPT {
         _setupLPTProviders();
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
         LPT.redeem(0, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
 
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
         IRoycoLiquidityProviderTranche(address(LPT)).redeemMultiAsset(0, 0, 0, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
     }
 
@@ -3311,26 +3326,30 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     // ── Premium accrual windows ──
 
-    /// @notice The first-ever sync initializes the accrual clock only: a pre-genesis window with pending
-    ///         oracle drift pays no premium, takes no fee, mints nothing, and stamps both timestamps.
+    /// @notice The genesis pool seed at deployment stamps the accrual and premium clocks, so the first
+    ///         user-facing sync accrues over the post-deploy window but pays no premium, takes no fee, and
+    ///         mints nothing: the market has no collateral and no senior supply, so no gain can exist.
+    /// @dev The deploy template's `_seedPool` runs the LPT multi-asset deposit at deployment, whose inline
+    ///      pre-op sync initializes both clocks at deploy time. The pre-deploy window can never be accrued.
     function test_Sync_firstSyncAfterDeploy_paysNoPremium() public {
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
-        assertEq(uint256(a0.lastYieldShareAccrualTimestamp), 0, "arrange: no accrual may be stamped yet");
-        assertEq(uint256(a0.lastPremiumPaymentTimestamp), 0, "arrange: no premium may be stamped yet");
+        assertEq(uint256(a0.lastYieldShareAccrualTimestamp), block.timestamp, "the genesis seed must stamp the accrual clock at deploy time");
+        assertEq(uint256(a0.lastPremiumPaymentTimestamp), block.timestamp, "the genesis seed must stamp the premium clock at deploy time");
+        assertEq(uint256(a0.twJTYieldShareAccruedWAD), 0, "no accrual may book at the genesis stamp");
+        assertEq(uint256(a0.twLPTYieldShareAccruedWAD), 0, "no accrual may book at the genesis stamp");
+        assertEq(a0.lastCollateralNAV, ZERO_NAV_UNITS, "the quote-only genesis seed must commit no collateral NAV");
 
         _warpForward(1 days);
         _applySTYield(0.05e18);
         SyncedAccountingState memory state = _syncWithState();
 
-        assertEq(state.lptLiquidityPremium, ZERO_NAV_UNITS, "the genesis sync must pay no liquidity premium");
-        assertEq(state.stProtocolFee, ZERO_NAV_UNITS, "the genesis sync must take no ST fee");
-        assertEq(state.jtProtocolFee, ZERO_NAV_UNITS, "the genesis sync must take no JT fee");
+        assertEq(state.lptLiquidityPremium, ZERO_NAV_UNITS, "the first sync must pay no liquidity premium");
+        assertEq(state.stProtocolFee, ZERO_NAV_UNITS, "the first sync must take no ST fee");
+        assertEq(state.jtProtocolFee, ZERO_NAV_UNITS, "the first sync must take no JT fee");
         assertEq(state.stEffectiveNAV, ZERO_NAV_UNITS, "no senior value exists before the first deposit");
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        assertEq(uint256(a.lastYieldShareAccrualTimestamp), block.timestamp, "the accrual clock must initialize");
-        assertEq(uint256(a.lastPremiumPaymentTimestamp), block.timestamp, "the premium clock must initialize");
-        assertEq(uint256(a.twJTYieldShareAccruedWAD), 0, "no pre-genesis JT accrual may book");
-        assertEq(uint256(a.twLPTYieldShareAccruedWAD), 0, "no pre-genesis LPT accrual may book");
+        assertEq(uint256(a.lastYieldShareAccrualTimestamp), block.timestamp, "the accrual clock must re-stamp");
+        assertEq(uint256(a.lastPremiumPaymentTimestamp), uint256(a0.lastPremiumPaymentTimestamp), "no premium payment may stamp without a gain");
         assertEq(ST.totalSupply(), 0, "no senior shares may mint");
         assertEq(ST.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS), 0, "no fee shares may mint");
         _assertCommittedConservation();
@@ -3511,10 +3530,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ── The premium reinvestment (inline and on demand) ──
 
     /**
-     * @notice The production steady state: with the slippage gate open against a deep pool, a plain sync mints
-     *         the liquidity premium AND deploys it inline in the same sync, nothing stages, the owned depth
-     *         grows by the reported venue mint clearing the gate's derived minimum, and the freshly deployed
-     *         depth is re-committed.
+     * @notice The production steady state: a bare sync STAGES the minted liquidity premium idle (no deployment,
+     *         no reinvest event), and the next operation's settled tail deploys the entire idle pile into the
+     *         venue, with the owned depth growing by the reported venue mint clearing the slippage gate's
+     *         derived minimum and the freshly deployed depth re-committed.
+     * @dev Deployment happens only in operation tails (`withLiquidityPremiumReinvestment`) or the standalone
+     *      `reinvestLiquidityPremium` entrypoint, never inside the bare sync itself.
      */
     function test_Sync_lptPremium_inlineReinvestment_deploysSameSync() public whenLPT {
         uint64 slippageWAD = 0.5e18;
@@ -3524,6 +3545,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _sync();
         _enableLPTOverlay(0.1e18, 0.5e18, _minLiquidityForTargetUtilization(0.8e18));
         _flushPremiumAccrual();
+        // The flush's bare sync stages its own small premium idle, deploy it so the window under test starts clean
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS);
+        KERNEL.reinvestLiquidityPremium(type(uint256).max);
         _warpForward(1 days);
         _applySTYield(0.02e18);
 
@@ -3539,26 +3563,38 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory pre = _snap();
         assertEq(pre.lptOwnedSeniorTrancheShares, 0, "arrange: nothing may be staged before the sync");
 
+        // Step 1: the bare sync mints the premium and STAGES it idle, deploying nothing
         vm.recordLogs();
         SyncedAccountingState memory state = _syncWithState();
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         _assertSyncMatchesExpectation(state, e);
-        MarketSnapshot memory post = _snap();
-        assertEq(post.lptOwnedSeniorTrancheShares, 0, "the premium must deploy inline, staging nothing");
-        assertEq(post.kernelSTShareBal, pre.kernelSTShareBal, "the kernel must hold no residual senior shares");
-        assertEq(post.stSupply, pre.stSupply + premShares + stFeeShares, "senior supply must grow by exactly the premium and fee share mints");
+        MarketSnapshot memory afterSync = _snap();
+        (uint256 syncReinvestCount,) = _lastLogData(logs, address(KERNEL), IRoycoDayKernel.LiquidityPremiumReinvested.selector);
+        assertEq(syncReinvestCount, 0, "a bare sync must never deploy the premium");
+        assertEq(afterSync.lptOwnedSeniorTrancheShares, premShares, "the sync must stage exactly the minted premium idle");
+        assertEq(afterSync.kernelSTShareBal, pre.kernelSTShareBal + premShares, "the kernel must custody the staged premium shares");
+        assertEq(afterSync.stSupply, pre.stSupply + premShares + stFeeShares, "senior supply must grow by exactly the premium and fee share mints");
+        assertEq(afterSync.lptOwned, pre.lptOwned, "the owned depth must not move on the staging sync");
 
+        // Step 2: the next operation's settled tail deploys the entire idle pile through the open gate
+        vm.recordLogs();
+        OpReceipt memory r = _doDepositJT(JT_BOB_ADDRESS, testConfig.initialFunding / 1000);
+        logs = vm.getRecordedLogs();
+
+        MarketSnapshot memory post = _snap();
+        assertEq(post.lptOwnedSeniorTrancheShares, 0, "the operation tail must deploy the whole idle pile");
+        assertEq(post.kernelSTShareBal, pre.kernelSTShareBal, "the kernel must hold no residual senior shares");
         (uint256 reinvestedCount, bytes memory reinvestedData) = _lastLogData(logs, address(KERNEL), IRoycoDayKernel.LiquidityPremiumReinvested.selector);
-        assertEq(reinvestedCount, 1, "exactly one inline reinvestment must be reported");
+        assertEq(reinvestedCount, 1, "exactly one tail reinvestment must be reported");
         (uint256 stSharesReinvested, uint256 lptAssetsMinted) = abi.decode(reinvestedData, (uint256, uint256));
-        assertEq(stSharesReinvested, premShares, "the entire minted premium must deploy");
-        uint256 ownedDeltaAssets = toUint256(post.lptOwned - pre.lptOwned);
+        assertEq(stSharesReinvested, premShares, "the entire staged premium must deploy");
+        uint256 ownedDeltaAssets = toUint256(post.lptOwned - r.pre.lptOwned);
         assertEq(lptAssetsMinted, ownedDeltaAssets, "the reported venue mint must match the owned-ledger delta");
-        assertEq(post.kernelBPTBal - pre.kernelBPTBal, ownedDeltaAssets, "the kernel's BPT balance must grow by exactly the venue mint");
-        assertGe(ownedDeltaAssets, minLptAssetsOut, "the inline mint must clear the slippage gate's derived minimum");
+        assertEq(post.kernelBPTBal - afterSync.kernelBPTBal, ownedDeltaAssets, "the kernel's BPT balance must grow by exactly the venue mint");
+        assertGe(ownedDeltaAssets, minLptAssetsOut, "the tail deployment must clear the slippage gate's derived minimum");
         assertEq(post.lastLPTRawNAV, KERNEL.convertLPTAssetsToValue(post.lptOwned), "the freshly deployed depth must be re-committed");
-        assertGt(post.lastLPTRawNAV, pre.lastLPTRawNAV, "the committed depth must grow");
+        assertGt(post.lastLPTRawNAV, afterSync.lastLPTRawNAV, "the committed depth must grow");
         _assertSolvency();
         _assertCommittedConservation();
     }
@@ -3671,7 +3707,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // Step 1: a redeemer takes 25 percent in kind and is paid its idle liquidity premium slice directly
         uint256 lptSupply = LPT.totalSupply();
         uint256 shares = LPT.balanceOf(LPT_BOB_ADDRESS) / 4;
-        // The idle-premium share slice scales through _scaleAssetClaims, dividing by the effective supply (+ 1e6)
+        // The idle-premium share slice scales through _scaleAssetClaims, dividing by the effective supply (+ VIRTUAL_SHARES)
         uint256 expectedIdleSlice = Math.mulDiv(idleStaged, shares, lptSupply + VIRTUAL_SHARES);
         assertGt(expectedIdleSlice, 0, "arrange: the redemption must claim an idle liquidity premium slice");
         uint256 redeemerSTSharesPre = ST.balanceOf(LPT_BOB_ADDRESS);
@@ -3840,6 +3876,22 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      *      price exists to compare.
      */
     function _seqCheckStep(SeqPrices memory _prev, bool _expectJTPriceDrop, bool _checkLPTPrice) internal view returns (SeqPrices memory cur) {
+        return _seqCheckStep(_prev, _expectJTPriceDrop, _checkLPTPrice, 0);
+    }
+
+    /// @notice The flagship sequence's per-step check with an extra LPT-side tolerance for steps whose
+    ///         operation tail deploys staged premium: the venue add pays real slippage bounded by the
+    ///         configured reinvestment gate, which the caller derives and passes as `_extraLPTToleranceNAV`.
+    function _seqCheckStep(
+        SeqPrices memory _prev,
+        bool _expectJTPriceDrop,
+        bool _checkLPTPrice,
+        uint256 _extraLPTToleranceNAV
+    )
+        internal
+        view
+        returns (SeqPrices memory cur)
+    {
         cur = _seqSnapPrices();
         _assertCommittedConservation();
         _assertSolvency();
@@ -3862,9 +3914,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         }
         if (_checkLPTPrice && _prev.lptSupply != 0 && cur.lptSupply != 0) {
             assertGe(
-                (cur.lptEffectiveNAV + tolerance) * _prev.lptSupply,
+                (cur.lptEffectiveNAV + tolerance + _extraLPTToleranceNAV) * _prev.lptSupply,
                 _prev.lptEffectiveNAV * cur.lptSupply,
-                "sequence: the liquidity share price must not decrease"
+                "sequence: the liquidity share price must not decrease beyond the derived reinvestment slippage"
             );
         }
     }
@@ -4019,8 +4071,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice The classic first-depositor inflation attack is neutralized: a donation to the kernel never enters the
-     *         owned-asset ledger, so the victim's shares match the pre-donation expectation exactly and the victim's
-     *         holding round-trips its deposit value.
+     *         owned-asset ledger, so the victim's shares match the pre-donation expectation exactly, the victim's
+     *         holding round-trips its deposit value, and the attacker forfeits the donation outright.
+     * @dev The mitigation stack: ledger-based valuation makes the donation pricing-inert, the virtual-shares
+     *      offset prices the victim fairly against the attacker's dust supply, and the supply-based dilution
+     *      clamp no longer distorts a healthily priced mint. The LPT side is additionally protected by the
+     *      genesis seed's permanently locked dead shares, pinned in the genesis deposit test.
      */
     function test_FirstDepositor_inflationAttack_neutralized() public {
         _depositJT(JT_ALICE_ADDRESS, testConfig.initialFunding / 10);
@@ -4055,6 +4111,14 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         );
         NAV_UNIT victimHoldingValue = _expectedValue(rVictim.shares, rVictim.post.stSupply, rVictim.post.lastSTEffectiveNAV);
         assertApproxEqAbs(victimHoldingValue, victimValue, maxNAVDelta(), "the victim's holding must round-trip its deposit value");
+        // The attack property itself: the donation must never profit the attacker. Its holding is worth only its
+        // pro-rata slice of the committed (donation-free) senior NAV, so the donation is forfeited in full
+        NAV_UNIT attackerHoldingValue = _expectedValue(rAttacker.shares, rVictim.post.stSupply, rVictim.post.lastSTEffectiveNAV);
+        assertLe(
+            toUint256(attackerHoldingValue),
+            toUint256(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(attackerAssets))) + 1,
+            "the attacker's holding must never exceed its own deposit value"
+        );
         _assertCommittedConservation();
     }
 
@@ -4092,36 +4156,40 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ── Pinned edge cases ──
 
     /**
-     * @notice PINS the zero-BPT-slice edge: an LPT redemption whose BPT slice floors to zero while its idle premium
-     *         slice is nonzero commits as a NAV-neutral redemption, handing the redeemer exactly its pro-rata idle
-     *         senior-share slice while the floored BPT leg pays nothing.
-     * @dev The idle premium is a claimable leg of the LPT's effective NAV. Handing the senior shares over moves no raw
-     *      NAV (they stay in the senior supply), so the LPT_REDEEM shape check (a redemption never grows the LPT's
-     *      deployed raw NAV) commits it. The arranged market is liquidity-healthy (utilization ~0.8), so the liquidity
-     *      requirement passes and the premium is delivered rather than stranded.
+     * @notice PINS the zero-BPT-slice edge: an LPT redemption whose BPT slice floors to zero (a dust share
+     *         count against a coarse BPT-per-share ratio) is REJECTED by the accountant's operation shape check,
+     *         even while a nonzero idle premium slice would be claimable, and the market is left untouched.
+     * @dev Current spec: RoycoDayAccountant.postOpSyncTrancheAccounting requires a strict raw-NAV decrease for
+     *      an LPT_REDEMPTION (src/accountant/RoycoDayAccountant.sol:248, deltaLPTRawNAV < 0), so a redemption
+     *      that would move no deployed depth fails closed with INVALID_POST_OP_STATE(LPT_REDEMPTION). The old
+     *      NAV-neutral idle-only payout shape is intentionally unreachable: the redeemer resubmits with enough
+     *      shares to move the mark, so no value is stranded, only the dust-sized shape is refused.
      */
     function test_LPTRedeem_zeroBPTSlice_nonzeroIdle_pinned() public whenLPT {
         uint256 idleShares = _arrangeStagedIdleLiquidityPremium();
 
         uint256 lptSupply = LPT.totalSupply();
         uint256 lptOwnedAssets = toUint256(KERNEL.getState().totalLPTAssets);
-        // The largest share count whose proportional BPT slice floors to zero
-        uint256 shares = (lptSupply - 1) / lptOwnedAssets;
+        // The largest share count whose proportional BPT slice floors to zero (scaling divides by the effective supply)
+        uint256 shares = lptSupply / lptOwnedAssets;
         assertGt(shares, 0, "arrange: the BPT-per-share ratio must make a zero-BPT slice representable");
         assertLe(shares, LPT.balanceOf(LPT_ALICE_ADDRESS), "arrange: the redeemer must afford the dust redemption");
-        assertEq(Math.mulDiv(lptOwnedAssets, shares, lptSupply), 0, "arrange: the BPT slice must floor to zero");
-        uint256 expectedIdleSlice = Math.mulDiv(idleShares, shares, lptSupply);
-        assertGt(expectedIdleSlice, 0, "arrange: the idle liquidity premium slice must be nonzero");
+        assertEq(Math.mulDiv(lptOwnedAssets, shares, lptSupply + VIRTUAL_SHARES), 0, "arrange: the BPT slice must floor to zero");
+        assertGt(Math.mulDiv(idleShares, shares, lptSupply + VIRTUAL_SHARES), 0, "arrange: the idle liquidity premium slice must be nonzero");
+        MarketSnapshot memory pre = _snap();
 
+        vm.prank(LPT_ALICE_ADDRESS);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LPT_REDEMPTION));
+        LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
+        _assertMarketUnchanged(pre);
+
+        // A redemption sized to move the deployed mark still delivers its idle premium slice pro-rata
+        uint256 largerShares = LPT.balanceOf(LPT_ALICE_ADDRESS) / 8;
         uint256 aliceSTPre = ST.balanceOf(LPT_ALICE_ADDRESS);
-        OpReceipt memory r = _doRedeemLPT(LPT_ALICE_ADDRESS, shares);
-
-        // Exactly the pro-rata idle senior shares are handed over in kind, the floored BPT leg pays nothing, and the
-        // kernel's idle pile drops by exactly that slice
-        assertEq(r.claims.stShares, expectedIdleSlice, "the in-kind redeem must pay exactly the pro-rata idle senior share slice");
-        assertEq(toUint256(r.claims.lptAssets), 0, "the floored BPT leg must pay nothing in kind");
-        assertEq(ST.balanceOf(LPT_ALICE_ADDRESS) - aliceSTPre, expectedIdleSlice, "the redeemer must receive exactly its idle senior share slice");
-        assertEq(r.post.lptOwnedSeniorTrancheShares, idleShares - expectedIdleSlice, "the kernel's idle pile must drop by exactly the redeemed slice");
+        OpReceipt memory r = _doRedeemLPT(LPT_ALICE_ADDRESS, largerShares);
+        assertGt(toUint256(r.claims.lptAssets), 0, "the sized redemption must move the deployed mark");
+        assertEq(ST.balanceOf(LPT_ALICE_ADDRESS) - aliceSTPre, r.claims.stShares, "the idle slice must be paid directly");
+        assertEq(r.post.lptOwnedSeniorTrancheShares, idleShares - r.claims.stShares, "the kernel's idle pile must drop by exactly the paid slice");
         _assertCommittedConservation();
     }
 
@@ -4150,8 +4218,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(_snap().coverageUtilizationWAD, type(uint256).max, "coverage utilization must saturate with an exhausted junior tranche");
         uint256 aliceShares = JT.balanceOf(JT_ALICE_ADDRESS);
 
-        // The zero-NAV denominator branch prices the deposit (ValuationLogic substitutes one NAV wei) and the
-        // clamp binds: the deposit's NAV value dwarfs the 1-wei denominator's bind threshold (~1e12 wei)
+        // The zero-NAV state prices through the virtual-value offset (denominator 0 + VIRTUAL_VALUE = 1 wei), the
+        // collapsed-price regime arms the clamp, and the deposit's NAV value dwarfs the bind threshold (~1e12 wei)
+        // so min(cap, fair) resolves to the cap
         uint256 assets = testConfig.initialFunding / 1000;
         NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
         uint256 expectedShares = _expectedShares(value, jtSupplyPre, ZERO_NAV_UNITS);
@@ -4172,7 +4241,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // previewRedeem simulates the real redemption and bubbles the still-breached coverage gate like exec
         NAV_UNIT expectedAliceValue = _expectedValue(aliceShares, r.post.jtSupply, r.post.lastJTEffectiveNAV);
         assertEq(JT.convertToAssets(aliceShares).nav, expectedAliceValue, "the unbacked holder's claim must be the floor-scaled dust slice");
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         JT.previewRedeem(aliceShares);
         assertLt(toUint256(expectedAliceValue) * 100, toUint256(value), "the unbacked holder must be diluted to under a percent of the new value");
     }
@@ -4222,11 +4291,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(JT.maxRedeem(JT_ALICE_ADDRESS), 0, "jtMaxRedeem must report zero once liquidation is breached");
         uint256 jtShares = JT.balanceOf(JT_ALICE_ADDRESS) / 10;
         vm.prank(JT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         JT.redeem(jtShares, JT_ALICE_ADDRESS, JT_ALICE_ADDRESS);
 
         // (d) The liquidity gate is enforced under liquidation: only a bounded surplus below the full pooled depth is reported
-        (, NAV_UNIT lptMaxWithdrawableNAV,) = KERNEL.lptMaxWithdrawable(LPT_ALICE_ADDRESS);
+        // The removed kernel getter's withdrawable NAV now reads off the accountant's maxLPTWithdrawal against a non-mutating sync preview
+        (SyncedAccountingState memory breachState,,) = KERNEL.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
+        NAV_UNIT lptMaxWithdrawableNAV = ACCOUNTANT.maxLPTWithdrawal(breachState);
         assertLt(lptMaxWithdrawableNAV, pre.lastLPTRawNAV, "the liquidation breach must not waive the pooled-depth liquidity floor");
         assertLt(LPT.maxRedeem(LPT_ALICE_ADDRESS), LPT.balanceOf(LPT_ALICE_ADDRESS), "lptMaxRedeem must stay bounded below the full balance");
 
@@ -4234,7 +4305,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 lptShares = (LPT.balanceOf(LPT_ALICE_ADDRESS) * 3) / 4;
         _assertSliceWouldBreachLiquidity(lptShares, minLiquidityWAD, pre);
         vm.prank(LPT_ALICE_ADDRESS);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(lptShares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
 
         // (a) A senior redemption succeeds and pays the exact bonus out of the junior effective NAV
@@ -4503,52 +4574,49 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice Every kernel and accountant inter-contract entrypoint rejects a direct EOA caller with its exact
-    ///         caller-gate error, and the tranche mint surface is kernel-only.
+    ///         caller-gate error, and the tranche mint and burn surfaces are kernel-only.
     function test_KernelAndAccountant_callerGates() public {
         address outsider = _randomOutsider();
         vm.startPrank(outsider);
-        vm.expectRevert(IRoycoDayKernel.ONLY_SENIOR_TRANCHE.selector);
-        KERNEL.stDeposit(false, toTrancheUnits(1));
-        vm.expectRevert(IRoycoDayKernel.ONLY_SENIOR_TRANCHE.selector);
-        KERNEL.stRedeem(false, 1, outsider);
-        vm.expectRevert(IRoycoDayKernel.ONLY_JUNIOR_TRANCHE.selector);
-        KERNEL.jtDeposit(false, toTrancheUnits(1));
-        vm.expectRevert(IRoycoDayKernel.ONLY_JUNIOR_TRANCHE.selector);
-        KERNEL.jtRedeem(false, 1, outsider);
+        // The per-tranche in-kind entrypoints unified into inkindDeposit and inkindRedeem, both gated to the market's tranches
+        vm.expectRevert(IRoycoDayKernel.ONLY_TRANCHE.selector);
+        KERNEL.inkindDeposit(DispatchMode.EXECUTE, toTrancheUnits(1), outsider, outsider);
+        vm.expectRevert(IRoycoDayKernel.ONLY_TRANCHE.selector);
+        KERNEL.inkindRedeem(DispatchMode.EXECUTE, 1, outsider, outsider, outsider);
         if (testConfig.hasLiquidityProviderTranche) {
+            // The multi-asset pair in both dispatch modes: a direct SIMULATE call would commit the
+            // flow's mutations with no outer simulation revert to unwind them, so this gate is the sole defense
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptDeposit(false, toTrancheUnits(1));
+            KERNEL.lptDepositMultiAsset(DispatchMode.EXECUTE, toTrancheUnits(1), 1, ZERO_TRANCHE_UNITS, outsider, outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptRedeem(false, 1, outsider);
-            // The multi-asset pair in both preview modes: a direct call with _isPreview true would commit the
-            // flow's mutations with no outer preview revert to unwind them, so this gate is the sole defense
+            KERNEL.lptDepositMultiAsset(DispatchMode.SIMULATE, toTrancheUnits(1), 1, ZERO_TRANCHE_UNITS, address(0), address(this));
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptDepositMultiAsset(false, toTrancheUnits(1), 1, ZERO_TRANCHE_UNITS);
+            KERNEL.lptRedeemMultiAsset(DispatchMode.EXECUTE, 1, 0, 0, outsider, outsider, outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptDepositMultiAsset(true, toTrancheUnits(1), 1, ZERO_TRANCHE_UNITS);
-            vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptRedeemMultiAsset(false, 1, 0, 0, outsider);
-            vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
-            KERNEL.lptRedeemMultiAsset(true, 1, 0, 0, outsider);
+            KERNEL.lptRedeemMultiAsset(DispatchMode.SIMULATE, 1, 0, 0, address(0), address(0), outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-            KERNEL.addLiquidity(false, 1, 1, ZERO_TRANCHE_UNITS);
+            KERNEL.addLiquidity(DispatchMode.EXECUTE, 1, 1, ZERO_TRANCHE_UNITS);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-            KERNEL.removeLiquidity(false, toTrancheUnits(1), 0, 0, outsider);
+            KERNEL.removeLiquidity(DispatchMode.EXECUTE, toTrancheUnits(1), 0, 0, outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-            KERNEL.attemptLiquidityPremiumReinvestment(1, ZERO_NAV_UNITS, 0);
+            KERNEL.attemptLiquidityPremiumReinvestment(1, ZERO_NAV_UNITS);
         }
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
         ACCOUNTANT.preOpSyncTrancheAccounting(ZERO_NAV_UNITS);
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
         ACCOUNTANT.commitLiquidityProviderTrancheRawNAV(ZERO_NAV_UNITS);
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        ACCOUNTANT.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        ACCOUNTANT.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
-        ST.mint(outsider, 1);
+        ST.kernelMint(outsider, 1);
+        vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
+        ST.kernelBurn(outsider, 1);
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
         ST.mintProtocolFeeShares(outsider, 1);
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
-        JT.mint(outsider, 1);
+        JT.kernelMint(outsider, 1);
+        vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
+        JT.kernelBurn(outsider, 1);
         vm.stopPrank();
     }
 
@@ -4620,11 +4688,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 idleBeforeReinvest = KERNEL.getState().lptOwnedSeniorTrancheShares;
         assertGt(idleBeforeReinvest, 0, "arrange: staged premium must exist for the reinvestment");
 
-        // (12) The pool deepens flat (no premium mints, so the idle survives), the gate opens, and the staged
-        //      premium deploys into the real depth
+        // (12) The pool deepens flat (no premium mints, so the idle survives), the gate opens to a bounded 1%
+        //      slippage, and the staged premium deploys into the real depth
+        uint64 seqReinvestSlippageWAD = 0.01e18;
         _seedLPTBalanced(LPT_BOB_ADDRESS, funding / 100);
         assertEq(KERNEL.getState().lptOwnedSeniorTrancheShares, idleBeforeReinvest, "deepening the pool must not consume the staged premium");
-        assertTrue(_trySetReinvestmentSlippage(uint64(WAD - 1)), "arrange: the slippage gate must open");
+        assertTrue(_trySetReinvestmentSlippage(seqReinvestSlippageWAD), "arrange: the slippage gate must open");
         NAV_UNIT lptRawBeforeReinvest = ACCOUNTANT.getState().lastLPTRawNAV;
         vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS);
         KERNEL.reinvestLiquidityPremium(type(uint256).max);
@@ -4638,15 +4707,19 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertLe(rMulti.post.liquidityUtilizationWAD, WAD, "the exit must leave the liquidity requirement satisfied");
         p = _seqCheckStep(p, false, true);
 
-        // (14) A longer premium window settles with the gate open
+        // (14) A longer premium window settles with the gate open: the bare sync STAGES the premium idle
         _warpForward(3 days);
         _applySTYield(0.03e18);
         _sync();
         p = _seqCheckStep(p, false, true);
 
-        // (15) JT_ALICE partially exits under the coverage gate
+        // (15) JT_ALICE partially exits under the coverage gate. The redemption's settled tail deploys the
+        //      premium staged by step (14) through the open gate, so the liquidity price may fall by at most
+        //      the gate's slippage bound on the deployed idle value (the derived monotonicity exemption)
+        uint256 tailDeployedIdleValue =
+            toUint256(_expectedValue(KERNEL.getState().lptOwnedSeniorTrancheShares, ST.totalSupply(), ACCOUNTANT.getState().lastSTEffectiveNAV));
         _doRedeemJT(JT_ALICE_ADDRESS, JT.balanceOf(JT_ALICE_ADDRESS) / 4);
-        p = _seqCheckStep(p, false, true);
+        p = _seqCheckStep(p, false, true, Math.mulDiv(tailDeployedIdleValue, seqReinvestSlippageWAD, WAD) + 2);
         assertLe(_snap().coverageUtilizationWAD, WAD, "the sequence must end with coverage satisfied");
     }
 
@@ -4718,7 +4791,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         bytes memory coverageData = abi.encodeCall(ACCOUNTANT.setMinCoverage, (newMinCoverageWAD));
         _scheduleAccountantOperation(coverageData);
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.CoverageUpdated(newMinCoverageWAD);
+        emit IRoycoDayAccountant.MinCoverageUpdated(newMinCoverageWAD);
         _executeScheduledAccountantOperation(coverageData);
         assertEq(uint256(ACCOUNTANT.getState().minCoverageWAD), uint256(newMinCoverageWAD), "the coverage requirement must update");
         assertEq(uint256(ACCOUNTANT.getState().lastYieldShareAccrualTimestamp), block.timestamp, "the setter's inline sync must stamp the checkpoint");
@@ -4735,14 +4808,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             bytes memory liquidityData = abi.encodeCall(ACCOUNTANT.setMinLiquidity, (minLiquidityA));
             _scheduleAccountantOperation(liquidityData);
             vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-            emit IRoycoDayAccountant.LiquidityUpdated(minLiquidityA);
+            emit IRoycoDayAccountant.MinLiquidityUpdated(minLiquidityA);
             _executeScheduledAccountantOperation(liquidityData);
             assertEq(
                 uint256(ACCOUNTANT.getState().lastYieldShareAccrualTimestamp), block.timestamp, "the liquidity setter's inline sync must stamp the checkpoint"
             );
             _sync();
-            (, NAV_UNIT maxWithdrawableA,) = KERNEL.lptMaxWithdrawable(LPT_ALICE_ADDRESS);
-            assertEq(maxWithdrawableA, _expectedMaxLPTWithdrawalNAV(), "lptMaxWithdrawable must match the independent recompute");
+            // The removed kernel getter's withdrawable NAV now reads off the accountant's maxLPTWithdrawal against a non-mutating sync preview
+            (SyncedAccountingState memory stateA,,) = KERNEL.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
+            NAV_UNIT maxWithdrawableA = ACCOUNTANT.maxLPTWithdrawal(stateA);
+            assertEq(maxWithdrawableA, _expectedMaxLPTWithdrawalNAV(), "maxLPTWithdrawal must match the independent recompute");
             assertGt(toUint256(maxWithdrawableA), 0, "arrange: the liquidity surplus must be nonzero");
             // Counterweights independent of the max-withdrawal mirror: the withdrawable depth can never exceed the
             // pooled depth itself, and removing it must leave enough depth to satisfy the liquidity requirement
@@ -4757,8 +4832,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
             _setMinLiquidityWAD(minLiquidityA * 2);
             _sync();
-            (, NAV_UNIT maxWithdrawableB,) = KERNEL.lptMaxWithdrawable(LPT_ALICE_ADDRESS);
-            assertEq(maxWithdrawableB, _expectedMaxLPTWithdrawalNAV(), "lptMaxWithdrawable must match the independent recompute after the raise");
+            (SyncedAccountingState memory stateB,,) = KERNEL.previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
+            NAV_UNIT maxWithdrawableB = ACCOUNTANT.maxLPTWithdrawal(stateB);
+            assertEq(maxWithdrawableB, _expectedMaxLPTWithdrawalNAV(), "maxLPTWithdrawal must match the independent recompute after the raise");
             assertLt(maxWithdrawableB, maxWithdrawableA, "raising the liquidity requirement must shrink the withdrawable depth");
         }
         _assertCommittedConservation();

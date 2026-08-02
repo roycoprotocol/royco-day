@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
+import { DispatchMode } from "../../../src/libraries/Types.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
@@ -100,25 +101,25 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
     /**
      * @notice On the flat seeded market every deposit preview quotes the exact 1:1 mint and the same-block
      *         execution mints exactly the previewed shares on all three tranches
-     * @dev All rates are 1.0 so each quote is pinned absolutely, not just relatively, under the virtual-shares/assets
-     *      offset the mint carries (floor((supply + 1e6) x value / (effNAV + 1))): ST 10e18 assets = 10e18 NAV against
-     *      100e18 effective NAV over 100e18 shares mints floor((100e18 + 1e6) x 10e18 / (100e18 + 1)) = 10000000000000099999,
-     *      JT the same at 30e18 over 30e18 mints floor((30e18 + 1e6) x 10e18 / (30e18 + 1)) = 10000000000000333332, and LPT
+     * @dev All rates are 1.0 so each quote is pinned absolutely, not just relatively, under the virtual-shares/value
+     *      offset the mint carries (floor((supply + 1) x value / (effNAV + 1))): ST 10e18 assets = 10e18 NAV against
+     *      100e18 effective NAV over 100e18 shares mints floor((100e18 + 1) x 10e18 / (100e18 + 1)) = 10000000000000000000,
+     *      JT the same at 30e18 over 30e18 mints floor((30e18 + 1) x 10e18 / (30e18 + 1)) = 10000000000000000000, and LPT
      *      5e18 quote-backed BPT (NAV-per-BPT 1.0) against 6e18 effective NAV over 6e18 shares mints
-     *      floor((6e18 + 1e6) x 5e18 / (6e18 + 1)) = 5000000000000833332
+     *      floor((6e18 + 1) x 5e18 / (6e18 + 1)) = 5000000000000000000
      */
     function test_PreviewDeposit_FreshMarket_ExactQuotesAndExecParity() public {
         uint256 stPreviewed = seniorTranche.previewDeposit(toTrancheUnits(10e18));
-        assertEq(stPreviewed, 10_000_000_000_000_099_999, "the flat-market senior quote must be the exact offset-adjusted mint");
+        assertEq(stPreviewed, 10_000_000_000_000_000_000, "the flat-market senior quote must be the exact offset-adjusted mint");
         assertEq(_depositSenior(10e18), stPreviewed, "the senior deposit must mint exactly the previewed shares");
 
         uint256 jtPreviewed = juniorTranche.previewDeposit(toTrancheUnits(10e18));
-        assertEq(jtPreviewed, 10_000_000_000_000_333_332, "the flat-market junior quote must be the exact offset-adjusted mint");
+        assertEq(jtPreviewed, 10_000_000_000_000_000_000, "the flat-market junior quote must be the exact offset-adjusted mint");
         assertEq(_depositJunior(10e18), jtPreviewed, "the junior deposit must mint exactly the previewed shares");
 
         _mintQuoteBackedBPT(LPT_PROVIDER, 5e18, 5e6);
         uint256 lptPreviewed = liquidityProviderTranche.previewDeposit(toTrancheUnits(5e18));
-        assertEq(lptPreviewed, 5_000_000_000_000_833_332, "the flat-market liquidity quote must be the exact offset-adjusted mint");
+        assertEq(lptPreviewed, 5_000_000_000_000_000_000, "the flat-market liquidity quote must be the exact offset-adjusted mint");
         vm.startPrank(LPT_PROVIDER);
         bpt.approve(address(liquidityProviderTranche), 5e18);
         assertEq(liquidityProviderTranche.deposit(toTrancheUnits(5e18), LPT_PROVIDER), lptPreviewed, "the liquidity deposit must mint exactly the previewed shares");
@@ -131,6 +132,10 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
      * @dev This is the state the old view previews mispriced: the quote must be minted-share-exact only if the
      *      simulation runs the real pre-op sync (fee shares to the recipient, the premium's senior-share mint and
      *      single-sided venue deploy) and prices against the post-sync supply, exactly as execution will
+     * @dev The senior quote also carries an ABSOLUTE anchor: after +10% senior yield over 30 days the pending premium
+     *      and fee mints dilute the senior supply, so a 10e18-NAV deposit priced against the post-sync supply mints
+     *      10348071495766698024 shares (above 10e18, the below-1.0 share price the dilution leaves). This pins the
+     *      real number, not just preview == exec, so a shared pre-op-sync miscalc that shifts BOTH sides together fails here
      */
     function test_PreviewDeposit_PendingPremiumAndFeeMints_MatchesExec() public {
         applySTPnL(1000);
@@ -138,6 +143,7 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         syncVenuePrices();
 
         uint256 stPreviewed = seniorTranche.previewDeposit(toTrancheUnits(10e18));
+        assertEq(stPreviewed, 10_348_071_495_766_698_024, "the pending-state senior quote must equal the exact post-sync-priced mint (absolute anchor)");
         assertEq(_depositSenior(10e18), stPreviewed, "the senior deposit must mint exactly the shares previewed under pending mints");
 
         uint256 jtPreviewed = juniorTranche.previewDeposit(toTrancheUnits(10e18));
@@ -162,31 +168,33 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
     /**
      * @notice On the flat seeded market every redemption preview quotes the exact pro-rata claims and the
      *         same-block execution pays exactly the previewed claims on every leg, on all three tranches
-     * @dev All value sits on each tranche's own raw NAV at a 1.0 rate, and the claim scaler carries the virtual-shares
-     *      offset (floor(leg x shares / (supply + 1e6)), leaving a virtual-dust sliver): 10e18 ST shares of 100e18
-     *      supply claim floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 senior assets and NAV, 5e18 JT
-     *      shares of 30e18 claim floor(30e18 x 5e18 / (30e18 + 1e6)) = 4999999999999833333, 1e18 LPT shares of 6e18
-     *      claim floor(6e18 x 1e18 / (6e18 + 1e6)) = 999999999999833333 BPT. The LPT slice is sized so the
+     * @dev All value sits on each tranche's own raw NAV at a 1.0 rate. The claim scaler carries the virtual-shares
+     *      offset on the asset legs (floor(leg x shares / (supply + 1)), leaving a virtual-dust sliver) and the
+     *      virtual-value offset on the NAV leg (floor((effNAV + 1) x shares / (supply + 1))), so NAV rounds one
+     *      virtual unit above the asset leg: 10e18 ST shares of 100e18 supply claim floor(100e18 x 10e18 / (100e18 + 1))
+     *      = 9999999999999999999 senior assets and floor((100e18 + 1) x 10e18 / (100e18 + 1)) = 10000000000000000000 NAV,
+     *      5e18 JT shares of 30e18 claim 4999999999999999999 assets and 5000000000000000000 NAV, 1e18 LPT shares of
+     *      6e18 claim 999999999999999999 BPT and 1000000000000000000 NAV. The LPT slice is sized so the
      *      post-redemption depth 5e18 clears the 5% liquidity floor on the post-exit senior effective NAV of 90e18 (required 4.5e18)
      */
     function test_PreviewRedeem_FreshMarket_ExactQuotesAndExecParity() public {
         AssetClaims memory stPreviewed = seniorTranche.previewRedeem(10e18);
-        assertEq(stPreviewed.collateralAssets, toTrancheUnits(9_999_999_999_999_900_000), "the senior quote must claim exactly its pro-rata collateral");
-        assertEq(stPreviewed.nav, toNAVUnits(uint256(9_999_999_999_999_900_000)), "the senior quote must claim exactly its pro-rata NAV");
+        assertEq(stPreviewed.collateralAssets, toTrancheUnits(9_999_999_999_999_999_999), "the senior quote must claim exactly its pro-rata collateral");
+        assertEq(stPreviewed.nav, toNAVUnits(uint256(10_000_000_000_000_000_000)), "the senior quote must claim exactly its pro-rata NAV");
         vm.prank(ST_PROVIDER);
         AssetClaims memory stClaims = seniorTranche.redeem(10e18, ST_PROVIDER, ST_PROVIDER);
         _assertClaimsParity(stClaims, stPreviewed, "senior redemption");
 
         AssetClaims memory jtPreviewed = juniorTranche.previewRedeem(5e18);
-        assertEq(jtPreviewed.collateralAssets, toTrancheUnits(4_999_999_999_999_833_333), "the junior quote must claim exactly its pro-rata collateral");
-        assertEq(jtPreviewed.nav, toNAVUnits(uint256(4_999_999_999_999_833_333)), "the junior quote must claim exactly its pro-rata NAV");
+        assertEq(jtPreviewed.collateralAssets, toTrancheUnits(4_999_999_999_999_999_999), "the junior quote must claim exactly its pro-rata collateral");
+        assertEq(jtPreviewed.nav, toNAVUnits(uint256(5_000_000_000_000_000_000)), "the junior quote must claim exactly its pro-rata NAV");
         vm.prank(JT_PROVIDER);
         AssetClaims memory jtClaims = juniorTranche.redeem(5e18, JT_PROVIDER, JT_PROVIDER);
         _assertClaimsParity(jtClaims, jtPreviewed, "junior redemption");
 
         AssetClaims memory lptPreviewed = liquidityProviderTranche.previewRedeem(1e18);
-        assertEq(lptPreviewed.lptAssets, toTrancheUnits(999_999_999_999_833_333), "the liquidity quote must claim exactly its pro-rata BPT");
-        assertEq(lptPreviewed.nav, toNAVUnits(uint256(999_999_999_999_833_333)), "the liquidity quote must claim exactly its pro-rata NAV");
+        assertEq(lptPreviewed.lptAssets, toTrancheUnits(999_999_999_999_999_999), "the liquidity quote must claim exactly its pro-rata BPT");
+        assertEq(lptPreviewed.nav, toNAVUnits(uint256(1_000_000_000_000_000_000)), "the liquidity quote must claim exactly its pro-rata NAV");
         vm.prank(LPT_PROVIDER);
         AssetClaims memory lptClaims = liquidityProviderTranche.redeem(1e18, LPT_PROVIDER, LPT_PROVIDER);
         _assertClaimsParity(lptClaims, lptPreviewed, "liquidity redemption");
@@ -197,6 +205,10 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
      *         same-block execution exactly on every claim leg, on all three tranches
      * @dev The simulated redemption must run the identical pre-op sync (committing the pending mints and the
      *      premium's venue deploy) and read the identical pre-burn supply, or a leg diverges here
+     * @dev The senior leg also carries an ABSOLUTE anchor: ST_PROVIDER holds the full 100e18 senior supply, so its
+     *      half-max slice is exactly 50e18 shares, and after the +10% yield reconciles (coverage-limited senior share)
+     *      those 50e18 shares claim a NAV of exactly 53.15e18. This pins the real number, not just preview == exec,
+     *      so a shared pre-op-sync miscalc that shifts BOTH sides together fails here
      */
     function test_PreviewRedeem_PendingPremiumAndFeeMints_MatchesExec() public {
         applySTPnL(1000);
@@ -204,7 +216,9 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         syncVenuePrices();
 
         uint256 stShares = seniorTranche.maxRedeem(ST_PROVIDER) / 2;
+        assertEq(stShares, 50e18, "arrange: the full-supply senior holder's half-max slice is exactly 50e18 shares");
         AssetClaims memory stPreviewed = seniorTranche.previewRedeem(stShares);
+        assertEq(stPreviewed.nav, toNAVUnits(uint256(53_150_000_000_000_000_000)), "the pending-state senior claim NAV must equal the exact reconciled value (absolute anchor)");
         vm.prank(ST_PROVIDER);
         AssetClaims memory stClaims = seniorTranche.redeem(stShares, ST_PROVIDER, ST_PROVIDER);
         _assertClaimsParity(stClaims, stPreviewed, "senior redemption under pending mints");
@@ -227,12 +241,12 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
      *         self-liquidation bonus, and the same-block execution pays exactly the previewed claims
      * @dev A covered -21% drawdown marks coverage utilization at ceil(102.7e18 x 0.2 / 2.7e18) = 7.608e18, past
      *      the 6.4667e18 liquidation threshold, which forces the market PERPETUAL with the bonus armed. The loss
-     *      is fully covered so 10e18 of the 100e18 senior shares claim a base NAV of floor(100e18 x 10e18 /
-     *      (100e18 + 1e6)) = 9999999999999900000 (the virtual-shares offset), the sized bonus is
+     *      is fully covered so 10e18 of the 100e18 senior shares claim a base NAV of floor((100e18 + 1) x 10e18 /
+     *      (100e18 + 1)) = 10000000000000000000 (the virtual-value offset), the sized bonus is
      *      min(configured 1% x base = base / 100, junior buffer 2.7e18, neutral cap base x 2.7 / 100) =
-     *      99999999999999000, and the report is the value of the granted assets: floor(floor(99999999999999000 /
-     *      0.79) x 0.79) = 99999999999998999, so the previewed claim NAV must be exactly 9999999999999900000 +
-     *      99999999999998999 = 10099999999999898999 and execution must match it on every leg
+     *      100000000000000000, and the report is the value of the granted assets at the 0.79 collateral rate:
+     *      floor(floor(100000000000000000 / 0.79) x 0.79) = 99999999999999999, so the previewed claim NAV must be
+     *      exactly 10000000000000000000 + 99999999999999999 = 10099999999999999999 and execution must match it on every leg
      */
     function test_PreviewRedeem_LiquidationRegime_SelfLiquidationBonusParity() public {
         applySTPnL(-2100);
@@ -243,8 +257,8 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         AssetClaims memory previewed = seniorTranche.previewRedeem(10e18);
         assertEq(
             previewed.nav,
-            toNAVUnits(uint256(10_099_999_999_999_898_999)),
-            "the quote must carry the base 9999999999999900000 slice plus the asset-quantized 99999999999998999 bonus"
+            toNAVUnits(uint256(10_099_999_999_999_999_999)),
+            "the quote must carry the base 10000000000000000000 slice plus the asset-quantized 99999999999999999 bonus"
         );
 
         vm.prank(ST_PROVIDER);
@@ -324,40 +338,40 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
     /**
      * @notice A zero-asset deposit preview bubbles the exact error the zero-asset execution raises on all three
      *         tranches, and a zero-share redeem preview bubbles the exact zero-share execution error
-     * @dev A zero deposit moves its tranche's raw NAV by zero, so the kernel's post-operation validation rejects
-     *      it with the op-tagged INVALID_POST_OP_STATE before any tranche-level guard. The zero-share redemption
-     *      trips the tranche's own MUST_REQUEST_NON_ZERO_SHARES inside the simulated frame. Exec is pinned first
+     * @dev A zero deposit prices to zero shares, so the kernel rejects it with MUST_MINT_NON_ZERO_SHARES right
+     *      after share pricing. The zero-share redemption trips the kernel's MUST_REDEMPTION_NON_ZERO_SHARES upfront,
+     *      which runs in preview and execution alike. Exec is pinned first
      *      so the parity claim is against the live exec error, not a hardcoded expectation
      */
     function test_RevertIf_ZeroAmounts_PreviewsBubbleExactExecErrors() public {
-        // Exec side: the zero-asset deposits raise the op-tagged post-op validation error
+        // Exec side: the zero-asset deposits raise the kernel's zero-share mint guard
         vm.prank(ST_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         seniorTranche.deposit(toTrancheUnits(0), ST_PROVIDER);
         vm.prank(JT_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         juniorTranche.deposit(toTrancheUnits(0), JT_PROVIDER);
         vm.prank(LPT_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LPT_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.deposit(toTrancheUnits(0), LPT_PROVIDER);
 
         // Preview side: the identical errors bubble verbatim through the simulation seam
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         seniorTranche.previewDeposit(toTrancheUnits(0));
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         juniorTranche.previewDeposit(toTrancheUnits(0));
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LPT_DEPOSIT));
+        vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.previewDeposit(toTrancheUnits(0));
 
-        // Zero-share redemptions: exec and preview raise the identical tranche-level guard
+        // Zero-share redemptions: exec and preview raise the identical kernel-level guard
         vm.prank(ST_PROVIDER);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
         seniorTranche.redeem(0, ST_PROVIDER, ST_PROVIDER);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
         seniorTranche.previewRedeem(0);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
         juniorTranche.previewRedeem(0);
-        vm.expectRevert(IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector);
+        vm.expectRevert(IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES.selector);
         liquidityProviderTranche.previewRedeem(0);
     }
 
@@ -409,30 +423,32 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
     function test_RevertIf_FlaggedKernelEntrypointInvokedOutsideSimulation() public {
         bytes32 digestBefore = keccak256(abi.encode(accountant.getState(), kernel.getState()));
 
+        // Each entrypoint is the unified inkind/multi-asset call; the pranked tranche resolves its type via _getInvokingTranche,
+        // and a simulation carries the null synthetic caller/owner. A direct SIMULATE call must still terminate in the result revert.
         vm.prank(address(seniorTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.stDeposit(true, toTrancheUnits(1e18));
+        kernel.inkindDeposit(DispatchMode.SIMULATE, toTrancheUnits(1e18), address(0), address(this));
         vm.prank(address(seniorTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.stRedeem(true, 1e18, address(kernel));
+        kernel.inkindRedeem(DispatchMode.SIMULATE, 1e18, address(0), address(0), address(kernel));
         vm.prank(address(juniorTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.jtDeposit(true, toTrancheUnits(1e18));
+        kernel.inkindDeposit(DispatchMode.SIMULATE, toTrancheUnits(1e18), address(0), address(this));
         vm.prank(address(juniorTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.jtRedeem(true, 1e18, address(kernel));
+        kernel.inkindRedeem(DispatchMode.SIMULATE, 1e18, address(0), address(0), address(kernel));
         vm.prank(address(liquidityProviderTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.lptDeposit(true, toTrancheUnits(1e18));
+        kernel.inkindDeposit(DispatchMode.SIMULATE, toTrancheUnits(1e18), address(0), address(this));
         vm.prank(address(liquidityProviderTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.lptRedeem(true, 1e18, address(kernel));
+        kernel.inkindRedeem(DispatchMode.SIMULATE, 1e18, address(0), address(0), address(kernel));
         vm.prank(address(liquidityProviderTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.lptDepositMultiAsset(true, toTrancheUnits(0), 1e6, toTrancheUnits(0));
+        kernel.lptDepositMultiAsset(DispatchMode.SIMULATE, toTrancheUnits(0), 1e6, toTrancheUnits(0), address(0), address(this));
         vm.prank(address(liquidityProviderTranche));
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
-        kernel.lptRedeemMultiAsset(true, 1e18, 0, 0, address(kernel));
+        kernel.lptRedeemMultiAsset(DispatchMode.SIMULATE, 1e18, 0, 0, address(0), address(0), address(kernel));
 
         assertEq(keccak256(abi.encode(accountant.getState(), kernel.getState())), digestBefore, "a flagged flow must leave the committed state untouched");
     }
@@ -488,12 +504,12 @@ contract Test_SimulationSeamPreviewsFixedTerm_Tranches is SimulationSeamPreviews
      *         liquidity and stays enabled in every market state) and execution matches it exactly
      * @dev The drawdown lives entirely on the ST/JT vault rate: the quote-only pool is untouched, so 5e18
      *      quote-backed BPT is worth 5e18 NAV against the 6e18 LPT effective NAV over 6e18 shares, minting the
-     *      offset-adjusted floor((6e18 + 1e6) x 5e18 / (6e18 + 1)) = 5000000000000833332
+     *      offset-adjusted floor((6e18 + 1) x 5e18 / (6e18 + 1)) = 5000000000000000000
      */
     function test_FixedTerm_LiquidityPreviewDepositStillQuotes_ExecParity() public {
         _mintQuoteBackedBPT(LPT_PROVIDER, 5e18, 5e6);
         uint256 previewed = liquidityProviderTranche.previewDeposit(toTrancheUnits(5e18));
-        assertEq(previewed, 5_000_000_000_000_833_332, "the fixed-term LPT quote must price the exact offset-adjusted mint on the untouched pool");
+        assertEq(previewed, 5_000_000_000_000_000_000, "the fixed-term LPT quote must price the exact offset-adjusted mint on the untouched pool");
         vm.startPrank(LPT_PROVIDER);
         bpt.approve(address(liquidityProviderTranche), 5e18);
         assertEq(liquidityProviderTranche.deposit(toTrancheUnits(5e18), LPT_PROVIDER), previewed, "the fixed-term LPT deposit must mint exactly the previewed shares");
@@ -594,13 +610,13 @@ contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestB
                 assertEq(_depositSenior(assets), previewed, "senior deposit must mint exactly the previewed shares");
             } catch (bytes memory err) {
                 assertEq(
-                    bytes4(err), IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "the senior deposit preview may only revert on the liquidity gate"
+                    bytes4(err), IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "the senior deposit preview may only revert on the liquidity gate"
                 );
                 _assertSnapshotUnchanged(before, "senior previewDeposit");
                 stJtVault.mintShares(ST_PROVIDER, assets);
                 vm.startPrank(ST_PROVIDER);
                 stJtVault.approve(address(seniorTranche), assets);
-                vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+                vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
                 seniorTranche.deposit(toTrancheUnits(assets), ST_PROVIDER);
                 vm.stopPrank();
             }
@@ -665,12 +681,12 @@ contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestB
             } catch (bytes memory err) {
                 assertEq(
                     bytes4(err),
-                    IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector,
+                    IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector,
                     "the liquidity redemption preview may only revert on the liquidity gate"
                 );
                 _assertSnapshotUnchanged(before, "liquidity previewRedeem");
                 vm.prank(LPT_PROVIDER);
-                vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+                vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
                 liquidityProviderTranche.redeem(shares, LPT_PROVIDER, LPT_PROVIDER);
             }
         }

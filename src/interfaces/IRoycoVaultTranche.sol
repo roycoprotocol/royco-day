@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { AssetClaims, TrancheType } from "../libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
+import { TRANCHE_UNIT } from "../libraries/Units.sol";
 
 /**
  * @title IRoycoVaultTranche
@@ -15,11 +15,26 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST", "Royco-JT", or "Royco-LPT")
      * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST", "JT", or "LPT")
      * @custom:field initialAuthority - The initial authority for the tranche
+     * @custom:field kernel - The kernel that handles the core market logic and accounting synchronization
+     * @custom:field asset - The underlying yield bearing asset of the tranche
      */
     struct RoycoTrancheInitParams {
         string name;
         string symbol;
         address initialAuthority;
+        address kernel;
+        address asset;
+    }
+
+    /**
+     * @notice Storage state for the Royco vault tranche
+     * @custom:storage-location erc7201:Royco.storage.RoycoVaultTrancheState
+     * @custom:field kernel - The kernel that handles the core market logic and accounting synchronization
+     * @custom:field asset - The address of the yield bearing asset of the tranche
+     */
+    struct RoycoVaultTrancheState {
+        address kernel;
+        address asset;
     }
 
     /**
@@ -48,21 +63,12 @@ interface IRoycoVaultTranche is IERC20Metadata {
      */
     event ProtocolFeeSharesMinted(address indexed protocolFeeRecipient, uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
 
-    /// @notice Thrown when a deposit would mint zero tranche shares (either zero assets or dust amount that rounds to zero shares)
-    error MUST_MINT_NON_ZERO_SHARES();
-
-    /// @notice Thrown when a redemption is requested with zero shares
-    error MUST_REQUEST_NON_ZERO_SHARES();
-
     /// @notice Thrown when the caller of a permissioned function is not the tranche's configured kernel
     error ONLY_KERNEL();
 
-    /// @notice Thrown when a deposit renders a zero deposit NAV
-    error INVALID_DEPOSIT_NAV();
-
     /// @notice Returns the address of the kernel that this tranche is associated with
     /// @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
-    function KERNEL() external view returns (address kernel);
+    function kernel() external view returns (address kernel);
 
     /**
      * @notice Deposits assets into the tranche and mints shares to the receiver
@@ -96,13 +102,21 @@ interface IRoycoVaultTranche is IERC20Metadata {
 
     /**
      * @notice Mints tranche shares to the specified account
-     * @dev Authorized via the AccessManager `restricted` modifier, the deploy template grants the market's kernel the role
-     *      for this selector so the kernel can mint senior shares to itself when seeding the LPT's liquidity venue
+     * @dev Only callable by the kernel, which prices every mint inside a synchronized operation
      * @dev Takes a raw share count: the caller (kernel) is responsible for computing a fair, non-diluting amount
      * @param _to The account to mint the shares to
      * @param _shares The number of shares to mint
      */
-    function mint(address _to, uint256 _shares) external;
+    function kernelMint(address _to, uint256 _shares) external;
+
+    /**
+     * @notice Burns the specified number of tranche shares from the specified owner
+     * @dev Only callable by the kernel during a redemption flow, after the owner's claims have been scaled against the pre-burn supply
+     * @dev Takes a raw share count: redemption inputs are validated upstream by the tranche, so a derived zero share burn is a permitted no-op
+     * @param _from The address whose tranche shares are burned
+     * @param _shares The number of tranche shares to burn
+     */
+    function kernelBurn(address _from, uint256 _shares) external;
 
     /**
      * @notice Previews the number of shares that would be minted for a given deposit amount

@@ -67,7 +67,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
         vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
         accountant.setMinCoverage(uint64(WAD));
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.CoverageUpdated(uint64(WAD - 1));
+        emit IRoycoDayAccountant.MinCoverageUpdated(uint64(WAD - 1));
         accountant.setMinCoverage(uint64(WAD - 1));
         assertEq(accountant.getState().minCoverageWAD, uint64(WAD - 1), "minCoverage written at boundary");
     }
@@ -87,7 +87,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
         vm.expectRevert(IRoycoDayAccountant.INVALID_LIQUIDITY_CONFIG.selector);
         accountant.setMinLiquidity(uint64(WAD));
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.LiquidityUpdated(uint64(WAD - 1));
+        emit IRoycoDayAccountant.MinLiquidityUpdated(uint64(WAD - 1));
         accountant.setMinLiquidity(uint64(WAD - 1));
         assertEq(accountant.getState().minLiquidityWAD, uint64(WAD - 1), "minLiquidity written at boundary");
     }
@@ -309,9 +309,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
 
         MockRecordingYDM reverting = new MockRecordingYDM();
         reverting.setRevertOnInitialize(true);
-        vm.expectRevert(
-            abi.encodeWithSelector(IRoycoDayAccountant.FAILED_TO_INITIALIZE_YDM.selector, abi.encodeWithSelector(MockRecordingYDM.YDM_INIT_REVERTED.selector))
-        );
+        vm.expectRevert(MockRecordingYDM.YDM_INIT_REVERTED.selector);
         accountant.setJuniorTrancheYDM(address(reverting), abi.encodeCall(MockRecordingYDM.initializeModel, (hex"")));
     }
 
@@ -351,9 +349,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
 
         MockRecordingYDM reverting = new MockRecordingYDM();
         reverting.setRevertOnInitialize(true);
-        vm.expectRevert(
-            abi.encodeWithSelector(IRoycoDayAccountant.FAILED_TO_INITIALIZE_YDM.selector, abi.encodeWithSelector(MockRecordingYDM.YDM_INIT_REVERTED.selector))
-        );
+        vm.expectRevert(MockRecordingYDM.YDM_INIT_REVERTED.selector);
         accountant.setLiquidityProviderTrancheYDM(address(reverting), abi.encodeCall(MockRecordingYDM.initializeModel, (hex"")));
     }
 

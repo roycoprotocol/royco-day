@@ -48,11 +48,8 @@ contract RoycoFactoryGatekeeper is IRoycoFactoryGatekeeper {
     {
         require(_selectors.length == _roleIds.length, LENGTH_MISMATCH());
 
-        // The protocol's own contracts are never legitimate deployment targets
-        require(_target != ROYCO_ACCESS_MANAGER && _target != ROYCO_FACTORY && _target != address(this), TARGET_FORBIDDEN(_target));
-
-        // A target may be configured exactly once, by the deployment that created it
-        require(!IRoycoAccessManager(ROYCO_ACCESS_MANAGER).wasEverConfigured(_target), TARGET_ALREADY_CONFIGURED(_target));
+        // The protocol's own contracts are never legitimate deployment targets, and a target may be configured exactly once, by the deployment that created it
+        _requireNotConfigured(_target);
 
         // Bind the selectors to the target
         AccessManager am = AccessManager(ROYCO_ACCESS_MANAGER);
@@ -87,10 +84,8 @@ contract RoycoFactoryGatekeeper is IRoycoFactoryGatekeeper {
         emit MarketRolesGranted(_roleIds.length);
     }
 
-    /**
-     * @dev A market deployment may only act on a contract that has never been configured before
-     * @param _subject The address a deployment is asking to configure or to grant a role to
-     */
+    /// @dev A market deployment may only act on a contract that has never been configured before
+    /// @param _subject The address a deployment is asking to configure or to grant a role to
     function _requireNotConfigured(address _subject) private view {
         require(_subject != ROYCO_ACCESS_MANAGER && _subject != ROYCO_FACTORY && _subject != address(this), TARGET_FORBIDDEN(_subject));
         require(!IRoycoAccessManager(ROYCO_ACCESS_MANAGER).wasEverConfigured(_subject), TARGET_ALREADY_CONFIGURED(_subject));

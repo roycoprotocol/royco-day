@@ -41,7 +41,7 @@ library RoycoTestMath {
     ///         (VIRTUAL_SHARES / VIRTUAL_VALUE in Constants.sol). Every conversion prices against
     ///         (supply + VIRTUAL_SHARES) over (totalValue + VIRTUAL_VALUE); if the src values change without this
     ///         mirror, every cross-assert fails loudly.
-    uint256 internal constant VIRTUAL_SHARES = 1e6;
+    uint256 internal constant VIRTUAL_SHARES = 1;
     uint256 internal constant VIRTUAL_VALUE = 1;
 
     /// @notice One below solady expWad's overflow threshold, the clamp on the adaptive yield model's linear adaptation.
@@ -285,15 +285,13 @@ library RoycoTestMath {
      *      bootstrap mint dilutes nobody); the empty-with-backing state (supply == 0, totalValue > 0) falls
      *      through to the priced branch so pre-existing backing is not captured; totalValue == 0 with a live
      *      supply pins the denominator to the 1-wei VIRTUAL_ASSETS.
-     *      The mint-dilution clamp: a single mint may own at most MAX_MINT_DILUTION / WAD of the
-     *      post-mint EFFECTIVE supply (MAX_MINT_DILUTION is this library's own restatement of the protocol
-     *      constant — if Constants.sol changes without this mirror, every cross-assert fails loudly). The
-     *      shares therefore never exceed cap = ⌊(supply + VIRTUAL_SHARES) · MAX_MINT_DILUTION / (WAD − MAX_MINT_DILUTION)⌋.
-     *      The bind test runs BEFORE the fair-shares division in its overflow-free form
-     *      (⌈value·(WAD − MAX_MINT_DILUTION) / MAX_MINT_DILUTION⌉ > denominator,
-     *      integer-equivalent to fair > cap), mirroring production's ordering exactly — including the panic
-     *      surface: the cap mulDiv overflows uint256 once supply ≥ ⌈2^256·(WAD − MAX_MINT_DILUTION) / MAX_MINT_DILUTION⌉,
-     *      exactly when production's does (load-bearing for the invariant handler's revert prediction).
+     *      The mint-dilution clamp: arms only in the collapsed-price regime
+     *      (⌈(supply + VIRTUAL_SHARES) · (WAD − MAX_MINT_DILUTION) / MAX_MINT_DILUTION⌉ > denominator), the state
+     *      where fair pricing itself mints runaway share counts, and the armed result is min(cap, fair) with
+     *      cap = ⌊(supply + VIRTUAL_SHARES) · MAX_MINT_DILUTION / (WAD − MAX_MINT_DILUTION)⌋. A mint into a
+     *      healthily priced tranche always prices fairly however large the value (MAX_MINT_DILUTION is this
+     *      library's own restatement of the protocol constant — if Constants.sol changes without this mirror,
+     *      every cross-assert fails loudly).
      *      Rounding: Floor on both branches (the cap floor favors existing holders).
      * @param value The value being contributed
      * @param totalValue The pre-contribution total value backing the supply
@@ -308,10 +306,10 @@ library RoycoTestMath {
         // VIRTUAL_VALUE. The bind predicate's effective supply cancels, so its form is unchanged
         uint256 effectiveSupply = supply + VIRTUAL_SHARES;
         uint256 denominator = totalValue + VIRTUAL_VALUE;
-        if (Math.mulDiv(value, WAD - MAX_MINT_DILUTION, MAX_MINT_DILUTION, Math.Rounding.Ceil) > denominator) {
-            return Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION, WAD - MAX_MINT_DILUTION);
-        }
         shares = Math.mulDiv(effectiveSupply, value, denominator);
+        if (Math.mulDiv(effectiveSupply, WAD - MAX_MINT_DILUTION, MAX_MINT_DILUTION, Math.Rounding.Ceil) > denominator) {
+            shares = Math.min(shares, Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION, WAD - MAX_MINT_DILUTION));
+        }
     }
 
     /**
@@ -339,8 +337,8 @@ library RoycoTestMath {
     /**
      * @notice Value redeemed for shares: ⌊(totalValue + VIRTUAL_ASSETS) · shares / (supply + VIRTUAL_SHARES)⌋.
      * @dev Mirrors src ValuationLogic._convertToValue.
-     *      Edge: only a genuinely fresh tranche (supply == 0 AND totalValue == 0) returns 0; with backing but no
-     *      supply the priced branch runs against the VIRTUAL_SHARES-only denominator.
+     *      Edge: a genuinely fresh tranche (supply == 0 AND totalValue == 0) values shares 1:1, the exact inverse
+     *      of the fresh mint; with backing but no supply the formula runs against the VIRTUAL_SHARES-only denominator.
      *      Rounding: Floor. Favors: remaining holders.
      * @param shares The shares being valued
      * @param totalValue The total value backing the supply
@@ -348,13 +346,11 @@ library RoycoTestMath {
      * @return value The value of the shares
      */
     function convertToValue(uint256 shares, uint256 totalValue, uint256 supply) internal pure returns (uint256 value) {
-        // A fresh tranche (no shares, no backing) has nothing to claim; matches the convertToShares fresh branch
-        if (supply == 0 && totalValue == 0) return 0;
-        // Inverse of convertToShares under the same virtual shares / virtual value
+        // Inverse of convertToShares under the same virtual shares / virtual value, the fresh tranche inverts 1:1
         value = Math.mulDiv(totalValue + VIRTUAL_VALUE, shares, supply + VIRTUAL_SHARES);
     }
 
-    /// @notice The pro-rata NAV claim of shares on a tranche's post-sync claims, mirrors TrancheClaimsLogic._scaleAssetClaims.nav (virtual shares, no virtual value)
+    /// @notice The pro-rata NAV claim of shares on a tranche's post-sync claims, mirrors AssetLedgerLogic._scaleAssetClaims.nav (virtual shares, no virtual value)
     function scaleClaimNav(uint256 shares, uint256 claimNav, uint256 supply) internal pure returns (uint256 value) {
         value = Math.mulDiv(claimNav, shares, supply + VIRTUAL_SHARES);
     }
@@ -431,7 +427,7 @@ library RoycoTestMath {
     /**
      * @notice Claim scaling: the three asset fields scale as ⌊claim · shares / (totalShares + VIRTUAL_SHARES)⌋ and the
      *         NAV field as ⌊(nav + VIRTUAL_VALUE) · shares / (totalShares + VIRTUAL_SHARES)⌋ (the full convertToValue shape).
-     * @dev Mirrors src TrancheClaimsLogic._scaleAssetClaims (the includeVirtualShares == true branch).
+     * @dev Mirrors src AssetLedgerLogic._scaleAssetClaims (the includeVirtualShares == true branch).
      *      Virtual shares: the redeemer's slice is priced against the effective supply (totalShares + VIRTUAL_SHARES),
      *      so a sole holder can never redeem the whole tranche 1:1 — the virtual-share sliver stays behind, closing the
      *      donation/premium extraction vector on the redemption side. The NAV numerator carries the matching
@@ -616,12 +612,15 @@ library RoycoTestMath {
 
         // State machine on the fresh collateral NAV and the settled post-sync jtEffectiveNAV. The market resolves
         // PERPETUAL when the drawdown is within the dust tolerance (fully repaid or dust-sized, so dust noise
-        // never locks or keeps locking the market), the market is permanently perpetual, the term elapsed, or
-        // the junior buffer is wiped (partial or total, extinguishing its dead restoration claim)
+        // never locks or keeps locking the market), the market is permanently perpetual, the term elapsed,
+        // there is no senior capital to protect (the observation period guards nobody), or the junior buffer is
+        // wiped (partial or total, extinguishing its dead restoration claim).
+        // NOT mirrored: src condition 7, the post-deployment fixed-term grace period, every mirror-driven harness
+        // deploys with a zero grace period so the condition is structurally false here
         out.coverageUtilizationWAD = computeCoverageUtilization(out.collateralNAV, in_.minCoverageWAD, jtEffectiveNAV);
         bool perpetual = il <= in_.dustTolerance || in_.fixedTermDuration == 0
             || (in_.marketStateLast == MarketState.FIXED_TERM && in_.fixedTermEndTimestampLast <= in_.nowTimestamp)
-            || out.coverageUtilizationWAD >= in_.coverageLiquidationUtilizationWAD || jtEffectiveNAV == 0;
+            || out.coverageUtilizationWAD >= in_.coverageLiquidationUtilizationWAD || stEffectiveNAV == 0 || jtEffectiveNAV == 0;
         if (perpetual) {
             // A perpetual commit always erases the IL and clears the term, so a perpetual market never carries a drawdown
             out.ilErased = il;

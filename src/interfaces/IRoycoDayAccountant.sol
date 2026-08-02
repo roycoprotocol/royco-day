@@ -9,6 +9,9 @@ import { NAV_UNIT } from "../libraries/Units.sol";
 interface IRoycoDayAccountant {
     /**
      * @notice Initialization parameters for the Royco Accountant
+     * @custom:field kernel - The kernel that this accountant maintains mark-to-market NAV, JT impermanent loss, and fee accounting for
+     * @custom:field initialAuthority - The initial authority for the accountant
+     * @custom:field fixedTermGracePeriodSeconds - The seconds after deployment during which the market cannot enter a fixed term no matter what, so a young market is never locked by an early junior impermanent loss
      * @custom:field minCoverageWAD - The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity provider tranche's market making inventory, scaled to WAD precision
@@ -26,6 +29,11 @@ interface IRoycoDayAccountant {
      * @custom:field lptYieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche, scaled to WAD precision
      */
     struct RoycoDayAccountantInitParams {
+        // Market Contracts
+        address kernel;
+        address initialAuthority;
+        // Deployment Configuration
+        uint24 fixedTermGracePeriodSeconds;
         // Coverage configuration
         uint64 minCoverageWAD;
         uint256 coverageLiquidationUtilizationWAD;
@@ -70,6 +78,8 @@ interface IRoycoDayAccountant {
      * @custom:field maxLPTYieldShareWAD - The maximum LPT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (JT YDM output) since the last premium payment, scaled to WAD precision
      * @custom:field twLPTYieldShareAccruedWAD - The time-weighted liquidity provider tranche yield share (LPT YDM output) since the last premium payment, scaled to WAD precision
+     * @custom:field fixedTermCommenceableAtTimestamp - The timestamp at which the market can enter a fixed term, the deployment time plus the fixed-term grace period
+     * @custom:field fixedTermEndTimestamp - The end timestamp of the currently ongoing fixed term (set to 0 if the market is in a perpetual state)
      * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field lastCollateralNAV - The last recorded pure value of the coinvested collateral backing the senior and junior tranches
      * @custom:field lastSTEffectiveNAV - The last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses) of the senior tranche
@@ -101,7 +111,10 @@ interface IRoycoDayAccountant {
         // Slot 4 (uint128 holds over 1e13 years of the config-capped WAD-per-second accrual)
         uint128 twJTYieldShareAccruedWAD;
         uint128 twLPTYieldShareAccruedWAD;
-        // Slot 5-11
+        // Slot 5
+        address kernel;
+        uint64 fixedTermCommenceableAtTimestamp;
+        // Slot 6-11
         uint256 coverageLiquidationUtilizationWAD;
         NAV_UNIT lastCollateralNAV;
         NAV_UNIT lastSTEffectiveNAV;
@@ -142,7 +155,7 @@ interface IRoycoDayAccountant {
 
     /// @notice Emitted when the coverage percentage requirement is updated
     /// @param minCoverageWAD The new coverage percentage, scaled to WAD precision
-    event CoverageUpdated(uint64 minCoverageWAD);
+    event MinCoverageUpdated(uint64 minCoverageWAD);
 
     /// @notice Emitted when the liquidation threshold parameter is updated
     /// @param liquidationCoverageUtilizationWAD The new liquidation coverageUtilization threshold for this market, scaled to WAD precision
@@ -173,7 +186,11 @@ interface IRoycoDayAccountant {
 
     /// @notice Emitted when the liquidity percentage requirement is updated
     /// @param minLiquidityWAD The new percentage of the senior tranche NAV that must be in the liquidity provider tranche's market making inventory, scaled to WAD precision
-    event LiquidityUpdated(uint64 minLiquidityWAD);
+    event MinLiquidityUpdated(uint64 minLiquidityWAD);
+
+    /// @notice Emitted when the timestamp at which the market can first enter a fixed term is set
+    /// @param fixedTermCommenceableAtTimestamp The timestamp at which the market can first enter a fixed term
+    event FixedTermCommenceableAt(uint64 fixedTermCommenceableAtTimestamp);
 
     /**
      * @notice Emitted when the maximum JT and LPT yield shares (premiums) are updated
@@ -200,10 +217,6 @@ interface IRoycoDayAccountant {
     /// @notice Thrown when the junior and liquidity provider tranche YDMs are identical
     error YDMS_CANNOT_BE_IDENTICAL();
 
-    /// @notice Thrown when the YDM failed to initialize
-    /// @param data The return data of the reverting YDM initialization
-    error FAILED_TO_INITIALIZE_YDM(bytes data);
-
     /// @notice Thrown when the collateral NAV doesn't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();
 
@@ -213,27 +226,17 @@ interface IRoycoDayAccountant {
     /// @notice Thrown when the operation and NAVs passed to post-op lead to an invalid state
     error INVALID_POST_OP_STATE(Operation _op);
 
-    /// @notice Thrown when the market's coverage requirement is violated
-    error COVERAGE_REQUIREMENT_VIOLATED();
-
-    /// @notice Thrown when the market's liquidity requirement is violated
-    error LIQUIDITY_REQUIREMENT_VIOLATED();
-
-    /// @notice Retrieves the address of the kernel tied to this accountant
-    /// @return kernel The kernel that this accountant maintains mark-to-market NAV, JT impermanent loss, and fee accounting for
-    function KERNEL() external view returns (address kernel);
-
     /**
      * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market
      * @dev Must be called before any NAV mutating operation
      * @dev Accrues the JT and LPT yield shares over time based on the market's JT and LPT YDM outputs
      * @dev Persists updated NAV and impermanent loss checkpoints for the next sync to use as reference
-     * @param _collateralNAV The current pure value of the coinvested collateral backing the senior and junior tranches
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @dev The returned state's lptRawNAV and liquidityUtilizationWAD are zero placeholders: this sync does not mark the liquidity
      *      tranche
      *      The kernel commits the freshly marked liquidity provider tranche raw NAV via commitLiquidityProviderTrancheRawNAV after minting the
      *      fee shares, then refreshes both fields in the state packet in memory
+     * @param _collateralNAV The current pure value of the coinvested collateral backing the senior and junior tranches
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function preOpSyncTrancheAccounting(NAV_UNIT _collateralNAV) external returns (SyncedAccountingState memory state);
 
@@ -254,38 +257,29 @@ interface IRoycoDayAccountant {
 
     /**
      * @notice Previews a synchronization of the effective NAVs and impermanent losses of both tranches by marking them to market
+     * @dev The returned state's lptRawNAV and liquidityUtilizationWAD are zero placeholders (this sync does not mark the liquidity provider tranche), the kernel preview refreshes them in memory
      * @param _collateralNAV The current pure value of the coinvested collateral backing the senior and junior tranches
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     * @dev The returned state's lptRawNAV and liquidityUtilizationWAD are zero placeholders (this sync does not mark the liquidity provider tranche), the kernel preview refreshes them in memory
      */
     function previewSyncTrancheAccounting(NAV_UNIT _collateralNAV) external view returns (SyncedAccountingState memory state);
 
     /**
-     * @notice Applies the post-operation (deposit or redemption) collateral NAV delta to the effective NAV checkpoints, commits the liquidity provider tranche's fresh raw NAV, and optionally enforces the market requirement(s) the operation can worsen
+     * @notice Applies the post-operation (deposit or redemption) collateral NAV delta to the effective NAV checkpoints and commits the liquidity provider tranche's fresh raw NAV
      * @dev Strictly interprets the collateral NAV delta as a deposit/redemption instead of PNL
      * @dev Unlike the pre-op sync, the post-op sync runs no waterfall and pays no premium, so it can commit the liquidity provider tranche raw NAV
      *      directly (the kernel marks it after the operation's pool mutation has settled) and report the resulting liquidity utilization
-     * @dev When enforcement is requested, fails fast on the coverage requirement for operations that can worsen coverage (add senior exposure or
-     *      remove the junior loss-absorption buffer: ST_DEPOSIT, LPT_MULTI_ASSET_DEPOSIT, JT_REDEEM) and on the liquidity requirement for operations
-     *      that can worsen liquidity (raise the senior effective NAV or reduce the depth of the AMM or another market-making venue: ST_DEPOSIT,
-     *      LPT_MULTI_ASSET_DEPOSIT, LPT_REDEEM, and LPT_MULTI_ASSET_REDEEM), enforced even while the liquidation coverage threshold is breached so a
-     *      multi-asset exit cannot unwind senior depth from the venue to relax its own liquidity floor and drain the market below the senior requirement
-     *      The in-kind LPT_DEPOSIT sits in neither gate: pre-minted LPT assets can only deepen liquidity and never add senior exposure, so blocking it would
-     *      only block healing capital mid-breach
-     *      Intermediate multi-asset sub-syncs pass false, deferring enforcement to the final post-op sync that books the combined exposure
+     * @dev The market's coverage and liquidity requirements are enforced by the kernel's post-op sync against the returned state
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _collateralNAV The post-op pure value of the coinvested collateral backing the senior and junior tranches
      * @param _lptRawNAV The post-op liquidity provider tranche's freshly marked raw NAV (the oracle value of the AMM or another market-making venue), committed by this call
      * @param _stSelfLiquidationBonusNAV The self-liquidation bonus remitted to an ST LP on redemption after the liquidation coverageUtilization threshold has been breached, sourced from JT effective NAV
-     * @param _enforceCoverageAndLiquidityRequirements Whether to enforce the market's coverage and liquidity requirements applicable to the operation
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function postOpSyncTrancheAccounting(
         Operation _op,
         NAV_UNIT _collateralNAV,
         NAV_UNIT _lptRawNAV,
-        NAV_UNIT _stSelfLiquidationBonusNAV,
-        bool _enforceCoverageAndLiquidityRequirements
+        NAV_UNIT _stSelfLiquidationBonusNAV
     )
         external
         returns (SyncedAccountingState memory state);
