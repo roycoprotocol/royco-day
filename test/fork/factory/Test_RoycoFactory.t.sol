@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { ILPOracleFactoryBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
 import { IProtocolFeeController } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IProtocolFeeController.sol";
 import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
 import { IVaultAdmin } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultAdmin.sol";
@@ -375,10 +376,26 @@ contract Test_RoycoFactory is Test {
     /// A template constructed with an entry point bound to a different factory is rejected at construction
     function test_RevertIf_TemplateConstructedWithMisboundEntryPoint() external {
         RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(makeAddr("OTHER_FACTORY"));
+        // Construct directly so the raw constructor error is observable. The script's CREATE2 path routes through the
+        // deterministic deployer, which swallows constructor revert data, and its params argument is an external
+        // getMarketConfig call that expectRevert would match instead of the construction. The chain-wide params are
+        // read off the known-good template from setUp, only the entry point is swapped for the misbound one
+        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = RoycoDayBalancerV3MarketDeploymentTemplate
+            .TemplateConstructionParams({
+            factory: IRoycoFactory(address(factory)),
+            balancerV3PoolFactory: template.BALANCER_V3_POOL_FACTORY(),
+            eclpLPOracleFactory: template.ECLP_LP_ORACLE_FACTORY(),
+            bptOracleConstantPriceFeed: template.BPT_ORACLE_CONSTANT_PRICE_FEED(),
+            roycoDayEntryPoint: address(foreignEntryPoint),
+            roycoMarketSyncer: address(syncer),
+            seniorTrancheBeacon: template.SENIOR_TRANCHE_BEACON(),
+            juniorTrancheBeacon: template.JUNIOR_TRANCHE_BEACON(),
+            liquidityProviderTrancheBeacon: template.LIQUIDITY_PROVIDER_TRANCHE_BEACON(),
+            kernelBeacon: template.KERNEL_BEACON(),
+            accountantBeacon: template.ACCOUNTANT_BEACON()
+        });
         vm.expectRevert(EntryPointConfigurer.ENTRY_POINT_BOUND_TO_DIFFERENT_FACTORY.selector);
-        deployScript.deployTemplateForTest(
-            IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(foreignEntryPoint), address(syncer)
-        );
+        new RoycoDayBalancerV3MarketDeploymentTemplate(cp);
     }
 
     /// Registration is blocked while the factory is paused

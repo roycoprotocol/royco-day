@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { DeployScript } from "../../../../../script/Deploy.s.sol";
-import { DeploymentResult } from "../../../../../script/config/DeploymentTypes.sol";
+import { DeploymentResult, MarketConfig } from "../../../../../script/config/DeploymentTypes.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../../../../src/libraries/Units.sol";
 import { Test_BalancerLPGateReinvestBase } from "../../../balancer/base/Test_BalancerLPGateReinvestBase.t.sol";
 
@@ -36,8 +36,16 @@ contract Neutrl_snUSD is Test_BalancerLPGateReinvestBase {
     }
 
     function _deployKernelAndMarket() internal override returns (DeploymentResult memory) {
+        // The template pulls the genesis pool seed from the configured funder. Repoint the funder at the broadcasting
+        // deployer, which approves the template from inside the script's broadcast, and fund it with the seed legs
+        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+        cfg.poolInitialization.funder = DEPLOYER.addr;
+        deal(cfg.gyroECLPPoolParams.quoteAsset, cfg.poolInitialization.funder, cfg.poolInitialization.quoteAmount);
+        if (cfg.poolInitialization.collateralAmount != 0) {
+            deal(cfg.collateralAsset, cfg.poolInitialization.funder, cfg.poolInitialization.collateralAmount);
+        }
         return DEPLOY_SCRIPT.deploy(
-            DEPLOY_SCRIPT.getMarketConfig("snUSD"),
+            cfg,
             OWNER_ADDRESS,
             PROTOCOL_FEE_RECIPIENT_ADDRESS,
             DEPLOY_SCRIPT.getChainConfig(block.chainid, false).scheduledOperationsExpirySeconds,

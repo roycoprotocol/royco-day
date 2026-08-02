@@ -16,7 +16,6 @@ import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-up
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { SafeCast } from "../../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { DeploymentResult, MarketConfig } from "../../../script/config/DeploymentTypes.sol";
@@ -464,14 +463,18 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(KERNEL), IRoycoDayKernel.setSequencerUptimeFeed.selector, ADMIN_ORACLE_ROLE);
     }
 
-    /// @notice Key grants exist (the accountant can sync, the kernel can burn) and every bound role has a live grantee
+    /// @notice Key grants exist (the accountant can sync) and every operationally bound role has a live grantee
     function test_Auth_EveryBoundRoleHasALiveGrantee() public view {
         (bool syncAcc,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(ACCOUNTANT));
         assertTrue(syncAcc, "accountant SYNC_ROLE");
+        // The kernel burns through the tranches' kernelBurn, an onlyKernel immutable-address check, so the deployment
+        // grants BURNER_ROLE to nobody. The tranches' burn/burnFrom surface stays bound to BURNER_ROLE as a
+        // dormant-by-design admin surface, grantable later by governance.
         (bool burner,) = ACCESS_MANAGER.hasRole(BURNER_ROLE, address(KERNEL));
-        assertTrue(burner, "kernel BURNER_ROLE");
+        assertFalse(burner, "kernel must not hold BURNER_ROLE, it burns via onlyKernel kernelBurn");
 
-        // Every bound role has a live grantee at deploy end (no memberless-role liveness cliffs).
+        // Every bound role has a live grantee at deploy end (no memberless-role liveness cliffs), except the
+        // dormant-by-design BURNER_ROLE above.
         (bool unpauser,) = ACCESS_MANAGER.hasRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS);
         assertTrue(unpauser, "unpauser granted");
         (bool lptLp,) = ACCESS_MANAGER.hasRole(LPT_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS);
@@ -526,26 +529,30 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         }
     }
 
-    /// Pinned real-stack behavior: computeTVL reverts on the unseeded pool while the kernel's zero-supply short-circuit stays immune
-    function test_BPTOracle_ComputeTVLRevertsOnUnseededPool_KernelShortCircuits() public {
-        // Pinned real-stack behavior: on the freshly deployed, UNSEEDED pool the E-CLP invariant math produces a small
-        // negative intermediate on zero balances, so a direct computeTVL() call reverts with a SafeCast int->uint
-        // overflow (argument value depends on the curve params, so only the selector is pinned). The kernel is immune:
-        // both LPT conversion directions short-circuit to zero on a zero BPT supply BEFORE reading the oracle
-        // (BalancerV3LiquidityVenue's convertLPTAssetsToValue/convertValueToLPTAssets), asserted against the real oracle below.
+    /// Pinned real-stack behavior: the template mandates a genesis seed and locks DEAD_SHARES at 0xdEaD, so a live
+    /// market's pool is never unseeded and the whole TVL path answers. The old unseeded computeTVL revert pin is
+    /// unreachable through the factory. The pre-seed protection ("an uninitialized venue is never queried", the
+    /// kernel's empty-ledger short-circuit) is pinned by the unit suites (Test_VenueBPTOracle)
+    function test_BPTOracle_LiveOnGenesisSeededPool() public view {
         address bptOracle = BalancerV3LiquidityVenue(address(KERNEL)).getBalancerV3LiquidityVenueState().bptOracle;
-        vm.expectPartialRevert(SafeCast.SafeCastOverflowedIntToUint.selector);
-        LPOracleBase(bptOracle).computeTVL();
 
-        assertEq(
-            TRANCHE_UNIT.unwrap(BalancerV3LiquidityVenue(address(KERNEL)).convertValueToLPTAssets(NAV_UNIT.wrap(1e18))),
-            0,
-            "zero-supply short-circuit must protect the NAV->BPT direction"
-        );
-        assertEq(
+        // Genesis-seeded: BPT minted, and the template's DEAD_SHARES (1e12) LPT lock parked at the dead address
+        assertGt(IERC20(POOL).totalSupply(), 0, "pool must be genesis-seeded at deploy end");
+        assertEq(IERC20(address(LPT)).balanceOf(0x000000000000000000000000000000000000dEaD), 1e12, "DEAD_SHARES must be locked at 0xdEaD");
+
+        // The real oracle answers a positive TVL on the seeded pool
+        assertGt(LPOracleBase(bptOracle).computeTVL(), 0, "computeTVL must answer a positive TVL on the seeded pool");
+
+        // Both kernel LPT conversion directions price against the live oracle without reverting
+        assertGt(
             NAV_UNIT.unwrap(BalancerV3LiquidityVenue(address(KERNEL)).convertLPTAssetsToValue(TRANCHE_UNIT.wrap(1e18))),
             0,
-            "zero-supply short-circuit must protect the BPT->NAV direction"
+            "the BPT->NAV direction must price on the seeded pool"
+        );
+        assertGt(
+            TRANCHE_UNIT.unwrap(BalancerV3LiquidityVenue(address(KERNEL)).convertValueToLPTAssets(NAV_UNIT.wrap(1e18))),
+            0,
+            "the NAV->BPT direction must price on the seeded pool"
         );
     }
 
