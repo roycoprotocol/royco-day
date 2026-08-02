@@ -446,13 +446,11 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         }
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params = _buildMarketParams(_config, marketId, _protocolFeeRecipient, _s.roycoBlacklist);
 
-        // The template pulls the market's genesis pool liquidity from the configured funder. When that funder is the
-        // broadcasting deployer, approve from inside the broadcast; any other funder must have approved out of band.
-        if (_config.poolInitialization.funder == _deployer) {
-            IERC20(_config.gyroECLPPoolParams.quoteAsset).approve(_s.template, _config.poolInitialization.quoteAmount);
-            uint256 collateralSeed = _config.poolInitialization.collateralAmount;
-            if (collateralSeed != 0) IERC20(_config.collateralAsset).approve(_s.template, collateralSeed);
-        }
+        // The template pulls the market's genesis pool liquidity from the account calling the factory's deployment
+        // entrypoint (the broadcasting deployer here), so approve the template from inside the broadcast
+        IERC20(_config.gyroECLPPoolParams.quoteAsset).approve(_s.template, _config.poolInitialization.quoteAmount);
+        uint256 collateralSeed = _config.poolInitialization.collateralAmount;
+        if (collateralSeed != 0) IERC20(_config.collateralAsset).approve(_s.template, collateralSeed);
 
         IRoycoProtocolTemplate.DeploymentResult memory r = _s.factory.executeMarketDeployment(_s.template, abi.encode(params));
 

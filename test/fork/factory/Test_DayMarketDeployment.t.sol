@@ -105,8 +105,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         // funder is the broadcasting deployer, which approves the template from inside the broadcast, so the suite only
         // has to make sure that deployer actually holds the quote.
         MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
-        cfg.poolInitialization.funder = DEPLOYER.addr;
-        deal(cfg.gyroECLPPoolParams.quoteAsset, cfg.poolInitialization.funder, cfg.poolInitialization.quoteAmount);
+        deal(cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
 
         // Deploy the Day-shaped SNUSD market end to end through the real script, sourcing the market config from the config
         // file (single source of truth) — not an inline test fixture.
@@ -641,9 +640,8 @@ contract Test_DayMarketDeployment_GenesisSeedBoundary is RoycoDayTestBase {
     /// @dev The snUSD market config repointed at the funded deployer with the specified quote-only genesis seed
     function _seededConfig(uint256 _quoteAmount) internal returns (MarketConfig memory cfg) {
         cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
-        cfg.poolInitialization.funder = DEPLOYER.addr;
         cfg.poolInitialization.quoteAmount = _quoteAmount;
-        deal(cfg.gyroECLPPoolParams.quoteAsset, cfg.poolInitialization.funder, _quoteAmount);
+        deal(cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER.addr, _quoteAmount);
     }
 
     /**
@@ -693,7 +691,7 @@ contract Test_DayMarketDeployment_GenesisSeedBoundary is RoycoDayTestBase {
 
         // The genesis mint is the tranche's only mint, split exactly between the dead lock and the funder
         assertEq(lpt.balanceOf(DEAD_ADDRESS), DEAD_SHARES, "DEAD_SHARES must be locked at 0xdEaD");
-        assertEq(lpt.balanceOf(cfg.poolInitialization.funder), minted - DEAD_SHARES, "the funder must hold exactly the minted remainder");
+        assertEq(lpt.balanceOf(DEPLOYER.addr), minted - DEAD_SHARES, "the funder must hold exactly the minted remainder");
         assertGe(minted, DEAD_SHARES, "a seed that deployed must have covered the dead-share lock");
         // The small seed brackets the boundary: the funder's remainder stays below one DEAD_SHARES unit, so the
         // deployment lives within one quote wei of the revert threshold the dust test pins from below

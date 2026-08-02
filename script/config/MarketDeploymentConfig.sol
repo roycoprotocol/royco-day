@@ -313,10 +313,10 @@ abstract contract MarketDeploymentConfig {
             ),
             jtYdmTargetUtilizationWAD: 0.9e18,
             lptYdmTargetUtilizationWAD: 0.9e18,
-            // Genesis pool liquidity. The deployer funds and approves the template for these amounts before running
-            // the market deployment, and receives the genesis liquidity provider shares.
+            // Genesis pool liquidity. The account calling the deployment entrypoint funds the seed and approves the
+            // template for these amounts before running the market deployment, and receives the genesis liquidity
+            // provider shares.
             poolInitialization: RoycoDayBalancerV3MarketDeploymentTemplate.PoolInitializationParams({
-                funder: DEPLOYER,
                 collateralAmount: 0, // no collateral leg: the genesis liquidity is quote-only
                 quoteAmount: 1e6, // 10,000 USDC of quote depth
                 minLPTAssetsOut: 0

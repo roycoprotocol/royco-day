@@ -132,6 +132,12 @@ interface IRoycoFactory {
      */
     function executeAsFactory(address _target, bytes calldata _data) external returns (bytes memory result);
 
+    /**
+     * @notice Returns the account that initiated the in-flight market deployment, the genesis seed's funder
+     * @dev Held transiently for the deployment's duration, the null address outside one
+     */
+    function marketDeployer() external view returns (address deployer);
+
     /// @notice Returns the kernel a factory-deployed tranche belongs to (zero for unknown addresses)
     function trancheToKernel(address _tranche) external view returns (address kernel);
 

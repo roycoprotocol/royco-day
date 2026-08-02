@@ -66,8 +66,6 @@ import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 ///      `MAINNET_RPC_URL` is unset, instead of silently passing.
 contract Test_RoycoFactory is Test {
     /// @dev The address that supplies each market's genesis pool liquidity in this suite
-    address internal constant POOL_SEED_FUNDER = address(uint160(uint256(keccak256("POOL_SEED_FUNDER"))));
-
     uint256 internal constant FORK_BLOCK = 25_400_000;
     address internal constant GYRO_ECLP_POOL_FACTORY = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
 
@@ -164,18 +162,17 @@ contract Test_RoycoFactory is Test {
     }
 
     /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold each seed leg and
-    ///      have approved the template before `executeMarketDeployment`. Points the seed at a test-controlled funder.
+    ///      have approved the template before `executeMarketDeployment`. The deployment caller (DEPLOYER) funds the seed.
     ///      The collateral leg is optional, so it is funded only when the config asks for it
     function _fundPoolSeed(MarketConfig memory _cfg) internal {
-        _cfg.poolInitialization.funder = POOL_SEED_FUNDER;
         _fundSeedLeg(_cfg.gyroECLPPoolParams.quoteAsset, _cfg.poolInitialization.quoteAmount);
         if (_cfg.poolInitialization.collateralAmount != 0) _fundSeedLeg(_cfg.collateralAsset, _cfg.poolInitialization.collateralAmount);
     }
 
-    /// @dev Deals one seed leg to the funder and approves the template to pull it
+    /// @dev Deals one seed leg to the deployment caller (DEPLOYER) and approves the template to pull it
     function _fundSeedLeg(address _asset, uint256 _amount) internal {
-        deal(_asset, POOL_SEED_FUNDER, _amount);
-        vm.prank(POOL_SEED_FUNDER);
+        deal(_asset, DEPLOYER, _amount);
+        vm.prank(DEPLOYER);
         IERC20(_asset).approve(address(template), _amount);
     }
 
@@ -233,7 +230,7 @@ contract Test_RoycoFactory is Test {
         assertGt(balances[1], 0, "quote leg opened with no genesis depth");
         // The collateral leg is the only source of senior shares here, and the funder receives the genesis LP shares
         assertGt(IERC20(r.seniorTranche).totalSupply(), 0, "collateral leg minted no senior shares");
-        assertGt(IERC20(r.liquidityProviderTranche).balanceOf(POOL_SEED_FUNDER), 0, "funder holds no genesis liquidity shares");
+        assertGt(IERC20(r.liquidityProviderTranche).balanceOf(DEPLOYER), 0, "funder holds no genesis liquidity shares");
     }
 
     /// The single wiring transaction must fit under EIP-7825's per-transaction gas cap (the reason the deployment

@@ -30,6 +30,9 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory 
     /// @dev Holds the address of the template currently inside an `executeMarketDeployment` window, `address(0)` otherwise
     address private transient _activeTemplate;
 
+    /// @dev The account that initiated the in-flight market deployment, held transiently so the active template can pull the genesis seed from it
+    address private transient _marketDeployer;
+
     // ═══════════════════════════════════════════════════════════════════════════
     // MODIFIERS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -119,8 +122,9 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory 
         require($.isTemplateEnabled[_template], TEMPLATE_NOT_ENABLED());
         require(_activeTemplate == address(0), NO_ACTIVE_TEMPLATE());
 
-        // Bind the active template
+        // Bind the active template and the deployment's initiator (the genesis seed's funder)
         _activeTemplate = _template;
+        _marketDeployer = msg.sender;
 
         // Deploy the market
         result = IBaseTemplate(_template).deployMarket(_params);
@@ -138,6 +142,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory 
 
         // Explicitly clear for clarity: transient storage auto-clears at the end of the transaction as a backstop
         _activeTemplate = address(0);
+        _marketDeployer = address(0);
 
         emit MarketDeploymentCompleted(_template, msg.sender, result);
     }
@@ -145,6 +150,11 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory 
     // ═══════════════════════════════════════════════════════════════════════════
     // TEMPLATE-CALLABLE PRIMITIVES
     // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @inheritdoc IRoycoFactory
+    function marketDeployer() external view override(IRoycoFactory) returns (address) {
+        return _marketDeployer;
+    }
 
     /// @inheritdoc IRoycoFactory
     function deployDeterministicProxyFromTemplate(

@@ -113,13 +113,12 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /**
      * @notice The genesis liquidity a market's pool is seeded with, routed through the liquidity provider tranche's multi-asset deposit
-     * @custom:field funder - The address the assets are pulled from, which must have approved this template, and which receives the genesis liquidity provider shares
+     * @dev The seed is pulled from the account that called the factory's deployment entrypoint: they must have approved this template for one or both legs and receive the genesis (exlcuding the locked) shares
      * @custom:field collateralAmount - The collateral to seed the pool with
      * @custom:field quoteAmount - The quote to seed the pool with, in the quote asset's own units
      * @custom:field minLPTAssetsOut - The slippage bound on the liquidity add, in liquidity provider tranche asset units
      */
     struct PoolInitializationParams {
-        address funder;
         uint256 collateralAmount;
         uint256 quoteAmount;
         uint256 minLPTAssetsOut;
@@ -419,7 +418,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
         // Deploy the liquidity provider tranche.
         result.liquidityProviderTranche = _deployProxy(
-            LIQUIDITY_PROVIDER_TRANCHE_BEACON, _encodeTrancheInitData(params.lptParams, kernel, balancerPool), _marketComponentSalt(params.marketId, TAG_LPT_PROXY)
+            LIQUIDITY_PROVIDER_TRANCHE_BEACON,
+            _encodeTrancheInitData(params.lptParams, kernel, balancerPool),
+            _marketComponentSalt(params.marketId, TAG_LPT_PROXY)
         );
 
         // Deploy the accountant.
@@ -467,19 +468,23 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /**
      * @notice Seeds the market's pool with its genesis liquidity through the liquidity provider tranche's multi-asset deposit
-     * @dev The funder must have approved this template for both legs, and receives the genesis shares net of the dead-share lock
+     * @dev The seed is funded by the account that called the factory's deployment entrypoint, read from the factory's
+     *      transient marketDeployer: it must have approved this template for both legs and receives the genesis shares
+     *      net of the dead-share lock
      * @dev The quote leg is mandatory; the collateral leg is optional
-     * @param _params The market's params, carrying the funder, the amounts, and the slippage bound
+     * @param _params The market's params, carrying the amounts and the slippage bound
      * @param _liquidityProviderTranche The market's liquidity provider tranche
      */
     function _seedPool(MarketParams memory _params, address _liquidityProviderTranche) internal {
         PoolInitializationParams memory init = _params.poolInitializationParams;
-        require(init.funder != address(0), NULL_CONSTRUCTION_PARAMETER());
         require(init.quoteAmount != 0, POOL_SEED_REQUIRED());
 
+        // The deployment initiator funds the seed, held transiently by the factory for exactly this read
+        address deployer = ROYCO_FACTORY.marketDeployer();
+
         // Pull each leg to the factory and approve the tranche for it. The tranche pulls from its caller, which is the factory.
-        _pullAndApproveSeedLeg(_params.quoteAsset, init.funder, _liquidityProviderTranche, init.quoteAmount);
-        if (init.collateralAmount != 0) _pullAndApproveSeedLeg(_params.collateralAsset, init.funder, _liquidityProviderTranche, init.collateralAmount);
+        _pullAndApproveSeedLeg(_params.quoteAsset, deployer, _liquidityProviderTranche, init.quoteAmount);
+        if (init.collateralAmount != 0) _pullAndApproveSeedLeg(_params.collateralAsset, deployer, _liquidityProviderTranche, init.collateralAmount);
 
         // Execute the deposit as the factory
         (uint256 lptShares,) = abi.decode(
@@ -496,20 +501,20 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         require(lptShares >= DEAD_SHARES, INSUFFICIENT_GENESIS_SHARES(lptShares));
         ROYCO_FACTORY.executeAsFactory(_liquidityProviderTranche, abi.encodeCall(IERC20.transfer, (DEAD_ADDRESS, DEAD_SHARES)));
 
-        // Return the remaining genesis shares to the funder
+        // Return the remaining genesis shares to the deployer
         uint256 excessLPTShares = lptShares - DEAD_SHARES;
-        if (excessLPTShares > 0) ROYCO_FACTORY.executeAsFactory(_liquidityProviderTranche, abi.encodeCall(IERC20.transfer, (init.funder, excessLPTShares)));
+        if (excessLPTShares > 0) ROYCO_FACTORY.executeAsFactory(_liquidityProviderTranche, abi.encodeCall(IERC20.transfer, (deployer, excessLPTShares)));
     }
 
     /**
-     * @notice Pulls one seed leg from the funder to the factory and approves the liquidity provider tranche to spend it
+     * @notice Pulls one seed leg from the deployer to the factory and approves the liquidity provider tranche to spend it
      * @param _asset The seed leg's asset
-     * @param _funder The address the leg is pulled from
+     * @param _deployer The address the leg is pulled from
      * @param _liquidityProviderTranche The market's liquidity provider tranche, the approved spender
      * @param _amount The leg's amount, in the asset's own units
      */
-    function _pullAndApproveSeedLeg(address _asset, address _funder, address _liquidityProviderTranche, uint256 _amount) internal {
-        IERC20(_asset).safeTransferFrom(_funder, address(ROYCO_FACTORY), _amount);
+    function _pullAndApproveSeedLeg(address _asset, address _deployer, address _liquidityProviderTranche, uint256 _amount) internal {
+        IERC20(_asset).safeTransferFrom(_deployer, address(ROYCO_FACTORY), _amount);
         ROYCO_FACTORY.executeAsFactory(_asset, abi.encodeCall(IERC20.approve, (_liquidityProviderTranche, _amount)));
     }
 
@@ -610,7 +615,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
             IRoycoVaultTranche(_result.liquidityProviderTranche).TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER,
             MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche)
         );
-        require(IRoycoVaultTranche(_result.liquidityProviderTranche).kernel() == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche));
+        require(
+            IRoycoVaultTranche(_result.liquidityProviderTranche).kernel() == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche)
+        );
         require(IRoycoVaultTranche(_result.liquidityProviderTranche).asset() == pool, MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche));
 
         // Kernel: full tranche set, assets, and accountant
@@ -714,7 +721,15 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /// @dev `mint` carries no binding: it is gated by the tranche's own `onlyKernel` check (an immutable-address
     ///      check), which scopes minting to THIS market's kernel in a way a shared AccessManager role could not
-    function _trancheBinding(uint64 _depositRole, uint64 _redeemRole, bool _isLiquidity) private pure returns (bytes4[] memory selectors, uint64[] memory roleIds) {
+    function _trancheBinding(
+        uint64 _depositRole,
+        uint64 _redeemRole,
+        bool _isLiquidity
+    )
+        private
+        pure
+        returns (bytes4[] memory selectors, uint64[] memory roleIds)
+    {
         // Base tranche surface (6 selectors) + the two LPT-only multi-asset selectors when binding the liquidity provider tranche
         // Upgrades are not bound here: a beacon proxy has no per-proxy upgrade entrypoint, its beacon carries that authority
         uint256 selectorCount = _isLiquidity ? 8 : 6;

@@ -98,10 +98,9 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         // The template pulls the genesis pool seed from the configured funder. Repoint the funder at the broadcasting
         // deployer, which approves the template from inside the script's broadcast, and fund it with the seed legs
         MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig(_marketName());
-        cfg.poolInitialization.funder = DEPLOYER.addr;
-        deal(cfg.gyroECLPPoolParams.quoteAsset, cfg.poolInitialization.funder, cfg.poolInitialization.quoteAmount);
+        deal(cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
         if (cfg.poolInitialization.collateralAmount != 0) {
-            deal(cfg.collateralAsset, cfg.poolInitialization.funder, cfg.poolInitialization.collateralAmount);
+            deal(cfg.collateralAsset, DEPLOYER.addr, cfg.poolInitialization.collateralAmount);
         }
 
         // Deploy the market end-to-end through the real script and capture the production entry point
