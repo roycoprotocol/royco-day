@@ -103,12 +103,12 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @notice Per-tranche entry point configurations applied on the pre-deployed entry point after the market is deployed
      * @custom:field st - The entry point configuration for the senior tranche
      * @custom:field jt - The entry point configuration for the junior tranche
-     * @custom:field lt - The entry point configuration for the liquidity provider tranche
+     * @custom:field lpt - The entry point configuration for the liquidity provider tranche
      */
     struct EntryPointTrancheConfigs {
         IRoycoDayEntryPoint.TrancheConfig st;
         IRoycoDayEntryPoint.TrancheConfig jt;
-        IRoycoDayEntryPoint.TrancheConfig lt;
+        IRoycoDayEntryPoint.TrancheConfig lpt;
     }
 
     /**
@@ -128,14 +128,14 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     /**
      * @notice Top-level params struct passed to `deployMarket(bytes)`
      * @custom:field marketId - A caller-supplied identifier for the market, mixed into the deterministic deployment salts
-     * @custom:field stTranche - The senior tranche initialization params
-     * @custom:field jtTranche - The junior tranche initialization params
-     * @custom:field lptTranche - The liquidity provider tranche initialization params
+     * @custom:field stParams - The senior tranche initialization params
+     * @custom:field jtParams - The junior tranche initialization params
+     * @custom:field lptParams - The liquidity provider tranche initialization params
      * @custom:field collateralAsset - The coinvested collateral asset underlying both the senior and junior tranches
      * @custom:field quoteAsset - The quote asset expected as the pool's second token, pinned during pool verification
-     * @custom:field accountant - The accountant initialization params (coverage, premiums, and state machine config)
-     * @custom:field poolParams - The Gyro E-CLP pool creation parameters, used to create the market's liquidity venue
-     * @custom:field poolInitialization - The genesis quote liquidity the pool is seeded with once the market is wired
+     * @custom:field accountantParams - The accountant initialization params (coverage, premiums, and state machine config)
+     * @custom:field poolCreationParams - The Gyro E-CLP pool creation parameters, used to create the market's liquidity venue
+     * @custom:field poolInitializationParams - The genesis quote liquidity the pool is seeded with once the market is wired
      * @custom:field jtYdmType - The yield distribution model shape the junior tranche selects from the template's instances
      * @custom:field lptYdmType - The yield distribution model shape the liquidity provider tranche selects from the template's instances
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
@@ -152,14 +152,14 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      */
     struct MarketParams {
         bytes32 marketId;
-        IRoycoVaultTranche.RoycoTrancheInitParams stTranche;
-        IRoycoVaultTranche.RoycoTrancheInitParams jtTranche;
-        IRoycoVaultTranche.RoycoTrancheInitParams lptTranche;
+        IRoycoVaultTranche.RoycoTrancheInitParams stParams;
+        IRoycoVaultTranche.RoycoTrancheInitParams jtParams;
+        IRoycoVaultTranche.RoycoTrancheInitParams lptParams;
         address collateralAsset;
         address quoteAsset;
-        IRoycoDayAccountant.RoycoDayAccountantInitParams accountant;
-        BalancerV3PoolCreationParams poolParams;
-        PoolInitializationParams poolInitialization;
+        IRoycoDayAccountant.RoycoDayAccountantInitParams accountantParams;
+        BalancerV3PoolCreationParams poolCreationParams;
+        PoolInitializationParams poolInitializationParams;
         string jtYdmType;
         string lptYdmType;
         address protocolFeeRecipient;
@@ -385,18 +385,18 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     ///  @inheritdoc IRoycoProtocolTemplate
     function deployMarket(bytes calldata _params) external override(IRoycoProtocolTemplate) onlyRoycoFactory returns (DeploymentResult memory result) {
-        MarketParams memory p = abi.decode(_params, (MarketParams));
+        MarketParams memory params = abi.decode(_params, (MarketParams));
 
         // Predict the kernel's proxy address.
-        bytes32 kernelSalt = _marketComponentSalt(p.marketId, TAG_KERNEL_PROXY);
+        bytes32 kernelSalt = _marketComponentSalt(params.marketId, TAG_KERNEL_PROXY);
         address kernel = ROYCO_FACTORY.predictDeterministicAddress(kernelSalt);
-        result.ydm = jtYdmFor(p.jtYdmType);
-        result.lptYdm = lptYdmFor(p.lptYdmType);
+        result.ydm = jtYdmFor(params.jtYdmType);
+        result.lptYdm = lptYdmFor(params.lptYdmType);
         require(result.ydm != result.lptYdm, YIELD_DISTRIBUTION_MODELS_NOT_DISTINCT());
 
         // Deploy the senior tranche.
         result.seniorTranche = _deployProxy(
-            SENIOR_TRANCHE_BEACON, _encodeTrancheInitData(p.stTranche, kernel, p.collateralAsset), _marketComponentSalt(p.marketId, TAG_ST_PROXY)
+            SENIOR_TRANCHE_BEACON, _encodeTrancheInitData(params.stParams, kernel, params.collateralAsset), _marketComponentSalt(params.marketId, TAG_ST_PROXY)
         );
 
         // Deploy the Balancer V3 pool and BPT oracle for the LP tranche.
@@ -404,43 +404,43 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
             BALANCER_V3_POOL_FACTORY,
             ECLP_LP_ORACLE_FACTORY,
             BPT_ORACLE_CONSTANT_PRICE_FEED,
-            p.poolParams,
+            params.poolCreationParams,
             result.seniorTranche,
-            p.quoteAsset,
+            params.quoteAsset,
             kernel,
             ROYCO_FACTORY.ROYCO_AUTHORITY(),
-            _marketComponentSalt(p.marketId, TAG_BALANCER_V3_POOL)
+            _marketComponentSalt(params.marketId, TAG_BALANCER_V3_POOL)
         );
 
         // Deploy the junior tranche.
         result.juniorTranche = _deployProxy(
-            JUNIOR_TRANCHE_BEACON, _encodeTrancheInitData(p.jtTranche, kernel, p.collateralAsset), _marketComponentSalt(p.marketId, TAG_JT_PROXY)
+            JUNIOR_TRANCHE_BEACON, _encodeTrancheInitData(params.jtParams, kernel, params.collateralAsset), _marketComponentSalt(params.marketId, TAG_JT_PROXY)
         );
 
         // Deploy the liquidity provider tranche.
         result.liquidityProviderTranche = _deployProxy(
-            LIQUIDITY_PROVIDER_TRANCHE_BEACON, _encodeTrancheInitData(p.lptTranche, kernel, balancerPool), _marketComponentSalt(p.marketId, TAG_LPT_PROXY)
+            LIQUIDITY_PROVIDER_TRANCHE_BEACON, _encodeTrancheInitData(params.lptParams, kernel, balancerPool), _marketComponentSalt(params.marketId, TAG_LPT_PROXY)
         );
 
         // Deploy the accountant.
         result.accountant = _deployProxy(
             ACCOUNTANT_BEACON,
-            _encodeAccountantInitData(p.accountant, kernel, result.ydm, result.lptYdm),
-            _marketComponentSalt(p.marketId, TAG_ACCOUNTANT_PROXY)
+            _encodeAccountantInitData(params.accountantParams, kernel, result.ydm, result.lptYdm),
+            _marketComponentSalt(params.marketId, TAG_ACCOUNTANT_PROXY)
         );
 
         // Verify the Balancer V3 pool.
-        _verifyPool(balancerPool, result.seniorTranche, p.quoteAsset);
+        _verifyPool(balancerPool, result.seniorTranche, params.quoteAsset);
 
         // Deploy the kernel.
-        result.kernel = _deployKernelProxy(p, result, balancerPool, bptOracle, kernelSalt);
+        result.kernel = _deployKernelProxy(params, result, balancerPool, bptOracle, kernelSalt);
         require(result.kernel == kernel, KERNEL_PROXY_ADDRESS_MISMATCH(kernel, result.kernel));
 
         // Verify the whole market's on-chain wiring.
-        _validateDeployment(p, result, balancerPool);
+        _validateDeployment(params, result, balancerPool);
 
         // Apply selector->role bindings + post-init grants.
-        _applyRoleBindings(_buildRoleBindings(p, result));
+        _applyRoleBindings(_buildRoleBindings(params, result));
 
         // Record the Balancer V3 pool and BPT oracle.
         result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool, bptOracle: bptOracle }));
@@ -448,38 +448,38 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /// @inheritdoc BaseDeploymentTemplate
     function _postMarketRegistration(DeploymentResult calldata _result, bytes calldata _params) internal override(BaseDeploymentTemplate) {
-        MarketParams memory p = abi.decode(_params, (MarketParams));
+        MarketParams memory params = abi.decode(_params, (MarketParams));
 
         // Decode the market's tranches and entry point configs
         address[] memory tranches = new address[](3);
         IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](3);
-        (tranches[0], configs[0]) = (_result.seniorTranche, p.entryPointTrancheConfigs.st);
-        (tranches[1], configs[1]) = (_result.juniorTranche, p.entryPointTrancheConfigs.jt);
-        (tranches[2], configs[2]) = (_result.liquidityProviderTranche, p.entryPointTrancheConfigs.lt);
+        (tranches[0], configs[0]) = (_result.seniorTranche, params.entryPointTrancheConfigs.st);
+        (tranches[1], configs[1]) = (_result.juniorTranche, params.entryPointTrancheConfigs.jt);
+        (tranches[2], configs[2]) = (_result.liquidityProviderTranche, params.entryPointTrancheConfigs.lpt);
 
         // Configure the market's tranches on the entry point and register its kernel on the market syncer
         _configureEntryPointTrancheConfigs(ROYCO_FACTORY, tranches, configs);
         _registerMarketKernelOnSyncer(ROYCO_FACTORY, _result.kernel);
 
         // Seed the pool.
-        _seedPool(p, _result.liquidityProviderTranche);
+        _seedPool(params, _result.liquidityProviderTranche);
     }
 
     /**
      * @notice Seeds the market's pool with its genesis liquidity through the liquidity provider tranche's multi-asset deposit
      * @dev The funder must have approved this template for both legs, and receives the genesis shares net of the dead-share lock
      * @dev The quote leg is mandatory; the collateral leg is optional
-     * @param _p The market's params, carrying the funder, the amounts, and the slippage bound
+     * @param _params The market's params, carrying the funder, the amounts, and the slippage bound
      * @param _liquidityProviderTranche The market's liquidity provider tranche
      */
-    function _seedPool(MarketParams memory _p, address _liquidityProviderTranche) internal {
-        PoolInitializationParams memory init = _p.poolInitialization;
+    function _seedPool(MarketParams memory _params, address _liquidityProviderTranche) internal {
+        PoolInitializationParams memory init = _params.poolInitializationParams;
         require(init.funder != address(0), NULL_CONSTRUCTION_PARAMETER());
         require(init.quoteAmount != 0, POOL_SEED_REQUIRED());
 
         // Pull each leg to the factory and approve the tranche for it. The tranche pulls from its caller, which is the factory.
-        _pullAndApproveSeedLeg(_p.quoteAsset, init.funder, _liquidityProviderTranche, init.quoteAmount);
-        if (init.collateralAmount != 0) _pullAndApproveSeedLeg(_p.collateralAsset, init.funder, _liquidityProviderTranche, init.collateralAmount);
+        _pullAndApproveSeedLeg(_params.quoteAsset, init.funder, _liquidityProviderTranche, init.quoteAmount);
+        if (init.collateralAmount != 0) _pullAndApproveSeedLeg(_params.collateralAsset, init.funder, _liquidityProviderTranche, init.collateralAmount);
 
         // Execute the deposit as the factory
         (uint256 lptShares,) = abi.decode(
@@ -515,16 +515,16 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /**
      *  @notice Deploys the Day kernel proxy against the script-deployed kernel impl, injecting the externally deployed BPT oracle
-     *  @param _p The market parameters
-     *  @param _r The deployment result
+     *  @param _params The market parameters
+     *  @param _result The deployment result
      *  @param _balancerPool The Balancer V3 pool
      *  @param _bptOracle The BPT oracle
      *  @param _kernelProxySalt The kernel proxy salt
      *  @return kernel The deployed kernel proxy address
      */
     function _deployKernelProxy(
-        MarketParams memory _p,
-        DeploymentResult memory _r,
+        MarketParams memory _params,
+        DeploymentResult memory _result,
         address _balancerPool,
         address _bptOracle,
         bytes32 _kernelProxySalt
@@ -534,22 +534,22 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     {
         IRoycoDayKernel.RoycoDayKernelInitParams memory kip = IRoycoDayKernel.RoycoDayKernelInitParams({
             initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY(),
-            seniorTranche: _r.seniorTranche,
-            juniorTranche: _r.juniorTranche,
-            liquidityProviderTranche: _r.liquidityProviderTranche,
-            collateralAsset: _p.collateralAsset,
+            seniorTranche: _result.seniorTranche,
+            juniorTranche: _result.juniorTranche,
+            liquidityProviderTranche: _result.liquidityProviderTranche,
+            collateralAsset: _params.collateralAsset,
             lptAsset: _balancerPool,
-            quoteAsset: _p.quoteAsset,
-            accountant: _r.accountant,
-            protocolFeeRecipient: _p.protocolFeeRecipient,
-            stSelfLiquidationBonusWAD: _p.stSelfLiquidationBonusWAD,
-            roycoBlacklist: _p.roycoBlacklist,
-            collateralAssetOracle: _p.collateralAssetOracle,
-            stalenessThresholdSeconds: _p.stalenessThresholdSeconds,
-            sequencerUptimeFeed: _p.sequencerUptimeFeed,
-            gracePeriodSeconds: _p.gracePeriodSeconds
+            quoteAsset: _params.quoteAsset,
+            accountant: _result.accountant,
+            protocolFeeRecipient: _params.protocolFeeRecipient,
+            stSelfLiquidationBonusWAD: _params.stSelfLiquidationBonusWAD,
+            roycoBlacklist: _params.roycoBlacklist,
+            collateralAssetOracle: _params.collateralAssetOracle,
+            stalenessThresholdSeconds: _params.stalenessThresholdSeconds,
+            sequencerUptimeFeed: _params.sequencerUptimeFeed,
+            gracePeriodSeconds: _params.gracePeriodSeconds
         });
-        kernel = _deployProxy(KERNEL_BEACON, _kernelInitData(kip, _p.kernelSpecificParams, _bptOracle), _kernelProxySalt);
+        kernel = _deployProxy(KERNEL_BEACON, _kernelInitData(kip, _params.kernelSpecificParams, _bptOracle), _kernelProxySalt);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -583,60 +583,60 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      *      script-side deployment mistake (wrong impl, mis-encoded init data, swapped address) fails loud here rather
      *      than producing a subtly mis-wired live market. Modeled on royco-dawn's `RoycoFactory._validateDeployment`
      */
-    function _validateDeployment(MarketParams memory _p, DeploymentResult memory _r, address _pool) internal view {
+    function _validateDeployment(MarketParams memory _params, DeploymentResult memory _result, address _pool) internal view {
         address authority = ROYCO_FACTORY.ROYCO_AUTHORITY();
         address pool = _pool;
 
         // Shared market authority governs every component (tranches, kernel, and accountant)
-        require(IAccessManaged(_r.seniorTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
-        require(IAccessManaged(_r.juniorTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
-        require(IAccessManaged(_r.liquidityProviderTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityProviderTranche));
-        require(IAccessManaged(_r.kernel).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(IAccessManaged(_r.accountant).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_r.accountant));
+        require(IAccessManaged(_result.seniorTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_result.seniorTranche));
+        require(IAccessManaged(_result.juniorTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_result.juniorTranche));
+        require(IAccessManaged(_result.liquidityProviderTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche));
+        require(IAccessManaged(_result.kernel).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
+        require(IAccessManaged(_result.accountant).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
 
         // Senior tranche: type, kernel binding, asset, and unseeded
-        require(IRoycoVaultTranche(_r.seniorTranche).TRANCHE_TYPE() == TrancheType.SENIOR, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
-        require(IRoycoVaultTranche(_r.seniorTranche).kernel() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
-        require(IRoycoVaultTranche(_r.seniorTranche).asset() == _p.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
-        require(IERC20(_r.seniorTranche).totalSupply() == 0, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
+        require(IRoycoVaultTranche(_result.seniorTranche).TRANCHE_TYPE() == TrancheType.SENIOR, MARKET_WIRING_VERIFICATION_FAILED(_result.seniorTranche));
+        require(IRoycoVaultTranche(_result.seniorTranche).kernel() == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.seniorTranche));
+        require(IRoycoVaultTranche(_result.seniorTranche).asset() == _params.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_result.seniorTranche));
+        require(IERC20(_result.seniorTranche).totalSupply() == 0, MARKET_WIRING_VERIFICATION_FAILED(_result.seniorTranche));
 
         // Junior tranche: type, kernel binding, asset
-        require(IRoycoVaultTranche(_r.juniorTranche).TRANCHE_TYPE() == TrancheType.JUNIOR, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
-        require(IRoycoVaultTranche(_r.juniorTranche).kernel() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
-        require(IRoycoVaultTranche(_r.juniorTranche).asset() == _p.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
+        require(IRoycoVaultTranche(_result.juniorTranche).TRANCHE_TYPE() == TrancheType.JUNIOR, MARKET_WIRING_VERIFICATION_FAILED(_result.juniorTranche));
+        require(IRoycoVaultTranche(_result.juniorTranche).kernel() == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.juniorTranche));
+        require(IRoycoVaultTranche(_result.juniorTranche).asset() == _params.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_result.juniorTranche));
 
         // Liquidity provider tranche: type, kernel binding, asset is the pool BPT
         require(
-            IRoycoVaultTranche(_r.liquidityProviderTranche).TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER,
-            MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityProviderTranche)
+            IRoycoVaultTranche(_result.liquidityProviderTranche).TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER,
+            MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche)
         );
-        require(IRoycoVaultTranche(_r.liquidityProviderTranche).kernel() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityProviderTranche));
-        require(IRoycoVaultTranche(_r.liquidityProviderTranche).asset() == pool, MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityProviderTranche));
+        require(IRoycoVaultTranche(_result.liquidityProviderTranche).kernel() == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche));
+        require(IRoycoVaultTranche(_result.liquidityProviderTranche).asset() == pool, MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche));
 
         // Kernel: full tranche set, assets, and accountant
-        IRoycoDayKernel kernel = IRoycoDayKernel(_r.kernel);
-        require(kernel.seniorTranche() == _r.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.juniorTranche() == _r.juniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.liquidityProviderTranche() == _r.liquidityProviderTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.accountant() == _r.accountant, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.collateralAsset() == _p.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.lptAsset() == pool, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
+        IRoycoDayKernel kernel = IRoycoDayKernel(_result.kernel);
+        require(kernel.seniorTranche() == _result.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
+        require(kernel.juniorTranche() == _result.juniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
+        require(kernel.liquidityProviderTranche() == _result.liquidityProviderTranche, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
+        require(kernel.accountant() == _result.accountant, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
+        require(kernel.collateralAsset() == _params.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
+        require(kernel.lptAsset() == pool, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
 
         // The market id should guarantee that the deployed ST share is "less" than the quote token
         IERC20[] memory tokens = BALANCER_V3_VAULT.getPoolTokens(pool);
-        require(address(tokens[0]) == _r.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(pool));
+        require(address(tokens[0]) == _result.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(pool));
         require(address(tokens[1]) == kernel.quoteAsset(), MARKET_WIRING_VERIFICATION_FAILED(pool));
 
         // Accountant: kernel binding and the injected JT YDM / LPT LDM instances
-        IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = IRoycoDayAccountant(_r.accountant).getState();
-        require(accountantState.kernel == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.accountant));
-        require(accountantState.jtYDM == _r.ydm && accountantState.lptYDM == _r.lptYdm, MARKET_WIRING_VERIFICATION_FAILED(_r.accountant));
+        IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = IRoycoDayAccountant(_result.accountant).getState();
+        require(accountantState.kernel == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
+        require(accountantState.jtYDM == _result.ydm && accountantState.lptYDM == _result.lptYdm, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
 
         // Pool: remains hookless, the kernel serves as its senior-leg rate provider
         require(BALANCER_V3_VAULT.getHooksConfig(pool).hooksContract == address(0), MARKET_WIRING_VERIFICATION_FAILED(pool));
 
         // Kernel-family-specific wiring (e.g. Makina machine, IdleCDO CDO)
-        _validateKernelSpecifics(_r.kernel, _p.kernelSpecificParams);
+        _validateKernelSpecifics(_result.kernel, _params.kernelSpecificParams);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -645,50 +645,50 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /// @notice Assembles the market's full role-binding config, pairing each deployment's runtime target addresses with
     ///         the selector/role sets from the per-target binding helpers and the deployer-declared oracle bindings
-    function _buildRoleBindings(MarketParams memory _p, DeploymentResult memory _r) internal view returns (RoleBindings memory) {
+    function _buildRoleBindings(MarketParams memory _params, DeploymentResult memory _result) internal view returns (RoleBindings memory) {
         // Runtime target addresses, index-aligned with the binding helpers below
         address[8] memory targets = [
-            _r.seniorTranche,
-            _r.juniorTranche,
-            _r.liquidityProviderTranche,
-            _r.kernel,
-            _r.accountant,
+            _result.seniorTranche,
+            _result.juniorTranche,
+            _result.liquidityProviderTranche,
+            _result.kernel,
+            _result.accountant,
             address(BALANCER_V3_VAULT),
             address(BALANCER_V3_VAULT.getProtocolFeeController()),
-            _p.collateralAssetOracle
+            _params.collateralAssetOracle
         ];
 
         IRoycoAccessManager accessManager = IRoycoAccessManager(ROYCO_FACTORY.ROYCO_AUTHORITY());
 
         TargetBinding[] memory targetBindings = new TargetBinding[](targets.length);
-        bytes4[] memory s;
-        uint64[] memory r;
-        (s, r) = _trancheBinding(ST_LP_ROLE, ST_LP_ROLE, false); // 0: senior tranche
-        targetBindings[0] = TargetBinding({ target: targets[0], selectors: s, roleIds: r });
-        (s, r) = _trancheBinding(JT_LP_ROLE, JT_LP_ROLE, false); // 1: junior tranche
-        targetBindings[1] = TargetBinding({ target: targets[1], selectors: s, roleIds: r });
-        (s, r) = _trancheBinding(LPT_LP_ROLE, LPT_LP_ROLE, true); // 2: liquidity provider tranche
-        targetBindings[2] = TargetBinding({ target: targets[2], selectors: s, roleIds: r });
-        (s, r) = _kernelBinding(); // 3: kernel
-        targetBindings[3] = TargetBinding({ target: targets[3], selectors: s, roleIds: r });
-        (s, r) = _accountantBinding(); // 4: accountant
-        targetBindings[4] = TargetBinding({ target: targets[4], selectors: s, roleIds: r });
+        bytes4[] memory selectors;
+        uint64[] memory roleIds;
+        (selectors, roleIds) = _trancheBinding(ST_LP_ROLE, ST_LP_ROLE, false); // 0: senior tranche
+        targetBindings[0] = TargetBinding({ target: targets[0], selectors: selectors, roleIds: roleIds });
+        (selectors, roleIds) = _trancheBinding(JT_LP_ROLE, JT_LP_ROLE, false); // 1: junior tranche
+        targetBindings[1] = TargetBinding({ target: targets[1], selectors: selectors, roleIds: roleIds });
+        (selectors, roleIds) = _trancheBinding(LPT_LP_ROLE, LPT_LP_ROLE, true); // 2: liquidity provider tranche
+        targetBindings[2] = TargetBinding({ target: targets[2], selectors: selectors, roleIds: roleIds });
+        (selectors, roleIds) = _kernelBinding(); // 3: kernel
+        targetBindings[3] = TargetBinding({ target: targets[3], selectors: selectors, roleIds: roleIds });
+        (selectors, roleIds) = _accountantBinding(); // 4: accountant
+        targetBindings[4] = TargetBinding({ target: targets[4], selectors: selectors, roleIds: roleIds });
         // 5: Balancer vault, skipped once any market has configured it
-        if (accessManager.wasEverConfigured(targets[5])) (s, r) = (new bytes4[](0), new uint64[](0));
-        else (s, r) = _balancerVaultBinding();
-        targetBindings[5] = TargetBinding({ target: targets[5], selectors: s, roleIds: r });
+        if (accessManager.wasEverConfigured(targets[5])) (selectors, roleIds) = (new bytes4[](0), new uint64[](0));
+        else (selectors, roleIds) = _balancerVaultBinding();
+        targetBindings[5] = TargetBinding({ target: targets[5], selectors: selectors, roleIds: roleIds });
         // 6: protocol fee controller, skipped once configured.
-        if (accessManager.wasEverConfigured(targets[6])) (s, r) = (new bytes4[](0), new uint64[](0));
-        else (s, r) = _balancerProtocolFeeControllerBinding();
-        targetBindings[6] = TargetBinding({ target: targets[6], selectors: s, roleIds: r });
+        if (accessManager.wasEverConfigured(targets[6])) (selectors, roleIds) = (new bytes4[](0), new uint64[](0));
+        else (selectors, roleIds) = _balancerProtocolFeeControllerBinding();
+        targetBindings[6] = TargetBinding({ target: targets[6], selectors: selectors, roleIds: roleIds });
         // 7: collateral asset oracle restricted surface, declared per oracle kind by the deployer .
-        if (accessManager.wasEverConfigured(targets[7])) (s, r) = (new bytes4[](0), new uint64[](0));
-        else (s, r) = (_p.collateralAssetOracleBindingSelectors, _p.collateralAssetOracleBindingRoleIds);
-        targetBindings[7] = TargetBinding({ target: targets[7], selectors: s, roleIds: r });
+        if (accessManager.wasEverConfigured(targets[7])) (selectors, roleIds) = (new bytes4[](0), new uint64[](0));
+        else (selectors, roleIds) = (_params.collateralAssetOracleBindingSelectors, _params.collateralAssetOracleBindingRoleIds);
+        targetBindings[7] = TargetBinding({ target: targets[7], selectors: selectors, roleIds: roleIds });
 
         // Post-init grants: accountant SYNC (zero execution delay)
         RoleGrant[] memory grants = new RoleGrant[](1);
-        grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
+        grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _result.accountant, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targetBindings, postInitGrants: grants });
     }
@@ -699,129 +699,130 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @dev Overridable so a kernel variant can restate its pricing surface; the result is appended to the kernel's
      * operational selectors by `_kernelBinding` rather than declared as a second binding on the same target
      */
-    function _kernelPricingBinding() internal view virtual returns (bytes4[] memory s, uint64[] memory r) {
-        s = new bytes4[](4);
-        r = new uint64[](4);
-        s[0] = BalancerV3LiquidityVenue.setBPTOracle.selector;
-        r[0] = ADMIN_ORACLE_ROLE;
-        s[1] = BalancerV3LiquidityVenue.setMaxReinvestmentSlippage.selector;
-        r[1] = ADMIN_ORACLE_ROLE;
-        s[2] = IRoycoDayKernel.setCollateralAssetOracle.selector;
-        r[2] = ADMIN_ORACLE_ROLE;
-        s[3] = IRoycoDayKernel.setSequencerUptimeFeed.selector;
-        r[3] = ADMIN_ORACLE_ROLE;
+    function _kernelPricingBinding() internal view virtual returns (bytes4[] memory selectors, uint64[] memory roleIds) {
+        selectors = new bytes4[](4);
+        roleIds = new uint64[](4);
+        selectors[0] = BalancerV3LiquidityVenue.setBPTOracle.selector;
+        roleIds[0] = ADMIN_ORACLE_ROLE;
+        selectors[1] = BalancerV3LiquidityVenue.setMaxReinvestmentSlippage.selector;
+        roleIds[1] = ADMIN_ORACLE_ROLE;
+        selectors[2] = IRoycoDayKernel.setCollateralAssetOracle.selector;
+        roleIds[2] = ADMIN_ORACLE_ROLE;
+        selectors[3] = IRoycoDayKernel.setSequencerUptimeFeed.selector;
+        roleIds[3] = ADMIN_ORACLE_ROLE;
     }
 
     /// @dev `mint` carries no binding: it is gated by the tranche's own `onlyKernel` check (an immutable-address
     ///      check), which scopes minting to THIS market's kernel in a way a shared AccessManager role could not
-    function _trancheBinding(uint64 _depositRole, uint64 _redeemRole, bool _isLiquidity) private pure returns (bytes4[] memory s, uint64[] memory r) {
+    function _trancheBinding(uint64 _depositRole, uint64 _redeemRole, bool _isLiquidity) private pure returns (bytes4[] memory selectors, uint64[] memory roleIds) {
         // Base tranche surface (6 selectors) + the two LPT-only multi-asset selectors when binding the liquidity provider tranche
         // Upgrades are not bound here: a beacon proxy has no per-proxy upgrade entrypoint, its beacon carries that authority
-        uint256 n = _isLiquidity ? 8 : 6;
-        s = new bytes4[](n);
-        r = new uint64[](n);
-        s[0] = IRoycoVaultTranche.deposit.selector;
-        r[0] = _depositRole;
-        s[1] = IRoycoVaultTranche.redeem.selector;
-        r[1] = _redeemRole;
-        s[2] = IRoycoAuth.pause.selector;
-        r[2] = ADMIN_PAUSER_ROLE;
-        s[3] = IRoycoAuth.unpause.selector;
-        r[3] = ADMIN_UNPAUSER_ROLE;
-        s[4] = ERC20BurnableUpgradeable.burn.selector;
-        r[4] = BURNER_ROLE;
-        s[5] = ERC20BurnableUpgradeable.burnFrom.selector;
-        r[5] = BURNER_ROLE;
+        uint256 selectorCount = _isLiquidity ? 8 : 6;
+        selectors = new bytes4[](selectorCount);
+        roleIds = new uint64[](selectorCount);
+        selectors[0] = IRoycoVaultTranche.deposit.selector;
+        roleIds[0] = _depositRole;
+        selectors[1] = IRoycoVaultTranche.redeem.selector;
+        roleIds[1] = _redeemRole;
+        selectors[2] = IRoycoAuth.pause.selector;
+        roleIds[2] = ADMIN_PAUSER_ROLE;
+        selectors[3] = IRoycoAuth.unpause.selector;
+        roleIds[3] = ADMIN_UNPAUSER_ROLE;
+        selectors[4] = ERC20BurnableUpgradeable.burn.selector;
+        roleIds[4] = BURNER_ROLE;
+        selectors[5] = ERC20BurnableUpgradeable.burnFrom.selector;
+        roleIds[5] = BURNER_ROLE;
         if (_isLiquidity) {
-            s[6] = RoycoLiquidityProviderTranche.depositMultiAsset.selector;
-            r[6] = _depositRole;
-            s[7] = RoycoLiquidityProviderTranche.redeemMultiAsset.selector;
-            r[7] = _redeemRole;
+            selectors[6] = RoycoLiquidityProviderTranche.depositMultiAsset.selector;
+            roleIds[6] = _depositRole;
+            selectors[7] = RoycoLiquidityProviderTranche.redeemMultiAsset.selector;
+            roleIds[7] = _redeemRole;
         }
     }
 
     /// @dev The kernel's operational surface
-    function _kernelBinding() private view returns (bytes4[] memory s, uint64[] memory r) {
-        (bytes4[] memory ps, uint64[] memory pr) = _kernelPricingBinding();
+    function _kernelBinding() private view returns (bytes4[] memory selectors, uint64[] memory roleIds) {
+        (bytes4[] memory pricingSelectors, uint64[] memory pricingRoleIds) = _kernelPricingBinding();
         // Upgrades are not bound here: the kernel's beacon carries that authority for every market at once
-        uint256 n = 8 + ps.length;
-        s = new bytes4[](n);
-        r = new uint64[](n);
-        for (uint256 i; i < ps.length; ++i) {
-            s[8 + i] = ps[i];
-            r[8 + i] = pr[i];
+        uint256 numPricingSelectors = pricingSelectors.length;
+        uint256 selectorCount = 8 + numPricingSelectors;
+        selectors = new bytes4[](selectorCount);
+        roleIds = new uint64[](selectorCount);
+        for (uint256 i; i < numPricingSelectors; ++i) {
+            selectors[8 + i] = pricingSelectors[i];
+            roleIds[8 + i] = pricingRoleIds[i];
         }
-        s[0] = IRoycoDayKernel.setProtocolFeeRecipient.selector;
-        r[0] = ADMIN_KERNEL_ROLE;
-        s[1] = IRoycoAuth.pause.selector;
-        r[1] = ADMIN_PAUSER_ROLE;
-        s[2] = IRoycoAuth.unpause.selector;
-        r[2] = ADMIN_UNPAUSER_ROLE;
-        s[3] = IRoycoDayKernel.syncTrancheAccounting.selector;
-        r[3] = SYNC_ROLE;
-        s[4] = IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector;
-        r[4] = ADMIN_KERNEL_ROLE;
-        s[5] = IRoycoDayKernel.reinvestLiquidityPremium.selector;
-        r[5] = ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE;
-        s[6] = IRoycoDayKernel.setRoycoBlacklist.selector;
-        r[6] = ADMIN_MARKET_OPS_ROLE;
-        s[7] = IRoycoDayKernel.syncTrancheAccountingFor.selector;
-        r[7] = SYNC_ROLE;
+        selectors[0] = IRoycoDayKernel.setProtocolFeeRecipient.selector;
+        roleIds[0] = ADMIN_KERNEL_ROLE;
+        selectors[1] = IRoycoAuth.pause.selector;
+        roleIds[1] = ADMIN_PAUSER_ROLE;
+        selectors[2] = IRoycoAuth.unpause.selector;
+        roleIds[2] = ADMIN_UNPAUSER_ROLE;
+        selectors[3] = IRoycoDayKernel.syncTrancheAccounting.selector;
+        roleIds[3] = SYNC_ROLE;
+        selectors[4] = IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector;
+        roleIds[4] = ADMIN_KERNEL_ROLE;
+        selectors[5] = IRoycoDayKernel.reinvestLiquidityPremium.selector;
+        roleIds[5] = ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE;
+        selectors[6] = IRoycoDayKernel.setRoycoBlacklist.selector;
+        roleIds[6] = ADMIN_MARKET_OPS_ROLE;
+        selectors[7] = IRoycoDayKernel.syncTrancheAccountingFor.selector;
+        roleIds[7] = SYNC_ROLE;
     }
 
     /// @dev Upgrades are not bound here: the accountant's beacon carries that authority for every market at once
-    function _accountantBinding() private pure returns (bytes4[] memory s, uint64[] memory r) {
-        s = new bytes4[](14);
-        r = new uint64[](14);
-        s[0] = IRoycoDayAccountant.setJuniorTrancheYDM.selector;
-        r[0] = ADMIN_ACCOUNTANT_ROLE;
-        s[1] = IRoycoDayAccountant.setLiquidityProviderTrancheYDM.selector;
-        r[1] = ADMIN_ACCOUNTANT_ROLE;
-        s[2] = IRoycoDayAccountant.setSeniorTrancheProtocolFee.selector;
-        r[2] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[3] = IRoycoDayAccountant.setJuniorTrancheProtocolFee.selector;
-        r[3] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[4] = IRoycoDayAccountant.setJTYieldShareProtocolFee.selector;
-        r[4] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[5] = IRoycoDayAccountant.setLPTYieldShareProtocolFee.selector;
-        r[5] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[6] = IRoycoDayAccountant.setMinCoverage.selector;
-        r[6] = ADMIN_ACCOUNTANT_ROLE;
-        s[7] = IRoycoDayAccountant.setLiquidationCoverageUtilization.selector;
-        r[7] = ADMIN_ACCOUNTANT_ROLE;
-        s[8] = IRoycoDayAccountant.setMinLiquidity.selector;
-        r[8] = ADMIN_ACCOUNTANT_ROLE;
-        s[9] = IRoycoDayAccountant.setMaxYieldShares.selector;
-        r[9] = ADMIN_ACCOUNTANT_ROLE;
-        s[10] = IRoycoDayAccountant.setFixedTermDuration.selector;
-        r[10] = ADMIN_ACCOUNTANT_ROLE;
-        s[11] = IRoycoAuth.pause.selector;
-        r[11] = ADMIN_PAUSER_ROLE;
-        s[12] = IRoycoAuth.unpause.selector;
-        r[12] = ADMIN_UNPAUSER_ROLE;
-        s[13] = IRoycoDayAccountant.setDustTolerance.selector;
-        r[13] = ADMIN_MARKET_OPS_ROLE;
+    function _accountantBinding() private pure returns (bytes4[] memory selectors, uint64[] memory roleIds) {
+        selectors = new bytes4[](14);
+        roleIds = new uint64[](14);
+        selectors[0] = IRoycoDayAccountant.setJuniorTrancheYDM.selector;
+        roleIds[0] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[1] = IRoycoDayAccountant.setLiquidityProviderTrancheYDM.selector;
+        roleIds[1] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[2] = IRoycoDayAccountant.setSeniorTrancheProtocolFee.selector;
+        roleIds[2] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        selectors[3] = IRoycoDayAccountant.setJuniorTrancheProtocolFee.selector;
+        roleIds[3] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        selectors[4] = IRoycoDayAccountant.setJTYieldShareProtocolFee.selector;
+        roleIds[4] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        selectors[5] = IRoycoDayAccountant.setLPTYieldShareProtocolFee.selector;
+        roleIds[5] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        selectors[6] = IRoycoDayAccountant.setMinCoverage.selector;
+        roleIds[6] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[7] = IRoycoDayAccountant.setLiquidationCoverageUtilization.selector;
+        roleIds[7] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[8] = IRoycoDayAccountant.setMinLiquidity.selector;
+        roleIds[8] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[9] = IRoycoDayAccountant.setMaxYieldShares.selector;
+        roleIds[9] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[10] = IRoycoDayAccountant.setFixedTermDuration.selector;
+        roleIds[10] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[11] = IRoycoAuth.pause.selector;
+        roleIds[11] = ADMIN_PAUSER_ROLE;
+        selectors[12] = IRoycoAuth.unpause.selector;
+        roleIds[12] = ADMIN_UNPAUSER_ROLE;
+        selectors[13] = IRoycoDayAccountant.setDustTolerance.selector;
+        roleIds[13] = ADMIN_MARKET_OPS_ROLE;
     }
 
-    function _balancerVaultBinding() private pure returns (bytes4[] memory s, uint64[] memory r) {
-        s = new bytes4[](3);
-        r = new uint64[](3);
-        s[0] = IVaultAdmin.pausePool.selector;
-        r[0] = ADMIN_PAUSER_ROLE;
-        s[1] = IVaultAdmin.unpausePool.selector;
-        r[1] = ADMIN_UNPAUSER_ROLE;
-        s[2] = IVaultAdmin.setStaticSwapFeePercentage.selector;
-        r[2] = ADMIN_BALANCER_POOL_MANAGER_ROLE;
+    function _balancerVaultBinding() private pure returns (bytes4[] memory selectors, uint64[] memory roleIds) {
+        selectors = new bytes4[](3);
+        roleIds = new uint64[](3);
+        selectors[0] = IVaultAdmin.pausePool.selector;
+        roleIds[0] = ADMIN_PAUSER_ROLE;
+        selectors[1] = IVaultAdmin.unpausePool.selector;
+        roleIds[1] = ADMIN_UNPAUSER_ROLE;
+        selectors[2] = IVaultAdmin.setStaticSwapFeePercentage.selector;
+        roleIds[2] = ADMIN_BALANCER_POOL_MANAGER_ROLE;
     }
 
-    function _balancerProtocolFeeControllerBinding() private pure returns (bytes4[] memory s, uint64[] memory r) {
-        s = new bytes4[](3);
-        r = new uint64[](3);
-        s[0] = IProtocolFeeController.setPoolCreatorSwapFeePercentage.selector;
-        r[0] = ADMIN_BALANCER_POOL_MANAGER_ROLE;
-        s[1] = IProtocolFeeController.setPoolCreatorYieldFeePercentage.selector;
-        r[1] = ADMIN_BALANCER_POOL_MANAGER_ROLE;
-        s[2] = IWithdrawPoolCreatorFeesTwoArgOverload.withdrawPoolCreatorFees.selector;
-        r[2] = ADMIN_BALANCER_POOL_MANAGER_ROLE;
+    function _balancerProtocolFeeControllerBinding() private pure returns (bytes4[] memory selectors, uint64[] memory roleIds) {
+        selectors = new bytes4[](3);
+        roleIds = new uint64[](3);
+        selectors[0] = IProtocolFeeController.setPoolCreatorSwapFeePercentage.selector;
+        roleIds[0] = ADMIN_BALANCER_POOL_MANAGER_ROLE;
+        selectors[1] = IProtocolFeeController.setPoolCreatorYieldFeePercentage.selector;
+        roleIds[1] = ADMIN_BALANCER_POOL_MANAGER_ROLE;
+        selectors[2] = IWithdrawPoolCreatorFeesTwoArgOverload.withdrawPoolCreatorFees.selector;
+        roleIds[2] = ADMIN_BALANCER_POOL_MANAGER_ROLE;
     }
 }

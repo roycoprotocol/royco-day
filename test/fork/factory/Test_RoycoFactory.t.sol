@@ -480,7 +480,7 @@ contract Test_RoycoFactory is Test {
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _assertEntryPointConfigured(r.seniorTranche, r.kernel, cfg.stEntryPointConfig, "st entry point config");
         _assertEntryPointConfigured(r.juniorTranche, r.kernel, cfg.jtEntryPointConfig, "jt entry point config");
-        _assertEntryPointConfigured(r.liquidityProviderTranche, r.kernel, cfg.lptEntryPointConfig, "lt entry point config");
+        _assertEntryPointConfigured(r.liquidityProviderTranche, r.kernel, cfg.lptEntryPointConfig, "lpt entry point config");
 
         // The template registered the market's kernel on the syncer through the factory.
         assertTrue(syncer.isMarketKernelRegistered(r.kernel), "kernel registered on the syncer");

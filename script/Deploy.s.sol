@@ -737,13 +737,13 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
         // Tranche init params carry only the token name and symbol: the template injects the market authority, the
         // kernel, and each tranche's underlying asset, all of which are deployment-derived.
-        params.stTranche = IRoycoVaultTranche.RoycoTrancheInitParams({
+        params.stParams = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol, initialAuthority: address(0), kernel: address(0), asset: address(0)
         });
-        params.jtTranche = IRoycoVaultTranche.RoycoTrancheInitParams({
+        params.jtParams = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, initialAuthority: address(0), kernel: address(0), asset: address(0)
         });
-        params.lptTranche = IRoycoVaultTranche.RoycoTrancheInitParams({
+        params.lptParams = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _config.liquidityProviderTrancheName,
             symbol: _config.liquidityProviderTrancheSymbol,
             initialAuthority: address(0),
@@ -754,7 +754,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.quoteAsset = _config.gyroECLPPoolParams.quoteAsset;
 
         // The Gyro E-CLP pool the template creates for this market's liquidity venue
-        params.poolParams = BalancerV3PoolCreationParams({
+        params.poolCreationParams = BalancerV3PoolCreationParams({
             name: _config.gyroECLPPoolParams.name,
             symbol: _config.gyroECLPPoolParams.symbol,
             eclpParams: _config.gyroECLPPoolParams.eclpParams,
@@ -766,7 +766,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         });
 
         // Genesis pool liquidity, seeded by the template as a multi-asset deposit once the market is wired
-        params.poolInitialization = _config.poolInitialization;
+        params.poolInitializationParams = _config.poolInitialization;
 
         // The model shapes this market selects from the template's per-slot instances
         params.jtYdmType = ydmTypeName(_config.ydmType);
@@ -775,7 +775,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // Accountant init params. `jtYDM`/`lptYDM` are overwritten by the template with the deployed instances. BOTH YDMs get
         // initialization data so the accountant initializes each of them. The LPT premium/liquidity overlay is at its zero
         // baseline (LPT service off) — but the LDM is still deployed, initialized, and distinct from the JT YDM.
-        params.accountant = IRoycoDayAccountant.RoycoDayAccountantInitParams({
+        params.accountantParams = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             kernel: address(0),
             initialAuthority: address(0),
             fixedTermGracePeriodSeconds: _config.fixedTermGracePeriodSeconds,
@@ -810,7 +810,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             _collateralAssetOracleRoleBindings(_config.collateralAssetOracleType);
         // Per-tranche entry point configs applied by the template (via the factory) after the market is deployed.
         params.entryPointTrancheConfigs = RoycoDayBalancerV3MarketDeploymentTemplate.EntryPointTrancheConfigs({
-            st: _config.stEntryPointConfig, jt: _config.jtEntryPointConfig, lt: _config.lptEntryPointConfig
+            st: _config.stEntryPointConfig, jt: _config.jtEntryPointConfig, lpt: _config.lptEntryPointConfig
         });
     }
 

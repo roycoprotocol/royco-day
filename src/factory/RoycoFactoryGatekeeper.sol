@@ -46,20 +46,21 @@ contract RoycoFactoryGatekeeper is IRoycoFactoryGatekeeper {
         override(IRoycoFactoryGatekeeper)
         onlyFactory
     {
-        require(_selectors.length == _roleIds.length, LENGTH_MISMATCH());
+        uint256 numSelectorsToBind = _selectors.length;
+        require(numSelectorsToBind == _roleIds.length, LENGTH_MISMATCH());
 
         // The protocol's own contracts are never legitimate deployment targets, and a target may be configured exactly once, by the deployment that created it
         _requireNotConfigured(_target);
 
         // Bind the selectors to the target
-        AccessManager am = AccessManager(ROYCO_ACCESS_MANAGER);
+        AccessManager accessManager = AccessManager(ROYCO_ACCESS_MANAGER);
         bytes4[] memory selector = new bytes4[](1);
-        for (uint256 i; i < _selectors.length; ++i) {
+        for (uint256 i; i < numSelectorsToBind; ++i) {
             selector[0] = _selectors[i];
-            am.setTargetFunctionRole(_target, selector, _roleIds[i]);
+            accessManager.setTargetFunctionRole(_target, selector, _roleIds[i]);
         }
 
-        emit FreshTargetConfigured(_target, _selectors.length);
+        emit FreshTargetConfigured(_target, numSelectorsToBind);
     }
 
     /// @inheritdoc IRoycoFactoryGatekeeper
@@ -72,16 +73,17 @@ contract RoycoFactoryGatekeeper is IRoycoFactoryGatekeeper {
         override(IRoycoFactoryGatekeeper)
         onlyFactory
     {
-        require(_roleIds.length == _accounts.length && _accounts.length == _executionDelays.length, LENGTH_MISMATCH());
+        uint256 numRolesToGrant = _roleIds.length;
+        require(numRolesToGrant == _accounts.length && numRolesToGrant == _executionDelays.length, LENGTH_MISMATCH());
 
-        AccessManager am = AccessManager(ROYCO_ACCESS_MANAGER);
-        for (uint256 i; i < _roleIds.length; ++i) {
+        AccessManager accessManager = AccessManager(ROYCO_ACCESS_MANAGER);
+        for (uint256 i; i < numRolesToGrant; ++i) {
             require(_roleIds[i] == SYNC_ROLE || _roleIds[i] == BURNER_ROLE, ROLE_FORBIDDEN(_roleIds[i]));
             // Verify the contract has never been configured
             _requireNotConfigured(_accounts[i]);
-            am.grantRole(_roleIds[i], _accounts[i], _executionDelays[i]);
+            accessManager.grantRole(_roleIds[i], _accounts[i], _executionDelays[i]);
         }
-        emit MarketRolesGranted(_roleIds.length);
+        emit MarketRolesGranted(numRolesToGrant);
     }
 
     /// @dev A market deployment may only act on a contract that has never been configured before

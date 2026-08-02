@@ -49,7 +49,7 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
     }
 
     /**
-     * @notice A role grant applied after deployment (e.g. SYNC_ROLE → accountant)
+     * @notice A role grant applied after deployment (e.grant. SYNC_ROLE → accountant)
      * @custom:field roleId - The role id to grant
      * @custom:field account - The account receiving the role
      * @custom:field executionDelay - The access-manager execution delay in seconds applied to the grant
@@ -117,7 +117,7 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
      * @notice Per-market component salt, same `(marketId, componentTag)` always produces the
      *         same address regardless of template
      * @param _marketId Caller-supplied stable identifier for the market
-     * @param _componentTag E.g. `bytes32("ST")`, `bytes32("JT")`, `bytes32("KERNEL")`,
+     * @param _componentTag E.grant. `bytes32("ST")`, `bytes32("JT")`, `bytes32("KERNEL")`,
      *        `bytes32("ACCOUNTANT")`, `bytes32("BALANCER_HOOK")`
      */
     function _marketComponentSalt(bytes32 _marketId, bytes32 _componentTag) internal pure returns (bytes32) {
@@ -193,24 +193,25 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
 
     ///  @notice Applies every binding in `_bindings` by calling back into the factory
     function _applyRoleBindings(RoleBindings memory _bindings) internal {
-        uint256 nGrants = _bindings.postInitGrants.length;
-        uint64[] memory grantRoleIds = new uint64[](nGrants);
-        address[] memory grantAccounts = new address[](nGrants);
-        uint32[] memory grantExecutionDelays = new uint32[](nGrants);
-        for (uint256 i; i < nGrants; ++i) {
-            RoleGrant memory g = _bindings.postInitGrants[i];
-            grantRoleIds[i] = g.roleId;
-            grantAccounts[i] = g.account;
-            grantExecutionDelays[i] = g.executionDelay;
+        uint256 numGrants = _bindings.postInitGrants.length;
+        uint64[] memory grantRoleIds = new uint64[](numGrants);
+        address[] memory grantAccounts = new address[](numGrants);
+        uint32[] memory grantExecutionDelays = new uint32[](numGrants);
+        for (uint256 i; i < numGrants; ++i) {
+            RoleGrant memory grant = _bindings.postInitGrants[i];
+            grantRoleIds[i] = grant.roleId;
+            grantAccounts[i] = grant.account;
+            grantExecutionDelays[i] = grant.executionDelay;
         }
         ROYCO_FACTORY.grantMarketRole(grantRoleIds, grantAccounts, grantExecutionDelays);
 
-        uint256 nTargets = _bindings.targetBindings.length;
-        for (uint256 i; i < nTargets; ++i) {
-            TargetBinding memory tb = _bindings.targetBindings[i];
-            require(tb.selectors.length == tb.roleIds.length, LENGTH_MISMATCH());
-            if (tb.selectors.length == 0) continue;
-            ROYCO_FACTORY.setMarketTargetFunctionRole(tb.target, tb.selectors, tb.roleIds);
+        uint256 numTargets = _bindings.targetBindings.length;
+        for (uint256 i; i < numTargets; ++i) {
+            TargetBinding memory binding = _bindings.targetBindings[i];
+            uint256 numSelectors = binding.selectors.length;
+            require(numSelectors == binding.roleIds.length, LENGTH_MISMATCH());
+            if (numSelectors == 0) continue;
+            ROYCO_FACTORY.setMarketTargetFunctionRole(binding.target, binding.selectors, binding.roleIds);
         }
     }
 }
