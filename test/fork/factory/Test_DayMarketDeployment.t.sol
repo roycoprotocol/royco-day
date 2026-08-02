@@ -39,6 +39,7 @@ import {
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -595,5 +596,107 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     function _assertRole(address _target, bytes4 _selector, uint64 _expectedRole) internal view {
         assertEq(ACCESS_MANAGER.getTargetFunctionRole(_target, _selector), _expectedRole, "role binding");
+    }
+}
+
+/**
+ * @title Test_DayMarketDeployment_GenesisSeedBoundary
+ * @notice The template's genesis-seed floor on the real stack: `_seedPool` deposits the genesis seed through the
+ *         LPT's multi-asset deposit, requires the minted shares to cover DEAD_SHARES (1e12), locks DEAD_SHARES at
+ *         0xdEaD, and transfers the remainder to the funder. This suite pins the revert path a dust seed takes and
+ *         the share split a barely-sufficient seed produces.
+ * @dev Share-count derivation for a quote-only seed of q USDC wei on the real Balancer stack: the Vault's
+ *      `initialize` computes the E-CLP invariant of the scaled seed (q x 1e12 at the constant-1.0 feeds), burns
+ *      POOL_MINIMUM_TOTAL_SUPPLY (1e6) dead BPT to address(0), and mints `invariant - 1e6` BPT to the kernel. The
+ *      LPT genesis mint then prices that BPT at the oracle mark (floor(1e18 x TVL / bptSupply) per whole BPT, with
+ *      TVL ~= q x 1e12) through the virtual-shares bootstrap (1 share-wei per NAV-wei on an empty tranche), so
+ *      lptShares ~= q x 1e12 x (invariant - 1e6) / invariant, STRICTLY below q x 1e12 because of the vault's dead
+ *      BPT slice and the floor roundings. At this market's E-CLP params the one-wei seed's invariant measures
+ *      ~2.66e8, so the dead slice shaves ~0.376% and the mint lands at ~0.99624e12 shares, just under the
+ *      dead-share lock, tripping INSUFFICIENT_GENESIS_SHARES. minted(q) steps by ~0.99624e12 per quote wei and
+ *      never lands on exactly 1e12, so the exact-equality boundary (funder left with zero shares) is not
+ *      constructible on the fork and the nearest constructible property is pinned instead: funder balance ==
+ *      minted - DEAD_SHARES for a small seed.
+ * @dev Guard ordering pinned by the dust test: neither the entry floor (MUST_MINT_NON_ZERO_SHARES needs the
+ *      deposit to price to ZERO shares, but a one-wei seed prices to ~0.996e12) nor Balancer's
+ *      minimum-total-supply check (needs invariant < 1e6, but the one-wei seed's invariant is ~2.66e8) fires
+ *      first, so the template's own INSUFFICIENT_GENESIS_SHARES is the operative dust-seed boundary.
+ */
+contract Test_DayMarketDeployment_GenesisSeedBoundary is RoycoDayTestBase {
+    address internal constant FACTORY_ADMIN = 0x7c405bbD131e42af506d14e752f2e59B19D49997; // ROOT_MULTISIG
+    address internal constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+    uint256 internal constant DEAD_SHARES = 1e12;
+
+    function _forkConfiguration() internal view override returns (uint256 forkBlock, string memory forkRpcUrl) {
+        // No skip: the suite FAILS (env not found) when MAINNET_RPC_URL is unset, instead of silently passing.
+        forkRpcUrl = vm.envString("MAINNET_RPC_URL");
+        forkBlock = vm.envOr("FORK_BLOCK", uint256(25_400_000));
+    }
+
+    /// @dev Fork + wallets + script only: each test runs its own deployment with a modified genesis seed
+    function setUp() public {
+        _setUpRoyco();
+    }
+
+    /// @dev The snUSD market config repointed at the funded deployer with the specified quote-only genesis seed
+    function _seededConfig(uint256 _quoteAmount) internal returns (MarketConfig memory cfg) {
+        cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+        cfg.poolInitialization.funder = DEPLOYER.addr;
+        cfg.poolInitialization.quoteAmount = _quoteAmount;
+        deal(cfg.gyroECLPPoolParams.quoteAsset, cfg.poolInitialization.funder, _quoteAmount);
+    }
+
+    /**
+     * @notice A one-USDC-wei genesis seed mints just under DEAD_SHARES LPT shares, so the whole deployment must
+     *         revert with the template's INSUFFICIENT_GENESIS_SHARES carrying the sub-1e12 mint
+     * @dev The carried share count also pins the guard ordering: a nonzero count proves the deposit's entry floor
+     *      (MUST_MINT_NON_ZERO_SHARES) did not fire, and reaching the template's check at all proves Balancer's
+     *      minimum-total-supply check passed, so the template's floor is the operative dust boundary
+     */
+    function test_RevertIf_DustGenesisSeedMintsFewerThanDeadShares() public {
+        MarketConfig memory cfg = _seededConfig(1);
+        try DEPLOY_SCRIPT.deploy(cfg, FACTORY_ADMIN, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0, _generateRoleAssignments(), DEPLOYER.privateKey) {
+            fail("a dust genesis seed minting fewer than DEAD_SHARES must revert the deployment");
+        } catch (bytes memory err) {
+            bytes4 sel;
+            uint256 mintedShares;
+            assembly ("memory-safe") {
+                sel := mload(add(err, 0x20))
+                mintedShares := mload(add(err, 0x24))
+            }
+            assertEq(
+                sel,
+                RoycoDayBalancerV3MarketDeploymentTemplate.INSUFFICIENT_GENESIS_SHARES.selector,
+                "the dust seed must trip the template's genesis-share floor, not an earlier guard"
+            );
+            // A near-miss band, not merely nonzero: the mint sits ~0.376% below the lock (the vault's 1e6 dead
+            // BPT out of the ~2.66e8 invariant), proving the entry floor was nowhere near firing
+            assertGt(mintedShares, 0.99e12, "the dust seed must price to a near-miss mint, so the entry floor was not the operative guard");
+            assertLt(mintedShares, DEAD_SHARES, "the dust seed's mint must fall below the dead-share lock");
+        }
+    }
+
+    /**
+     * @notice A two-USDC-wei genesis seed clears the floor: the deployment succeeds, exactly DEAD_SHARES sit at
+     *         0xdEaD, and the funder holds exactly the minted remainder (minted - DEAD_SHARES, itself sub-1e12)
+     * @dev The exact-equality boundary (a seed minting exactly DEAD_SHARES, funder left with zero) is not
+     *      constructible on the fork: minted(q) ~= q x 1e12 net of the vault's 1e6 dead BPT slice never lands on
+     *      1e12 for an integer q, so this pins the nearest constructible property instead (see the contract natspec)
+     */
+    function test_GenesisSeed_SmallSeedLocksDeadSharesAndFunderHoldsRemainder() public {
+        MarketConfig memory cfg = _seededConfig(2);
+        DeploymentResult memory result =
+            DEPLOY_SCRIPT.deploy(cfg, FACTORY_ADMIN, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0, _generateRoleAssignments(), DEPLOYER.privateKey);
+
+        IERC20 lpt = IERC20(result.kernel.liquidityProviderTranche());
+        uint256 minted = lpt.totalSupply();
+
+        // The genesis mint is the tranche's only mint, split exactly between the dead lock and the funder
+        assertEq(lpt.balanceOf(DEAD_ADDRESS), DEAD_SHARES, "DEAD_SHARES must be locked at 0xdEaD");
+        assertEq(lpt.balanceOf(cfg.poolInitialization.funder), minted - DEAD_SHARES, "the funder must hold exactly the minted remainder");
+        assertGe(minted, DEAD_SHARES, "a seed that deployed must have covered the dead-share lock");
+        // The small seed brackets the boundary: the funder's remainder stays below one DEAD_SHARES unit, so the
+        // deployment lives within one quote wei of the revert threshold the dust test pins from below
+        assertLt(minted, 2 * DEAD_SHARES, "a two-wei seed must mint under twice the dead-share lock");
     }
 }

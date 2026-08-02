@@ -27,10 +27,10 @@ import {
  *         probes and skew builders, a liquidity-gate driver, and the derived-bound helpers the tests
  *         assert against. Everything runs on the real forked Vault + Gyro E-CLP pool + E-CLP LP oracle the
  *         deploy template ships — nothing here touches a mock.
- * @dev Transient-cache discipline: foundry executes a whole test as ONE
- *      transaction, so the kernel's transient `ST_SHARE_PRICE` cache persists across helper calls. `getRate()`
- *      reads taken BEFORE any kernel op/sync in a test are cache-miss (fresh preview) reads; any read AFTER a
- *      sync observes the frozen cached mark of that sync. Each test states which regime it reads under.
+ * @dev Cache discipline: the kernel's transient `ST_SHARE_PRICE` cache is OPERATION-scoped. Every kernel
+ *      operation's `withPriceCache` frame clears it on exit, so a `getRate()` read between top-level helper
+ *      calls is ALWAYS a cache-miss (live preview off committed state plus pending accrual). Only code running
+ *      inside a single operation frame can observe the cached mark, which the concrete harness suites pin.
  */
 abstract contract BalancerVenueForkBase is Identical_ERC4626_Chainlink_BalancerV3_LPT_KernelTest {
     // ═══════════════════════════════════════════════════════════════════════════

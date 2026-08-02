@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { LPT_LP_ROLE } from "../../../src/factory/Roles.sol";
+import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
@@ -175,6 +176,298 @@ contract TestFuzz_MultiAssetPreviewParity_Kernel is MarketFuzzTestBase {
         assertEq(claims.lptAssets, previewClaims.lptAssets, "bonus-regime multi-asset redeem: LPT-asset leg must match the preview");
         assertEq(claims.stShares, previewClaims.stShares, "bonus-regime multi-asset redeem: senior-share leg must match the preview");
         assertEq(claims.nav, previewClaims.nav, "bonus-regime multi-asset redeem: claim NAV must match the preview");
+    }
+
+    // =============================
+    // The harsh-state sweep: the advertised multi-asset maximum must execute, quote exactly at the
+    // boundary, and conserve every venue token flow, across drawdown, liquidation, wipeout, idle
+    // premium, venue slippage, and pool-skew states the evolved up-only sweep never constructs
+    // =============================
+
+    /**
+     * Scenario: the advertised maxRedeemMultiAsset must NEVER revert when executed at exactly that value.
+     * The bound linearizes the senior-unwind relief (z = (D - S*m) * D / (D - r*m)) while the execution
+     * settles the real venue removal, senior redemption, and end-of-flow liquidity gate, so any modeling
+     * error in the bound (a stale pile assumption, a rounding wedge the heal machinery misses, a relief
+     * overstatement in the wiped regime) surfaces here as a revert at the advertised size. Also pins the
+     * weak dominance maxRedeemMultiAsset >= maxRedeem on every harsh state, extending the evolved-market
+     * dominance pin into the drawdown and liquidation regimes, and that the settled exit leaves the
+     * committed liquidity utilization within WAD (the end-of-flow gate's own promise).
+     */
+    function testFuzz_MaxRedeemMultiAsset_AdvertisedMaxAlwaysExecutes(
+        uint256 _stSeed,
+        uint256 _jtSeed,
+        uint256 _regimeSeed,
+        uint256 _pnlSeed,
+        uint256 _elapsed,
+        uint256 _lptBpsSeed,
+        uint256 _premiumSeed
+    )
+        public
+    {
+        _buildHarshState(_stSeed, _jtSeed, _regimeSeed, _pnlSeed, _elapsed, _lptBpsSeed, _premiumSeed);
+
+        uint256 maxShares = liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER);
+        // The multi-asset bound weakly dominates the in-kind bound on every harsh state: both price through the
+        // same virtual-shares primitive and the senior-unwind relief only ever lifts the multi-asset bound
+        assertGe(maxShares, liquidityProviderTranche.maxRedeem(LPT_PROVIDER), "the multi-asset bound must weakly dominate the in-kind bound");
+        // Dust floor per the repo convention: a sub-1e6-share max scales its claims to a zero-NAV payout the
+        // accountant's no-op guard rejects, a dust boundary the concrete boundary suite owns, not this property
+        if (maxShares < 1e6) return;
+
+        // The advertised maximum must settle with no slippage floors and no tolerance for any revert
+        vm.prank(LPT_PROVIDER);
+        liquidityProviderTranche.redeemMultiAsset(maxShares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
+
+        // The settled exit honored the liquidity requirement it was sized against
+        SyncedAccountingState memory state = _sync();
+        assertLe(state.liquidityUtilizationWAD, WAD, "the settled max redemption must leave the liquidity utilization within WAD");
+    }
+
+    /**
+     * Scenario: previewRedeemMultiAsset at exactly maxRedeemMultiAsset must quote (not revert) and match the
+     * execution byte for byte on the quote leg and every claim leg. The existing parity fuzz samples uniformly
+     * below the max, but the max point is where the wedge and heal machinery is maximally stressed: the
+     * preview's null caller skips every burn and its LPT_ASSET_PRICE cache replaces the settled post-remove
+     * pool, so a divergence between the simulated and settled boundary paths lands exactly here.
+     */
+    function testFuzz_PreviewRedeemMultiAsset_ParityAtExactMax(
+        uint256 _stSeed,
+        uint256 _jtSeed,
+        uint256 _regimeSeed,
+        uint256 _pnlSeed,
+        uint256 _elapsed,
+        uint256 _lptBpsSeed,
+        uint256 _premiumSeed
+    )
+        public
+    {
+        _buildHarshState(_stSeed, _jtSeed, _regimeSeed, _pnlSeed, _elapsed, _lptBpsSeed, _premiumSeed);
+
+        uint256 maxShares = liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER);
+        if (maxShares < 1e6) return; // dust floor, see the always-executes arm
+
+        // The preview at the exact boundary must quote, so no try/catch tolerance
+        (AssetClaims memory previewClaims, uint256 previewQuote) = liquidityProviderTranche.previewRedeemMultiAsset(maxShares);
+        vm.prank(LPT_PROVIDER);
+        (AssetClaims memory claims, uint256 quoteOut) = liquidityProviderTranche.redeemMultiAsset(maxShares, 0, 0, LPT_PROVIDER, LPT_PROVIDER);
+
+        assertEq(quoteOut, previewQuote, "max-boundary multi-asset redeem: quote leg must match the preview");
+        assertEq(claims.collateralAssets, previewClaims.collateralAssets, "max-boundary multi-asset redeem: collateral leg must match the preview");
+        assertEq(claims.lptAssets, previewClaims.lptAssets, "max-boundary multi-asset redeem: LPT-asset leg must match the preview");
+        assertEq(claims.stShares, previewClaims.stShares, "max-boundary multi-asset redeem: senior-share leg must match the preview");
+        assertEq(claims.nav, previewClaims.nav, "max-boundary multi-asset redeem: claim NAV must match the preview");
+    }
+
+    /**
+     * Scenario: after a fuzzed multi-asset deposit the venue's ACTUAL token movements must conserve exactly,
+     * independently of any pricing mirror: the quote leg lands in the pool in full, every senior share the
+     * deposit minted plus the tail's measured idle-premium deployment lands in the pool (none stranded with
+     * the kernel or the depositor), and every pool token the add minted sits in kernel custody. Mirrors the
+     * invariant handler's token-flow reconciliation as direct fuzz assertions over the harsh state sweep.
+     */
+    function testFuzz_DepositMultiAsset_VenueTokenFlowsConserved(
+        uint256 _stSeed,
+        uint256 _jtSeed,
+        uint256 _regimeSeed,
+        uint256 _pnlSeed,
+        uint256 _elapsed,
+        uint256 _lptBpsSeed,
+        uint256 _premiumSeed,
+        uint256 _stLegSeed,
+        uint256 _quoteSeed
+    )
+        public
+    {
+        uint256 st = _buildHarshState(_stSeed, _jtSeed, _regimeSeed, _pnlSeed, _elapsed, _lptBpsSeed, _premiumSeed);
+
+        // Bound the senior leg by the live plain-ST max (conservative, per the balanced parity arm), degrading to
+        // a quote-only deposit when senior capacity is negligible or the harsh state landed FIXED_TERM
+        uint256 maxStLeg = toUint256(seniorTranche.maxDeposit(ST_PROVIDER));
+        uint256 stLeg = maxStLeg < 1e6 ? 0 : bound(_stLegSeed, maxStLeg / 2, maxStLeg);
+        uint256 quoteLeg = bound(_quoteSeed, 1, Math.max(1e12, st / QUOTE_TO_NAV_SCALE / 10));
+
+        address a = makeAddr("MA_FLOWS_IN");
+        accessManager.grantRole(LPT_LP_ROLE, a, 0);
+        if (stLeg != 0) stJtVault.mintShares(a, stLeg);
+        quoteToken.mint(a, quoteLeg);
+        vm.startPrank(a);
+        if (stLeg != 0) stJtVault.approve(address(liquidityProviderTranche), stLeg);
+        quoteToken.approve(address(liquidityProviderTranche), quoteLeg);
+        // A dust combined value floors to zero shares (a non-mintable input), skip it via the preview
+        try liquidityProviderTranche.previewDepositMultiAsset(stLeg, quoteLeg) returns (uint256 p, uint256) {
+            if (p == 0) {
+                vm.stopPrank();
+                return;
+            }
+        } catch {
+            vm.stopPrank();
+            return;
+        }
+
+        FlowSnap memory f = _snapFlows();
+        liquidityProviderTranche.depositMultiAsset(stLeg, quoteLeg, 0, a);
+        vm.stopPrank();
+
+        // The settled op's tail deploys the idle premium pile into the pool, so the ledger may only fall
+        uint256 idleAfter = kernel.getState().lptOwnedSeniorTrancheShares;
+        assertLe(idleAfter, f.idle0, "a multi-asset deposit must never grow the idle liquidity premium ledger");
+        uint256 idleDeployed = f.idle0 - idleAfter;
+
+        // Venue conservation, written additively so a flow moving the wrong way fails instead of underflowing
+        assertEq(quoteToken.balanceOf(address(balancerVault)), f.venueQuote0 + quoteLeg, "the deposited quote leg must land in the pool in full");
+        assertEq(
+            seniorTranche.totalSupply() + f.venueSenior0 + idleDeployed,
+            f.stSupply0 + seniorTranche.balanceOf(address(balancerVault)),
+            "minted senior shares plus the deployed idle pile must reconcile with the pool's senior inflow"
+        );
+        assertEq(
+            bpt.balanceOf(address(kernel)) + f.bptSupply0,
+            f.kernelBpt0 + bpt.totalSupply(),
+            "pool tokens minted by the add must reconcile with the kernel's custody"
+        );
+    }
+
+    /**
+     * Scenario: after a fuzzed multi-asset redemption the venue's ACTUAL token movements must conserve exactly:
+     * the pool's quote outflow all lands with the receiver, every senior share pulled from the pool or the idle
+     * pile is burned (none parked with the kernel), and the burned pool tokens come exclusively from the
+     * kernel's custody. The idle ledger's total move is measured and split into the redeemer's floor-mirrored
+     * slice and the tail's deployment of the remaining pile.
+     */
+    function testFuzz_RedeemMultiAsset_VenueTokenFlowsConserved(
+        uint256 _stSeed,
+        uint256 _jtSeed,
+        uint256 _regimeSeed,
+        uint256 _pnlSeed,
+        uint256 _elapsed,
+        uint256 _lptBpsSeed,
+        uint256 _premiumSeed,
+        uint256 _sharesSeed
+    )
+        public
+    {
+        _buildHarshState(_stSeed, _jtSeed, _regimeSeed, _pnlSeed, _elapsed, _lptBpsSeed, _premiumSeed);
+
+        uint256 maxShares = liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER);
+        if (maxShares < 1e6) return; // dust floor, see the always-executes arm
+        uint256 shares = bound(_sharesSeed, 1e6, maxShares);
+
+        // A fresh receiver isolates the quote outflow reconciliation from the provider's own balances
+        address receiver = makeAddr("MA_FLOWS_OUT");
+        FlowSnap memory f = _snapFlows();
+        vm.prank(LPT_PROVIDER);
+        liquidityProviderTranche.redeemMultiAsset(shares, 0, 0, receiver, LPT_PROVIDER);
+
+        // The idle ledger moves twice in a settled exit: the redeemer's slice is unwound in the ST leg, then the
+        // tail deploys the remaining pile, so the total move is at least the floor-mirrored slice and never grows
+        uint256 idleAfter = kernel.getState().lptOwnedSeniorTrancheShares;
+        assertLe(idleAfter, f.idle0, "a multi-asset redemption must never grow the idle liquidity premium ledger");
+        uint256 idleUnwound = f.idle0 - idleAfter;
+        // The slice mirror divides by the effective supply exactly as production's _scaleAssetClaims does
+        assertGe(idleUnwound, f.idle0.mulDiv(shares, f.lptSupply0 + 1), "the idle ledger must move by at least the redeemer's mirrored slice");
+
+        // Venue conservation, written additively so a flow moving the wrong way fails instead of underflowing
+        assertEq(
+            quoteToken.balanceOf(address(balancerVault)) + quoteToken.balanceOf(receiver),
+            f.venueQuote0,
+            "the pool's quote outflow must reconcile with the receiver's quote gain"
+        );
+        assertEq(
+            seniorTranche.totalSupply() + f.venueSenior0 + idleUnwound,
+            f.stSupply0 + seniorTranche.balanceOf(address(balancerVault)),
+            "burned senior shares must reconcile with the pool withdrawal plus the idle ledger outflow"
+        );
+        assertEq(
+            bpt.totalSupply() + f.kernelBpt0,
+            f.bptSupply0 + bpt.balanceOf(address(kernel)),
+            "burned pool tokens must reconcile with the kernel's custody outflow"
+        );
+    }
+
+    // =============================
+    // Harsh-state fixtures
+    // =============================
+
+    /// @dev Token balances captured around a multi-asset op so its actual transfers can be reconciled
+    struct FlowSnap {
+        uint256 venueQuote0;
+        uint256 venueSenior0;
+        uint256 stSupply0;
+        uint256 kernelBpt0;
+        uint256 bptSupply0;
+        uint256 idle0;
+        uint256 lptSupply0;
+    }
+
+    /// @dev Captures the balances the venue-flow reconciliation compares against after a multi-asset op
+    function _snapFlows() internal view returns (FlowSnap memory f) {
+        f.venueQuote0 = quoteToken.balanceOf(address(balancerVault));
+        f.venueSenior0 = seniorTranche.balanceOf(address(balancerVault));
+        f.stSupply0 = seniorTranche.totalSupply();
+        f.kernelBpt0 = bpt.balanceOf(address(kernel));
+        f.bptSupply0 = bpt.totalSupply();
+        f.idle0 = kernel.getState().lptOwnedSeniorTrancheShares;
+        f.lptSupply0 = liquidityProviderTranche.totalSupply();
+    }
+
+    /**
+     * @dev Builds the harshest state the fixture can construct, then commits it with a final sync:
+     *      1. Flat market over 8 orders of magnitude of senior size with real two-leg pool depth (a 0.5%
+     *         collateral-leg deposit puts senior shares in the pool so removals carry a senior leg)
+     *      2. Staged idle premium: mode 1 and 2 arm the venue's punitive slippage so the staging sync's
+     *         reinvest gate fails and the minted premium senior shares sit idle, mode 1 then disarms so the
+     *         next op's tail can deploy the pile, mode 2 leaves it armed so the pile stays idle through the op
+     *      3. Regime PnL: the even regime sweeps up-only vault yield [0%, +100%], the odd regime holds the
+     *         bonus suite's 30% junior ratio and sweeps the drawdown band [-20.8%, -26%] on the staged price.
+     *         At that ratio the flat-market liquidation entry sits at -20.8% and junior exhaustion at -22.99%
+     *         (0.3 / 1.305), both shifted slightly by the staged +2% gain and its junior yield share, so the
+     *         band sweeps liquidation-regime PERPETUAL through wiped-buffer PERPETUAL with only a thin
+     *         FIXED_TERM sliver at the low edge (those runs advertise zero and skip)
+     *      4. LPT-side PnL skews the pool's quote leg [-20%, +20%] in both price stores coherently
+     * @return st The senior seed size in NAV wei
+     */
+    function _buildHarshState(
+        uint256 _stSeed,
+        uint256 _jtSeed,
+        uint256 _regimeSeed,
+        uint256 _pnlSeed,
+        uint256 _elapsed,
+        uint256 _lptBpsSeed,
+        uint256 _premiumSeed
+    )
+        internal
+        returns (uint256 st)
+    {
+        st = bound(_stSeed, 1e18, 1e26);
+        bool liquidationRegime = _regimeSeed % 2 == 1;
+        uint256 jt = liquidationRegime ? st * 3 / 10 : bound(_jtSeed, st / 2, 2 * st);
+        _seedFlatMarket(st, jt, st.mulDiv(3, 20) / QUOTE_TO_NAV_SCALE + 1);
+
+        // A collateral-leg deposit worth 0.5% of the senior seed puts senior shares in the quote-only pool
+        uint256 stLeg = st / 200;
+        stJtVault.mintShares(LPT_PROVIDER, stLeg);
+        vm.startPrank(LPT_PROVIDER);
+        stJtVault.approve(address(liquidityProviderTranche), stLeg);
+        liquidityProviderTranche.depositMultiAsset(stLeg, 0, 0, LPT_PROVIDER);
+        vm.stopPrank();
+
+        // Stage the idle premium pile over an elapsed window with a fixed +2% gain
+        uint256 premiumMode = _premiumSeed % 3;
+        if (premiumMode != 0) setVenueSlippageMode(true);
+        _warpAndRefreshFeed(bound(_elapsed, 1 hours, 30 days));
+        applySTPnL(200);
+        _sync();
+        if (premiumMode == 1) setVenueSlippageMode(false);
+
+        // Regime PnL on the shared collateral oracle
+        if (liquidationRegime) applySTPnL(-int256(bound(_pnlSeed, 2080, 2600)));
+        else applySTPnL(int256(bound(_pnlSeed, 0, 10_000)));
+
+        // Skew the pool's quote leg last so no venue price re-sync erases it
+        applyLPTPnL(int256(bound(_lptBpsSeed, 0, 4000)) - 2000);
+
+        _sync();
     }
 
     /// @dev Seeds a flat market, applies up-only vault yield over a window, and syncs, leaving PERPETUAL state

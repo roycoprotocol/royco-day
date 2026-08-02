@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
+import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -137,7 +139,113 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
 
     // =============================
     // Helpers
+    /**
+     * @notice A cold standalone reinvestment stages the premium accrued since the last sync into the pile, deploys
+     *         the ENTIRE enlarged pile, and re-commits the LPT raw NAV at the post-deployment venue state
+     * @dev The cache-miss path: outside an operation's price frame the rate cache is cleared, so the standalone
+     *      entrypoint syncs first (staging the pending premium and producing the fresh rate) and then deploys.
+     *      The re-commit afterward is load-bearing: the deployment settles after the sync's commit, so without it
+     *      the committed depth would understate the freshly deployed market-making inventory
+     */
+    function test_ReinvestLiquidityPremium_ColdCall_StagesAccruedPremiumDeploysAndRecommits() public {
+        uint256 stagedPile = _accrueIdlePremiumSeniorShares();
+
+        // Accrue a second premium window WITHOUT syncing, so the standalone call's own sync must stage it
+        _warpAndRefreshFeed(1 days);
+        applySTPnL(1000);
+
+        // Measure what the cold call's internal sync will stage, on a snapshot that is always reverted
+        uint256 snap = vm.snapshotState();
+        vm.prank(SYNC_OPERATOR);
+        kernel.syncTrancheAccounting();
+        uint256 enlargedPile = kernel.getState().lptOwnedSeniorTrancheShares;
+        vm.revertToState(snap);
+        assertGt(enlargedPile, stagedPile, "arrange: the unsynced window must carry pending premium to stage");
+
+        uint256 poolSenior0 = seniorTranche.balanceOf(address(balancerVault));
+        uint256 totalLPT0 = toUint256(kernel.getState().totalLPTAssets);
+
+        // The cold call syncs (staging the pending premium), deploys the entire enlarged pile, and re-commits
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
+        kernel.reinvestLiquidityPremium(type(uint256).max);
+
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the entire enlarged pile must deploy");
+        assertEq(
+            seniorTranche.balanceOf(address(balancerVault)) - poolSenior0,
+            enlargedPile,
+            "the pool must receive exactly the staged pile plus the newly staged premium"
+        );
+        uint256 totalLPTAfter = toUint256(kernel.getState().totalLPTAssets);
+        assertGt(totalLPTAfter, totalLPT0, "the deployment must credit freshly minted BPT to the ledger");
+        // The re-commit: the committed depth must price the post-deployment ledger at the post-deployment venue mark
+        assertEq(
+            toUint256(accountant.getState().lastLPTRawNAV),
+            toUint256(kernel.convertLPTAssetsToValue(toTrancheUnits(totalLPTAfter))),
+            "the committed LPT raw NAV must reflect the freshly deployed inventory at the live mark"
+        );
+    }
+
+    /**
+     * @notice An operation's tail and a cold standalone call deploy identically from the same settled state
+     * @dev The tail consumes the operation frame's cached senior rate while the standalone call resyncs for a
+     *      fresh one, but on identical settled state both must value the pile the same and mint the same BPT.
+     *      A junior deposit is the probe operation: it moves neither the senior rate nor the pool, so its tail
+     *      deploys from exactly the state the standalone path sees
+     */
+    function test_ReinvestLiquidityPremium_TailAndColdCall_DeployIdenticallyFromSameState() public {
+        _accrueIdlePremiumSeniorShares();
+
+        // Path 1: a junior deposit whose settled tail deploys the pile at the frame's cached rate
+        uint256 snap = vm.snapshotState();
+        _depositInkind(juniorTranche, JT_PROVIDER, 1e18);
+        uint256 tailBptOut = toUint256(kernel.getState().totalLPTAssets);
+        uint256 tailIdleAfter = kernel.getState().lptOwnedSeniorTrancheShares;
+        vm.revertToState(snap);
+
+        // Path 2: the standalone cold call at the identical state
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
+        kernel.reinvestLiquidityPremium(type(uint256).max);
+
+        assertEq(tailIdleAfter, 0, "the tail must deploy the entire pile");
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, 0, "the standalone call must deploy the entire pile");
+        assertEq(toUint256(kernel.getState().totalLPTAssets), tailBptOut, "both paths must mint identical BPT from the same settled state");
+    }
+
+    /**
+     * @notice A gated (deferring) tail reinvestment never blocks the operation that carries it: the deposit
+     *         settles, the pile stays idle and claimable, and no reinvestment event fires
+     * @dev The tail tolerates its inner add's revert by design, so an armed venue haircut converts the
+     *      deployment into a no-op instead of failing the user's operation
+     */
+    function test_InKindOperation_SettlesWhileTailReinvestmentDefers() public {
+        uint256 idleShares = _accrueIdlePremiumSeniorShares();
+        // Re-arm the punitive haircut so the tail's gated add deterministically defers
+        setVenueSlippageMode(true);
+
+        vm.recordLogs();
+        uint256 minted = _depositInkind(seniorTranche, ST_PROVIDER, 1e18);
+        assertGt(minted, 0, "the deposit must settle despite the deferring tail");
+        assertEq(kernel.getState().lptOwnedSeniorTrancheShares, idleShares, "the pile must stay idle and claimable through the deferral");
+
+        // No reinvestment event may fire on a deferred tail
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(
+                logs[i].topics[0] != IRoycoDayKernel.LiquidityPremiumReinvested.selector, "a deferred tail must not emit LiquidityPremiumReinvested"
+            );
+        }
+    }
+
     // =============================
+
+    /// @dev Funds and executes an in-kind vault-share deposit on the given tranche as the given provider
+    function _depositInkind(IRoycoVaultTranche _tranche, address _provider, uint256 _assets) internal returns (uint256 shares) {
+        stJtVault.mintShares(_provider, _assets);
+        vm.startPrank(_provider);
+        stJtVault.approve(address(_tranche), _assets);
+        shares = _tranche.deposit(toTrancheUnits(_assets), _provider);
+        vm.stopPrank();
+    }
 
     /**
      * @dev Accrues an idle liquidity premium senior share pile: arm venue slippage so the sync's reinvestment

@@ -5,12 +5,13 @@ import { GyroECLPMath } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro
 import { PausableUpgradeable } from "../../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 
-import { ADMIN_UNPAUSER_ROLE } from "../../../../src/factory/Roles.sol";
-import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
+import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
+import { IRoycoLiquidityProviderTranche } from "../../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
-import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
+import { SyncedAccountingState, TrancheType } from "../../../../src/libraries/Types.sol";
+import { NAV_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import { BalancerVenueForkBase } from "./BalancerVenueForkBase.sol";
 
 /**
@@ -41,67 +42,46 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         else _fundExternalLP(swapper, 0, amountIn);
     }
 
-    /// @dev Snapshot-probes the full accountant checkpoint an explicit sync would commit RIGHT NOW, leaving no trace.
-    function _probeCommittedSync() internal returns (IRoycoDayAccountant.RoycoDayAccountantState memory state) {
-        uint256 snapshotId = vm.snapshotState();
-        _sync();
-        state = ACCOUNTANT.getState();
-        vm.revertToState(snapshotId);
-    }
-
-    /// @dev Pauses the pool hook via the delay-0 pauser role (the hook is a RoycoBase with its own pause binding).
-    function _pauseHook() internal {
-        vm.prank(PAUSER_ADDRESS);
-        IRoycoAuth(BALANCER_HOOK).pause();
-    }
-
-    /// @dev Unpauses the pool hook via the unpauser role, scheduling through the AccessManager when the role carries a delay.
-    function _unpauseHook() internal {
-        (, uint32 delay) = ACCESS_MANAGER.hasRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS);
-        if (delay == 0) {
-            vm.prank(UNPAUSER_ADDRESS);
-            IRoycoAuth(BALANCER_HOOK).unpause();
-        } else {
-            bytes memory data = abi.encodeCall(IRoycoAuth.unpause, ());
-            vm.prank(UNPAUSER_ADDRESS);
-            ACCESS_MANAGER.schedule(BALANCER_HOOK, data, 0);
-            _warpForward(uint256(delay) + 1);
-            vm.prank(UNPAUSER_ADDRESS);
-            ACCESS_MANAGER.execute(BALANCER_HOOK, data);
-        }
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
-    // A — REAL E-CLP SWAPS & HOOK COUPLING
+    // A — REAL E-CLP SWAPS ON THE HOOKLESS POOL
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice an external swap's before-hook syncs the kernel FIRST: the committed checkpoint equals what
-     *         an explicit sync would have committed pre-swap, and the swap's own effects land after the commit.
-     * @dev A pending (unsynced) feed move makes the sync non-trivial; the snapshot probe measures the exact
-     *      checkpoint an explicit sync would commit. Ordering discriminator: the committed LPT raw NAV equals
-     *      the PRE-swap pool mark exactly, while the post-swap live mark exceeds it by the accrued swap fee.
+     * @notice the pool is HOOKLESS by design (the template validates hooksContract == address(0)): an external
+     *         swap runs no kernel sync and leaves the committed checkpoint untouched, while the Vault still
+     *         prices the senior leg at the kernel rate provider's LIVE previewed rate, so a pending feed move
+     *         is priced by the swap without ever being committed.
+     * @dev COVERAGE NOTE: the removed hook (optional since bc91b0c0, forbidden by the template since fdaa08ce)
+     *      used to force a kernel sync and checkpoint commit on every external pool op. Pricing freshness is
+     *      fully replaced by the rate provider's live preview (pinned here and by the LVR test), but the
+     *      commit-on-external-flow behavior has NO replacement: the committed marks go stale until the next
+     *      kernel operation or explicit sync.
      */
     function test_ExternalSwap_syncsBeforeSwap_commitsPreSwapMarks() public {
         _seedForSwaps();
+        _sync();
+        IRoycoDayAccountant.RoycoDayAccountantState memory committed0 = ACCOUNTANT.getState();
         simulateSTYield(0.01e18); // pending move, deliberately uncommitted
 
-        IRoycoDayAccountant.RoycoDayAccountantState memory expected = _probeCommittedSync();
         (address swapper, uint256 amountIn) = _armSwapper(testConfig.quoteAsset, 0.5e18);
+        uint256 committedRate = Math.mulDiv(WAD, toUint256(committed0.lastSTEffectiveNAV) + VIRTUAL_VALUE, ST.totalSupply() + VIRTUAL_SHARES);
+        uint256 liveRate = _kernelRate();
+        assertGt(liveRate, committedRate, "arrange: the live-previewed rate must carry the pending feed move");
 
         vm.recordLogs();
         _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
         (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(KERNEL), IRoycoDayKernel.PreOpTrancheAccountingSynced.selector);
-        assertEq(syncCount, 1, "the before-swap hook must sync the kernel exactly once");
+        assertEq(syncCount, 0, "a hookless external swap must run no kernel sync");
 
         IRoycoDayAccountant.RoycoDayAccountantState memory committed = ACCOUNTANT.getState();
-        // The two per-tranche raw NAVs collapsed into the one coinvested collateral mark, so one checkpoint
-        // equality carries what the two raw-NAV asserts did.
-        assertEq(committed.lastCollateralNAV, expected.lastCollateralNAV, "committed collateral NAV must equal the pre-swap explicit-sync probe");
-        assertEq(committed.lastSTEffectiveNAV, expected.lastSTEffectiveNAV, "committed ST effective NAV must equal the pre-swap explicit-sync probe");
-        assertEq(committed.lastJTEffectiveNAV, expected.lastJTEffectiveNAV, "committed JT effective NAV must equal the pre-swap explicit-sync probe");
-        assertEq(committed.lastLPTRawNAV, expected.lastLPTRawNAV, "committed LPT raw NAV must be the PRE-swap pool mark (sync-before-swap ordering)");
-        assertGt(toUint256(_liveLPTRawNAV()), toUint256(committed.lastLPTRawNAV), "the swap's fee must land in the pool AFTER the commit");
+        assertEq(committed.lastCollateralNAV, committed0.lastCollateralNAV, "the committed collateral NAV must be untouched by the swap");
+        assertEq(committed.lastSTEffectiveNAV, committed0.lastSTEffectiveNAV, "the committed ST effective NAV must be untouched by the swap");
+        assertEq(committed.lastJTEffectiveNAV, committed0.lastJTEffectiveNAV, "the committed JT effective NAV must be untouched by the swap");
+        assertEq(committed.lastLPTRawNAV, committed0.lastLPTRawNAV, "the committed LPT raw NAV must be untouched by the swap");
+        // The swap priced the senior leg at the live rate: the pool's rate view still reads it after the swap
+        (, uint256[] memory tokenRates) = VAULT.getPoolTokenRates(POOL);
+        assertEq(tokenRates[_stPoolIndex()], liveRate, "the pool must price the senior leg at the live previewed rate");
+        assertGt(toUint256(_liveLPTRawNAV()), toUint256(committed.lastLPTRawNAV), "the swap's fee lands in the pool above the stale committed mark");
     }
 
     /**
@@ -150,39 +130,50 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     }
 
     /**
-     * @notice a paused hook blocks external swaps (the before-swap sync is `whenNotPaused` and its revert
-     *         bubbles), and unpausing restores swap liveness. Pins the liveness coupling of third-party pool
-     *         flow to Royco pause state.
+     * @notice a paused kernel blocks external swaps: the pool's WITH_RATE leg reads the kernel rate provider,
+     *         whose `whenNotPaused` revert bubbles through the Vault, so the pool never executes operations on
+     *         a faulty kernel state. Unpausing restores swap liveness. This is the hookless replacement for the
+     *         removed hook's pause coupling.
      */
     function test_RevertIf_ExternalSwapWhileHookPaused_thenRecovers() public {
         _seedForSwaps();
         (address swapper, uint256 amountIn) = _armSwapper(testConfig.quoteAsset, 0.25e18);
 
-        _pauseHook();
+        _pauseKernel();
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
 
-        _unpauseHook();
+        _unpauseKernel();
         uint256 amountOut = _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
-        assertGt(amountOut, 0, "the identical swap must succeed once the hook is unpaused");
+        assertGt(amountOut, 0, "the identical swap must succeed once the kernel is unpaused");
     }
 
     /**
-     * @notice a paused hook does NOT touch kernel-routed LPT flows: the `router == kernel` exemption
-     *         short-circuits before the `whenNotPaused` sync, so deposits and redemptions keep functioning.
-     *         Pins the pause blast-radius: hook pause stops external pool traffic only.
+     * @notice the kernel pause blast radius covers the WHOLE pool surface on the hookless topology: the
+     *         kernel-routed multi-asset flows revert at the kernel's own gate and third-party swaps revert
+     *         through the rate provider, and both resume after unpause. There is no narrower hook pause: the
+     *         hook is removed, so the kernel's pause is the single liveness switch for the venue.
      */
     function test_ExternalSwap_hookPaused_kernelFlowsUnaffected() public {
         _seedForSwaps();
-        _pauseHook();
-
+        (address swapper, uint256 amountIn) = _armSwapper(testConfig.quoteAsset, 0.25e18);
         uint256 stLeg = testConfig.initialFunding / 1000;
         uint256 quoteLeg = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(stLeg)));
-        uint256 shares = _doDepositLPTMulti(LPT_ALICE_ADDRESS, stLeg, quoteLeg, 0).shares;
-        assertGt(shares, 0, "the kernel-routed multi-asset deposit must succeed while the hook is paused");
+        _pauseKernel();
 
-        uint256 redeemed = _doRedeemLPTMulti(LPT_ALICE_ADDRESS, shares / 2, 0, 0).quoteAssets;
-        assertGt(redeemed, 0, "the kernel-routed multi-asset redemption must succeed while the hook is paused");
+        vm.startPrank(LPT_ALICE_ADDRESS);
+        IERC20(COLLATERAL_ASSET).approve(address(LPT), stLeg);
+        IERC20(testConfig.quoteAsset).approve(address(LPT), quoteLeg);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        IRoycoLiquidityProviderTranche(address(LPT)).depositMultiAsset(stLeg, quoteLeg, 0, LPT_ALICE_ADDRESS);
+        vm.stopPrank();
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
+
+        _unpauseKernel();
+        uint256 shares = _doDepositLPTMulti(LPT_ALICE_ADDRESS, stLeg, quoteLeg, 0).shares;
+        assertGt(shares, 0, "the kernel-routed multi-asset deposit must resume after unpause");
+        assertGt(_swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0), 0, "external swaps must resume after unpause");
     }
 
     /**
@@ -391,16 +382,33 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         );
     }
 
-    /// @notice within a synced transaction the rate is FROZEN: a feed move after the sync does not move
-    ///         `getRate` until the next sync rewrites the cache. The senior mark inside an op is stable.
+    /**
+     * @notice the ST_SHARE_PRICE cache is OPERATION-scoped: the sync's `withPriceCache` frame clears it at the
+     *         operation's exit, so a later `getRate` read reprices LIVE from committed state and immediately
+     *         tracks a post-sync feed move through the preview path, exactly matching the previewed post-mint
+     *         supply and effective NAV. In-frame freezing (an inline senior mint inside ONE operation) is
+     *         pinned by the concrete harness test, since only a single call frame can observe it.
+     */
     function test_GetRate_cacheHit_freezesSeniorMark() public {
         _seedForSwaps();
         _sync();
         uint256 rateAtSync = _kernelRate();
         simulateSTYield(0.01e18);
-        assertEq(_kernelRate(), rateAtSync, "the frozen cached rate must ignore a post-sync feed move");
+
+        // The frame cleared the cache at the sync's exit, so the read previews the moved feed live
+        (SyncedAccountingState memory preview,, uint256 stSupplyAfterMints) = KERNEL.previewSyncTrancheAccountingFor(TrancheType.SENIOR);
+        uint256 expectedLive = Math.mulDiv(WAD, toUint256(preview.stEffectiveNAV) + VIRTUAL_VALUE, stSupplyAfterMints + VIRTUAL_SHARES);
+        assertGt(_kernelRate(), rateAtSync, "the post-frame read must reprice the moved feed live");
+        assertEq(_kernelRate(), expectedLive, "the live read must match the previewed post-mint NAV per effective share");
+
+        // The next sync commits the move and the fresh committed read agrees with the live preview
         _sync();
-        assertGt(_kernelRate(), rateAtSync, "the next sync must refresh the frozen mark to the moved feed");
+        assertGt(_kernelRate(), rateAtSync, "the committed rate must carry the moved feed");
+        assertEq(
+            _kernelRate(),
+            Math.mulDiv(WAD, toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV) + VIRTUAL_VALUE, ST.totalSupply() + VIRTUAL_SHARES),
+            "the committed read must equal the committed NAV per effective share"
+        );
     }
 
     /**
@@ -430,23 +438,33 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     }
 
     /**
-     * @notice an external swap refreshes the rate through the hook: after a feed move, the swap leaves the
-     *         cache holding the POST-move committed rate, coherent with the post-swap committed checkpoint.
+     * @notice on the hookless pool an external swap neither syncs nor caches a rate: `getRate` previews the
+     *         moved feed live before AND after the swap (the same rate the Vault priced the swap's senior leg
+     *         at), while the committed checkpoint stays at the pre-move marks until the next kernel sync.
      */
     function test_GetRate_externalSwapRefreshesRateThroughHook() public {
         _seedForSwaps();
         _sync();
         uint256 rateBefore = _kernelRate();
+        NAV_UNIT committedSTEff0 = ACCOUNTANT.getState().lastSTEffectiveNAV;
         simulateSTYield(0.01e18);
+        uint256 liveRate = _kernelRate();
+        assertGt(liveRate, rateBefore, "the live preview must carry the moved feed before any sync");
 
         (address swapper, uint256 amountIn) = _armSwapper(testConfig.quoteAsset, 0.1e18);
         _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
 
-        uint256 rateAfter = _kernelRate();
-        assertGt(rateAfter, rateBefore, "the hook's sync must refresh the rate to the moved feed");
-        // getRate carries the offset: floor((stEff + VIRTUAL_VALUE) * WAD / (supply + VIRTUAL_SHARES))
-        uint256 expected = Math.mulDiv(WAD, toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV) + VIRTUAL_VALUE, ST.totalSupply() + VIRTUAL_SHARES);
-        assertEq(rateAfter, expected, "the swap-refreshed rate must equal the committed NAV per effective share");
+        // The swap moved neither the senior supply nor the collateral marks, so the live preview is unchanged
+        assertEq(_kernelRate(), liveRate, "the swap must not move the live-previewed senior rate");
+        assertEq(ACCOUNTANT.getState().lastSTEffectiveNAV, committedSTEff0, "the committed senior mark must be untouched by the swap");
+
+        // Only a kernel sync commits the move
+        _sync();
+        assertEq(
+            _kernelRate(),
+            Math.mulDiv(WAD, toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV) + VIRTUAL_VALUE, ST.totalSupply() + VIRTUAL_SHARES),
+            "the synced rate must equal the committed NAV per effective share"
+        );
     }
 
     /// @notice the Vault's own view of the pool token rates reads the kernel rate provider live: the
@@ -551,26 +569,33 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     }
 
     /**
-     * @notice `computeTVL` reads cleanly INSIDE `Vault.unlock`: an external Router add triggers the hook's
-     *         sync, whose LPT raw NAV commit calls the oracle mid-unlock. Validates the template's
-     *         `shouldRevertIfVaultUnlocked = false` choice empirically (flipping it would brick every external
-     *         pool op, since the hook syncs before each one).
+     * @notice `computeTVL` reads cleanly INSIDE `Vault.unlock`: every kernel venue op runs its callback inside
+     *         its own unlock and reads the LPT oracle there (the add credits and re-commits the fresh mark
+     *         mid-unlock). Validates the template's `shouldRevertIfVaultUnlocked = false` choice empirically:
+     *         flipping it would brick every kernel-routed venue operation. The hookless external add runs no
+     *         kernel code at all, so it can never trip the oracle's unlock guard.
      */
     function test_ComputeTVL_midVaultUnlock_doesNotRevert() public {
         _seedForSwaps();
         _sync();
         assertFalse(_oracleShouldRevertIfVaultUnlocked(), "the template must deploy the oracle readable mid-unlock");
 
+        // The kernel-routed multi-asset deposit reads the oracle inside its own venue unlock and must succeed
+        uint256 stLeg = testConfig.initialFunding / 1000;
+        uint256 quoteLeg = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(stLeg)));
+        uint256 shares = _doDepositLPTMulti(LPT_ALICE_ADDRESS, stLeg, quoteLeg, 0).shares;
+        assertGt(shares, 0, "the kernel deposit (with its mid-unlock oracle read) must succeed");
+
+        // The hookless external add touches no kernel code and succeeds untouched by the unlock guard
         address actor = _makeExternalLP("MID_UNLOCK_ADDER");
         uint256 stShares = _rawBalances()[_stPoolIndex()] / 20;
         uint256 quoteAssets = _rawBalances()[_quotePoolIndex()] / 20;
         _fundExternalLP(actor, stShares, quoteAssets);
-
         vm.recordLogs();
         uint256 bptOut = _externalAddUnbalanced(actor, stShares, quoteAssets, 0);
-        assertGt(bptOut, 0, "the external add (with its mid-unlock oracle read) must succeed");
+        assertGt(bptOut, 0, "the external add must succeed");
         (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(KERNEL), IRoycoDayKernel.PreOpTrancheAccountingSynced.selector);
-        assertEq(syncCount, 1, "the hook must have synced (and read the oracle) inside the unlock");
+        assertEq(syncCount, 0, "a hookless external add must run no kernel sync");
     }
 
     /// @notice the kernel's LPT conversions round-trip on the LIVE oracle TVL with bounded floor loss:
