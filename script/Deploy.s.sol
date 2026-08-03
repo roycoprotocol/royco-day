@@ -776,9 +776,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.sequencerUptimeFeed = _config.sequencerUptimeFeed;
         params.gracePeriodSeconds = _config.gracePeriodSeconds;
         // The oracle's restricted surface bindings are declared per oracle kind here and applied by the template
-        // alongside the market's other role bindings (the factory only binds roles for an active template)
-        (params.collateralAssetOracleBindingSelectors, params.collateralAssetOracleBindingRoleIds) =
-            _collateralAssetOracleRoleBindings(_config.collateralAssetOracleType);
         // Per-tranche entry point configs applied by the template (via the factory) after the market is deployed.
         params.entryPointTrancheConfigs = RoycoDayBalancerV3MarketDeploymentTemplate.EntryPointTrancheConfigs({
             st: _config.stEntryPointConfig, jt: _config.jtEntryPointConfig, lpt: _config.lptEntryPointConfig

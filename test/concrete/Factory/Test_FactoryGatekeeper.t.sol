@@ -5,10 +5,7 @@ import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { ADMIN_ROLE, BURNER_ROLE, PUBLIC_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
-import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
-import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 
 /**
  * @title Test_FactoryGatekeeper
@@ -21,8 +18,8 @@ import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 contract Test_FactoryGatekeeper is Test {
     RoycoAccessManager internal am;
     RoycoFactoryGatekeeper internal gatekeeper;
-    IRoycoDayEntryPoint internal entryPoint;
-    RoycoMarketSyncer internal marketSyncer;
+    address internal ENTRY_POINT = makeAddr("ENTRY_POINT");
+    address internal MARKET_SYNCER = makeAddr("MARKET_SYNCER");
 
     address internal FACTORY = makeAddr("FACTORY");
     address internal STRANGER = makeAddr("STRANGER");
@@ -33,8 +30,8 @@ contract Test_FactoryGatekeeper is Test {
 
     function setUp() public {
         am = new RoycoAccessManager(address(this));
-        (entryPoint, marketSyncer) = FactoryScaffold.deployPeripherySingletons(am, FACTORY);
-        gatekeeper = new RoycoFactoryGatekeeper(address(am), FACTORY, address(entryPoint), address(marketSyncer));
+        // The gatekeeper only pins the periphery; this suite exercises the target/role rules, so plain addresses do
+        gatekeeper = new RoycoFactoryGatekeeper(address(am), FACTORY, ENTRY_POINT, MARKET_SYNCER);
         am.grantRole(ADMIN_ROLE, address(gatekeeper), 0);
     }
 
@@ -155,9 +152,9 @@ contract Test_FactoryGatekeeper is Test {
     /// @notice A gatekeeper can never be deployed serving nobody, in either direction
     function test_RevertIf_constructedWithZeroAddress() public {
         vm.expectRevert(IRoycoFactoryGatekeeper.NULL_ADDRESS.selector);
-        new RoycoFactoryGatekeeper(address(0), FACTORY, address(entryPoint), address(marketSyncer));
+        new RoycoFactoryGatekeeper(address(0), FACTORY, ENTRY_POINT, MARKET_SYNCER);
         vm.expectRevert(IRoycoFactoryGatekeeper.NULL_ADDRESS.selector);
-        new RoycoFactoryGatekeeper(address(am), address(0), address(entryPoint), address(marketSyncer));
+        new RoycoFactoryGatekeeper(address(am), address(0), ENTRY_POINT, MARKET_SYNCER);
     }
 
 

@@ -109,22 +109,28 @@ contract Test_EntryPointConstructionAndAdmin is EntryPointTestBase {
 
     function test_factoryRoute_modifyTrancheConfigs_succeeds() public {
         // The factory (holding ADMIN_ENTRY_POINT_ROLE) applies config changes from a deployment's hook phase, as
-        // production deployments do: the update rides the real executeMarketDeployment pipeline
+        // production governance does: a tranche is configured ONCE by its deployment, and every later change is an
+        // ADMIN_ENTRY_POINT_ROLE call straight at the entry point
         (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
         configs[1].redemptionDelaySeconds = 3 hours;
-        _applyTrancheConfigsThroughFactory(tranches, configs);
+        _modifyTrancheConfigsAsAdmin(tranches, configs);
 
         assertEq(entryPoint.getTrancheConfig(tranches[1]).baseConfig.redemptionDelaySeconds, 3 hours, "the factory-routed config update must be stored");
     }
 
-    function test_factoryRoute_revertsWhenFactoryLacksRole() public {
-        // Without ADMIN_ENTRY_POINT_ROLE the factory's forwarded call fails the entry point's access check, which
-        // the factory's dispatch bubbles verbatim, unwinding the whole deployment
-        accessManager.revokeRole(ADMIN_ENTRY_POINT_ROLE, address(entryPointFactory));
+    function test_deploymentRoute_revertsWhenGatekeeperLacksRole() public {
+        // The gatekeeper, not the factory, drives the entry point. Without ADMIN_ENTRY_POINT_ROLE its call fails the
+        // entry point's access check, which bubbles back through the factory and unwinds the whole deployment
+        accessManager.revokeRole(ADMIN_ENTRY_POINT_ROLE, address(entryPointFactoryGatekeeper));
 
-        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        // Fresh tranche addresses: the fixture's own were configured by its deployment, and the gatekeeper's
+        // freshness check would fire before the access check this test is about
+        address[] memory tranches = new address[](1);
+        tranches[0] = makeAddr("UNCONFIGURED_TRANCHE");
+        IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](1);
+
         registrationTemplate.queueTrancheConfigs(tranches, configs);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(entryPointFactory)));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(entryPointFactoryGatekeeper)));
         entryPointFactory.executeMarketDeployment(address(registrationTemplate), "");
     }
 

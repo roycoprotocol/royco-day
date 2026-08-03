@@ -209,6 +209,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     /// @notice Applies tranche configs on the entry point through the factory's real deployment pipeline
     /// @dev Queues the configs on the registration template and runs executeMarketDeployment: the registry writes
     ///      are idempotent re-registrations of the same market, and the hook forwards the configs as the factory
+    /// @dev The market-deployment path, valid only for tranches that carry no configuration yet
     function _applyTrancheConfigsThroughFactory(address[] memory _tranches, IRoycoDayEntryPoint.TrancheConfig[] memory _configs) internal {
         registrationTemplate.queueTrancheConfigs(_tranches, _configs);
         entryPointFactory.executeMarketDeployment(address(registrationTemplate), "");
@@ -247,7 +248,15 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
             redemptionExpirySeconds: _redemptionExpirySeconds,
             gateByOracleUpdate: false
         });
-        _applyTrancheConfigsThroughFactory(tranches, configs);
+        _modifyTrancheConfigsAsAdmin(tranches, configs);
+    }
+
+    /// @notice Re-configures already-live tranches the way production does: as the entry point admin, directly
+    /// @dev A market DEPLOYMENT may configure a tranche exactly once (the gatekeeper rejects an already-configured
+    ///      one), so every later change is a governance action against `ADMIN_ENTRY_POINT_ROLE`, not a redeployment
+    function _modifyTrancheConfigsAsAdmin(address[] memory _tranches, IRoycoDayEntryPoint.TrancheConfig[] memory _configs) internal {
+        vm.prank(ENTRY_POINT_ADMIN);
+        entryPoint.modifyTrancheConfigs(_tranches, _configs);
     }
 
     /// @notice Creates a labeled, funded actor holding all three tranche LP roles

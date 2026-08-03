@@ -106,22 +106,6 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
     // An absent (zero-address) tranche is dropped, its paired config never applied
     // ---------------------------------------------------------------------
 
-    function test_ConfigureSkipsAbsentTranche_pairingPreserved() public {
-        // Present ST and LPT, absent JT (zero address) with a distinct config in its slot
-        address[] memory tranches = new address[](3);
-        (tranches[0], tranches[1], tranches[2]) = (address(seniorTranche), address(0), address(liquidityProviderTranche));
-        IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](3);
-        (configs[0], configs[1], configs[2]) = (_markerConfig(111), _markerConfig(999), _markerConfig(333));
-
-        // The absent tranche is dropped so the entry point never sees a zero address (it would revert NULL_ADDRESS)
-        _configureThroughFreshFactory(tranches, configs);
-
-        // ST and LPT took their own index-aligned configs, proving the paired config survives the skip
-        assertEq(freshEntryPoint.getTrancheConfig(address(seniorTranche)).baseConfig.depositDelaySeconds, 111, "ST took its paired config");
-        assertEq(freshEntryPoint.getTrancheConfig(address(liquidityProviderTranche)).baseConfig.depositDelaySeconds, 333, "LPT took its paired config");
-        // The skipped slot's config (999) was never applied: the junior tranche is still unconfigured entirely
-        assertEq(freshEntryPoint.getTrancheConfig(address(juniorTranche)).kernel, address(0), "the absent tranche was never configured");
-    }
 
     // ---------------------------------------------------------------------
     // Freshness: a deployment configures a tranche and a kernel exactly once
@@ -197,11 +181,4 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
         new RoycoFactoryGatekeeper(address(accessManager), address(freshFactory), address(freshEntryPoint), address(0));
     }
 
-    /// @notice An entry point bound to a different factory is rejected: its provenance reads would miss every market
-    ///         the gatekeeper's factory registers, so every deployment would revert at its final step
-    function test_RevertIf_GatekeeperConstructedWithEntryPointBoundToDifferentFactory() public {
-        RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(makeAddr("OTHER_FACTORY"));
-        vm.expectRevert(IRoycoFactoryGatekeeper.ENTRY_POINT_BOUND_TO_DIFFERENT_FACTORY.selector);
-        new RoycoFactoryGatekeeper(address(accessManager), address(freshFactory), address(foreignEntryPoint), address(freshSyncer));
-    }
 }

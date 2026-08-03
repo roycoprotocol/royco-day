@@ -42,12 +42,6 @@ library MarketDeploymentValidationLogic {
     /// @notice Thrown when a tranche is deployed without a share token name or symbol
     error EMPTY_TRANCHE_NAME_OR_SYMBOL();
 
-    /// @notice Thrown when the oracle's binding selectors and role ids are not index-aligned
-    error ORACLE_BINDING_LENGTH_MISMATCH();
-
-    /// @notice Thrown when an oracle binding would gate a restricted selector behind an ungated or super-admin role
-    error ORACLE_BINDING_ROLE_FORBIDDEN(uint64 roleId);
-
     /// @notice Thrown when a market is deployed without genesis pool liquidity
     error POOL_SEED_REQUIRED();
 
@@ -125,11 +119,6 @@ library MarketDeploymentValidationLogic {
         // Optional feeds: null is the documented "not applicable" case, but a non-null one must be live
         if (params.sequencerUptimeFeed != address(0)) _requireCode(params.sequencerUptimeFeed);
         if (params.poolCreationParams.quoteAssetRateProvider != address(0)) _requireCode(params.poolCreationParams.quoteAssetRateProvider);
-
-        // Validate the collateral asset oracle's binding selectors and role ids
-        _validateCollateralAssetOracleBinding(
-            params.collateralAssetOracle, params.collateralAssetOracleBindingSelectors, params.collateralAssetOracleBindingRoleIds
-        );
     }
 
     /**
@@ -197,29 +186,6 @@ library MarketDeploymentValidationLogic {
 
         // Each model's initialization blob is decoded by the instance the template resolves, so an empty one is never valid
         require(_params.jtYDMInitializationData.length != 0 && _params.lptYDMInitializationData.length != 0, EMPTY_YDM_INITIALIZATION_DATA());
-    }
-
-    /**
-     * @notice Validates the collateral asset oracle's binding selectors and role ids
-     * @param _collateralAssetOracle The collateral asset oracle
-     * @param _collateralAssetOracleBindingSelectors The collateral asset oracle's binding selectors
-     * @param _collateralAssetOracleBindingRoleIds The collateral asset oracle's binding role ids
-     */
-    function _validateCollateralAssetOracleBinding(
-        address _collateralAssetOracle,
-        bytes4[] memory _collateralAssetOracleBindingSelectors,
-        uint64[] memory _collateralAssetOracleBindingRoleIds
-    )
-        private
-        pure
-    {
-        // The oracle's restricted surface is declared by the deployer, so it is the one binding the template does not author
-        uint256 numOracleSelectors = _collateralAssetOracleBindingSelectors.length;
-        require(numOracleSelectors == _collateralAssetOracleBindingRoleIds.length, ORACLE_BINDING_LENGTH_MISMATCH());
-        for (uint256 i; i < numOracleSelectors; ++i) {
-            uint64 roleId = _collateralAssetOracleBindingRoleIds[i];
-            require(roleId != PUBLIC_ROLE && roleId != ADMIN_ROLE, ORACLE_BINDING_ROLE_FORBIDDEN(roleId));
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

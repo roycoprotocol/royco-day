@@ -1032,32 +1032,8 @@ contract Test_RoycoFactory is Test {
         _expectParamsRevert(p, MarketDeploymentValidationLogic.COLLATERAL_SEED_REQUIRES_ZERO_MIN_COVERAGE.selector);
     }
 
-    /// The oracle binding arrays are index-aligned; today the mismatch is only caught after the market is deployed
-    function test_RevertIf_OracleBindingArraysAreNotIndexAligned() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
-        p.collateralAssetOracleBindingRoleIds = new uint64[](p.collateralAssetOracleBindingSelectors.length + 1);
-        _expectParamsRevert(p, MarketDeploymentValidationLogic.ORACLE_BINDING_LENGTH_MISMATCH.selector);
-    }
 
-    /// PUBLIC_ROLE on an oracle's admin surface would open it to everyone
-    function test_RevertIf_OracleBindingUsesPublicRole() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
-        p.collateralAssetOracleBindingSelectors = new bytes4[](1);
-        p.collateralAssetOracleBindingSelectors[0] = OracleClockBase.tick.selector;
-        p.collateralAssetOracleBindingRoleIds = new uint64[](1);
-        p.collateralAssetOracleBindingRoleIds[0] = PUBLIC_ROLE;
-        _expectParamsRevert(p, MarketDeploymentValidationLogic.ORACLE_BINDING_ROLE_FORBIDDEN.selector);
-    }
 
-    /// ADMIN_ROLE would reserve it to the access manager's super-admin, which is equally never intended
-    function test_RevertIf_OracleBindingUsesAdminRole() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
-        p.collateralAssetOracleBindingSelectors = new bytes4[](1);
-        p.collateralAssetOracleBindingSelectors[0] = OracleClockBase.tick.selector;
-        p.collateralAssetOracleBindingRoleIds = new uint64[](1);
-        p.collateralAssetOracleBindingRoleIds[0] = ADMIN_ROLE;
-        _expectParamsRevert(p, MarketDeploymentValidationLogic.ORACLE_BINDING_ROLE_FORBIDDEN.selector);
-    }
 
     /// The whole point of validating up front: a rejected deployment must leave no component behind, and must not
     /// consume any AccessManager target's one-time `wasEverConfigured` freshness

@@ -148,8 +148,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
      * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
      * @custom:field sequencerUptimeFeed - The L2 sequencer uptime feed used to gate price queries (the null address when not applicable)
      * @custom:field gracePeriodSeconds - The grace period in seconds after the L2 sequencer is back up before oracle prices are trusted again
-     * @custom:field collateralAssetOracleBindingSelectors - The oracle's restricted selectors to bind, declared per oracle kind by the deployer (empty when the kind has no restricted surface)
-     * @custom:field collateralAssetOracleBindingRoleIds - The role ids bound to the oracle's restricted selectors, index-aligned with the selectors
      * @custom:field kernelSpecificParams - ABI-encoded liquidity venue initialization params
      * @custom:field entryPointTrancheConfigs - The per-tranche entry point configurations applied after the market is deployed (any oracle clock is deployed externally and passed by address)
      */
@@ -171,8 +169,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
         uint48 stalenessThresholdSeconds;
         address sequencerUptimeFeed;
         uint48 gracePeriodSeconds;
-        bytes4[] collateralAssetOracleBindingSelectors;
-        uint64[] collateralAssetOracleBindingRoleIds;
         bytes kernelSpecificParams;
         EntryPointTrancheConfigs entryPointTrancheConfigs;
     }
@@ -588,15 +584,14 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
     ///         the selector/role sets from the per-target binding helpers and the deployer-declared oracle bindings
     function _buildRoleBindings(MarketParams memory _params, DeploymentResult memory _result) internal view returns (TargetBinding[] memory) {
         // Runtime target addresses, index-aligned with the binding helpers below
-        address[8] memory targets = [
+        address[7] memory targets = [
             _result.seniorTranche,
             _result.juniorTranche,
             _result.liquidityProviderTranche,
             _result.kernel,
             _result.accountant,
             address(BALANCER_V3_VAULT),
-            address(BALANCER_V3_VAULT.getProtocolFeeController()),
-            _params.collateralAssetOracle
+            address(BALANCER_V3_VAULT.getProtocolFeeController())
         ];
 
         IRoycoAccessManager accessManager = IRoycoAccessManager(ROYCO_FACTORY.ROYCO_AUTHORITY());
@@ -622,11 +617,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
         if (accessManager.wasEverConfigured(targets[6])) (selectors, roleIds) = (new bytes4[](0), new uint64[](0));
         else (selectors, roleIds) = _balancerProtocolFeeControllerBinding();
         targetBindings[6] = TargetBinding({ target: targets[6], selectors: selectors, roleIds: roleIds });
-        // 7: collateral asset oracle restricted surface, declared per oracle kind by the deployer .
-        // todo: consider removal
-        if (accessManager.wasEverConfigured(targets[7])) (selectors, roleIds) = (new bytes4[](0), new uint64[](0));
-        else (selectors, roleIds) = (_params.collateralAssetOracleBindingSelectors, _params.collateralAssetOracleBindingRoleIds);
-        targetBindings[7] = TargetBinding({ target: targets[7], selectors: selectors, roleIds: roleIds });
 
         return targetBindings;
     }

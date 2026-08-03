@@ -43,13 +43,19 @@ contract MockAccountantKernel {
         return _stateAtLastSync;
     }
 
-    /// @dev Mirror of IRoycoDayKernel.syncTrancheAccounting invoked by the accountant's withSyncedAccounting modifier and tolerated raw calls
-    function syncTrancheAccounting() external returns (SyncedAccountingState memory state) {
+    /// @dev Mirror of IRoycoDayKernel.syncTrancheAccountingFromAccountant, the entrypoint the accountant's
+    ///      `withSyncedAccounting` modifier drives around every admin parameter change
+    function syncTrancheAccountingFromAccountant() public returns (SyncedAccountingState memory state) {
         if (syncMode == SyncMode.REVERT) revert KERNEL_SYNC_REVERTED();
         syncCallCount++;
         _stateAtLastSync = accountant.getState();
         stateHashAtSync.push(keccak256(abi.encode(_stateAtLastSync)));
         if (syncMode == SyncMode.SYNC) state = accountant.preOpSyncTrancheAccounting(syncCollateralNAV);
+    }
+
+    /// @dev The kernel's own sync entrypoint, kept as a passthrough for tests that drive it as a raw call
+    function syncTrancheAccounting() external returns (SyncedAccountingState memory state) {
+        return syncTrancheAccountingFromAccountant();
     }
 
     /// @dev Passthrough so msg.sender == kernel for the pre-op sync
