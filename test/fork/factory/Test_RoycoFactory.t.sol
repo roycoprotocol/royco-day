@@ -161,6 +161,13 @@ contract Test_RoycoFactory is Test {
     /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold each seed leg and
     ///      have approved the template before `executeMarketDeployment`. The deployment caller (DEPLOYER) funds the seed.
     ///      The collateral leg is optional, so it is funded only when the config asks for it
+    /// @dev Funds and approves an explicit deployer, which the template pulls the genesis seed from
+    function _fundPoolSeedFor(MarketConfig memory _cfg, address _deployer) internal {
+        deal(_cfg.gyroECLPPoolParams.quoteAsset, _deployer, _cfg.poolInitialization.quoteAmount);
+        vm.prank(_deployer);
+        IERC20(_cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
+    }
+
     function _fundPoolSeed(MarketConfig memory _cfg) internal {
         _fundSeedLeg(_cfg.gyroECLPPoolParams.quoteAsset, _cfg.poolInitialization.quoteAmount);
         if (_cfg.poolInitialization.collateralAmount != 0) _fundSeedLeg(_cfg.collateralAsset, _cfg.poolInitialization.collateralAmount);
@@ -181,7 +188,7 @@ contract Test_RoycoFactory is Test {
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
         _fundPoolSeed(cfg);
-        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT));
+        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
     }
 
     /// @dev The `deploy()` flow resolves an unset config oracle itself; the direct-template path must supply it, so
@@ -216,7 +223,7 @@ contract Test_RoycoFactory is Test {
         cfg.minCoverageWAD = 0;
         cfg.poolInitialization.collateralAmount = 10_000e18;
         _fundPoolSeed(cfg);
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -579,7 +586,7 @@ contract Test_RoycoFactory is Test {
         _fundPoolSeed(staticCfg);
         staticCfg.ydmType = YDMType.StaticCurve;
         bytes32 staticId = MARKET_ID_C;
-        bytes memory p = abi.encode(deployScript.buildMarketParams(staticCfg, staticId, PROTOCOL_FEE_RECIPIENT));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(staticCfg, staticId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory s = factory.executeMarketDeployment(address(template), p);
         assertTrue(s.ydm != a.ydm, "a different YDM model must not share the adaptive markets' JT YDM instance");
@@ -800,20 +807,48 @@ contract Test_RoycoFactory is Test {
     // MARKET-ID COLLISION + YDM-TYPE WIRING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Re-running a deployment with a marketId that already produced a market reverts on the first colliding
-    ///         CREATE3 salt (the senior tranche implementation) and unwinds the whole transaction atomically, so a
-    ///         same-names/same-block marketId collision can never half-build a second market or leave a live market
-    ///         wired to a YDM reused earlier in the same transaction. Blast radius is a clean revert, never aliasing
+    /// @notice The deployer is mixed into the base salt, so two deployers submitting IDENTICAL params land on
+    ///         disjoint markets instead of colliding on each other's CREATE3 salts
+    function test_ExecuteMarketDeployment_SameParamsFromADifferentDeployerYieldADistinctMarket() external {
+        _register();
+
+        address otherDeployer = makeAddr("OTHER_DEPLOYER");
+        am.grantRole(DEPLOYER_ROLE, otherDeployer, 0);
+
+        MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
+
+        // The same seed and the same config, mined for each deployer in turn
+        _fundPoolSeedFor(cfg, DEPLOYER);
+        bytes memory pA = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+        _fundPoolSeedFor(cfg, otherDeployer);
+        bytes memory pB = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT, address(factory), otherDeployer));
+
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory first = factory.executeMarketDeployment(address(template), pA);
+        vm.prank(otherDeployer);
+        IRoycoProtocolTemplate.DeploymentResult memory second = factory.executeMarketDeployment(address(template), pB);
+
+        assertTrue(first.kernel != second.kernel, "a different deployer must produce a different kernel");
+        assertTrue(first.seniorTranche != second.seniorTranche, "a different deployer must produce a different senior tranche");
+    }
+
+    /// @notice Re-running a deployment with params that already produced a market reverts on the first colliding
+    ///         CREATE3 salt (the senior tranche proxy) and unwinds the whole transaction atomically, so a repeat can
+    ///         never half-build a second market or leave a live market wired to a YDM reused earlier in the same
+    ///         transaction. Blast radius is a clean revert, never aliasing
+    /// @dev Every component salt hashes the WHOLE params struct, so a collision needs the exact same params, not
+    ///      merely the same market id: the encoded blob is built once here and submitted twice
     function test_RevertIf_MarketRedeployedWithSameMarketId() external {
         _register();
-        bytes32 marketId = MARKET_ID_A;
-        IRoycoProtocolTemplate.DeploymentResult memory first = _deploy(MARKET_ID_A);
+        bytes memory p = _encodedParams(MARKET_ID_A);
+
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory first = factory.executeMarketDeployment(address(template), p);
         assertGt(first.kernel.code.length, 0, "first market is live");
 
-        // The deterministic component addresses are a pure function of the marketId, so a second deployment under the
-        // same id collides on the very first proxy the template deploys: the senior tranche already exists at its
-        // CREATE3 address. Match on the selector only: the exact (address, salt) payload is an internal detail.
-        bytes memory p = _encodedParams(marketId);
+        // The second deployment collides on the very first proxy the template deploys: the senior tranche already
+        // exists at its CREATE3 address. Match on the selector only: the (address, salt) payload is an internal detail
         vm.prank(DEPLOYER);
         vm.expectPartialRevert(BaseDeploymentTemplate.MARKET_COMPONENT_ALREADY_DEPLOYED.selector);
         factory.executeMarketDeployment(address(template), p);
@@ -835,7 +870,7 @@ contract Test_RoycoFactory is Test {
         _fundPoolSeed(cfg);
         cfg.ydmType = YDMType.StaticCurve;
         bytes32 marketId = MARKET_ID_A;
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -868,7 +903,7 @@ contract Test_RoycoFactory is Test {
         cfg.ydmSpecificParams = v1Params;
         cfg.lptYdmSpecificParams = v1Params;
         bytes32 marketId = MARKET_ID_A;
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -889,7 +924,7 @@ contract Test_RoycoFactory is Test {
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
         _fundPoolSeed(cfg);
-        return deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT);
+        return deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER);
     }
 
     /// @dev Runs a deployment expected to revert with `_err` from the params validation

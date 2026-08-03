@@ -144,7 +144,7 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
 
     function _encodedParams(bytes32 _marketId, address _oracleCollateralAsset) internal returns (bytes memory) {
         MarketConfig memory cfg = _marketConfig(_oracleCollateralAsset);
-        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT));
+        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -158,7 +158,7 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
     function test_ExecuteMarketDeployment_ChainlinkOracleKernelWiring() external {
         _register();
         MarketConfig memory cfg = _marketConfig(deployScript.getMarketConfig("snUSD").collateralAsset);
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 

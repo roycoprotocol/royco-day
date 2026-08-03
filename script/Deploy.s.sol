@@ -21,6 +21,7 @@ import { BeaconProxy } from "../lib/openzeppelin-contracts/contracts/proxy/beaco
 import { UpgradeableBeacon } from "../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { IERC20 } from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoMarketSyncer } from "../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
+import { CREATE3 } from "../lib/solady/src/utils/CREATE3.sol";
 import { RoycoDayAccountant } from "../src/accountant/RoycoDayAccountant.sol";
 import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
 import { RoycoDayEntryPoint } from "../src/entrypoint/RoycoDayEntryPoint.sol";
@@ -461,7 +462,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (_config.collateralAssetOracle == address(0)) {
             _config.collateralAssetOracle = _deployCollateralAssetOracle(_config, marketId, address(_s.accessManager));
         }
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params = _buildMarketParams(_config, marketId, _protocolFeeRecipient);
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params =
+            _buildMarketParams(_config, marketId, _protocolFeeRecipient, address(_s.factory), _deployer);
 
         // The template pulls the market's genesis pool liquidity from the account calling the factory's deployment
         // entrypoint (the broadcasting deployer here), so approve the template from inside the broadcast
@@ -583,16 +585,49 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Public wrapper over `_buildMarketParams` so tests can construct real template deploy params from a market config
     /// @dev Every market contract is deployed by the template itself, so the params are a pure function of the config
+    /**
+     * @notice Mines the market id that places the market's senior tranche below the quote asset in address order
+     * @dev The Vault registers a pool's tokens in ascending address order, and the market is wired against the senior
+     *      leg being token0, so the id is searched until the predicted senior proxy sorts below the quote asset
+     * @dev Every component salt derives from a hash of the ENTIRE params struct, so a mined id is valid only for the
+     *      exact params it was mined against: change any other field and it must be re-mined
+     * @param _params The market's fully built params, whose `marketId` this search fills in
+     * @param _seed The caller's stable seed, mixed with the search nonce so distinct seeds yield distinct markets
+     * @param _factory The factory whose CREATE3 namespace the proxies land in
+     * @param _deployer The account that will call `executeMarketDeployment`, which the template mixes into the base salt
+     */
+    function _mineMarketId(
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory _params,
+        bytes32 _seed,
+        address _factory,
+        address _deployer
+    )
+        internal
+        pure
+        returns (bytes32 marketId)
+    {
+        for (uint64 nonce;; ++nonce) {
+            marketId = keccak256(abi.encodePacked(_seed, nonce));
+            _params.marketId = marketId;
+            // Mirrors the template's derivation exactly: params + deployer, then the per-component tag
+            bytes32 baseSalt = keccak256(abi.encode(_params, _deployer));
+            bytes32 stSalt = keccak256(abi.encodePacked("ROYCO_MARKET_", baseSalt, TAG_ST_PROXY));
+            if (uint160(CREATE3.predictDeterministicAddress(stSalt, _factory)) < uint160(_params.quoteAsset)) return marketId;
+        }
+    }
+
     function buildMarketParams(
         MarketConfig memory _config,
-        bytes32 _marketId,
-        address _protocolFeeRecipient
+        bytes32 _marketIdSeed,
+        address _protocolFeeRecipient,
+        address _factory,
+        address _deployer
     )
         public
         pure
         returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory)
     {
-        return _buildMarketParams(_config, _marketId, _protocolFeeRecipient);
+        return _buildMarketParams(_config, _marketIdSeed, _protocolFeeRecipient, _factory, _deployer);
     }
 
     /**
@@ -714,15 +749,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice Builds the template `MarketParams` from a `MarketConfig`; every market contract is deployed by the template.
     function _buildMarketParams(
         MarketConfig memory _config,
-        bytes32 _marketId,
-        address _protocolFeeRecipient
+        bytes32 _marketIdSeed,
+        address _protocolFeeRecipient,
+        address _factory,
+        address _deployer
     )
         internal
         pure
         returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params)
     {
-        params.marketId = _marketId;
-
         params.stParams = IBaseTemplate.TrancheDeploymentParams({ name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol });
         params.jtParams = IBaseTemplate.TrancheDeploymentParams({ name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol });
         params.lptParams = IBaseTemplate.TrancheDeploymentParams({ name: _config.liquidityProviderTrancheName, symbol: _config.liquidityProviderTrancheSymbol });
@@ -780,6 +815,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.entryPointTrancheConfigs = RoycoDayBalancerV3MarketDeploymentTemplate.EntryPointTrancheConfigs({
             st: _config.stEntryPointConfig, jt: _config.jtEntryPointConfig, lpt: _config.lptEntryPointConfig
         });
+
+        // The component salts hash the WHOLE params struct, so the id can only be mined once every other field is
+        // settled: it is what makes the senior tranche's CREATE3 proxy sort below the quote asset, and so pool token0
+        params.marketId = _mineMarketId(params, _marketIdSeed, _factory, _deployer);
     }
 
     /// @notice Builds YDM initialization data based on YDM type.

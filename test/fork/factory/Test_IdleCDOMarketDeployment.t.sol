@@ -180,7 +180,7 @@ contract Test_IdleCDOMarketDeployment is Test {
     function test_ExecuteMarketDeployment_IdleCDOOracleKernelWiring() external {
         _register();
         MarketConfig memory cfg = _marketConfig();
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 

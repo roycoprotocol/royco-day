@@ -138,14 +138,15 @@ abstract contract MarketDeploymentConfig {
         _marketIds[snUSDHash][_predictFactoryProxy(DEPLOYER, false)] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
         // snUSD against the local test-harness factory ("_PROD" salts, the suite runs on the prod config).
         address localFactory = _predictFactoryProxy(TEST_HARNESS_DEPLOYER, false);
-        _marketIds[snUSDHash][localFactory] = _mineMarketId(SNUSD, localFactory, USDC[MAINNET]);
+        _marketIds[snUSDHash][localFactory] = _marketIdSeed(SNUSD, localFactory);
         // snUSD against the test-environment factory ("_TEST" salts, prod deployer key).
         address testEnvFactory = _predictFactoryProxy(DEPLOYER, true);
-        _marketIds[snUSDHash][testEnvFactory] = _mineMarketId(SNUSD, testEnvFactory, USDC[MAINNET]);
-        _marketIds[snUSDHash][address(0xcEC7f6E54b89fBd283382921A90Cf8C7A13dD62f)] = _mineMarketId(SNUSD, testEnvFactory, USDC[MAINNET]);
+        _marketIds[snUSDHash][testEnvFactory] = _marketIdSeed(SNUSD, testEnvFactory);
+        _marketIds[snUSDHash][address(0xcEC7f6E54b89fBd283382921A90Cf8C7A13dD62f)] = _marketIdSeed(SNUSD, testEnvFactory);
     }
 
-    /// @notice The mined marketId for `_marketName` against `_factory`. Reverts if none is configured.
+    /// @notice The market id SEED for `_marketName` against `_factory`, which the params builder mines on top of.
+    /// @dev Reverts if none is configured.
     function getMarketId(string memory _marketName, address _factory) public view returns (bytes32 marketId) {
         marketId = _marketIds[keccak256(bytes(_marketName))][_factory];
         require(marketId != bytes32(0), MarketIdNotConfigured(_marketName, _factory));
@@ -175,12 +176,11 @@ abstract contract MarketDeploymentConfig {
 
     /// @notice Mines the lowest-nonce marketId whose senior-tranche CREATE3 proxy sorts below `_quoteAsset` under
     ///         `_factory`, so the senior tranche registers as pool token0. Mirrors script/mine-market-id.
-    function _mineMarketId(string memory _name, address _factory, address _quoteAsset) internal pure returns (bytes32 marketId) {
-        for (uint64 nonce;; ++nonce) {
-            marketId = keccak256(abi.encodePacked(bytes(_name), nonce));
-            bytes32 salt = keccak256(abi.encodePacked("ROYCO_MARKET_", marketId, TAG_ST_PROXY));
-            if (uint160(CREATE3.predictDeterministicAddress(salt, _factory)) < uint160(_quoteAsset)) return marketId;
-        }
+    /// @dev A stable per-(market, factory) SEED, not a usable market id on its own. Every component salt hashes the
+    ///      whole params struct, so the id that actually places the senior tranche below the quote asset can only be
+    ///      mined once the params are fully built: `Deploy.s.sol._buildMarketParams` does that, taking this as input
+    function _marketIdSeed(string memory _name, address _factory) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(bytes(_name), _factory));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

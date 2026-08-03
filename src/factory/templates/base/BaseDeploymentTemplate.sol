@@ -94,12 +94,12 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
     /**
      * @notice Per-market component salt, same `(marketId, componentTag)` always produces the
      *         same address regardless of template
-     * @param _marketId Caller-supplied stable identifier for the market
+     * @param _baseSalt The base salt for the market
      * @param _componentTag E.g. `bytes32("ST")`, `bytes32("JT")`, `bytes32("KERNEL")`,
      *        `bytes32("ACCOUNTANT")`, `bytes32("BALANCER_HOOK")`
      */
-    function _marketComponentSalt(bytes32 _marketId, bytes32 _componentTag) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked("ROYCO_MARKET_", _marketId, _componentTag));
+    function _marketComponentSalt(bytes32 _baseSalt, bytes32 _componentTag) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked("ROYCO_MARKET_", _baseSalt, _componentTag));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -389,8 +389,11 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
         // Validate the deployer's params
         MarketParams memory params = MarketDeploymentValidationLogic.validateMarketParams(_params);
 
+        // The base salt is the hash of the params and the deployer's address.
+        bytes32 baseSalt = keccak256(abi.encode(params, ROYCO_FACTORY.marketDeployer()));
+
         // Predict the kernel's proxy address.
-        bytes32 kernelSalt = _marketComponentSalt(params.marketId, TAG_KERNEL_PROXY);
+        bytes32 kernelSalt = _marketComponentSalt(baseSalt, TAG_KERNEL_PROXY);
         address kernel = ROYCO_FACTORY.predictDeterministicAddress(kernelSalt);
         result.ydm = jtYdmFor(params.jtYdmType);
         result.lptYdm = lptYdmFor(params.lptYdmType);
@@ -398,7 +401,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
 
         // Deploy the senior tranche.
         result.seniorTranche = _deployProxy(
-            SENIOR_TRANCHE_BEACON, _encodeTrancheInitData(params.stParams, kernel, params.collateralAsset), _marketComponentSalt(params.marketId, TAG_ST_PROXY)
+            SENIOR_TRANCHE_BEACON, _encodeTrancheInitData(params.stParams, kernel, params.collateralAsset), _marketComponentSalt(baseSalt, TAG_ST_PROXY)
         );
 
         // Deploy the Balancer V3 pool and BPT oracle for the LP tranche.
@@ -411,26 +414,24 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
             params.quoteAsset,
             kernel,
             ROYCO_FACTORY.ROYCO_AUTHORITY(),
-            _marketComponentSalt(params.marketId, TAG_BALANCER_V3_POOL)
+            _marketComponentSalt(baseSalt, TAG_BALANCER_V3_POOL)
         );
 
         // Deploy the junior tranche.
         result.juniorTranche = _deployProxy(
-            JUNIOR_TRANCHE_BEACON, _encodeTrancheInitData(params.jtParams, kernel, params.collateralAsset), _marketComponentSalt(params.marketId, TAG_JT_PROXY)
+            JUNIOR_TRANCHE_BEACON, _encodeTrancheInitData(params.jtParams, kernel, params.collateralAsset), _marketComponentSalt(baseSalt, TAG_JT_PROXY)
         );
 
         // Deploy the liquidity provider tranche.
         result.liquidityProviderTranche = _deployProxy(
-            LIQUIDITY_PROVIDER_TRANCHE_BEACON,
-            _encodeTrancheInitData(params.lptParams, kernel, balancerPool),
-            _marketComponentSalt(params.marketId, TAG_LPT_PROXY)
+            LIQUIDITY_PROVIDER_TRANCHE_BEACON, _encodeTrancheInitData(params.lptParams, kernel, balancerPool), _marketComponentSalt(baseSalt, TAG_LPT_PROXY)
         );
 
         // Deploy the accountant.
         result.accountant = _deployProxy(
             ACCOUNTANT_BEACON,
             _encodeAccountantInitData(params.accountantParams, kernel, result.ydm, result.lptYdm),
-            _marketComponentSalt(params.marketId, TAG_ACCOUNTANT_PROXY)
+            _marketComponentSalt(baseSalt, TAG_ACCOUNTANT_PROXY)
         );
 
         // Deploy the kernel.

@@ -156,7 +156,7 @@ contract Test_MakinaMarketDeployment is Test {
 
     function _encodedParams(bytes32 _marketId, address _machine, address _collateralAsset) internal returns (bytes memory) {
         MarketConfig memory cfg = _marketConfig(_machine, _collateralAsset);
-        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT));
+        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -170,7 +170,7 @@ contract Test_MakinaMarketDeployment is Test {
     function test_ExecuteMarketDeployment_MakinaOracleKernelWiring() external {
         _register();
         MarketConfig memory cfg = _marketConfig(MAKINA_MACHINE, DUSD);
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
