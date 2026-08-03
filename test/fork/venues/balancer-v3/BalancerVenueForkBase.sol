@@ -15,24 +15,89 @@ import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/mat
 import { BalancerV3LiquidityVenue } from "../../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { toUint256 } from "../../../../src/libraries/Units.sol";
-import {
-    ERC4626_Chainlink_KernelSuite,
-    IPermit2Like
-} from "../../kernels/ERC4626_Chainlink/base/ERC4626_Chainlink_KernelSuite.sol";
+import { Test_KernelSuiteBase } from "../../kernels/Test_KernelSuiteBase.t.sol";
+
+/// @dev The minimal Permit2 surface the Balancer Router's token pulls require (no permit2 lib is vendored).
+interface IPermit2Like {
+    function approve(address token, address spender, uint160 amount, uint48 expiration) external;
+}
 
 /**
  * @title BalancerVenueForkBase
- * @notice Shared scaffolding (NO tests) for the deep Balancer-venue fork suites: external actors that trade
- *         and LP through Balancer's canonical V3 Router, pool composition/price/TVL readers, swap-capacity
- *         probes and skew builders, a liquidity-gate driver, and the derived-bound helpers the tests
- *         assert against. Everything runs on the real forked Vault + Gyro E-CLP pool + E-CLP LP oracle the
- *         deploy template ships — nothing here touches a mock.
+ * @notice The VENUE module of the fork chain, rooted directly on `Test_KernelSuiteBase`: any oracle layer
+ *         inherits this venue (venue -> oracle -> asset). Shared scaffolding (NO tests) for the deep
+ *         Balancer-venue fork suites: external actors that trade and LP through Balancer's canonical V3
+ *         Router, the one-time pool bootstrap, pool composition/price/TVL readers, swap-capacity probes and
+ *         skew builders, a liquidity-gate driver, and the derived-bound helpers the tests assert against.
+ *         Everything runs on the real forked Vault + Gyro E-CLP pool + E-CLP LP oracle the deploy template
+ *         ships — nothing here touches a mock. Oracle-agnostic: yield/loss/deal mechanics reach the market
+ *         only through the abstract `IKernelTestHooks` seams an oracle layer implements above.
  * @dev Cache discipline: the kernel's transient `ST_SHARE_PRICE` cache is OPERATION-scoped. Every kernel
  *      operation's `withPriceCache` frame clears it on exit, so a `getRate()` read between top-level helper
  *      calls is ALWAYS a cache-miss (live preview off committed state plus pending accrual). Only code running
  *      inside a single operation frame can observe the cached mark, which the concrete harness suites pin.
  */
-abstract contract BalancerVenueForkBase is ERC4626_Chainlink_KernelSuite {
+abstract contract BalancerVenueForkBase is Test_KernelSuiteBase {
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VENUE BOOTSTRAP — one-time Balancer pool initialization via the canonical Router
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Balancer's canonical V3 Router (the 20250307-v3-router-v2 mainnet deployment). Other chains override.
+    function _balancerV3Router() internal view virtual returns (address) {
+        return 0xAE563E3f8219521950555F5962419C8919758Ea2;
+    }
+
+    /// @dev The canonical Permit2 the Balancer Router pulls tokens through (same address on every chain).
+    function _canonicalPermit2() internal view virtual returns (address) {
+        return 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+    }
+
+    /**
+     * @dev Initializes the market's freshly created Gyro E-CLP pool through Balancer's canonical Router when it
+     *      is still uninitialized, since Balancer rejects the kernel's UNBALANCED adds (`PoolNotInitialized`)
+     *      until the pool is initialized.
+     * @dev Production now initializes the pool itself: the kernel's add callback routes the first add through
+     *      `Vault.initialize` when the pool is uninitialized, so a fresh Day market's LPT surface is usable from
+     *      the first multi-asset deposit (pinned by the production-genesis fork tests in the venue suites). This
+     *      helper remains as the historical ops-style bootstrap through the venue's own Router for suites that
+     *      want a dust-deep two-sided pool BEFORE the first kernel add, funding the dust senior leg with live ST
+     *      shares borrowed from ST_ALICE so no new senior exposure is created and no coverage/liquidity gate is
+     *      consulted.
+     */
+    function _initializeLPTVenueIfNeeded() internal virtual override {
+        if (!testConfig.hasLiquidityProviderTranche || VAULT.isPoolInitialized(POOL)) return;
+
+        // Dust seed: ~1 unit of value per side, sized in each token's own decimals
+        uint256 initSTShares = 1e18;
+        uint256 initQuoteAssets = 10 ** IERC20Metadata(testConfig.quoteAsset).decimals();
+
+        // Arrange-guard: the bootstrap borrows live ST shares, so the ST/JT market must be seeded first
+        assertGt(ST.balanceOf(ST_ALICE_ADDRESS), initSTShares, "venue init: seed the ST/JT market before seeding the LPT");
+
+        address initializer = makeAddr("BALANCER_POOL_INITIALIZER");
+        vm.prank(ST_ALICE_ADDRESS);
+        IERC20(address(ST)).transfer(initializer, initSTShares);
+        dealQuoteAsset(initializer, initQuoteAssets);
+
+        // The Router pulls both legs through Permit2, so wire the two-step allowances
+        address router = _balancerV3Router();
+        address permit2 = _canonicalPermit2();
+        vm.startPrank(initializer);
+        IERC20(address(ST)).approve(permit2, type(uint256).max);
+        IERC20(testConfig.quoteAsset).approve(permit2, type(uint256).max);
+        IPermit2Like(permit2).approve(address(ST), router, type(uint160).max, type(uint48).max);
+        IPermit2Like(permit2).approve(testConfig.quoteAsset, router, type(uint160).max, type(uint48).max);
+
+        // Initialize with the pool's registered token order. The dust BPT stays with the initializer
+        IERC20[] memory tokens = VAULT.getPoolTokens(POOL);
+        uint256[] memory exactAmountsIn = new uint256[](tokens.length);
+        for (uint256 i = 0; i < tokens.length; ++i) {
+            exactAmountsIn[i] = address(tokens[i]) == address(ST) ? initSTShares : initQuoteAssets;
+        }
+        IRouter(router).initialize(POOL, tokens, exactAmountsIn, 0, false, "");
+        vm.stopPrank();
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // EXTERNAL ACTORS — trade/LP through the canonical Router, never the kernel
     // ═══════════════════════════════════════════════════════════════════════════

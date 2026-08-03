@@ -6,7 +6,7 @@ import { DeploymentResult, MarketConfig } from "../../../script/config/Deploymen
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { MarketState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { Test_BalancerLPGateReinvestBase } from "../balancer/base/Test_BalancerLPGateReinvestBase.t.sol";
+import { ERC4626_Chainlink_KernelSuite } from "../oracles/ERC4626_Chainlink/ERC4626_Chainlink_KernelSuite.sol";
 
 /**
  * @title Neutrl_snUSD_Scenario
@@ -20,7 +20,7 @@ import { Test_BalancerLPGateReinvestBase } from "../balancer/base/Test_BalancerL
  *      /`_assertSolvency`, the seed/overlay/yield/sync helpers, and the actor model). RPC-gated: the inherited
  *      `setUp` `vm.skip`s the whole suite when `MAINNET_RPC_URL` is unset, and pins fork block 25_400_000.
  */
-contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
+contract Neutrl_snUSD_Scenario is ERC4626_Chainlink_KernelSuite {
     address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313;
     address internal constant NUSD_REDSTONE_ORACLE = 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95;
     address internal constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;

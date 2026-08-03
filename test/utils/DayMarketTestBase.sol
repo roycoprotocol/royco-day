@@ -46,6 +46,7 @@ import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
 import { MockAggregatorV3 } from "../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../mocks/MockBPTOracle.sol";
+import { MockBalancerRouter } from "../mocks/MockBalancerRouter.sol";
 import { MockBalancerVault } from "../mocks/MockBalancerVault.sol";
 import { MockERC20C } from "../mocks/MockERC20C.sol";
 import { MockERC4626C } from "../mocks/MockERC4626C.sol";
@@ -148,6 +149,9 @@ abstract contract DayMarketTestBase is Assertions {
 
     /// @notice The mock Balancer V3 vault backing the LPT venue
     MockBalancerVault internal balancerVault;
+
+    /// @notice The router mirroring the real Balancer Router's access shape, the exogenous party's swap and removal entry
+    MockBalancerRouter internal balancerRouter;
 
     /// @notice The mock BPT (the LPT asset), its ledger lives in the mock vault
     MockBPT internal bpt;
@@ -278,9 +282,11 @@ abstract contract DayMarketTestBase is Assertions {
 
         // 4. Venue: mock Balancer vault, the BPT it ledgers, and the BPT oracle (AUTO mode default)
         balancerVault = new MockBalancerVault();
+        balancerRouter = new MockBalancerRouter(balancerVault);
         bpt = new MockBPT(IVault(address(balancerVault)), "Royco BPT", "rBPT");
         bptOracle = new MockBPTOracle(balancerVault, address(bpt));
         vm.label(address(balancerVault), "MockBalancerVault");
+        vm.label(address(balancerRouter), "MockBalancerRouter");
         vm.label(address(bpt), "MockBPT");
         vm.label(address(bptOracle), "MockBPTOracle");
 

@@ -76,9 +76,11 @@ library MarketDeploymentValidationLogic {
     // PARAM VALIDATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Validates the deployer-supplied params before any of the market's contracts exist
-    /// @param _rawParams The ABI-encoded `MarketParams` the deployer passed to `deployMarket`
-    /// @return params The validated market params
+    /**
+     * @notice Validates the deployer-supplied params before any of the market's contracts exist
+     * @param _rawParams The ABI-encoded `MarketParams` the deployer passed to `deployMarket`
+     * @return params The validated market params
+     */
     function validateMarketParams(bytes calldata _rawParams) external view returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params) {
         params = abi.decode(_rawParams, (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams));
 

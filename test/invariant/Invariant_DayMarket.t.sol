@@ -144,6 +144,12 @@ contract Invariant_DayMarket is StdInvariant, Test {
         _logOpLedger("lptPnL");
         _logOpLedger("adminParamNudge");
         _logOpLedger("externalPoolOp");
+        _logOpLedger("extQuoteDonation");
+        _logOpLedger("extFairJoin");
+        _logOpLedger("extSwapQuoteToSenior");
+        _logOpLedger("extSwapSeniorToQuote");
+        _logOpLedger("extPartialRemove");
+        _logOpLedger("extSeniorDonation");
         _logOpLedger("toggleVenueSlippage");
         _logOpLedger("aimedDepositExactlyMaxST");
         _logOpLedger("aimedLoseUntilLiquidation");

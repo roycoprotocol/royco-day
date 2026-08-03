@@ -13,6 +13,7 @@ import { BasePoolMath } from "../../../../lib/balancer-v3-monorepo/pkg/vault/con
 
 import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
+import { IRoycoLiquidityProviderTranche } from "../../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { SyncedAccountingState } from "../../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
@@ -22,8 +23,8 @@ import { Test_BalancerSwapRateOracleBase } from "./Test_BalancerSwapRateOracleBa
  * @title Test_BalancerLPGateReinvestBase
  * @notice Fork tests for external LPing through the canonical Router, the liquidity gate on real oracle
  *         numbers, the reinvestment fee decomposition on real E-CLP math, proportional-remove composition
- *         after skew, and FIXED_TERM x the pool. Chains linearly on the swap/rate/oracle suite so one
- *         concrete leaf carries the whole deep-venue fork suite.
+ *         after skew, the production-genesis pool seed, and FIXED_TERM x the pool. Chains linearly on the
+ *         swap/rate suite, completing the venue module an oracle layer inherits.
  */
 abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracleBase {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -162,9 +163,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
         _externalProportionalPosition("EXTERNAL_PROPORTIONAL_ADDER", _bptSupply() / 10);
 
-        assertGe(
-            _navPerBPTWAD() + invariantErrTolerance, navPerBPT0, "a proportional add must not dilute NAV per BPT beyond the invariant computation error"
-        );
+        assertGe(_navPerBPTWAD() + invariantErrTolerance, navPerBPT0, "a proportional add must not dilute NAV per BPT beyond the invariant computation error");
         assertApproxEqAbs(toUint256(_liveLPTRawNAV()), lptRaw0, _tol2(), "a proportional add must leave the kernel's LPT mark unchanged");
     }
 
@@ -864,5 +863,76 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         vm.prank(LPT_ALICE_ADDRESS);
         vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         LPT.redeem(shares, LPT_ALICE_ADDRESS, LPT_ALICE_ADDRESS);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PRODUCTION GENESIS — the deploy-time pool seed on the real Vault
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice The production genesis is the DEPLOY-TIME pool seed: the template's `_seedPool` runs the LPT
+     *         multi-asset deposit at deployment, so a fresh Day market's pool is initialized before the first
+     *         user ever touches it, with the real Balancer minimum-supply burn, exactly `DEAD_SHARES` LPT
+     *         permanently locked at 0xdEaD, the funder holding the genesis remainder, and the kernel
+     *         custodying every live BPT on its ledger
+     */
+    function test_LPTMultiAssetDeposit_FirstDepositInitializesPool_ProductionGenesis() public {
+        if (!testConfig.hasLiquidityProviderTranche) return;
+
+        // The pool is initialized by the genesis seed at deployment, never left uninitialized
+        assertTrue(VAULT.isPoolInitialized(POOL), "the deploy-time genesis seed must initialize the pool");
+        uint256 dead = IERC20(POOL).balanceOf(address(0));
+        assertEq(dead, 1e6, "the real vault must burn the minimum supply to the null address");
+        assertEq(IERC20(POOL).balanceOf(address(KERNEL)), IERC20(POOL).totalSupply() - dead, "the kernel must custody every live genesis BPT");
+        assertEq(
+            toUint256(KERNEL.getState().totalLPTAssets),
+            IERC20(POOL).balanceOf(address(KERNEL)),
+            "the kernel's LPT ledger must credit exactly its custodied genesis BPT"
+        );
+
+        // The genesis LPT share topology: the dead-share lock plus the funder's remainder is the whole supply
+        uint256 lptSupply = LPT.totalSupply();
+        uint256 deadShares = LPT.balanceOf(0x000000000000000000000000000000000000dEaD);
+        assertEq(deadShares, 1e12, "exactly DEAD_SHARES must be locked at 0xdEaD");
+        assertEq(LPT.balanceOf(DEPLOYER.addr), lptSupply - deadShares, "the funder must hold the genesis remainder");
+        assertGt(toUint256(ACCOUNTANT.getState().lastLPTRawNAV), 0, "the genesis depth must be committed");
+
+        // The seeded market is immediately usable: a depth-capped two-leg deposit lands with no bootstrap
+        // (the quote-only genesis leaves an all-quote composition, so the ST leg is the addable side)
+        _setupLPTProviders();
+        _seedMarket(testConfig.initialFunding / 100, testConfig.initialFunding / 100);
+        uint256 depthCapAssets = toUint256(KERNEL.convertValueToCollateralAssets(KERNEL.convertLPTAssetsToValue(toTrancheUnits(IERC20(POOL).totalSupply()))));
+        uint256 collateralAssets = Math.min(1e18, depthCapAssets);
+        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssets)));
+        OpReceipt memory r = _doDepositLPTMulti(LPT_ALICE_ADDRESS, collateralAssets, quoteAssets, 0);
+        assertGt(r.shares, 0, "a post-genesis deposit must mint against the seeded pool");
+    }
+
+    /**
+     * @notice The multi-asset preview on the freshly seeded real pool simulates the deposit through the
+     *         Vault's real invariant math and unwinds it: the quote equals the executed shares to the wei
+     *         while latching nothing
+     * @dev The quote is in LPT SHARE units, not BPT: a concentrated E-CLP pool mints far fewer BPT than the
+     *      deposit's NAV (the invariant, thousands of times smaller for a tight stable band), so the share
+     *      quote must never be fed into minLPTAssetsOut (the BPT floor). The exact BPT floor boundary is
+     *      pinned in the mock suite where the linear venue makes the two units coincide by construction
+     */
+    function test_LPTMultiAssetDeposit_UninitializedPoolPreview_MatchesExecutionAndLatchesNothing() public {
+        if (!testConfig.hasLiquidityProviderTranche) return;
+        _setupLPTProviders();
+        _seedMarket(testConfig.initialFunding / 100, testConfig.initialFunding / 100);
+        assertTrue(VAULT.isPoolInitialized(POOL), "arrange: the deploy-time genesis seed must initialize the pool");
+        uint256 bptSupplyPre = IERC20(POOL).totalSupply();
+
+        uint256 collateralAssets = 1e18;
+        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssets)));
+
+        // The execute-and-revert preview runs the real venue add inside the unlocked Vault and unwinds it whole
+        (uint256 quoted,) = IRoycoLiquidityProviderTranche(address(LPT)).previewDepositMultiAsset(collateralAssets, quoteAssets);
+        assertEq(IERC20(POOL).totalSupply(), bptSupplyPre, "the preview must unwind the simulated venue mint");
+
+        // The executed deposit matches the quote to the wei
+        OpReceipt memory r = _doDepositLPTMulti(LPT_ALICE_ADDRESS, collateralAssets, quoteAssets, 0);
+        assertEq(r.shares, quoted, "the preview must quote exactly the executed deposit's shares");
     }
 }

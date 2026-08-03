@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
 import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { JT_LP_ROLE, LPT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
@@ -302,7 +303,9 @@ contract DayMarketHandler is DayMarketTestBase {
         jtActors[1] = _generateActor("H_JT_ACTOR_1", JT_LP_ROLE);
         lptActors[0] = _generateActor("H_LPT_ACTOR_0", LPT_LP_ROLE);
         lptActors[1] = _generateActor("H_LPT_ACTOR_1", LPT_LP_ROLE);
-        externalLp = makeAddr("H_EXTERNAL_LP");
+        // The external actor holds ST_LP_ROLE only so it can source senior shares through the real gated
+        // deposit path (never a mint), its pool interactions themselves are permissionless
+        externalLp = _generateActor("H_EXTERNAL_LP", ST_LP_ROLE);
 
         // Seed a healthy market: 30k junior first (coverage), auto-seeded quote depth, then 100k senior
         _seedMarket(100_000e18, 30_000e18);
@@ -633,23 +636,73 @@ contract DayMarketHandler is DayMarketTestBase {
         }
     }
 
-    /// @notice An external participant joins the pool at fair value or donates one-sided quote depth
+    /**
+     * @notice An external participant interacts with the pool: quote donation, fair-value join, exact-in
+     *         swaps in both directions, a partial removal of its own pool tokens, or a senior-share donation
+     * @dev Every kind drifts pool composition without touching the kernel's ledgers, so the trailing verified
+     *      sync re-prices the drift through the same two-step mark mirrors every other op is judged by. At the
+     *      mock's pinned prices every exogenous flow conserves or adds pool value (swap flooring and fees stay
+     *      in the pool), so no loss flag is armed here, and the executors assert exactly that conservation
+     */
     function op_externalPoolOp(uint256 _kindSeed, uint256 _amount) external {
         _recordCall("externalPoolOp");
-        // Uniform over one to ten thousand whole quote tokens
+        // Uniform over one to ten thousand whole quote tokens for the quote-denominated kinds
         uint256 amount = bound(_amount, QUOTE_UNIT, QUOTE_UNIT * 10_000);
-        if (bound(_kindSeed, 0, 1) == 0) {
+        uint256 kind = bound(_kindSeed, 0, 5);
+        if (kind == 0) {
             // One-sided quote donation: drifts the pool composition and raises every pool mark
             quoteToken.mint(externalLp, amount);
             vm.startPrank(externalLp);
             quoteToken.approve(address(balancerVault), amount);
             balancerVault.injectPoolBalance(address(bpt), IERC20(address(quoteToken)), amount);
             vm.stopPrank();
-        } else {
+            _recordSuccess("externalPoolOp");
+            _recordSuccess("extQuoteDonation");
+        } else if (kind == 1) {
             // Fair-value external join: an outside LP now owns pool tokens the kernel does not control
             _mintFairValueBpt(externalLp, amount);
+            _recordSuccess("externalPoolOp");
+            _recordSuccess("extFairJoin");
+        } else if (kind == 2) {
+            // Exact-in swap quote -> senior: the swapper takes senior shares out of the pool at the pinned rates
+            quoteToken.mint(externalLp, amount);
+            uint256 poolSeniorLeg = balancerVault.getPoolBalances(address(bpt))[stPoolTokenIndex];
+            if (_execExternalSwapExactIn(IERC20(address(quoteToken)), IERC20(address(seniorTranche)), amount, poolSeniorLeg)) {
+                _recordSuccess("externalPoolOp");
+                _recordSuccess("extSwapQuoteToSenior");
+            }
+        } else if (kind == 3) {
+            // Exact-in swap senior -> quote: the swapper's senior shares come from a real gated ST deposit
+            uint256 bal = _ensureExternalSeniorShares();
+            if (bal != 0) {
+                uint256 amountIn = bound(_amount, 1, bal);
+                uint256 poolQuoteLeg = balancerVault.getPoolBalances(address(bpt))[1 - stPoolTokenIndex];
+                if (_execExternalSwapExactIn(IERC20(address(seniorTranche)), IERC20(address(quoteToken)), amountIn, poolQuoteLeg)) {
+                    _recordSuccess("externalPoolOp");
+                    _recordSuccess("extSwapSeniorToQuote");
+                }
+            }
+        } else if (kind == 4) {
+            // Partial removal: the external LP burns its OWN pool tokens, the kernel's ledger must be inert
+            if (bpt.balanceOf(externalLp) == 0) _mintFairValueBpt(externalLp, amount);
+            _execExternalPartialRemove(bound(_amount, 1, bpt.balanceOf(externalLp)));
+            _recordSuccess("externalPoolOp");
+            _recordSuccess("extPartialRemove");
+        } else {
+            // Senior-share donation: composition drift on the senior leg, sourced from a real gated ST deposit
+            uint256 bal = _ensureExternalSeniorShares();
+            if (bal != 0) {
+                uint256 donate = bound(_amount, 1, bal);
+                uint256 tvl0 = bptOracle.computeTVL();
+                vm.startPrank(externalLp);
+                seniorTranche.approve(address(balancerVault), donate);
+                balancerVault.injectPoolBalance(address(bpt), IERC20(address(seniorTranche)), donate);
+                vm.stopPrank();
+                _flag(bptOracle.computeTVL() >= tvl0, "a senior-share donation lowered the pool's TVL");
+                _recordSuccess("externalPoolOp");
+                _recordSuccess("extSeniorDonation");
+            }
         }
-        _recordSuccess("externalPoolOp");
         _syncAndVerify("post:externalPoolOp");
     }
 
@@ -959,9 +1012,11 @@ contract DayMarketHandler is DayMarketTestBase {
         }
     }
 
-    /// @dev Runs one multi-asset liquidity deposit under a full mirror of the mock venue's pricing
-    function _execLptDepositMultiAsset(address _actor, uint256 _collateralAssets, uint256 _quoteAssets, Snap memory s) internal {
-        Pred memory p;
+    /// @notice The multi-asset deposit's revert prediction, callable only by the handler itself
+    /// @dev An external self-call (the handler's established frame-splitting pattern) so the venue-add
+    ///      mirror's frame never shares stack with the execution body's reconciliation locals
+    function runLptDepositMultiAssetPrediction(Snap memory s, uint256 _collateralAssets, uint256 _quoteAssets) external view returns (Pred memory p) {
+        require(msg.sender == address(this), "only self");
         if (s.fixedTerm && _collateralAssets > 0) {
             _expect(p, SEL_DISABLED_FT);
         } else {
@@ -970,10 +1025,13 @@ contract DayMarketHandler is DayMarketTestBase {
             if (v.stMintPanics) _expect(p, SEL_PANIC);
             if (_collateralAssets > 0 && !v.stMintPanics && v.stSharesMinted == 0) _expect(p, SEL_ZERO_SHARES);
             if (v.valueAllocated == 0 || v.lptRawAfter <= s.lptRawNAV) _expect(p, SEL_INVALID_POST_OP);
-            uint256 navAt = RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(s.lptRawNAV, s.lptOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
-            (uint256 predLptShares, bool lptMintPanics) = _mirrorMintShares(v.valueAllocated, navAt, s.lptSupply);
-            if (lptMintPanics) _expect(p, SEL_PANIC);
-            else if (predLptShares == 0) _expect(p, SEL_ZERO_SHARES);
+            {
+                uint256 navAt =
+                    RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(s.lptRawNAV, s.lptOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
+                (uint256 predLptShares, bool lptMintPanics) = _mirrorMintShares(v.valueAllocated, navAt, s.lptSupply);
+                if (lptMintPanics) _expect(p, SEL_PANIC);
+                else if (predLptShares == 0) _expect(p, SEL_ZERO_SHARES);
+            }
             if (_collateralAssets > 0) {
                 uint256 collateralAfter = _quoteCollateralUnits(s.collateralOwned + _collateralAssets);
                 uint256 stEffAfter = s.stEffectiveNAV + (collateralAfter - s.collateralNAV);
@@ -983,6 +1041,11 @@ contract DayMarketHandler is DayMarketTestBase {
                 if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, v.lptRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
             }
         }
+    }
+
+    /// @dev Runs one multi-asset liquidity deposit under a full mirror of the mock venue's pricing
+    function _execLptDepositMultiAsset(address _actor, uint256 _collateralAssets, uint256 _quoteAssets, Snap memory s) internal {
+        Pred memory p = this.runLptDepositMultiAssetPrediction(s, _collateralAssets, _quoteAssets);
         stJtVault.mintShares(_actor, _collateralAssets);
         quoteToken.mint(_actor, _quoteAssets);
         TokenFlows memory f = _snapTokenFlows();
@@ -1788,6 +1851,129 @@ contract DayMarketHandler is DayMarketTestBase {
     // =============================
     // Internal helpers
     // =============================
+
+    /// @dev Sources senior shares for the external actor through the real gated deposit path, never a mint.
+    ///      The deposit runs under _execStDeposit's full revert prediction, so a gate rejection is asserted
+    ///      (not skipped) and a zero balance afterward simply means the exogenous leg has nothing to move
+    function _ensureExternalSeniorShares() internal returns (uint256 bal) {
+        bal = seniorTranche.balanceOf(externalLp);
+        if (bal != 0) return bal;
+        Snap memory s = _syncAndVerify("pre:externalStDeposit");
+        if (!s.ok) return 0;
+        uint256 assets = _clampSupplySafeDeposit(1e21, _quoteCollateralUnits(1e21), s.stEffectiveNAV, s.stSupply);
+        _execStDeposit(externalLp, assets, s);
+        return seniorTranche.balanceOf(externalLp);
+    }
+
+    /// @dev Mirrors the mock vault's exact-in swap output: fair value at the vault's pinned prices, floored,
+    ///      less the pool-retained swap fee, the same two floors in the same order as MockBalancerVault.swap
+    function _mirrorSwapExactInOut(address _tokenIn, address _tokenOut, uint256 _amountIn) internal view returns (uint256) {
+        uint256 valueInWAD = _amountIn.mulDiv(balancerVault.getTokenPriceWAD(_tokenIn), 10 ** IERC20Metadata(_tokenIn).decimals());
+        uint256 grossOut = valueInWAD.mulDiv(10 ** IERC20Metadata(_tokenOut).decimals(), balancerVault.getTokenPriceWAD(_tokenOut));
+        return (grossOut * (10_000 - balancerVault.swapFeeBps())) / 10_000;
+    }
+
+    /// @dev State captured around an exogenous pool op so its exact token movements can be reconciled
+    struct ExtPoolSnap {
+        uint256 inBal0;
+        uint256 outBal0;
+        uint256[2] pool0;
+        uint256 tvl0;
+        uint256 lptOwned0;
+        uint256 kernelBpt0;
+        uint256 bptSupply0;
+        uint256 extBpt0;
+    }
+
+    /// @dev Captures the balances the exogenous-op reconciliations compare against
+    function _snapExtPool(IERC20 _tokenIn, IERC20 _tokenOut) internal view returns (ExtPoolSnap memory s) {
+        s.inBal0 = _tokenIn.balanceOf(externalLp);
+        s.outBal0 = _tokenOut.balanceOf(externalLp);
+        s.pool0 = balancerVault.getPoolBalances(address(bpt));
+        s.tvl0 = bptOracle.computeTVL();
+        s.lptOwned0 = toUint256(kernel.getState().totalLPTAssets);
+        s.kernelBpt0 = bpt.balanceOf(address(kernel));
+        s.bptSupply0 = bpt.totalSupply();
+        s.extBpt0 = bpt.balanceOf(externalLp);
+    }
+
+    /**
+     * @dev Runs one exogenous exact-in swap through the router, halving the input until the priced output fits
+     *      the pool's out leg (the mock reverts on a drained leg exactly like a checked balance would). The
+     *      minAmountOut is armed at exactly the mirrored output, so the vault's SwapLimit floor is exercised at
+     *      the boundary on every call. Verifies value conservation at the oracle's prices: at pinned rates a
+     *      swap's output value never exceeds its input value (output flooring plus the fee stay in the pool),
+     *      so the pool's TVL can fall by at most the one wei the per-token TVL floors can lose
+     * @return swapped Whether a swap executed (false only when even a one-wei input overfills the out leg)
+     */
+    function _execExternalSwapExactIn(IERC20 _tokenIn, IERC20 _tokenOut, uint256 _amountIn, uint256 _poolOutLeg) internal returns (bool swapped) {
+        uint256 predOut = _mirrorSwapExactInOut(address(_tokenIn), address(_tokenOut), _amountIn);
+        while (predOut > _poolOutLeg && _amountIn > 1) {
+            _amountIn /= 2;
+            predOut = _mirrorSwapExactInOut(address(_tokenIn), address(_tokenOut), _amountIn);
+        }
+        if (predOut > _poolOutLeg) return false;
+
+        ExtPoolSnap memory s = _snapExtPool(_tokenIn, _tokenOut);
+        vm.startPrank(externalLp);
+        _tokenIn.approve(address(balancerRouter), _amountIn);
+        uint256 amountOut = balancerRouter.swapSingleTokenExactIn(address(bpt), _tokenIn, _tokenOut, _amountIn, predOut);
+        vm.stopPrank();
+
+        _flag(amountOut == predOut, "external swap output diverges from the constant-price mirror");
+        _flag(_tokenIn.balanceOf(externalLp) == s.inBal0 - _amountIn, "external swap took more input than the exact amount");
+        _flag(_tokenOut.balanceOf(externalLp) == s.outBal0 + amountOut, "external swap output did not land with the swapper in full");
+        {
+            uint256 inIdx = address(_tokenIn) == address(seniorTranche) ? stPoolTokenIndex : 1 - stPoolTokenIndex;
+            uint256[2] memory pool1 = balancerVault.getPoolBalances(address(bpt));
+            _flag(
+                pool1[inIdx] == s.pool0[inIdx] + _amountIn && pool1[1 - inIdx] == s.pool0[1 - inIdx] - amountOut,
+                "external swap pool composition does not reconcile with the exact amounts"
+            );
+        }
+        _flag(bptOracle.computeTVL() + 1 >= s.tvl0, "external swap destroyed pool value beyond the one-wei TVL floor bound");
+        _flag(
+            toUint256(kernel.getState().totalLPTAssets) == s.lptOwned0 && bpt.balanceOf(address(kernel)) == s.kernelBpt0,
+            "an external swap moved the kernel's pool-token ledger or custody"
+        );
+        return true;
+    }
+
+    /**
+     * @dev Runs one exogenous proportional removal of the external LP's own pool tokens through the router,
+     *      with the per-token floors armed at exactly the mirrored proportional outputs so the vault's
+     *      AmountOutBelowMin boundary is exercised on every call. The kernel's ledger and custody must be
+     *      inert: the burn draws exclusively on the external LP's balance and the floor-rounded residue
+     *      stays in the pool, so the per-BPT value the ledger is priced at can only rise
+     */
+    function _execExternalPartialRemove(uint256 _burn) internal {
+        IERC20 seniorToken = IERC20(address(seniorTranche));
+        IERC20 quoteAsIERC20 = IERC20(address(quoteToken));
+        ExtPoolSnap memory s = _snapExtPool(stPoolTokenIndex == 0 ? seniorToken : quoteAsIERC20, stPoolTokenIndex == 0 ? quoteAsIERC20 : seniorToken);
+        uint256[2] memory pred = [s.pool0[0].mulDiv(_burn, s.bptSupply0), s.pool0[1].mulDiv(_burn, s.bptSupply0)];
+
+        vm.prank(externalLp);
+        uint256[2] memory outs = balancerRouter.removeLiquidityProportional(address(bpt), _burn, pred);
+
+        _flag(outs[0] == pred[0] && outs[1] == pred[1], "external removal outputs diverge from the proportional floors");
+        _flag(bpt.totalSupply() == s.bptSupply0 - _burn && bpt.balanceOf(externalLp) == s.extBpt0 - _burn, "external removal burned a different pool-token amount");
+        {
+            IERC20 token0 = stPoolTokenIndex == 0 ? seniorToken : quoteAsIERC20;
+            IERC20 token1 = stPoolTokenIndex == 0 ? quoteAsIERC20 : seniorToken;
+            _flag(
+                token0.balanceOf(externalLp) == s.inBal0 + outs[0] && token1.balanceOf(externalLp) == s.outBal0 + outs[1],
+                "external removal outputs did not land with the external LP in full"
+            );
+        }
+        {
+            uint256[2] memory pool1 = balancerVault.getPoolBalances(address(bpt));
+            _flag(pool1[0] == s.pool0[0] - outs[0] && pool1[1] == s.pool0[1] - outs[1], "external removal pool composition does not reconcile");
+        }
+        _flag(
+            toUint256(kernel.getState().totalLPTAssets) == s.lptOwned0 && bpt.balanceOf(address(kernel)) == s.kernelBpt0,
+            "an external LP's removal touched the kernel's pool-token ledger or custody"
+        );
+    }
 
     /// @dev Mints pool tokens to an account at the pool's current value per token, backed by a real quote leg
     function _mintFairValueBpt(address _to, uint256 _quoteLeg) internal returns (uint256 bptAmt) {

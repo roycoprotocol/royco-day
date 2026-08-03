@@ -8,7 +8,9 @@ import {
     AddLiquidityKind,
     AddLiquidityParams,
     RemoveLiquidityKind,
-    RemoveLiquidityParams
+    RemoveLiquidityParams,
+    SwapKind,
+    VaultSwapParams
 } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -26,7 +28,7 @@ import { MockBPT } from "./MockBPT.sol";
  * @dev The debt/credit session ledger mirrors the real vault, every delta opened by addLiquidity, removeLiquidity, and sendTo must be
  *      closed by settle or sendTo before unlock returns, else BalanceNotSettled
  * @dev The complete fidelity table (mirrored semantics vs deliberate deltas such as linear fair-value add pricing,
- *      no swap surface, and no hook layer) lives in test/mocks/README.md
+ *      constant-price swap math, and no hook layer) lives in test/mocks/README.md
  */
 contract MockBalancerVault {
     using Math for uint256;
@@ -66,6 +68,9 @@ contract MockBalancerVault {
 
     /// @notice Thrown when a BPT allowance cannot cover the transferFrom
     error BPT_INSUFFICIENT_ALLOWANCE();
+
+    /// @notice Thrown when a swap requests EXACT_OUT, which this mock does not model (curve-shape realism is fork-suite territory)
+    error EXACT_IN_ONLY();
 
     // =============================
     // State
@@ -113,6 +118,9 @@ contract MockBalancerVault {
 
     /// @notice The haircut applied to the fair-value BPT out on UNBALANCED adds, in basis points
     uint16 public unbalancedFeeBps;
+
+    /// @notice The swap fee retained by the pool on exact-in swaps, charged on the output leg, in basis points
+    uint16 public swapFeeBps;
 
     /// @dev The one-shot BPT-out override for the next add, and whether it is armed
     uint256 private _nextBptOutOverride;
@@ -398,6 +406,61 @@ contract MockBalancerVault {
     }
 
     // =============================
+    // Swap (the exogenous-party surface, router-style through unlock)
+    // =============================
+
+    /**
+     * @notice Performs an EXACT_IN swap between the pool's two tokens at the mock's pinned per-token prices
+     * @dev Mirrors the real vault's ACCESS shape exactly: swap is onlyWhenUnlocked, so an external party routes
+     *      it through unlock (see MockBalancerRouter), the input opens a debt the router must settle and the
+     *      output opens a credit sendTo consumes, and the same AmountGivenZero / CannotSwapSameToken /
+     *      SwapLimit error shapes fire. The MATH is deliberately not the real vault's: amountOut is the input's
+     *      fair value re-priced at the pinned rates (the senior leg through the live rate provider) less the
+     *      configured swapFeeBps retained by the pool, so an exogenous swap moves pool COMPOSITION and fee value
+     *      at constant prices. E-CLP curve-shape realism (price impact, imbalance fees) is the fork suites' job
+     * @dev Balances are updated atomically inside the call, an output exceeding the pool's leg reverts with the
+     *      checked-arithmetic panic exactly like draining a real constant-price leg would
+     * @param params The real vault's VaultSwapParams, EXACT_IN only, limitRaw is the minimum amount out
+     * @return amountCalculated The computed output amount
+     * @return amountIn The exact input amount (params.amountGivenRaw)
+     * @return amountOut The computed output amount
+     */
+    function swap(VaultSwapParams memory params) external returns (uint256 amountCalculated, uint256 amountIn, uint256 amountOut) {
+        _ensureUnlocked();
+        require(_registered[params.pool], IVaultErrors.PoolNotRegistered(params.pool));
+        require(_initialized[params.pool], IVaultErrors.PoolNotInitialized(params.pool));
+        require(params.kind == SwapKind.EXACT_IN, EXACT_IN_ONLY());
+        require(params.amountGivenRaw != 0, IVaultErrors.AmountGivenZero());
+        require(params.tokenIn != params.tokenOut, IVaultErrors.CannotSwapSameToken());
+
+        // Resolve both tokens against the pool's registration order
+        IERC20[2] storage tokens = _poolTokens[params.pool];
+        uint256 indexIn;
+        if (tokens[0] == params.tokenIn) indexIn = 0;
+        else if (tokens[1] == params.tokenIn) indexIn = 1;
+        else revert IVaultErrors.TokenNotRegistered(params.tokenIn);
+        uint256 indexOut = 1 - indexIn;
+        require(tokens[indexOut] == params.tokenOut, IVaultErrors.TokenNotRegistered(params.tokenOut));
+
+        // Price the output at the pinned rates: fair value in, floored out, less the pool-retained fee
+        amountIn = params.amountGivenRaw;
+        uint256 valueInWAD = _tokenValueWAD(params.tokenIn, amountIn);
+        uint256 grossAmountOut =
+            valueInWAD.mulDiv(10 ** IERC20Metadata(address(params.tokenOut)).decimals(), getTokenPriceWAD(address(params.tokenOut)), Math.Rounding.Floor);
+        amountOut = (grossAmountOut * (10_000 - swapFeeBps)) / 10_000;
+        require(amountOut >= params.limitRaw, IVaultErrors.SwapLimit(amountOut, params.limitRaw));
+
+        // Commit the swap atomically and open the session deltas the router must close
+        uint256[2] storage balances = _poolBalances[params.pool];
+        balances[indexIn] += amountIn;
+        balances[indexOut] -= amountOut;
+        _accountDelta(params.tokenIn, int256(amountIn));
+        if (amountOut > 0) _accountDelta(params.tokenOut, -int256(amountOut));
+
+        amountCalculated = amountOut;
+    }
+
+    // =============================
     // Quote (preview with revert-discard semantics)
     // =============================
 
@@ -448,6 +511,12 @@ contract MockBalancerVault {
     function setUnbalancedFeeBps(uint16 _unbalancedFeeBps) external {
         require(_unbalancedFeeBps <= 10_000, INVALID_FEE_BPS());
         unbalancedFeeBps = _unbalancedFeeBps;
+    }
+
+    /// @notice Sets the swap fee retained by the pool on exact-in swaps, charged on the output leg, in basis points
+    function setSwapFeeBps(uint16 _swapFeeBps) external {
+        require(_swapFeeBps <= 10_000, INVALID_FEE_BPS());
+        swapFeeBps = _swapFeeBps;
     }
 
     /// @notice Arms a one-shot BPT-out override consumed by the next committed add, driving the slippage gate deterministically

@@ -460,7 +460,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         bytes32 marketId = _s.marketId;
         // Resolve the kernel's collateral asset oracle before params are built (deployed here when the config leaves it unset)
         if (_config.collateralAssetOracle == address(0)) {
-            _config.collateralAssetOracle = _deployCollateralAssetOracle(_config, marketId, address(_s.accessManager));
+            _config.collateralAssetOracle = _deployCollateralAssetOracle(_config, marketId);
         }
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params =
             _buildMarketParams(_config, marketId, _protocolFeeRecipient, address(_s.factory), _deployer);
@@ -942,9 +942,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice CREATE2-deploys the market's collateral asset oracle adapter selected by `collateralAssetOracleType`,
     ///         decoding the kind-specific constructor params from `collateralAssetOracleSpecificParams`
     /// @dev Only runs when the config leaves `collateralAssetOracle` unset; a pre-deployed oracle address bypasses this.
-    ///      The IdleCDO kind is UUPS-proxied: the impl is CREATE2-deployed, then wrapped in an ERC1967 proxy initialized
-    ///      with the market AccessManager (`_authority`) and the config's deviation-clock threshold
-    function _deployCollateralAssetOracle(MarketConfig memory _config, bytes32 _marketId, address _authority) internal returns (address oracle) {
+    ///      Every kind is a fully immutable direct deployment with no authority, so reconfiguration is a redeploy
+    ///      plus a kernel oracle repoint
+    function _deployCollateralAssetOracle(MarketConfig memory _config, bytes32 _marketId) internal returns (address oracle) {
         _logSection("Collateral asset oracle");
         bytes memory ctorArgs;
         bytes memory creationCode;
@@ -961,70 +961,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             creationCode = type(MakinaSharePriceOracle).creationCode;
             ctorArgs = abi.encode(p.makinaMachine, p.accountingAssetToNavAssetFeed);
         } else if (_config.collateralAssetOracleType == OracleType.IdleCDOTranchePrice) {
-            return _deployIdleCDOTranchePriceOracle(_config, _marketId, _authority);
+            IdleCDOTranchePriceOracleParams memory p = abi.decode(_config.collateralAssetOracleSpecificParams, (IdleCDOTranchePriceOracleParams));
+            creationCode = type(IdleCDOTranchePriceOracle).creationCode;
+            ctorArgs = abi.encode(p.idleCDO, _config.collateralAsset, p.underlyingTokenToNavAssetFeed, p.minDeviationWAD, p.lastUpdate);
         } else {
             revert UnsupportedOracleType(_config.collateralAssetOracleType);
         }
         bool existed;
         (oracle, existed) = deployWithSanityChecks(_marketScopedSalt(_marketId, "COLLATERAL_ASSET_ORACLE"), abi.encodePacked(creationCode, ctorArgs), false);
         _logDeploy("CollateralAssetOracle  ", oracle, existed);
-    }
-
-    /// @notice CREATE2-deploys the IdleCDO tranche oracle impl (CDO virtual price x feed) and its ERC1967 proxy,
-    ///         initialized with the market AccessManager and the config's minimum deviation threshold
-    /// @dev The tranche the oracle prices is the market's collateral asset (the impl verifies it is an AA or BB tranche)
-    function _deployIdleCDOTranchePriceOracle(MarketConfig memory _config, bytes32 _marketId, address _authority) internal returns (address oracle) {
-        IdleCDOTranchePriceOracleParams memory p = abi.decode(_config.collateralAssetOracleSpecificParams, (IdleCDOTranchePriceOracleParams));
-        address impl = _deployImplWithArgs(
-            "CollateralAssetOracle (impl)",
-            type(IdleCDOTranchePriceOracle).creationCode,
-            abi.encode(p.idleCDO, _config.collateralAsset, p.underlyingTokenToNavAssetFeed),
-            _marketScopedSalt(_marketId, "COLLATERAL_ASSET_ORACLE_IMPL")
-        );
-        bytes memory initData = abi.encodeCall(IdleCDOTranchePriceOracle.initialize, (_authority, p.minDeviationWAD, p.lastUpdate));
-
-        // The clock-based oracle is the one per-market component deployed outside the template, and like every other
-        // per-market component it sits behind a beacon so all of them upgrade together
-        (address beacon, bool beaconExisted) = deployWithSanityChecks(
-            _singletonSalt("ROYCO_IDLE_CDO_TRANCHE_PRICE_ORACLE_BEACON"),
-            abi.encodePacked(type(UpgradeableBeacon).creationCode, abi.encode(impl, _authority)),
-            false
-        );
-        _logDeploy("CollateralOracle (beacon)", beacon, beaconExisted);
-        if (!IRoycoAccessManager(_authority).wasEverConfigured(beacon)) {
-            bytes4[] memory beaconSelectors = new bytes4[](1);
-            beaconSelectors[0] = UpgradeableBeacon.upgradeTo.selector;
-            AccessManager(_authority).setTargetFunctionRole(beacon, beaconSelectors, ADMIN_UPGRADER_ROLE);
-        }
-
-        bool existed;
-        (oracle, existed) = deployWithSanityChecks(
-            _marketScopedSalt(_marketId, "COLLATERAL_ASSET_ORACLE"), abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(beacon, initData)), false
-        );
-        _logDeploy("CollateralAssetOracle  ", oracle, existed);
-    }
-
-    /// @notice Returns the collateral asset oracle's restricted selector to role bindings for the specified oracle kind
-    /// @dev The immutable adapter kinds carry no authority, so they have no restricted surface to bind. The proxied
-    ///      clock-based kind binds its deviation clock surface to ADMIN_ORACLE_ROLE (matching the kernel's pricing
-    ///      setters) and pause/unpause/upgrade to the protocol-wide roles
-    function _collateralAssetOracleRoleBindings(OracleType _oracleType) internal pure returns (bytes4[] memory selectors, uint64[] memory roleIds) {
-        if (_oracleType == OracleType.ChainlinkPrice || _oracleType == OracleType.ERC4626SharePrice || _oracleType == OracleType.MakinaSharePrice) {
-            return (selectors, roleIds);
-        } else if (_oracleType == OracleType.IdleCDOTranchePrice) {
-            selectors = new bytes4[](4);
-            roleIds = new uint64[](4);
-            selectors[0] = OracleClockBase.tick.selector;
-            roleIds[0] = ADMIN_ORACLE_ROLE;
-            selectors[1] = OracleClockBase.setMinDeviationWAD.selector;
-            roleIds[1] = ADMIN_ORACLE_ROLE;
-            selectors[2] = IRoycoAuth.pause.selector;
-            roleIds[2] = ADMIN_PAUSER_ROLE;
-            selectors[3] = IRoycoAuth.unpause.selector;
-            roleIds[3] = ADMIN_UNPAUSER_ROLE;
-        } else {
-            revert UnsupportedOracleType(_oracleType);
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

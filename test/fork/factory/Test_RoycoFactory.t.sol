@@ -53,7 +53,6 @@ import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoF
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { MarketDeploymentValidationLogic } from "../../../src/libraries/logic/factory/MarketDeploymentValidationLogic.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
-import { OracleClockBase } from "../../../src/oracle/base/clock/OracleClockBase.sol";
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
@@ -138,9 +137,7 @@ contract Test_RoycoFactory is Test {
         deployScript = new DeployScript();
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
         template = RoycoDayBalancerV3MarketDeploymentTemplate(
-            deployScript.deployTemplateForTest(
-                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), roycoBlacklist
-            )
+            deployScript.deployTemplateForTest(IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), roycoBlacklist)
         );
 
         // The template resolves a market's yield distribution models out of its own registry, so bind its registration
@@ -179,7 +176,6 @@ contract Test_RoycoFactory is Test {
         vm.prank(DEPLOYER);
         IERC20(_asset).approve(address(template), _amount);
     }
-
 
     /// @dev Externally deploys the snUSD market's impls/YDMs/pool and pre-deploys its ST + hook proxies (as the
     ///      deployScript, which holds DEPLOYER_ROLE), then builds the encoded template params from the SAME config.
@@ -368,16 +364,12 @@ contract Test_RoycoFactory is Test {
         (RoycoFactory otherFactory,,,) = FactoryScaffold.deployFactory(am, keccak256("FOREIGN_FACTORY_PROXY"));
         RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(address(otherFactory));
         RoycoDayBalancerV3MarketDeploymentTemplate foreign = RoycoDayBalancerV3MarketDeploymentTemplate(
-            deployScript.deployTemplateForTest(
-                IRoycoFactory(address(otherFactory)), deployScript.getMarketConfig("snUSD"), roycoBlacklist
-            )
+            deployScript.deployTemplateForTest(IRoycoFactory(address(otherFactory)), deployScript.getMarketConfig("snUSD"), roycoBlacklist)
         );
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(IRoycoFactory.TEMPLATE_BOUND_TO_DIFFERENT_FACTORY.selector);
         factory.registerTemplate(address(foreign));
     }
-
-
 
     /// Registration is blocked while the factory is paused
     function test_RevertIf_TemplateRegisteredWhilePaused() external {
@@ -484,7 +476,6 @@ contract Test_RoycoFactory is Test {
         assertEq(stored.baseConfig.redemptionDelaySeconds, _expected.redemptionDelaySeconds, string.concat(_ctx, ": redemption delay"));
         assertEq(stored.baseConfig.gateByOracleUpdate, _expected.gateByOracleUpdate, string.concat(_ctx, ": oracle enabled"));
     }
-
 
     /// @notice Only the factory may drive the periphery configuration hook
     function test_RevertIf_StrangerCallspostMarketRegistration() external {
@@ -1029,7 +1020,7 @@ contract Test_RoycoFactory is Test {
     function test_RevertIf_EclpPriceRangeIsInverted() external {
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
         (p.poolCreationParams.eclpParams.alpha, p.poolCreationParams.eclpParams.beta) =
-            (p.poolCreationParams.eclpParams.beta, p.poolCreationParams.eclpParams.alpha);
+        (p.poolCreationParams.eclpParams.beta, p.poolCreationParams.eclpParams.alpha);
         _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_ECLP_PRICE_RANGE.selector);
     }
 
@@ -1067,9 +1058,6 @@ contract Test_RoycoFactory is Test {
         _expectParamsRevert(p, MarketDeploymentValidationLogic.COLLATERAL_SEED_REQUIRES_ZERO_MIN_COVERAGE.selector);
     }
 
-
-
-
     /// The whole point of validating up front: a rejected deployment must leave no component behind, and must not
     /// consume any AccessManager target's one-time `wasEverConfigured` freshness
     function test_ParamsValidation_RunsBeforeAnyComponentIsDeployed() external {
@@ -1105,9 +1093,7 @@ contract Test_RoycoFactory is Test {
     function test_RevertIf_TemplateConstructedWithCodelessBlacklist() external {
         RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _templateConstructionParams();
         cp.roycoBlacklist = makeAddr("NOT_A_BLACKLIST");
-        vm.expectRevert(
-            abi.encodeWithSelector(RoycoDayBalancerV3MarketDeploymentTemplate.CONSTRUCTION_PARAMETER_HAS_NO_CODE.selector, cp.roycoBlacklist)
-        );
+        vm.expectRevert(abi.encodeWithSelector(RoycoDayBalancerV3MarketDeploymentTemplate.CONSTRUCTION_PARAMETER_HAS_NO_CODE.selector, cp.roycoBlacklist));
         new RoycoDayBalancerV3MarketDeploymentTemplate(cp);
     }
 

@@ -35,25 +35,32 @@ import { RoycoDayTestBase } from "../../utils/RoycoDayTestBase.sol";
  *         forks the configured network, deploys the market end-to-end through the real `DeployScript` (via the
  *         `_deployKernelAndMarket` hook, which selects a market config by name from the config file), wires every deployed
  *         contract into member vars (including the Day-only LPT/pool/hook/LDM topology the script's result omits), and
- *         funds the ST/JT providers. Shape bases plug in the market's mechanics and concretes plug in config.
+ *         funds the ST/JT providers. The venue module and oracle layer plug in the market's mechanics and asset
+ *         leaves plug in config.
  * @dev The shared tests live here on top of the scaffolding, grouped by flow: deposits, redemptions, syncs, adversarial.
- * @dev New-integration recipe. A SHAPE base (one per collateral/oracle/venue shape) extends this suite and implements
- *      the `IKernelTestHooks` mechanics plus the internal seams:
- *      - `simulateSTYield`/`simulateJTYield`/`simulateSTLoss`/`simulateJTLoss` must move the tranche's RAW NAV by the
- *        stated signed WAD fraction, the suite asserts on realized post-sync numbers so an approximate move fails
- *      - `dealSTAsset`/`dealJTAsset`/`dealQuoteAsset` must fund real tokens in each asset's own decimals, the quote
- *        deal must no-op when the market has no LPT
- *      - `_refreshOraclesAfterWarp` must leave every time-sensitive oracle quoting fresh at the post-warp timestamp
- *        so admin-op warps never brick the market on staleness
- *      - `_requiresTimeWarpForYield` must say whether yield realization needs a warp (true for rebasing/streaming)
- *      - `_oracleStalenessSelector` must return the venue's staleness error selector, `bytes4(0)` skips that test
- *      - `_initializeLPTVenueIfNeeded` must one-time bootstrap the LPT venue before the first entry, no-op if none
- *      - `_trySetReinvestmentSlippage` needs an override only when the default setter signature does not match
- *      A CONCRETE market file extends the shape base and supplies config only: `getTestConfig`,
- *      `_deployKernelAndMarket` (market name into the real `DeployScript`), the `maxTrancheUnitDelta`/`maxNAVDelta`
- *      rounding tolerances, and any addresses the shape base declares (for example the base->NAV feed).
- *      Layering rule: kernel-behavior assertions live ONLY in this suite base, shape mechanics live ONLY in shape
- *      bases, concretes carry zero assertions.
+ * @dev New-integration recipe. The fork chain layers venue -> oracle -> asset on top of this suite:
+ *      - VENUE module (`BalancerVenueForkBase` plus the venue test suites, in `test/fork/venues/<venue>/`): the lowest
+ *        module, rooted directly on this suite. Implements `_initializeLPTVenueIfNeeded` (the one-time LPT venue
+ *        bootstrap before the first entry, no-op if none) and the venue mechanics (external actors, pool readers,
+ *        capacity probes, derived bounds), and carries the venue-behavior tests. Oracle-agnostic: it reaches yield,
+ *        loss, and funding only through the abstract hooks an oracle layer implements above.
+ *      - ORACLE layer (`ERC4626_Chainlink_KernelSuite`, in `test/fork/oracles/<shape>/`): inherits the venue module
+ *        and implements the `IKernelTestHooks` mechanics plus the internal seams for one collateral/oracle shape:
+ *        - `simulateSTYield`/`simulateJTYield`/`simulateSTLoss`/`simulateJTLoss` must move the tranche's RAW NAV by the
+ *          stated signed WAD fraction, the suite asserts on realized post-sync numbers so an approximate move fails
+ *        - `dealSTAsset`/`dealJTAsset`/`dealQuoteAsset` must fund real tokens in each asset's own decimals, the quote
+ *          deal must no-op when the market has no LPT
+ *        - `_refreshOraclesAfterWarp` must leave every time-sensitive oracle quoting fresh at the post-warp timestamp
+ *          so admin-op warps never brick the market on staleness
+ *        - `_requiresTimeWarpForYield` must say whether yield realization needs a warp (true for rebasing/streaming)
+ *        - `_oracleStalenessSelector` must return the oracle's staleness error selector, `bytes4(0)` skips that test
+ *        - `_trySetReinvestmentSlippage` needs an override only when the default setter signature does not match
+ *      - ASSET leaf (`Neutrl_snUSD`, in `test/fork/assets/`): extends the oracle layer and supplies config only:
+ *        `getTestConfig`, `_deployKernelAndMarket` (market name into the real `DeployScript`), the
+ *        `maxTrancheUnitDelta`/`maxNAVDelta` rounding tolerances, and any addresses the oracle layer declares (for
+ *        example the base->NAV feed).
+ *      Layering rule: kernel-behavior assertions live ONLY in this suite base, venue mechanics and tests live ONLY
+ *      in the venue module, oracle mechanics live ONLY in the oracle layer, asset leaves carry zero assertions.
  */
 abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /// @notice The concrete kernel's static test configuration (assets, fork, funding).
@@ -1096,7 +1103,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.prank(address(LPT), address(0));
         // SIMULATE dispatch: the null synthetic caller, this contract the deposit receiver
         (bool ok, bytes memory ret) = address(KERNEL)
-            .call(abi.encodeCall(IRoycoDayKernel.lptDepositMultiAsset, (DispatchMode.SIMULATE, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(0), address(0), address(this))));
+            .call(
+                abi.encodeCall(
+                    IRoycoDayKernel.lptDepositMultiAsset,
+                    (DispatchMode.SIMULATE, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(0), address(0), address(this))
+                )
+            );
         assertFalse(ok, "the flagged flow must unwind via its result-carrying revert");
         if (bytes4(ret) != DispatchLogic.SIMULATION_RESULT.selector) _bubbleRevert(ret);
         bytes memory simulationResult;

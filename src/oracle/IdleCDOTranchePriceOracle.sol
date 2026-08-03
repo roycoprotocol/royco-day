@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { IRoycoAuth } from "../interfaces/IRoycoAuth.sol";
 import { IIdleCDO } from "../interfaces/external/idle-finance/IIdleCDO.sol";
 import { WAD_DECIMALS } from "../libraries/Constants.sol";
 import { NAV_UNIT } from "../libraries/Units.sol";
@@ -27,21 +28,23 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
 
     /**
      * @notice Constructs the Idle CDO tranche virtual price to Chainlink (compatible) oracle composed collateral oracle
+     * @dev The clock's baseline is read from the CDO through the static helper because a base constructor cannot reach this contract's immutables
      * @param _idleCDO The Idle CDO whose tranche token is the collateral asset
      * @param _tranche The CDO tranche token (AA or BB) this oracle prices into NAV units
      * @param _underlyingTokenToNavAssetOracle The Chainlink (compatible) oracle pricing the CDO's underlying token in NAV units
+     * @param _minDeviationWAD The minimum relative deviation from the checkpointed virtual price that counts as an update, scaled to WAD precision (zero counts any change)
+     * @param _lastUpdate The deployer-attested timestamp of the virtual price's last update (zero if unknown, which holds pricing and the execution gate shut until the first observed deviation)
      */
     constructor(
         address _idleCDO,
         address _tranche,
-        address _underlyingTokenToNavAssetOracle
+        address _underlyingTokenToNavAssetOracle,
+        uint256 _minDeviationWAD,
+        uint32 _lastUpdate
     )
         ChainlinkPriceOracleBase(_tranche, _underlyingTokenToNavAssetOracle)
+        OracleClockBase(_lastUpdate, _minDeviationWAD, _readVirtualPriceWAD(_idleCDO, _tranche))
     {
-        // Sanity checks on the Idle CDO configuration
-        require(_idleCDO != address(0), NULL_ADDRESS());
-        // virtualPrice treats any unknown address as the BB tranche, so the tranche must be validated here
-        require(_tranche == IIdleCDO(_idleCDO).AATranche() || _tranche == IIdleCDO(_idleCDO).BBTranche(), COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE());
         IDLE_CDO = _idleCDO;
 
         // virtualPrice returns the value of one whole tranche token scaled to the CDO underlying token's decimals
@@ -53,14 +56,18 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
     }
 
     /**
-     * @notice Initializes the Idle CDO tranche virtual price to Chainlink (compatible) oracle composed collateral oracle
-     * @param _initialAuthority The initial authority for the oracle
-     * @param _minDeviationWAD The minimum relative deviation from the checkpointed virtual price that counts as an update, scaled to WAD precision (zero counts any change)
-     * @param _lastUpdate The admin-attested timestamp of the virtual price's last update (zero if unknown, which holds pricing and the execution gate shut until the first observed deviation)
+     * @notice Validates the CDO configuration and reads the CDO's live virtual price for the tranche, lifted to WAD precision
+     * @dev Static construction helper: it takes every input explicitly so the clock base's constructor can receive the baseline before this contract's immutables exist
+     * @dev Runs before every constructor body, so it carries the configuration sanity checks and their clean errors
+     * @param _idleCDO The Idle CDO to read the virtual price from
+     * @param _tranche The CDO tranche token whose virtual price is read
+     * @return priceWAD The tranche's virtual price in WAD precision
      */
-    function initialize(address _initialAuthority, uint256 _minDeviationWAD, uint32 _lastUpdate) external initializer {
-        __RoycoBase_init(_initialAuthority);
-        __OracleClockBase_init_unchained(_lastUpdate, _minDeviationWAD);
+    function _readVirtualPriceWAD(address _idleCDO, address _tranche) private view returns (uint256 priceWAD) {
+        require(_idleCDO != address(0), IRoycoAuth.NULL_ADDRESS());
+        // virtualPrice treats any unknown address as the BB tranche, so the tranche must be validated here
+        require(_tranche == IIdleCDO(_idleCDO).AATranche() || _tranche == IIdleCDO(_idleCDO).BBTranche(), COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE());
+        return IIdleCDO(_idleCDO).virtualPrice(_tranche) * (10 ** (WAD_DECIMALS - IERC20Metadata(IIdleCDO(_idleCDO).token()).decimals()));
     }
 
     /**

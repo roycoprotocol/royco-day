@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { NAV_UNIT, toUint256 } from "../../../src/libraries/Units.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
@@ -15,7 +14,6 @@ import { MockERC20C } from "../../mocks/MockERC20C.sol";
 import { MockERC4626C } from "../../mocks/MockERC4626C.sol";
 import { MockIdleCDO } from "../../mocks/MockIdleCDO.sol";
 import { MockMakinaMachine } from "../../mocks/MockMakinaMachine.sol";
-import { UninitializedERC1967Proxy } from "../../mocks/UninitializedERC1967Proxy.sol";
 
 /**
  * @title Test_CollateralOracles
@@ -40,12 +38,10 @@ contract Test_CollateralOracles is Test {
     MockERC20C internal aaTranche;
     MockERC20C internal cdoUnderlying;
     MockIdleCDO internal cdo;
-    AccessManager internal authority;
     IdleCDOTranchePriceOracle internal cdoOracle;
 
     function setUp() public {
         vm.warp(T0);
-        authority = new AccessManager(address(this));
 
         // ERC4626: an 18-decimal share over a 6-decimal reference asset, priced by an 8-decimal feed
         referenceAsset = new MockERC20C("NUSD", "NUSD", 6);
@@ -60,18 +56,16 @@ contract Test_CollateralOracles is Test {
         makinaOracle = new MakinaSharePriceOracle(address(machine), address(feed));
 
         // Idle CDO: an AA tranche over a 6-decimal underlying, virtual price in underlying decimals, composed
-        // with the shared feed and proxied like every RoycoBase contract with a zero deviation threshold
+        // with the shared feed as a fully immutable direct deployment with a zero deviation threshold
         aaTranche = new MockERC20C("AA_FalconXUSDC", "AA_FalconXUSDC", 18);
         cdoUnderlying = new MockERC20C("USDC", "USDC", 6);
         cdo = new MockIdleCDO(address(aaTranche), address(cdoUnderlying), 1.01e6);
         cdoOracle = _deployCDOOracle(address(aaTranche), 0);
     }
 
-    /// @dev Deploys the CDO tranche price oracle for the tranche behind a proxy with the specified deviation threshold
+    /// @dev Deploys the CDO tranche price oracle for the tranche with the specified deviation threshold and no attested checkpoint
     function _deployCDOOracle(address _tranche, uint256 _minDeviationWAD) internal returns (IdleCDOTranchePriceOracle oracle) {
-        IdleCDOTranchePriceOracle implementation = new IdleCDOTranchePriceOracle(address(cdo), _tranche, address(feed));
-        oracle = IdleCDOTranchePriceOracle(address(new UninitializedERC1967Proxy(address(implementation))));
-        oracle.initialize(address(authority), _minDeviationWAD, 0);
+        return new IdleCDOTranchePriceOracle(address(cdo), _tranche, address(feed), _minDeviationWAD, 0);
     }
 
     /*----------------------------------------------------------------------
@@ -189,7 +183,7 @@ contract Test_CollateralOracles is Test {
      * The composed price is the live virtual price times the feed price, but updatedAt comes from the clock
      * Derivation: virtual price 1.01e6 at the 6-decimal underlying lifts by 1e12 to 1.01e18 and feed 1.00005e8:
      * price = floor(1.01e18 * 100005000 / 1e8) = 1.0100505e18 exact. The virtual price still sits at the
-     * initialization baseline, so previewPoke and therefore updatedAt report the zero checkpoint, not the feed's T0-10
+     * construction baseline, so previewPoke and therefore updatedAt report the zero checkpoint, not the feed's T0-10
      */
     function test_IdleCDO_composesVirtualPriceWithFeed() public {
         feed.setAll(7, 1.00005e8, T0 - 50, T0 - 10, 9);
@@ -204,7 +198,7 @@ contract Test_CollateralOracles is Test {
      * virtual price deviation does, and getPrice's updatedAt keeps tracking the clock instead of the feed
      */
     function test_IdleCDO_pokeKeysOnVirtualPriceNotTheFeed() public {
-        assertEq(cdoOracle.poke(), 0, "the initialization baseline carries no update timestamp");
+        assertEq(cdoOracle.poke(), 0, "the construction baseline carries no update timestamp");
 
         // A fresh feed heartbeat is invisible to the clock: the tranche price has not moved
         vm.warp(T0 + 100);
@@ -267,18 +261,28 @@ contract Test_CollateralOracles is Test {
         assertEq(gated.poke(), T0 + 100, "a move at the threshold checkpoints");
     }
 
-    /// Construction wires the collateral identity against the CDO and rejects null or non-member configuration
+    /// Construction wires the collateral identity against the CDO, pins the immutable clock configuration, and
+    /// rejects null or non-member configuration through the static helper that runs before any constructor body
     function test_IdleCDO_constructionIdentityAndNullChecks() public {
         assertEq(cdoOracle.COLLATERAL_ASSET(), address(aaTranche), "the collateral asset is the configured CDO tranche");
         assertEq(cdoOracle.IDLE_CDO(), address(cdo), "the CDO is wired");
         assertEq(address(cdoOracle.ORACLE()), address(feed), "the feed is wired");
+        assertEq(cdoOracle.MIN_DEVIATION_WAD(), 0, "the deviation threshold is a construction immutable");
+        // The clock baselines at the live virtual price lifted to WAD (1.01e6 at 6 underlying decimals is 1.01e18)
+        (uint160 lastValue, uint32 lastUpdatedAt) = cdoOracle.getOracleClockState();
+        assertEq(lastValue, 1.01e18, "the clock baselines at the construction-time virtual price in WAD");
+        assertEq(lastUpdatedAt, 0, "a zero attested checkpoint stamps nothing");
         assertEq(cdoOracle.version(), 1, "version");
         assertEq(cdoOracle.description(), string.concat("AA_FalconXUSDC / ", feed.description()), "the description chains through the feed");
+        // The helper validates the CDO before any constructor body, so a null CDO fails its null check first
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new IdleCDOTranchePriceOracle(address(0), address(aaTranche), address(feed));
+        new IdleCDOTranchePriceOracle(address(0), address(aaTranche), address(feed), 0, 0);
         // The CDO's virtualPrice silently computes the BB price for any unknown address, so membership is checked
         vm.expectRevert(IdleCDOTranchePriceOracle.COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE.selector);
-        new IdleCDOTranchePriceOracle(address(cdo), makeAddr("NOT_A_TRANCHE"), address(feed));
+        new IdleCDOTranchePriceOracle(address(cdo), makeAddr("NOT_A_TRANCHE"), address(feed), 0, 0);
+        // The clock's threshold bound is enforced at construction like every other immutable
+        vm.expectRevert(OracleClockBase.INVALID_MIN_DEVIATION_WAD.selector);
+        new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 1e18, 0);
     }
 
     /// The oracle prices the BB (junior) tranche identically: virtualPrice works for either CDO tranche
@@ -292,32 +296,40 @@ contract Test_CollateralOracles is Test {
         assertEq(bbOracle.description(), string.concat("BB_FalconXUSDC / ", feed.description()), "the description reads the BB chain");
     }
 
-    /// The proxy initializes exactly once
-    function test_RevertIf_IdleCDO_initializedTwice() public {
-        vm.expectRevert();
-        cdoOracle.initialize(address(authority), 0, 0);
+    /// The oracle is a plain immutable contract: no initializer, no tick, no threshold setter, no fallback
+    function test_IdleCDO_hasNoAdminSurface() public {
+        (bool initOk,) = address(cdoOracle).call(abi.encodeWithSignature("initialize(address,uint256,uint32)", address(this), uint256(0), uint32(0)));
+        assertFalse(initOk, "the oracle is not a proxy and exposes no initializer");
+        (bool tickOk,) = address(cdoOracle).call(abi.encodeWithSignature("tick()"));
+        assertFalse(tickOk, "the removed tick selector must not be callable");
+        (bool setOk,) = address(cdoOracle).call(abi.encodeWithSignature("setMinDeviationWAD(uint256)", uint256(0.01e18)));
+        assertFalse(setOk, "the removed setMinDeviationWAD selector must not be callable");
     }
 
-    /// An attested initialization checkpoint seeds the clock, and a future one fails shut
-    function test_IdleCDO_initializationCheckpointSeedsTheClock() public {
-        IdleCDOTranchePriceOracle implementation = new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed));
-        IdleCDOTranchePriceOracle seeded = IdleCDOTranchePriceOracle(address(new UninitializedERC1967Proxy(address(implementation))));
-        seeded.initialize(address(authority), 0, uint32(T0 - 100));
+    /// An attested construction checkpoint seeds the clock, and a future one fails shut
+    function test_IdleCDO_constructionCheckpointSeedsTheClock() public {
+        IdleCDOTranchePriceOracle seeded = new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0, uint32(T0 - 100));
         assertEq(seeded.poke(), T0 - 100, "the attested checkpoint is the clock's starting update");
 
-        IdleCDOTranchePriceOracle future = IdleCDOTranchePriceOracle(address(new UninitializedERC1967Proxy(address(implementation))));
         vm.expectRevert(OracleClockBase.INVALID_LAST_UPDATE_TIMESTAMP.selector);
-        future.initialize(address(authority), 0, uint32(T0 + 1));
+        new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0, uint32(T0 + 1));
     }
 
-    /// The restricted tick escape hatch is inherited: an attested update unblocks the deviation blind spot
-    function test_IdleCDO_tickInherited() public {
-        address anyone = makeAddr("ANYONE");
-        vm.prank(anyone);
-        vm.expectRevert();
-        cdoOracle.tick();
+    /**
+     * The deviation blind spot fails shut: a virtual price republish the clock cannot observe holds the entry
+     * point's execution gate shut until the next observable deviation. The removed tick was a
+     * freshness-fabrication lever (it could stamp now with no genuine source update), so no caller can open the
+     * gate by fiat, and reconfiguration is a redeploy plus a kernel oracle repoint
+     */
+    function test_IdleCDO_blindSpotFailsShutWithoutTick() public {
         vm.warp(T0 + 100);
-        cdoOracle.tick();
-        assertEq(cdoOracle.poke(), T0 + 100, "the attested update stamps the clock");
+        assertEq(cdoOracle.poke(), 0, "an unchanged virtual price must never stamp the clock");
+        (bool tickOk,) = address(cdoOracle).call(abi.encodeWithSignature("tick()"));
+        assertFalse(tickOk, "no lever exists to stamp the blind spot");
+        assertEq(cdoOracle.poke(), 0, "the gate stays shut after the failed stamp attempt");
+
+        // The next observable deviation opens the gate at its observation time
+        cdo.setVirtualPrice(1.02e6);
+        assertEq(cdoOracle.poke(), T0 + 100, "the next observable deviation opens the gate");
     }
 }

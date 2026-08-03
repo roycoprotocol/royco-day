@@ -7,9 +7,7 @@ import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccount
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
 import { AssetClaims, MarketState, SyncedAccountingState, TrancheType } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
-import {
-    ERC4626_Chainlink_KernelSuite
-} from "../../kernels/ERC4626_Chainlink/base/ERC4626_Chainlink_KernelSuite.sol";
+import { ERC4626_Chainlink_KernelSuite } from "../../oracles/ERC4626_Chainlink/ERC4626_Chainlink_KernelSuite.sol";
 
 /**
  * @title Test_SeniorTrancheDepositWithdrawBase
