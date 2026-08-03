@@ -2,8 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { VIRTUAL_SHARES } from "../../../src/libraries/Constants.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
+import { VIRTUAL_SHARES } from "../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -33,6 +33,18 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
     // =============================
 
     /**
+     * @notice Every tranche share token reports WAD decimals regardless of its base asset's precision
+     * @dev Shares are priced and minted against NAV units which are always WAD, so the share precision is pinned
+     *      at 18 by construction, integrators reading decimals() for scaling must never see the asset's precision
+     */
+    function test_Decimals_AllTranchesReportWADPrecision() public {
+        _deployMarket(cellA(), defaultParams());
+        assertEq(seniorTranche.decimals(), 18, "senior shares must be WAD precision");
+        assertEq(juniorTranche.decimals(), 18, "junior shares must be WAD precision");
+        assertEq(liquidityProviderTranche.decimals(), 18, "liquidity provider shares must be WAD precision");
+    }
+
+    /**
      * @notice On a tranche with zero share supply, convertToAssets reports zero claims for any input, while
      *         convertToShares on the identical state returns the 1:1 bootstrap quote
      * @dev A share of an empty tranche is worth nothing, so the total conversion view reports zero claims for any
@@ -60,7 +72,9 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         assertEq(juniorTranche.convertToShares(toTrancheUnits(1e18)), 1e18, "the empty junior tranche must quote the 1:1 bootstrap mint without reverting");
         // The pool's genesis seed pins NAV-per-BPT at exactly 1.0, so 1e18 BPT is worth 1e18 NAV and mints 1:1
         assertEq(
-            liquidityProviderTranche.convertToShares(toTrancheUnits(1e18)), 1e18, "the empty liquidity provider tranche must quote the 1:1 bootstrap mint without reverting"
+            liquidityProviderTranche.convertToShares(toTrancheUnits(1e18)),
+            1e18,
+            "the empty liquidity provider tranche must quote the 1:1 bootstrap mint without reverting"
         );
     }
 
@@ -112,7 +126,9 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         uint256 totalSupply = liquidityProviderTranche.totalSupply();
 
         // With no minimum liquidity requirement there is no depth floor to protect, so the whole balance is redeemable
-        assertEq(liquidityProviderTranche.maxRedeem(LPT_PROVIDER), balance, "maxRedeem must report the full balance when no liquidity floor constrains the exit");
+        assertEq(
+            liquidityProviderTranche.maxRedeem(LPT_PROVIDER), balance, "maxRedeem must report the full balance when no liquidity floor constrains the exit"
+        );
 
         // Each payout leg is an independent pro-rata slice of the pre-redeem ledgers, scaled by the effective
         // supply (totalSupply + VIRTUAL_SHARES virtual shares) the claim scaler now carries

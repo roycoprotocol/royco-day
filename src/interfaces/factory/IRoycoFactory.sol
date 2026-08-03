@@ -62,7 +62,7 @@ interface IRoycoFactory {
     /// @notice Thrown when a factory-forwarded call targets the access manager, which is only administrable through the typed role primitives
     error FACTORY_CALL_TARGET_FORBIDDEN();
 
-    /// @notice Thrown when a template returns a deployment result with a zero tranche or kernel address
+    /// @notice Thrown when a template returns a deployment result without a kernel, a senior tranche, or at least one counterparty tranche (junior or liquidity provider)
     error INVALID_DEPLOYMENT_RESULT();
 
     /// @notice Thrown when index-aligned array arguments have mismatched lengths

@@ -401,6 +401,30 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         assertEq(seniorTranche.balanceOf(ST_PROVIDER), 100e18, "no share may be burned without the burner role");
         assertEq(seniorTranche.totalSupply(), supplyBefore, "the supply must be untouched");
     }
+
+    /**
+     * @notice Every restricted value-moving tranche entrypoint rejects a roleless caller with the caller-named
+     *         error: deposit, redeem, burn, and both LPT multi-asset entrypoints
+     * @dev The role matrix suite pins the selector-to-role bindings as views, this pins the behavioral revert so a
+     *      wiring regression that unbinds a selector to PUBLIC_ROLE cannot pass unnoticed
+     */
+    function test_RevertIf_RolelessCallerUsesRestrictedTrancheEntrypoints() public {
+        address attacker = makeAddr("ROLELESS_CALLER");
+        bytes memory unauthorized = abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, attacker);
+
+        vm.startPrank(attacker);
+        vm.expectRevert(unauthorized);
+        seniorTranche.deposit(toTrancheUnits(1e18), attacker);
+        vm.expectRevert(unauthorized);
+        seniorTranche.redeem(1e18, attacker, attacker);
+        vm.expectRevert(unauthorized);
+        seniorTranche.burn(1e18);
+        vm.expectRevert(unauthorized);
+        liquidityProviderTranche.depositMultiAsset(1e18, 1e18, 0, attacker);
+        vm.expectRevert(unauthorized);
+        liquidityProviderTranche.redeemMultiAsset(1e18, 0, 0, attacker, attacker);
+        vm.stopPrank();
+    }
 }
 
 /**

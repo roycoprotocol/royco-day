@@ -476,22 +476,25 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @param _liquidityProviderTranche The market's liquidity provider tranche
      */
     function _seedPool(MarketParams memory _params, address _liquidityProviderTranche) internal {
-        PoolInitializationParams memory init = _params.poolInitializationParams;
-        require(init.quoteAmount != 0, POOL_SEED_REQUIRED());
+        PoolInitializationParams memory initParams = _params.poolInitializationParams;
+        require(initParams.quoteAmount != 0, POOL_SEED_REQUIRED());
 
         // The deployment initiator funds the seed, held transiently by the factory for exactly this read
         address deployer = ROYCO_FACTORY.marketDeployer();
 
         // Pull each leg to the factory and approve the tranche for it. The tranche pulls from its caller, which is the factory.
-        _pullAndApproveSeedLeg(_params.quoteAsset, deployer, _liquidityProviderTranche, init.quoteAmount);
-        if (init.collateralAmount != 0) _pullAndApproveSeedLeg(_params.collateralAsset, deployer, _liquidityProviderTranche, init.collateralAmount);
+        _pullAndApproveSeedLeg(_params.quoteAsset, deployer, _liquidityProviderTranche, initParams.quoteAmount);
+        if (initParams.collateralAmount != 0) {
+            _pullAndApproveSeedLeg(_params.collateralAsset, deployer, _liquidityProviderTranche, initParams.collateralAmount);
+        }
 
         // Execute the deposit as the factory
         (uint256 lptShares,) = abi.decode(
             ROYCO_FACTORY.executeAsFactory(
                 _liquidityProviderTranche,
                 abi.encodeCall(
-                    RoycoLiquidityProviderTranche.depositMultiAsset, (init.collateralAmount, init.quoteAmount, init.minLPTAssetsOut, address(ROYCO_FACTORY))
+                    RoycoLiquidityProviderTranche.depositMultiAsset,
+                    (initParams.collateralAmount, initParams.quoteAmount, initParams.minLPTAssetsOut, address(ROYCO_FACTORY))
                 )
             ),
             (uint256, uint256)

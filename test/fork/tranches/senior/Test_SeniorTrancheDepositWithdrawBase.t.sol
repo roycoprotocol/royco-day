@@ -8,8 +8,8 @@ import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol"
 import { AssetClaims, MarketState, SyncedAccountingState, TrancheType } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import {
-    Identical_ERC4626_Chainlink_BalancerV3_LPT_KernelTest
-} from "../../kernels/Identical_ERC4626_Chainlink_BalancerV3_LPT/base/Identical_ERC4626_Chainlink_BalancerV3_LPT_KernelTest.sol";
+    ERC4626_Chainlink_BalancerV3_MarketTestBase
+} from "../../kernels/ERC4626_Chainlink_BalancerV3/base/ERC4626_Chainlink_BalancerV3_MarketTestBase.sol";
 
 /**
  * @title Test_SeniorTrancheDepositWithdrawBase
@@ -29,7 +29,7 @@ import {
  *      `simulate*` hooks move both legs together. FIXED_TERM / self-liquidation-bonus tests are therefore best-effort:
  *      they attempt to reach the target state and `vm.skip` (with a reason) if a symmetric-PnL market cannot get there.
  */
-abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Chainlink_BalancerV3_LPT_KernelTest {
+abstract contract Test_SeniorTrancheDepositWithdrawBase is ERC4626_Chainlink_BalancerV3_MarketTestBase {
     uint256 internal constant WAD = 1e18;
 
     // ─── senior helpers ──────────────────────────────────────────────────────

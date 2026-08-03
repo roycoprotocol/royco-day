@@ -2,20 +2,21 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
-import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
-import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 import { ADMIN_FACTORY_ROLE, ADMIN_ROLE, DEPLOYER_ROLE } from "../../../src/factory/Roles.sol";
+import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
+import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { MockDeploymentTemplate } from "../../mocks/MockDeploymentTemplate.sol";
 import { UninitializedERC1967Proxy } from "../../mocks/UninitializedERC1967Proxy.sol";
+import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 
 /// @title Test_FactoryTrancheRegistry
 /// @notice Pins how `RoycoFactory.executeMarketDeployment` validates a template's `DeploymentResult` and populates the
-///         tranche-to-kernel registry. Every market has all three tranches (senior, junior, liquidity), so a result
-///         missing the kernel or any required tranche is rejected
+///         tranche-to-kernel registry. Every market is anchored on a kernel, a senior tranche, and at least one
+///         counterparty tranche (junior or liquidity provider), which of the two is template-defined, so partial
+///         results register exactly their present tranches and the null address never enters the registry
 contract Test_FactoryTrancheRegistry is Test {
     RoycoAccessManager internal am;
     RoycoFactoryGatekeeper internal gatekeeper;
@@ -85,18 +86,17 @@ contract Test_FactoryTrancheRegistry is Test {
         factory.executeMarketDeployment(address(template), "");
     }
 
-    /// A template result without a liquidity provider tranche is rejected: every market has a liquidity provider tranche, so a result
-    /// missing it names no valid market
-    function test_ExecuteMarketDeployment_RevertIf_ResultHasNoLiquidityProviderTranche() external {
-        template.setDeploymentResult(_result(makeAddr("ST"), makeAddr("JT"), address(0), makeAddr("KERNEL")));
+    /// A senior-only result is rejected: senior capital needs a junior buffer or a liquidity venue to trade
+    /// against, so a result with neither counterparty tranche names no valid market
+    function test_ExecuteMarketDeployment_RevertIf_ResultHasNoCounterpartyTranche() external {
+        template.setDeploymentResult(_result(makeAddr("ST_ONLY"), address(0), address(0), makeAddr("KERNEL_ST_ONLY")));
         vm.prank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.INVALID_DEPLOYMENT_RESULT.selector);
         factory.executeMarketDeployment(address(template), "");
     }
 
-    /// A result without a junior tranche is accepted: the validation makes only the kernel, the senior tranche, and
-    /// the liquidity provider tranche mandatory, so a two-tranche market registers its present tranches
-    function test_ExecuteMarketDeployment_JuniorTrancheIsOptional() external {
+    /// A two-tranche result (no junior) registers its present tranches and never the null address
+    function test_ExecuteMarketDeployment_NoJuniorMarket_RegistersOnlyPresentTranches() external {
         address st = makeAddr("ST_NO_JT");
         address lt = makeAddr("LPT_NO_JT");
         address kernel = makeAddr("KERNEL_NO_JT");
@@ -104,6 +104,19 @@ contract Test_FactoryTrancheRegistry is Test {
 
         assertEq(factory.trancheToKernel(st), kernel, "senior key -> kernel");
         assertEq(factory.trancheToKernel(lt), kernel, "liquidity key -> kernel");
+        assertEq(factory.trancheToKernel(address(0)), address(0), "the null address must never resolve to a kernel");
+    }
+
+    /// A two-tranche result (no liquidity provider) registers its present tranches and never the null address
+    function test_ExecuteMarketDeployment_NoLiquidityProviderMarket_RegistersOnlyPresentTranches() external {
+        address st = makeAddr("ST_NO_LPT");
+        address jt = makeAddr("JT_NO_LPT");
+        address kernel = makeAddr("KERNEL_NO_LPT");
+        _deploy(_result(st, jt, address(0), kernel));
+
+        assertEq(factory.trancheToKernel(st), kernel, "senior key -> kernel");
+        assertEq(factory.trancheToKernel(jt), kernel, "junior key -> kernel");
+        assertEq(factory.trancheToKernel(address(0)), address(0), "the null address must never resolve to a kernel");
     }
 
     /// A complete result registers all three tranches (senior, junior, liquidity) against the market's kernel

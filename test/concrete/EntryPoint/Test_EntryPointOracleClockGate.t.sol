@@ -2,6 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { Vm } from "../../../lib/forge-std/src/Vm.sol";
+import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
+import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -287,6 +289,21 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
         vm.recordLogs();
         assertEq(entryPoint.pokeCollateralAssetOracle(address(juniorTranche)), 0, "an ungated tranche must report a zero timestamp");
         assertEq(vm.getRecordedLogs().length, 0, "an ungated poke must emit nothing");
+    }
+
+    /// @notice The public poke honors the entry point's pause: a paused entry point drives no oracle, and unpausing
+    ///         restores the surface, so the pause is a full stop on every mutating selector including the ungated one
+    function test_pokeCollateralAssetOracle_blockedWhileEntryPointPaused() public {
+        _setOracleGate(true);
+        vm.prank(PAUSER);
+        IRoycoAuth(address(entryPoint)).pause();
+
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        entryPoint.pokeCollateralAssetOracle(address(juniorTranche));
+
+        vm.prank(UNPAUSER);
+        IRoycoAuth(address(entryPoint)).unpause();
+        assertGt(entryPoint.pokeCollateralAssetOracle(address(juniorTranche)), 0, "the poke must serve again after unpausing");
     }
 
     function test_request_pokesOracleThroughKernelSync_circuitBreakerFailsRequestShut() public {

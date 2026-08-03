@@ -31,13 +31,29 @@ import { RoycoDayTestBase } from "../../utils/RoycoDayTestBase.sol";
 
 /**
  * @title Test_KernelSuiteBase
- * @notice The shared, config-driven base every Day kernel test extends. `setUp` reads the concrete kernel's `TestConfig`,
- *         forks the configured network, deploys the market end-to-end through the real `DeployScript` (via the concrete
+ * @notice The one exhaustive kernel suite every Day fork market runs. `setUp` reads the market's `TestConfig`,
+ *         forks the configured network, deploys the market end-to-end through the real `DeployScript` (via the
  *         `_deployKernelAndMarket` hook, which selects a market config by name from the config file), wires every deployed
  *         contract into member vars (including the Day-only LPT/pool/hook/LDM topology the script's result omits), and
- *         funds the ST/JT providers. Concrete kernel tests then only supply the per-kernel `IKernelTestHooks` and the market
- *         name, following an "abstract kernel test per kernel type" pattern.
+ *         funds the ST/JT providers. Shape bases plug in the market's mechanics and concretes plug in config.
  * @dev The shared tests live here on top of the scaffolding, grouped by flow: deposits, redemptions, syncs, adversarial.
+ * @dev New-integration recipe. A SHAPE base (one per collateral/oracle/venue shape) extends this suite and implements
+ *      the `IKernelTestHooks` mechanics plus the internal seams:
+ *      - `simulateSTYield`/`simulateJTYield`/`simulateSTLoss`/`simulateJTLoss` must move the tranche's RAW NAV by the
+ *        stated signed WAD fraction, the suite asserts on realized post-sync numbers so an approximate move fails
+ *      - `dealSTAsset`/`dealJTAsset`/`dealQuoteAsset` must fund real tokens in each asset's own decimals, the quote
+ *        deal must no-op when the market has no LPT
+ *      - `_refreshOraclesAfterWarp` must leave every time-sensitive oracle quoting fresh at the post-warp timestamp
+ *        so admin-op warps never brick the market on staleness
+ *      - `_requiresTimeWarpForYield` must say whether yield realization needs a warp (true for rebasing/streaming)
+ *      - `_oracleStalenessSelector` must return the venue's staleness error selector, `bytes4(0)` skips that test
+ *      - `_initializeLPTVenueIfNeeded` must one-time bootstrap the LPT venue before the first entry, no-op if none
+ *      - `_trySetReinvestmentSlippage` needs an override only when the default setter signature does not match
+ *      A CONCRETE market file extends the shape base and supplies config only: `getTestConfig`,
+ *      `_deployKernelAndMarket` (market name into the real `DeployScript`), the `maxTrancheUnitDelta`/`maxNAVDelta`
+ *      rounding tolerances, and any addresses the shape base declares (for example the base->NAV feed).
+ *      Layering rule: kernel-behavior assertions live ONLY in this suite base, shape mechanics live ONLY in shape
+ *      bases, concretes carry zero assertions.
  */
 abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /// @notice The concrete kernel's static test configuration (assets, fork, funding).
@@ -60,7 +76,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     IVault internal VAULT;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // HOOKS IMPLEMENTED BY CONCRETE KERNEL TESTS / PER-KERNEL-TYPE BASES
+    // HOOKS IMPLEMENTED BY SHAPE BASES / CONCRETE MARKET FILES
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Deploys the kernel + market for this test, typically `DEPLOY_SCRIPT.deploy(getMarketConfig("<name>"), ...)`.
