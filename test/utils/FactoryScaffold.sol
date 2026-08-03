@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import { RoycoBlacklist } from "../../src/auth/RoycoBlacklist.sol";
 import { RoycoAccessManager } from "../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { RoycoCreate3Deployer } from "../../src/factory/RoycoCreate3Deployer.sol";
@@ -90,6 +91,22 @@ library FactoryScaffold {
         _accessManager.grantRole(SYNC_ROLE, _factory, 0);
         // The genesis pool seed is a role-gated deposit the template forwards as the factory
         _accessManager.grantRole(LPT_LP_ROLE, _factory, 0);
+    }
+
+    /**
+     * @notice Stands up the chain's blacklist singleton the way `Deploy.s.sol._deployBlacklist` does
+     * @dev The template pins one blacklist for every market it deploys and rejects the null address, so a fixture that
+     *      builds a template by hand needs a real one. Deployed with no sanctions list and an empty initial set, which
+     *      is what the script does too: the Chainalysis list is wired later by an ops script
+     * @param _accessManager The access manager governing the blacklist's admin surface
+     * @return blacklist The initialized blacklist proxy
+     */
+    function deployBlacklist(RoycoAccessManager _accessManager) internal returns (address blacklist) {
+        blacklist = address(
+            new ERC1967Proxy(
+                address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(_accessManager), address(0), new address[](0)))
+            )
+        );
     }
 
     function _one(bytes4 _selector) private pure returns (bytes4[] memory selectors) {

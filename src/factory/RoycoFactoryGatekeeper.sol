@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { IRoycoAccessManager } from "../interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactoryGatekeeper } from "../interfaces/factory/IRoycoFactoryGatekeeper.sol";
-import { BURNER_ROLE, SYNC_ROLE } from "./Roles.sol";
+import { ADMIN_ROLE, BURNER_ROLE, PUBLIC_ROLE, SYNC_ROLE } from "./Roles.sol";
 
 /**
  * @title RoycoFactoryGatekeeper
@@ -56,6 +56,7 @@ contract RoycoFactoryGatekeeper is IRoycoFactoryGatekeeper {
         AccessManager accessManager = AccessManager(ROYCO_ACCESS_MANAGER);
         bytes4[] memory selector = new bytes4[](1);
         for (uint256 i; i < numSelectorsToBind; ++i) {
+            require(_roleIds[i] != PUBLIC_ROLE && _roleIds[i] != ADMIN_ROLE, ROLE_FORBIDDEN(_roleIds[i]));
             selector[0] = _selectors[i];
             accessManager.setTargetFunctionRole(_target, selector, _roleIds[i]);
         }

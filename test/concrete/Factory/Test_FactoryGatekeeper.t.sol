@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
-import { ADMIN_ROLE, BURNER_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ROLE, BURNER_ROLE, PUBLIC_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
 
 /**
@@ -37,11 +37,19 @@ contract Test_FactoryGatekeeper is Test {
         gatekeeper.configureFreshTarget(_target, _selectors, _roleIds);
     }
 
+    /// @dev Neither role may be ADMIN_ROLE or PUBLIC_ROLE: `configureFreshTarget` rejects both outright
     function _two() internal pure returns (bytes4[] memory selectors, uint64[] memory roleIds) {
         selectors = new bytes4[](2);
         roleIds = new uint64[](2);
         (selectors[0], roleIds[0]) = (SELECTOR_A, SYNC_ROLE);
-        (selectors[1], roleIds[1]) = (SELECTOR_B, ADMIN_ROLE);
+        (selectors[1], roleIds[1]) = (SELECTOR_B, ST_LP_ROLE);
+    }
+
+    /// @dev One selector bound to an arbitrary role, for the role-value rejection tests
+    function _one(uint64 _roleId) internal pure returns (bytes4[] memory selectors, uint64[] memory roleIds) {
+        selectors = new bytes4[](1);
+        roleIds = new uint64[](1);
+        (selectors[0], roleIds[0]) = (SELECTOR_A, _roleId);
     }
 
     // ---------------------------------------------------------------------
@@ -56,7 +64,7 @@ contract Test_FactoryGatekeeper is Test {
         _bind(FRESH_TARGET, selectors, roleIds);
 
         assertEq(am.getTargetFunctionRole(FRESH_TARGET, SELECTOR_A), SYNC_ROLE, "the first selector must be bound");
-        assertEq(am.getTargetFunctionRole(FRESH_TARGET, SELECTOR_B), ADMIN_ROLE, "the second selector must be bound");
+        assertEq(am.getTargetFunctionRole(FRESH_TARGET, SELECTOR_B), ST_LP_ROLE, "the second selector must be bound");
         assertTrue(am.wasEverConfigured(FRESH_TARGET), "configuring a target must record it");
     }
 
@@ -290,5 +298,38 @@ contract Test_FactoryGatekeeper is Test {
         am.setTargetFunctionRole(FRESH_TARGET, rebind, ADMIN_ROLE);
         assertEq(am.getTargetFunctionRole(FRESH_TARGET, SELECTOR_A), ADMIN_ROLE, "governance must retain a direct reconfiguration path");
     }
-}
 
+    // ---------------------------------------------------------------------
+    // Role-value gating
+    // ---------------------------------------------------------------------
+
+    /**
+     * @notice A market's bindings gate admin surfaces, so PUBLIC_ROLE is never legitimate: it would leave the selector
+     *         callable by anyone. Enforced here rather than only in a template, so no template can bind around it
+     */
+    function test_RevertIf_configureFreshTargetBindsPublicRole() public {
+        (bytes4[] memory selectors, uint64[] memory roleIds) = _one(PUBLIC_ROLE);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, PUBLIC_ROLE));
+        _bind(FRESH_TARGET, selectors, roleIds);
+    }
+
+    /// @notice ADMIN_ROLE is the access manager's super-admin, equally never a gate a market deployment should install
+    function test_RevertIf_configureFreshTargetBindsAdminRole() public {
+        (bytes4[] memory selectors, uint64[] memory roleIds) = _one(ADMIN_ROLE);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, ADMIN_ROLE));
+        _bind(FRESH_TARGET, selectors, roleIds);
+    }
+
+    /// @notice A forbidden role anywhere in the set rejects the whole call, leaving the target unconfigured and still fresh
+    function test_RevertIf_configureFreshTargetBindsAForbiddenRoleAfterAValidOne() public {
+        bytes4[] memory selectors = new bytes4[](2);
+        uint64[] memory roleIds = new uint64[](2);
+        (selectors[0], roleIds[0]) = (SELECTOR_A, SYNC_ROLE);
+        (selectors[1], roleIds[1]) = (SELECTOR_B, PUBLIC_ROLE);
+
+        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, PUBLIC_ROLE));
+        _bind(FRESH_TARGET, selectors, roleIds);
+
+        assertFalse(am.wasEverConfigured(FRESH_TARGET), "a rejected binding must not consume the target's one-time freshness");
+    }
+}

@@ -35,6 +35,7 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     DEPLOYER_ROLE,
+    PUBLIC_ROLE,
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
@@ -42,7 +43,7 @@ import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
-import { TAG_JT_PROXY } from "../../../src/factory/templates/base/Constants.sol";
+import { TAG_JT_PROXY, TAG_ST_PROXY } from "../../../src/factory/templates/base/Constants.sol";
 import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/EntryPointConfigurer.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
@@ -50,7 +51,9 @@ import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol
 import { IRoycoAccessManager } from "../../../src/interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
+import { MarketDeploymentValidationLogic } from "../../../src/libraries/logic/factory/MarketDeploymentValidationLogic.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
+import { OracleClockBase } from "../../../src/oracle/base/clock/OracleClockBase.sol";
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
@@ -76,6 +79,9 @@ contract Test_RoycoFactory is Test {
     RoycoDayBalancerV3MarketDeploymentTemplate internal template;
     IRoycoDayEntryPoint internal entryPoint;
     RoycoMarketSyncer internal syncer;
+
+    /// @dev The chain's blacklist singleton, pinned into the template at construction
+    address internal roycoBlacklist;
 
     address internal FACTORY_ADMIN = makeAddr("FACTORY_ADMIN");
     address internal DEPLOYER = makeAddr("DEPLOYER");
@@ -103,6 +109,9 @@ contract Test_RoycoFactory is Test {
         // and the factory each hold the other as a constructor immutable. The scaffold stands both up and binds the
         // factory's own selectors and roles, exactly as the deployment script does.
         (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
+
+        // Every market the template deploys screens against this one blacklist, and the template rejects a null one
+        roycoBlacklist = FactoryScaffold.deployBlacklist(am);
 
         // Grant the factory-facing roles the scaffold bound to the factory's selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
@@ -142,7 +151,7 @@ contract Test_RoycoFactory is Test {
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
         template = RoycoDayBalancerV3MarketDeploymentTemplate(
             deployScript.deployTemplateForTest(
-                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer)
+                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer), roycoBlacklist
             )
         );
 
@@ -184,7 +193,7 @@ contract Test_RoycoFactory is Test {
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
         _fundPoolSeed(cfg);
-        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
+        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT));
     }
 
     /// @dev The `deploy()` flow resolves an unset config oracle itself; the direct-template path must supply it, so
@@ -219,7 +228,7 @@ contract Test_RoycoFactory is Test {
         cfg.minCoverageWAD = 0;
         cfg.poolInitialization.collateralAmount = 10_000e18;
         _fundPoolSeed(cfg);
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT, address(0)));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -362,7 +371,7 @@ contract Test_RoycoFactory is Test {
         RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(address(otherFactory));
         RoycoDayBalancerV3MarketDeploymentTemplate foreign = RoycoDayBalancerV3MarketDeploymentTemplate(
             deployScript.deployTemplateForTest(
-                IRoycoFactory(address(otherFactory)), deployScript.getMarketConfig("snUSD"), address(foreignEntryPoint), address(syncer)
+                IRoycoFactory(address(otherFactory)), deployScript.getMarketConfig("snUSD"), address(foreignEntryPoint), address(syncer), roycoBlacklist
             )
         );
         vm.prank(FACTORY_ADMIN);
@@ -385,6 +394,7 @@ contract Test_RoycoFactory is Test {
             bptOracleConstantPriceFeed: template.BPT_ORACLE_CONSTANT_PRICE_FEED(),
             roycoDayEntryPoint: address(foreignEntryPoint),
             roycoMarketSyncer: address(syncer),
+            roycoBlacklist: template.ROYCO_BLACKLIST(),
             seniorTrancheBeacon: template.SENIOR_TRANCHE_BEACON(),
             juniorTrancheBeacon: template.JUNIOR_TRANCHE_BEACON(),
             liquidityProviderTrancheBeacon: template.LIQUIDITY_PROVIDER_TRANCHE_BEACON(),
@@ -621,7 +631,7 @@ contract Test_RoycoFactory is Test {
         _fundPoolSeed(staticCfg);
         staticCfg.ydmType = YDMType.StaticCurve;
         bytes32 staticId = MARKET_ID_C;
-        bytes memory p = abi.encode(deployScript.buildMarketParams(staticCfg, staticId, PROTOCOL_FEE_RECIPIENT, address(0)));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(staticCfg, staticId, PROTOCOL_FEE_RECIPIENT));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory s = factory.executeMarketDeployment(address(template), p);
         assertTrue(s.ydm != a.ydm, "a different YDM model must not share the adaptive markets' JT YDM instance");
@@ -881,7 +891,7 @@ contract Test_RoycoFactory is Test {
         _fundPoolSeed(cfg);
         cfg.ydmType = YDMType.StaticCurve;
         bytes32 marketId = MARKET_ID_A;
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -914,7 +924,7 @@ contract Test_RoycoFactory is Test {
         cfg.ydmSpecificParams = v1Params;
         cfg.lptYdmSpecificParams = v1Params;
         bytes32 marketId = MARKET_ID_A;
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -926,7 +936,246 @@ contract Test_RoycoFactory is Test {
         assertEq(r.lptYdm.codehash, address(refLptV1).codehash, "configured AdaptiveCurve_V1, lptYdm must be AdaptiveCurveYDM_V1");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARKET PARAM VALIDATION
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev A funded, oracle-resolved param set for MARKET_ID_A, ready for a test to corrupt one field of
+    function _validParams() internal returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory) {
+        MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
+        _fundPoolSeed(cfg);
+        return deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT);
+    }
+
+    /// @dev Runs a deployment expected to revert with `_err` from the params validation
+    /// @dev Partial matching: several of these errors carry the offending address or role id, and the point of each
+    ///      test is which check fired, not the argument it echoed back
+    function _expectParamsRevert(RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory _params, bytes4 _err) internal {
+        _register();
+        vm.prank(DEPLOYER);
+        vm.expectPartialRevert(_err);
+        factory.executeMarketDeployment(address(template), abi.encode(_params));
+    }
+
+    /// The market's two assets must both be live contracts and must be distinct, else the pool is not a two-token pool
+    function test_RevertIf_CollateralAssetIsNull() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.collateralAsset = address(0);
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.NULL_MARKET_PARAMETER.selector);
+    }
+
+    function test_RevertIf_QuoteAssetHasNoCode() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.quoteAsset = makeAddr("NOT_A_TOKEN");
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.MARKET_PARAMETER_HAS_NO_CODE.selector);
+    }
+
+    function test_RevertIf_CollateralAndQuoteAssetAreIdentical() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.quoteAsset = p.collateralAsset;
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.COLLATERAL_AND_QUOTE_ASSET_IDENTICAL.selector);
+    }
+
+    function test_RevertIf_CollateralAssetOracleHasNoCode() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.collateralAssetOracle = makeAddr("NOT_AN_ORACLE");
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.MARKET_PARAMETER_HAS_NO_CODE.selector);
+    }
+
+    /// A null sequencer feed is the documented "not an L2" case, but a non-null one must be a live contract
+    function test_RevertIf_SequencerUptimeFeedHasNoCode() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.sequencerUptimeFeed = makeAddr("NOT_A_FEED");
+        p.gracePeriodSeconds = 1 hours;
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.MARKET_PARAMETER_HAS_NO_CODE.selector);
+    }
+
+    /// Same rule for the quote leg's rate provider, which becomes a live `IRateProvider` on the pool
+    function test_RevertIf_QuoteAssetRateProviderHasNoCode() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.poolCreationParams.quoteAssetRateProvider = makeAddr("NOT_A_RATE_PROVIDER");
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.MARKET_PARAMETER_HAS_NO_CODE.selector);
+    }
+
+    /// The fee recipient is normally an EOA or multisig, so only the null address is rejected
+    function test_RevertIf_ProtocolFeeRecipientIsNull() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.protocolFeeRecipient = address(0);
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.NULL_MARKET_PARAMETER.selector);
+    }
+
+    function test_RevertIf_TrancheNameIsEmpty() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.jtParams.name = "";
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.EMPTY_TRANCHE_NAME_OR_SYMBOL.selector);
+    }
+
+    /// The genesis seed's quote leg is mandatory, and is now rejected up front rather than after the market is built
+    function test_RevertIf_PoolSeedQuoteAmountIsZero() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.poolInitializationParams.quoteAmount = 0;
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.POOL_SEED_REQUIRED.selector);
+    }
+
+    /// Each tranche selects its model shape by name, and the empty name is never a registered shape
+    function test_RevertIf_YdmTypeIsEmpty() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.lptYdmType = "";
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.EMPTY_YDM_TYPE.selector);
+    }
+
+    /// Each model instance decodes its own initialization blob, so an empty one can never initialize it
+    function test_RevertIf_YdmInitializationDataIsEmpty() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.accountantParams.jtYDMInitializationData = "";
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.EMPTY_YDM_INITIALIZATION_DATA.selector);
+    }
+
+    /// The pool token is a live ERC20 in its own right
+    function test_RevertIf_PoolSymbolIsEmpty() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.poolCreationParams.symbol = "";
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.EMPTY_POOL_NAME_OR_SYMBOL.selector);
+    }
+
+    /// A swap fee is a percentage of the swap, so it cannot exceed 100%
+    function test_RevertIf_SwapFeeExceedsOneHundredPercent() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.poolCreationParams.swapFeePercentage = 1e18 + 1;
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_SWAP_FEE.selector);
+    }
+
+    /// An inverted E-CLP price range is not an interval, and would produce a nonsensical curve
+    function test_RevertIf_EclpPriceRangeIsInverted() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        (p.poolCreationParams.eclpParams.alpha, p.poolCreationParams.eclpParams.beta) =
+            (p.poolCreationParams.eclpParams.beta, p.poolCreationParams.eclpParams.alpha);
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_ECLP_PRICE_RANGE.selector);
+    }
+
+    /// Protocol fees are percentages of the yield they are taken from
+    function test_RevertIf_ProtocolFeeExceedsTheMaximum() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.accountantParams.stProtocolFeeWAD = uint64(1e18) + 1;
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_ACCOUNTANT_CONFIG.selector);
+    }
+
+    /// Coverage must demand less than the whole senior exposure
+    function test_RevertIf_MinCoverageIsNotBelowWad() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.accountantParams.minCoverageWAD = uint64(1e18);
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_ACCOUNTANT_CONFIG.selector);
+    }
+
+    /// Both premiums are carved out of senior appreciation, so together they cannot exceed it
+    function test_RevertIf_MaxYieldSharesSumAboveWad() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.accountantParams.maxJTYieldShareWAD = uint64(1e18);
+        p.accountantParams.maxLPTYieldShareWAD = 1;
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_ACCOUNTANT_CONFIG.selector);
+    }
+
+    /**
+     * @notice The seed is the market's first deposit, so its junior tranche is empty. A collateral leg mints senior
+     *         shares against that empty junior, which breaches any nonzero coverage floor deep inside the accounting
+     *         sync — this rejects it up front with a message that says what is actually wrong
+     */
+    function test_RevertIf_CollateralSeedOnAMarketWithACoverageFloor() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.poolInitializationParams.collateralAmount = 1e18;
+        p.accountantParams.minCoverageWAD = 0.1e18;
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.COLLATERAL_SEED_REQUIRES_ZERO_MIN_COVERAGE.selector);
+    }
+
+    /// The oracle binding arrays are index-aligned; today the mismatch is only caught after the market is deployed
+    function test_RevertIf_OracleBindingArraysAreNotIndexAligned() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.collateralAssetOracleBindingRoleIds = new uint64[](p.collateralAssetOracleBindingSelectors.length + 1);
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.ORACLE_BINDING_LENGTH_MISMATCH.selector);
+    }
+
+    /// PUBLIC_ROLE on an oracle's admin surface would open it to everyone
+    function test_RevertIf_OracleBindingUsesPublicRole() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.collateralAssetOracleBindingSelectors = new bytes4[](1);
+        p.collateralAssetOracleBindingSelectors[0] = OracleClockBase.tick.selector;
+        p.collateralAssetOracleBindingRoleIds = new uint64[](1);
+        p.collateralAssetOracleBindingRoleIds[0] = PUBLIC_ROLE;
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.ORACLE_BINDING_ROLE_FORBIDDEN.selector);
+    }
+
+    /// ADMIN_ROLE would reserve it to the access manager's super-admin, which is equally never intended
+    function test_RevertIf_OracleBindingUsesAdminRole() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.collateralAssetOracleBindingSelectors = new bytes4[](1);
+        p.collateralAssetOracleBindingSelectors[0] = OracleClockBase.tick.selector;
+        p.collateralAssetOracleBindingRoleIds = new uint64[](1);
+        p.collateralAssetOracleBindingRoleIds[0] = ADMIN_ROLE;
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.ORACLE_BINDING_ROLE_FORBIDDEN.selector);
+    }
+
+    /// The whole point of validating up front: a rejected deployment must leave no component behind, and must not
+    /// consume any AccessManager target's one-time `wasEverConfigured` freshness
+    function test_ParamsValidation_RunsBeforeAnyComponentIsDeployed() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.protocolFeeRecipient = address(0);
+
+        address predictedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", MARKET_ID_A, TAG_ST_PROXY)));
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.NULL_MARKET_PARAMETER.selector);
+        assertEq(predictedST.code.length, 0, "a rejected deployment must not have deployed the senior tranche");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BLACKLIST
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// The blacklist is the template's, not the market's: every market it deploys reads back exactly the pinned one
+    function test_ExecuteMarketDeployment_KernelReadsBackTheTemplatesBlacklist() external {
+        _register();
+        IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(MARKET_ID_A);
+        assertEq(template.ROYCO_BLACKLIST(), roycoBlacklist, "the template must pin the blacklist it was constructed with");
+        assertEq(IRoycoDayKernel(r.kernel).getState().roycoBlacklist, roycoBlacklist, "the market's kernel must screen against the template's blacklist");
+    }
+
+    /// Screening is mandatory: a template cannot be constructed without a blacklist, so no market can opt out of it
+    function test_RevertIf_TemplateConstructedWithNullBlacklist() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _templateConstructionParams();
+        cp.roycoBlacklist = address(0);
+        vm.expectRevert(RoycoDayBalancerV3MarketDeploymentTemplate.NULL_CONSTRUCTION_PARAMETER.selector);
+        new RoycoDayBalancerV3MarketDeploymentTemplate(cp);
+    }
+
+    /// An EOA passes the non-null check but could never screen anything, so it is rejected separately
+    function test_RevertIf_TemplateConstructedWithCodelessBlacklist() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _templateConstructionParams();
+        cp.roycoBlacklist = makeAddr("NOT_A_BLACKLIST");
+        vm.expectRevert(
+            abi.encodeWithSelector(RoycoDayBalancerV3MarketDeploymentTemplate.CONSTRUCTION_PARAMETER_HAS_NO_CODE.selector, cp.roycoBlacklist)
+        );
+        new RoycoDayBalancerV3MarketDeploymentTemplate(cp);
+    }
+
     // ─── internal ───
+
+    /// @dev The chain-wide construction params read off the known-good template from `setUp`, for a construction test
+    ///      to corrupt one field of
+    function _templateConstructionParams() internal view returns (RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory) {
+        return RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams({
+            factory: IRoycoFactory(address(factory)),
+            balancerV3PoolFactory: template.BALANCER_V3_POOL_FACTORY(),
+            eclpLPOracleFactory: template.ECLP_LP_ORACLE_FACTORY(),
+            bptOracleConstantPriceFeed: template.BPT_ORACLE_CONSTANT_PRICE_FEED(),
+            roycoDayEntryPoint: address(entryPoint),
+            roycoMarketSyncer: address(syncer),
+            roycoBlacklist: template.ROYCO_BLACKLIST(),
+            seniorTrancheBeacon: template.SENIOR_TRANCHE_BEACON(),
+            juniorTrancheBeacon: template.JUNIOR_TRANCHE_BEACON(),
+            liquidityProviderTrancheBeacon: template.LIQUIDITY_PROVIDER_TRANCHE_BEACON(),
+            kernelBeacon: template.KERNEL_BEACON(),
+            accountantBeacon: template.ACCOUNTANT_BEACON()
+        });
+    }
 
     function _emptyResult() internal pure returns (IRoycoProtocolTemplate.DeploymentResult memory r) {
         r; // zero-initialized; only used for event topic matching (data not checked)

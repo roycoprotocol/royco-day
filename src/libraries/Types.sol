@@ -152,4 +152,3 @@ function toRedemptionOperation(TrancheType _trancheType) pure returns (Operation
     else if (_trancheType == TrancheType.JUNIOR) return Operation.JT_REDEMPTION;
     else return Operation.LPT_REDEMPTION;
 }
-

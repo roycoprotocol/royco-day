@@ -76,6 +76,7 @@ import { IRoycoDayEntryPoint } from "../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
+import { IBaseTemplate } from "../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoAccessManager } from "../src/interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
@@ -270,7 +271,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         }
 
         // Register (or reuse) the Day template for this kernel type.
-        s.template = _getOrRegisterTemplate(s.factory, _config, s.entryPoint, s.marketSyncer);
+        s.template = _getOrRegisterTemplate(s.factory, _config, s.entryPoint, s.marketSyncer, s.roycoBlacklist);
 
         // Register the yield distribution models on the template and open its admin surface. Both are chain-wide and
         // must land before the deployer renounces its admin roles.
@@ -444,7 +445,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (_config.collateralAssetOracle == address(0)) {
             _config.collateralAssetOracle = _deployCollateralAssetOracle(_config, marketId, address(_s.accessManager));
         }
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params = _buildMarketParams(_config, marketId, _protocolFeeRecipient, _s.roycoBlacklist);
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params = _buildMarketParams(_config, marketId, _protocolFeeRecipient);
 
         // The template pulls the market's genesis pool liquidity from the account calling the factory's deployment
         // entrypoint (the broadcasting deployer here), so approve the template from inside the broadcast
@@ -535,13 +536,14 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         RoycoFactory _factory,
         MarketConfig memory _config,
         address _entryPoint,
-        address _marketSyncer
+        address _marketSyncer,
+        address _roycoBlacklist
     )
         internal
         returns (address template)
     {
         bool existed;
-        (template, existed) = _deployTemplate(IRoycoFactory(address(_factory)), _config, _entryPoint, _marketSyncer);
+        (template, existed) = _deployTemplate(IRoycoFactory(address(_factory)), _config, _entryPoint, _marketSyncer, _roycoBlacklist);
         if (!_factory.isTemplateEnabled(template)) _factory.registerTemplate(template);
         _logDeploy("Template           ", template, existed);
     }
@@ -555,12 +557,13 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         IRoycoFactory _factory,
         MarketConfig memory _config,
         address _entryPoint,
-        address _marketSyncer
+        address _marketSyncer,
+        address _roycoBlacklist
     )
         public
         returns (address template)
     {
-        (template,) = _deployTemplate(_factory, _config, _entryPoint, _marketSyncer);
+        (template,) = _deployTemplate(_factory, _config, _entryPoint, _marketSyncer, _roycoBlacklist);
     }
 
     /**
@@ -585,14 +588,13 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     function buildMarketParams(
         MarketConfig memory _config,
         bytes32 _marketId,
-        address _protocolFeeRecipient,
-        address _roycoBlacklist
+        address _protocolFeeRecipient
     )
         public
         pure
         returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory)
     {
-        return _buildMarketParams(_config, _marketId, _protocolFeeRecipient, _roycoBlacklist);
+        return _buildMarketParams(_config, _marketId, _protocolFeeRecipient);
     }
 
     /**
@@ -604,7 +606,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         IRoycoFactory _factory,
         MarketConfig memory _config,
         address _entryPoint,
-        address _marketSyncer
+        address _marketSyncer,
+        address _roycoBlacklist
     )
         internal
         returns (address template, bool existed)
@@ -619,6 +622,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         cp.eclpLPOracleFactory = ILPOracleFactoryBase(chainConfig.eclpLPOracleFactory);
         cp.roycoDayEntryPoint = _entryPoint;
         cp.roycoMarketSyncer = _marketSyncer;
+        cp.roycoBlacklist = _roycoBlacklist;
 
         (template, existed) = deployWithSanityChecks(
             _singletonSalt(string.concat("ROYCO_DAY_BALANCER_V3_TEMPLATE_", vm.toString(keccak256(abi.encode(cp))))),
@@ -724,8 +728,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     function _buildMarketParams(
         MarketConfig memory _config,
         bytes32 _marketId,
-        address _protocolFeeRecipient,
-        address _roycoBlacklist
+        address _protocolFeeRecipient
     )
         internal
         pure
@@ -733,21 +736,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     {
         params.marketId = _marketId;
 
-        // Tranche init params carry only the token name and symbol: the template injects the market authority, the
-        // kernel, and each tranche's underlying asset, all of which are deployment-derived.
-        params.stParams = IRoycoVaultTranche.RoycoTrancheInitParams({
-            name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol, initialAuthority: address(0), kernel: address(0), asset: address(0)
-        });
-        params.jtParams = IRoycoVaultTranche.RoycoTrancheInitParams({
-            name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, initialAuthority: address(0), kernel: address(0), asset: address(0)
-        });
-        params.lptParams = IRoycoVaultTranche.RoycoTrancheInitParams({
-            name: _config.liquidityProviderTrancheName,
-            symbol: _config.liquidityProviderTrancheSymbol,
-            initialAuthority: address(0),
-            kernel: address(0),
-            asset: address(0)
-        });
+        params.stParams = IBaseTemplate.TrancheDeploymentParams({ name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol });
+        params.jtParams = IBaseTemplate.TrancheDeploymentParams({ name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol });
+        params.lptParams = IBaseTemplate.TrancheDeploymentParams({ name: _config.liquidityProviderTrancheName, symbol: _config.liquidityProviderTrancheSymbol });
         params.collateralAsset = _config.collateralAsset;
         params.quoteAsset = _config.gyroECLPPoolParams.quoteAsset;
 
@@ -770,19 +761,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.jtYdmType = ydmTypeName(_config.ydmType);
         params.lptYdmType = ydmTypeName(_config.ydmType);
 
-        // Accountant init params. `jtYDM`/`lptYDM` are overwritten by the template with the deployed instances. BOTH YDMs get
+        // Accountant params. The template resolves both model instances from its registry by shape name. BOTH YDMs get
         // initialization data so the accountant initializes each of them. The LPT premium/liquidity overlay is at its zero
         // baseline (LPT service off) — but the LDM is still deployed, initialized, and distinct from the JT YDM.
-        params.accountantParams = IRoycoDayAccountant.RoycoDayAccountantInitParams({
-            kernel: address(0),
-            initialAuthority: address(0),
+        params.accountantParams = IBaseTemplate.AccountantDeploymentParams({
             fixedTermGracePeriodSeconds: _config.fixedTermGracePeriodSeconds,
             minCoverageWAD: _config.minCoverageWAD,
             coverageLiquidationUtilizationWAD: _config.coverageLiquidationUtilizationWAD,
             minLiquidityWAD: 0,
-            jtYDM: address(0),
             jtYDMInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams),
-            lptYDM: address(0),
             lptYDMInitializationData: _buildYDMInitializationData(_config.ydmType, _config.lptYdmSpecificParams),
             maxJTYieldShareWAD: uint64(1e18), // uncapped at the WAD ceiling; the real JT cap comes from the JT YDM curve
             maxLPTYieldShareWAD: 0, // LPT liquidity premium disabled in the baseline
@@ -794,10 +781,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             lptYieldShareProtocolFeeWAD: 0
         });
 
-        params.kernelSpecificParams = _config.kernelSpecificParams; // the venue init params blob (IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams)
+        params.kernelSpecificParams = _config.kernelSpecificParams; // the venue params blob (BalancerV3LiquidityVenueDeploymentParams)
         params.protocolFeeRecipient = _protocolFeeRecipient;
         params.stSelfLiquidationBonusWAD = _config.stSelfLiquidationBonusWAD;
-        params.roycoBlacklist = _roycoBlacklist;
         params.collateralAssetOracle = _config.collateralAssetOracle;
         params.stalenessThresholdSeconds = _config.stalenessThresholdSeconds;
         params.sequencerUptimeFeed = _config.sequencerUptimeFeed;

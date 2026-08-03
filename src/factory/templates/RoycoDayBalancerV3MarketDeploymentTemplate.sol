@@ -23,7 +23,7 @@ import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolT
 import { IBalancerV3LiquidityVenue } from "../../interfaces/liquidity-venue/IBalancerV3LiquidityVenue.sol";
 import { RoycoDayBalancerV3Kernel } from "../../kernels/RoycoDayBalancerV3Kernel.sol";
 import { BalancerV3LiquidityVenue } from "../../kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
-import { TrancheType } from "../../libraries/Types.sol";
+import { MarketDeploymentValidationLogic } from "../../libraries/logic/factory/MarketDeploymentValidationLogic.sol";
 import { BalancerV3PoolCreationParams, BalancerV3VenueCreationLogic } from "../../libraries/logic/liquidity-venue/BalancerV3VenueCreationLogic.sol";
 import { RoycoLiquidityProviderTranche } from "../../tranches/RoycoLiquidityProviderTranche.sol";
 import {
@@ -79,6 +79,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @custom:field bptOracleConstantPriceFeed - The shared stateless constant-1.0 price feed both pool legs are priced against
      * @custom:field roycoDayEntryPoint - The chain's entry point singleton, configured with each market's tranches
      * @custom:field roycoMarketSyncer - The chain's market syncer singleton, registered with each market's kernel
+     * @custom:field roycoBlacklist - The chain's blacklist singleton every market this template deploys screens against
      * @custom:field seniorTrancheBeacon - The senior tranche beacon, holding the implementation every senior proxy resolves against
      * @custom:field juniorTrancheBeacon - The junior tranche beacon
      * @custom:field liquidityProviderTrancheBeacon - The liquidity provider tranche beacon
@@ -92,11 +93,21 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         address bptOracleConstantPriceFeed;
         address roycoDayEntryPoint;
         address roycoMarketSyncer;
+        address roycoBlacklist;
         address seniorTrancheBeacon;
         address juniorTrancheBeacon;
         address liquidityProviderTrancheBeacon;
         address kernelBeacon;
         address accountantBeacon;
+    }
+
+    /**
+     * @notice The Balancer V3 liquidity venue's deployer-supplied initialization params, carried in `MarketParams.kernelSpecificParams`
+     * @dev The venue's BPT oracle is deployed by the template and injected, so it is deliberately absent here
+     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when reinvesting idle liquidity-premium senior shares into the pool, scaled to WAD precision
+     */
+    struct BalancerV3LiquidityVenueDeploymentParams {
+        uint64 maxReinvestmentSlippageWAD;
     }
 
     /**
@@ -113,8 +124,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /**
      * @notice The genesis liquidity a market's pool is seeded with, routed through the liquidity provider tranche's multi-asset deposit
-     * @dev The seed is pulled from the account that called the factory's deployment entrypoint: they must have approved this template for one or both legs and receive the genesis (exlcuding the locked) shares
-     * @custom:field collateralAmount - The collateral to seed the pool with
+     * @dev The seed is pulled from the account that called the factory's deployment entrypoint
+     * @custom:field collateralAmount - The collateral to seed the pool with, in the collateral asset's own units (zero seeds quote-only)
      * @custom:field quoteAmount - The quote to seed the pool with, in the quote asset's own units
      * @custom:field minLPTAssetsOut - The slippage bound on the liquidity add, in liquidity provider tranche asset units
      */
@@ -125,21 +136,20 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     }
 
     /**
-     * @notice Top-level params struct passed to `deployMarket(bytes)`
+     * @notice Top-level params struct passed to a Balancer V3 Day template's `deployMarket(bytes)`
      * @custom:field marketId - A caller-supplied identifier for the market, mixed into the deterministic deployment salts
-     * @custom:field stParams - The senior tranche initialization params
-     * @custom:field jtParams - The junior tranche initialization params
-     * @custom:field lptParams - The liquidity provider tranche initialization params
+     * @custom:field stParams - The senior tranche's deployer-supplied params
+     * @custom:field jtParams - The junior tranche's deployer-supplied params
+     * @custom:field lptParams - The liquidity provider tranche's deployer-supplied params
      * @custom:field collateralAsset - The coinvested collateral asset underlying both the senior and junior tranches
      * @custom:field quoteAsset - The quote asset expected as the pool's second token, pinned during pool verification
-     * @custom:field accountantParams - The accountant initialization params (coverage, premiums, and state machine config)
+     * @custom:field accountantParams - The accountant's deployer-supplied params (coverage, premiums, and state machine config)
      * @custom:field poolCreationParams - The Gyro E-CLP pool creation parameters, used to create the market's liquidity venue
-     * @custom:field poolInitializationParams - The genesis quote liquidity the pool is seeded with once the market is wired
+     * @custom:field poolInitializationParams - The genesis liquidity the pool is seeded with once the market is wired
      * @custom:field jtYdmType - The yield distribution model shape the junior tranche selects from the template's instances
      * @custom:field lptYdmType - The yield distribution model shape the liquidity provider tranche selects from the template's instances
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The ST self-liquidation bonus remitted to redeeming ST LPs once the liquidation coverage threshold is breached, scaled to WAD
-     * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables screening)
      * @custom:field collateralAssetOracle - The collateral asset oracle pricing one whole collateral asset in NAV units
      * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
      * @custom:field sequencerUptimeFeed - The L2 sequencer uptime feed used to gate price queries (the null address when not applicable)
@@ -151,19 +161,18 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      */
     struct MarketParams {
         bytes32 marketId;
-        IRoycoVaultTranche.RoycoTrancheInitParams stParams;
-        IRoycoVaultTranche.RoycoTrancheInitParams jtParams;
-        IRoycoVaultTranche.RoycoTrancheInitParams lptParams;
+        TrancheDeploymentParams stParams;
+        TrancheDeploymentParams jtParams;
+        TrancheDeploymentParams lptParams;
         address collateralAsset;
         address quoteAsset;
-        IRoycoDayAccountant.RoycoDayAccountantInitParams accountantParams;
+        AccountantDeploymentParams accountantParams;
         BalancerV3PoolCreationParams poolCreationParams;
         PoolInitializationParams poolInitializationParams;
         string jtYdmType;
         string lptYdmType;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
-        address roycoBlacklist;
         address collateralAssetOracle;
         uint48 stalenessThresholdSeconds;
         address sequencerUptimeFeed;
@@ -191,11 +200,11 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     /// @notice Thrown when the kernel proxy did not land on the address the market was wired against
     error KERNEL_PROXY_ADDRESS_MISMATCH(address expected, address deployed);
 
-    /// @notice Thrown when the created Balancer pool is not a fresh, unseeded, hookless `{ST_share, quote}` pool
-    error INVALID_POOL_CONFIGURATION(address pool);
-
     /// @notice Thrown when a construction parameter is the null address
     error NULL_CONSTRUCTION_PARAMETER();
+
+    /// @notice Thrown when a construction parameter that must name a live contract holds no code
+    error CONSTRUCTION_PARAMETER_HAS_NO_CODE(address subject);
 
     /// @notice Thrown when a junior and a liquidity provider yield distribution model share an instance, which the accountant rejects
     error YIELD_DISTRIBUTION_MODELS_NOT_DISTINCT();
@@ -205,9 +214,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /// @notice Thrown when registering a model shape under an empty name
     error INVALID_YDM_TYPE();
-
-    /// @notice Thrown when a market is deployed without genesis pool liquidity
-    error POOL_SEED_REQUIRED();
 
     /// @notice Thrown when the genesis deposit mints too few shares to cover the dead-share lock
     error INSUFFICIENT_GENESIS_SHARES(uint256 shares);
@@ -219,9 +225,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      * @param lptYdm The liquidity provider tranche's model instance for this shape
      */
     event YieldDistributionModelsRegistered(string ydmType, address jtYdm, address lptYdm);
-
-    /// @notice Thrown when a deployed market contract's on-chain wiring does not match the expected configuration
-    error MARKET_WIRING_VERIFICATION_FAILED(address subject);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTANTS
@@ -248,6 +251,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     /// @notice The shared stateless constant-1.0 price feed both of a pool's legs are priced against
     address public immutable BPT_ORACLE_CONSTANT_PRICE_FEED;
+
+    /// @notice The chain's blacklist singleton every market this template deploys screens tranche balance updates against
+    address public immutable ROYCO_BLACKLIST;
 
     /// @notice The senior tranche beacon every market's senior proxy resolves its implementation from
     address public immutable SENIOR_TRANCHE_BEACON;
@@ -288,15 +294,26 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     {
         require(
             address(_params.balancerV3PoolFactory) != address(0) && address(_params.eclpLPOracleFactory) != address(0)
-                && _params.bptOracleConstantPriceFeed != address(0) && _params.seniorTrancheBeacon != address(0) && _params.juniorTrancheBeacon != address(0)
-                && _params.liquidityProviderTrancheBeacon != address(0) && _params.kernelBeacon != address(0) && _params.accountantBeacon != address(0),
+                && _params.bptOracleConstantPriceFeed != address(0) && _params.roycoBlacklist != address(0) && _params.seniorTrancheBeacon != address(0)
+                && _params.juniorTrancheBeacon != address(0) && _params.liquidityProviderTrancheBeacon != address(0) && _params.kernelBeacon != address(0)
+                && _params.accountantBeacon != address(0),
             NULL_CONSTRUCTION_PARAMETER()
         );
+        require(address(_params.balancerV3PoolFactory).code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(address(_params.balancerV3PoolFactory)));
+        require(address(_params.eclpLPOracleFactory).code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(address(_params.eclpLPOracleFactory)));
+        require(_params.bptOracleConstantPriceFeed.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.bptOracleConstantPriceFeed));
+        require(_params.roycoBlacklist.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.roycoBlacklist));
+        require(_params.seniorTrancheBeacon.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.seniorTrancheBeacon));
+        require(_params.juniorTrancheBeacon.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.juniorTrancheBeacon));
+        require(_params.liquidityProviderTrancheBeacon.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.liquidityProviderTrancheBeacon));
+        require(_params.kernelBeacon.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.kernelBeacon));
+        require(_params.accountantBeacon.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.accountantBeacon));
 
         BALANCER_V3_POOL_FACTORY = _params.balancerV3PoolFactory;
         BALANCER_V3_VAULT = IVault(address(_params.balancerV3PoolFactory.getVault()));
         ECLP_LP_ORACLE_FACTORY = _params.eclpLPOracleFactory;
         BPT_ORACLE_CONSTANT_PRICE_FEED = _params.bptOracleConstantPriceFeed;
+        ROYCO_BLACKLIST = _params.roycoBlacklist;
 
         SENIOR_TRANCHE_BEACON = _params.seniorTrancheBeacon;
         JUNIOR_TRANCHE_BEACON = _params.juniorTrancheBeacon;
@@ -351,7 +368,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     /**
      * @dev Returns the ABI-encoded kernel `initialize(...)` calldata for the Day kernel
      * @param _bptOracle The externally deployed E-CLP BPT oracle for this market's pool, injected into the kernel's
-     *        liquidity venue init params (overwriting any caller-supplied value)
+     *        liquidity venue init params
      */
     function _kernelInitData(
         IRoycoDayKernel.RoycoDayKernelInitParams memory _kip,
@@ -363,10 +380,10 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         virtual
         returns (bytes memory)
     {
-        IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory liquidityVenueParams =
-            abi.decode(_kernelSpecificParams, (IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams));
-        // Set the BPT oracle to the template-deployed oracle
-        liquidityVenueParams.bptOracle = _bptOracle;
+        BalancerV3LiquidityVenueDeploymentParams memory venueParams = abi.decode(_kernelSpecificParams, (BalancerV3LiquidityVenueDeploymentParams));
+        IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory liquidityVenueParams = IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams({
+            bptOracle: _bptOracle, maxReinvestmentSlippageWAD: venueParams.maxReinvestmentSlippageWAD
+        });
         return abi.encodeCall(RoycoDayBalancerV3Kernel.initialize, (_kip, liquidityVenueParams));
     }
 
@@ -384,6 +401,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
 
     ///  @inheritdoc IRoycoProtocolTemplate
     function deployMarket(bytes calldata _params) external override(IRoycoProtocolTemplate) onlyRoycoFactory returns (DeploymentResult memory result) {
+        // Validate the deployer's params
+        MarketDeploymentValidationLogic.validateMarketParams(_params);
+
         MarketParams memory params = abi.decode(_params, (MarketParams));
 
         // Predict the kernel's proxy address.
@@ -431,7 +451,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
         );
 
         // Verify the Balancer V3 pool.
-        _verifyPool(balancerPool, result.seniorTranche, params.quoteAsset);
+        MarketDeploymentValidationLogic.verifyPool(BALANCER_V3_VAULT, balancerPool, result.seniorTranche, params.quoteAsset);
 
         // Deploy the kernel.
         result.kernel = _deployKernelProxy(params, result, balancerPool, bptOracle, kernelSalt);
@@ -477,7 +497,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
      */
     function _seedPool(MarketParams memory _params, address _liquidityProviderTranche) internal {
         PoolInitializationParams memory initParams = _params.poolInitializationParams;
-        require(initParams.quoteAmount != 0, POOL_SEED_REQUIRED());
 
         // The deployment initiator funds the seed, held transiently by the factory for exactly this read
         address deployer = ROYCO_FACTORY.marketDeployer();
@@ -551,7 +570,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
             accountant: _result.accountant,
             protocolFeeRecipient: _params.protocolFeeRecipient,
             stSelfLiquidationBonusWAD: _params.stSelfLiquidationBonusWAD,
-            roycoBlacklist: _params.roycoBlacklist,
+            roycoBlacklist: ROYCO_BLACKLIST,
             collateralAssetOracle: _params.collateralAssetOracle,
             stalenessThresholdSeconds: _params.stalenessThresholdSeconds,
             sequencerUptimeFeed: _params.sequencerUptimeFeed,
@@ -565,85 +584,15 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, E
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Verifies the Gyro E-CLP pool this template just created before the market is wired against it
-     * @dev Provenance needs no check: the pool came from this template's own call to its pool factory
-     * @param _pool The created pool
-     * @param _seniorTranche The senior tranche share expected as the pool's first token
-     * @param _quoteAsset The quote asset expected as the pool's second token
-     */
-    function _verifyPool(address _pool, address _seniorTranche, address _quoteAsset) internal view {
-        // Unseeded: no BPT has been minted
-        require(IERC20(_pool).totalSupply() == 0, INVALID_POOL_CONFIGURATION(_pool));
-
-        // Hookless: the kernel is the pool's senior-leg rate provider, and the market registers no hooks contract
-        BalancerV3HooksConfig memory hooksConfig = BALANCER_V3_VAULT.getHooksConfig(_pool);
-        require(hooksConfig.hooksContract == address(0), INVALID_POOL_CONFIGURATION(_pool));
-
-        // Exactly {ST share, quote asset}: the market id guarantees the deployed ST share sorts "less" than the
-        // quote token, so the Vault's ascending-order registration puts the senior leg first
-        IERC20[] memory tokens = BALANCER_V3_VAULT.getPoolTokens(_pool);
-        require(tokens.length == 2 && address(tokens[0]) == _seniorTranche && address(tokens[1]) == _quoteAsset, INVALID_POOL_CONFIGURATION(_pool));
-    }
-
-    /**
      * @notice Verifies the whole market's on-chain wiring after the proxies are deployed and initialized
-     * @dev Cross-checks every deployed contract's immutables/state against the params and against each other, so a
-     *      script-side deployment mistake (wrong impl, mis-encoded init data, swapped address) fails loud here rather
-     *      than producing a subtly mis-wired live market. Modeled on royco-dawn's `RoycoFactory._validateDeployment`
+     * @param _params The market parameters
+     * @param _result The deployment result
+     * @param _pool The market's Gyro E-CLP pool
      */
     function _validateDeployment(MarketParams memory _params, DeploymentResult memory _result, address _pool) internal view {
-        address authority = ROYCO_FACTORY.ROYCO_AUTHORITY();
-        address pool = _pool;
-
-        // Shared market authority governs every component (tranches, kernel, and accountant)
-        require(IAccessManaged(_result.seniorTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_result.seniorTranche));
-        require(IAccessManaged(_result.juniorTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_result.juniorTranche));
-        require(IAccessManaged(_result.liquidityProviderTranche).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche));
-        require(IAccessManaged(_result.kernel).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
-        require(IAccessManaged(_result.accountant).authority() == authority, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
-
-        // Senior tranche: type, kernel binding, asset, and unseeded
-        require(IRoycoVaultTranche(_result.seniorTranche).TRANCHE_TYPE() == TrancheType.SENIOR, MARKET_WIRING_VERIFICATION_FAILED(_result.seniorTranche));
-        require(IRoycoVaultTranche(_result.seniorTranche).kernel() == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.seniorTranche));
-        require(IRoycoVaultTranche(_result.seniorTranche).asset() == _params.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_result.seniorTranche));
-        require(IERC20(_result.seniorTranche).totalSupply() == 0, MARKET_WIRING_VERIFICATION_FAILED(_result.seniorTranche));
-
-        // Junior tranche: type, kernel binding, asset
-        require(IRoycoVaultTranche(_result.juniorTranche).TRANCHE_TYPE() == TrancheType.JUNIOR, MARKET_WIRING_VERIFICATION_FAILED(_result.juniorTranche));
-        require(IRoycoVaultTranche(_result.juniorTranche).kernel() == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.juniorTranche));
-        require(IRoycoVaultTranche(_result.juniorTranche).asset() == _params.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_result.juniorTranche));
-
-        // Liquidity provider tranche: type, kernel binding, asset is the pool BPT
-        require(
-            IRoycoVaultTranche(_result.liquidityProviderTranche).TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER,
-            MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche)
+        MarketDeploymentValidationLogic.validateDeployment(
+            _result, BALANCER_V3_VAULT, _pool, _params.collateralAsset, ROYCO_BLACKLIST, ROYCO_FACTORY.ROYCO_AUTHORITY()
         );
-        require(
-            IRoycoVaultTranche(_result.liquidityProviderTranche).kernel() == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche)
-        );
-        require(IRoycoVaultTranche(_result.liquidityProviderTranche).asset() == pool, MARKET_WIRING_VERIFICATION_FAILED(_result.liquidityProviderTranche));
-
-        // Kernel: full tranche set, assets, and accountant
-        IRoycoDayKernel kernel = IRoycoDayKernel(_result.kernel);
-        require(kernel.seniorTranche() == _result.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
-        require(kernel.juniorTranche() == _result.juniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
-        require(kernel.liquidityProviderTranche() == _result.liquidityProviderTranche, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
-        require(kernel.accountant() == _result.accountant, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
-        require(kernel.collateralAsset() == _params.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
-        require(kernel.lptAsset() == pool, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
-
-        // The market id should guarantee that the deployed ST share is "less" than the quote token
-        IERC20[] memory tokens = BALANCER_V3_VAULT.getPoolTokens(pool);
-        require(address(tokens[0]) == _result.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(pool));
-        require(address(tokens[1]) == kernel.quoteAsset(), MARKET_WIRING_VERIFICATION_FAILED(pool));
-
-        // Accountant: kernel binding and the injected JT YDM / LPT LDM instances
-        IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = IRoycoDayAccountant(_result.accountant).getState();
-        require(accountantState.kernel == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
-        require(accountantState.jtYDM == _result.ydm && accountantState.lptYDM == _result.lptYdm, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
-
-        // Pool: remains hookless, the kernel serves as its senior-leg rate provider
-        require(BALANCER_V3_VAULT.getHooksConfig(pool).hooksContract == address(0), MARKET_WIRING_VERIFICATION_FAILED(pool));
 
         // Kernel-family-specific wiring (e.g. Makina machine, IdleCDO CDO)
         _validateKernelSpecifics(_result.kernel, _params.kernelSpecificParams);

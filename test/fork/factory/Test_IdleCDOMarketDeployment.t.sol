@@ -73,6 +73,9 @@ contract Test_IdleCDOMarketDeployment is Test {
     IRoycoDayEntryPoint internal entryPoint;
     RoycoMarketSyncer internal syncer;
 
+    /// @dev The chain's blacklist singleton, pinned into the template at construction
+    address internal roycoBlacklist;
+
     address internal FACTORY_ADMIN = makeAddr("FACTORY_ADMIN");
     address internal DEPLOYER = makeAddr("DEPLOYER");
     address internal PROTOCOL_FEE_RECIPIENT = makeAddr("PROTOCOL_FEE_RECIPIENT");
@@ -92,6 +95,9 @@ contract Test_IdleCDOMarketDeployment is Test {
         // and the factory each hold the other as a constructor immutable. The scaffold stands both up and binds the
         // factory's own selectors and roles, exactly as the deployment script does.
         (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
+
+        // Every market the template deploys screens against this one blacklist, and the template rejects a null one
+        roycoBlacklist = FactoryScaffold.deployBlacklist(am);
 
         // Grant the factory-facing roles the initialize() call bound to selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
@@ -126,7 +132,7 @@ contract Test_IdleCDOMarketDeployment is Test {
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
         template = RoycoDayBalancerV3MarketDeploymentTemplate(
             deployScript.deployTemplateForTest(
-                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer)
+                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer), roycoBlacklist
             )
         );
 
@@ -186,7 +192,7 @@ contract Test_IdleCDOMarketDeployment is Test {
     function test_ExecuteMarketDeployment_IdleCDOOracleKernelWiring() external {
         _register();
         MarketConfig memory cfg = _marketConfig();
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(0)));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
