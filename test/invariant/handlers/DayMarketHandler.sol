@@ -1061,9 +1061,20 @@ contract DayMarketHandler is DayMarketTestBase {
             // every multi-asset redeem. A redemption that moves real value simply succeeds instead.
             _expect(p, SEL_INVALID_POST_OP);
             // The liquidity gate is enforced on every LPT redemption, including during a liquidation breach: the multi-asset
-            // exit relaxes the floor by unwinding senior depth (reflected in stEffAfter) but never waives it
+            // exit relaxes the floor by unwinding senior depth (reflected in stEffAfter) but never waives it. src judges
+            // the gate at its committed two-step mark (queryLPTAssetOracle floors the price of one whole LPT asset, then
+            // convertLPTAssetsToValue floors the ledger amount at that quantized price), which can sit up to one quote-wei
+            // of NAV (WAD / QUOTE_UNIT, also dominating the unit-price floor's lptOwned / LPT_UNIT loss and the senior
+            // rate's post-redeem drift) below this mirror's NAV-granular r.lptRawAfter, and the bonusNAV requote floors
+            // can overstate stEffAfter by a couple of NAV wei. This mirror cannot resolve that quantization band reliably,
+            // so predict the gate at the band's pessimistic inputs: utilization <= WAD there proves src cannot fire and the
+            // prediction stays strict, past WAD there both a settle and the gate are valid outcomes (success is always accepted)
             uint256 stEffAfter = s.stEffectiveNAV - (r.totalRedeemed - r.bonusNAV);
-            if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, r.lptRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
+            uint256 markQuantBand = WAD / QUOTE_UNIT;
+            uint256 quantizedMarkFloor = r.lptRawAfter > markQuantBand ? r.lptRawAfter - markQuantBand : 0;
+            if (RoycoTestMath.computeLiquidityUtilization(stEffAfter + (r.bonusNAV == 0 ? 0 : 2), s.minLiquidityWAD, quantizedMarkFloor) > WAD) {
+                _expect(p, SEL_LIQUIDITY);
+            }
             if (_shares > liquidityProviderTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
             if (_probeQuoteMin) {
                 // The unmeetable floor: one wei above the proportional removal's guaranteed quote output

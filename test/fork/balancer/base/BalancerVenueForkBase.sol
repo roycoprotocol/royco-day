@@ -16,9 +16,9 @@ import { BalancerV3LiquidityVenue } from "../../../../src/kernels/base/liquidity
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { toUint256 } from "../../../../src/libraries/Units.sol";
 import {
-    ERC4626_Chainlink_BalancerV3_MarketTestBase,
+    ERC4626_Chainlink_KernelSuite,
     IPermit2Like
-} from "../../kernels/ERC4626_Chainlink_BalancerV3/base/ERC4626_Chainlink_BalancerV3_MarketTestBase.sol";
+} from "../../kernels/ERC4626_Chainlink/base/ERC4626_Chainlink_KernelSuite.sol";
 
 /**
  * @title BalancerVenueForkBase
@@ -32,7 +32,7 @@ import {
  *      calls is ALWAYS a cache-miss (live preview off committed state plus pending accrual). Only code running
  *      inside a single operation frame can observe the cached mark, which the concrete harness suites pin.
  */
-abstract contract BalancerVenueForkBase is ERC4626_Chainlink_BalancerV3_MarketTestBase {
+abstract contract BalancerVenueForkBase is ERC4626_Chainlink_KernelSuite {
     // ═══════════════════════════════════════════════════════════════════════════
     // EXTERNAL ACTORS — trade/LP through the canonical Router, never the kernel
     // ═══════════════════════════════════════════════════════════════════════════

@@ -17,15 +17,17 @@ interface IPermit2Like {
 }
 
 /**
- * @title ERC4626_Chainlink_BalancerV3_MarketTestBase
- * @notice Market-configuration shape base for `RoycoDayBalancerV3Kernel` markets whose collateral is an ERC4626 vault
- *         share priced by an `ERC4626SharePriceOracle` (share->base via the vault and base->NAV via a
- *         Chainlink-compatible feed), with the LPT holding the Gyro E-CLP BPT of `{collateral_share, quote}`.
- * @dev Implements the `IKernelTestHooks` deal + simulate seams once for this market shape, so concrete protocol tests
- *      supply only `getTestConfig`, `_deployKernelAndMarket` (the market name), the `_baseAssetToNavOracle` address, and
- *      the rounding tolerances. Kernel behavior is asserted upstream in `Test_KernelSuiteBase`.
+ * @title ERC4626_Chainlink_KernelSuite
+ * @notice The full kernel suite (every `Test_KernelSuiteBase` test) with the oracle and asset seams plugged in for
+ *         markets whose collateral is an ERC4626 vault share priced by an `ERC4626SharePriceOracle` (share->base via
+ *         the vault and base->NAV via a Chainlink-compatible feed), with the LPT holding the Gyro E-CLP BPT of
+ *         `{collateral_share, quote}`.
+ * @dev Implements the `IKernelTestHooks` deal + simulate seams once for this oracle and asset shape, so a concrete
+ *      integration supplies only `getTestConfig`, `_deployKernelAndMarket` (the market name), the
+ *      `_baseAssetToNavOracle` address, and the rounding tolerances. Kernel behavior is asserted only upstream in
+ *      `Test_KernelSuiteBase`: this layer overrides oracles and assets, never expectations.
  */
-abstract contract ERC4626_Chainlink_BalancerV3_MarketTestBase is Test_KernelSuiteBase {
+abstract contract ERC4626_Chainlink_KernelSuite is Test_KernelSuiteBase {
     /// @dev Cached base->NAV feed answer, mocked once then moved by `simulate*`; re-stamped fresh after warps.
     int256 internal _mockedOracleAnswer;
     bool internal _oracleMocked;
