@@ -36,7 +36,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IBalan
 
     /// @dev Storage slot for BalancerV3LiquidityVenueState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.BalancerV3LiquidityVenueState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant BALANCER_V3_LIQUIDITY_VENUE_STORAGE_SLOT = 0x6acdb3c7456d7977317bc93eaa2681ec68014f836d3a13d257053a0d594f9a00;
+    bytes32 private constant _BALANCER_V3_LIQUIDITY_VENUE_STORAGE_SLOT = 0x6acdb3c7456d7977317bc93eaa2681ec68014f836d3a13d257053a0d594f9a00;
 
     /// @notice Emitted when the BPT oracle used to value the liquidity provider tranche is updated
     event BPTOracleUpdated(address indexed bptOracle);
@@ -353,7 +353,7 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IBalan
      */
     function _getBalancerV3LiquidityVenueStorage() internal pure returns (BalancerV3LiquidityVenueState storage $) {
         assembly ("memory-safe") {
-            $.slot := BALANCER_V3_LIQUIDITY_VENUE_STORAGE_SLOT
+            $.slot := _BALANCER_V3_LIQUIDITY_VENUE_STORAGE_SLOT
         }
     }
 }

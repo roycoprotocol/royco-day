@@ -14,7 +14,7 @@ import { ISanctionsList } from "../interfaces/external/chainalysis/ISanctionsLis
 contract RoycoBlacklist is IRoycoBlacklist, RoycoUUPSBase {
     /// @dev Storage slot for RoycoBlacklistState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoBlacklistState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ROYCO_BLACKLIST_STORAGE_SLOT = 0x9cdd7566a2b8c3aa6c16fbea0646d47b549e37af578fc5d5261a1bd123401800;
+    bytes32 private constant _ROYCO_BLACKLIST_STORAGE_SLOT = 0x9cdd7566a2b8c3aa6c16fbea0646d47b549e37af578fc5d5261a1bd123401800;
 
     // =============================
     // Initialization Functions
@@ -151,7 +151,7 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoUUPSBase {
      */
     function _getRoycoBlacklistStorage() private pure returns (RoycoBlacklistState storage $) {
         assembly ("memory-safe") {
-            $.slot := ROYCO_BLACKLIST_STORAGE_SLOT
+            $.slot := _ROYCO_BLACKLIST_STORAGE_SLOT
         }
     }
 }

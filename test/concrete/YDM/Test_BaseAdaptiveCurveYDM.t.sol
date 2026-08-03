@@ -48,7 +48,7 @@ contract Test_BaseAdaptiveCurveYDM is Test {
         assertEq(m.MIN_YIELD_SHARE_AT_TARGET_WAD(), 2e14, "min");
         assertEq(m.MAX_YIELD_SHARE_AT_TARGET_WAD(), 8e17, "max");
         assertEq(m.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), SPEED_V1, "speed");
-        assertEq(m.MAX_ADAPTATION_SPEED_WAD(), SPEED_LIMIT, "limit constant");
+        // The speed ceiling is private, its value and enforcement are pinned by the constructor boundary tests below
     }
 
     // --- min bound ---
@@ -183,7 +183,6 @@ contract Test_BaseAdaptiveCurveYDM is Test {
         assertEq(y.MIN_YIELD_SHARE_AT_TARGET_WAD(), MIN_YT, "V1 min");
         assertEq(y.MAX_YIELD_SHARE_AT_TARGET_WAD(), MAX_YT, "V1 max");
         assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), SPEED_V1, "V1 speed == 50e18/365d");
-        assertEq(y.MAX_ADAPTATION_SPEED_WAD(), SPEED_LIMIT, "limit constant");
     }
 
     /// V2 forwards its hardcoded (min, max, speed) triple to the base and the getters return it verbatim
@@ -193,19 +192,18 @@ contract Test_BaseAdaptiveCurveYDM is Test {
         assertEq(y.MIN_YIELD_SHARE_AT_TARGET_WAD(), MIN_YT, "V2 min");
         assertEq(y.MAX_YIELD_SHARE_AT_TARGET_WAD(), MAX_YT, "V2 max");
         assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), SPEED_V2, "V2 speed == 100e18/365d (== limit)");
-        assertEq(y.MAX_ADAPTATION_SPEED_WAD(), SPEED_LIMIT, "limit constant");
     }
 
     /// V2 adapts at exactly the deploy-time speed limit
     function test_ImmutableGetters_V2SpeedSitsAtLimit() public {
         AdaptiveCurveYDM_V2 y = new AdaptiveCurveYDM_V2(5e17, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
-        assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), y.MAX_ADAPTATION_SPEED_WAD(), "V2 sits exactly at the limit");
+        assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), SPEED_LIMIT, "V2 sits exactly at the limit");
     }
 
     /// V1 adapts at exactly half the deploy-time speed limit
     function test_ImmutableGetters_V1SpeedIsHalfLimit() public {
         AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(5e17, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
-        assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD() * 2, y.MAX_ADAPTATION_SPEED_WAD(), "V1 is half the limit");
+        assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD() * 2, SPEED_LIMIT, "V1 is half the limit");
     }
 
     // =====================================================================

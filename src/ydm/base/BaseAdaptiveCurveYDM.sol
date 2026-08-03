@@ -22,13 +22,12 @@ import { BaseYDM } from "./BaseYDM.sol";
  * @dev Inspired by Morpho's AdaptiveCurveIrm: https://github.com/morpho-org/morpho-blue-irm/blob/main/src/adaptive-curve-irm/AdaptiveCurveIrm.sol
  */
 abstract contract BaseAdaptiveCurveYDM is BaseYDM {
-    /// @notice The maximum allowed adaptation speed per second, scaled to WAD precision
-    /// @dev A deploy-time ceiling on ADAPTATION_SPEED_AT_BOUNDARY_WAD that keeps the speed math safely within int256
-    uint256 public constant MAX_ADAPTATION_SPEED_WAD = 100e18 / uint256(365 days);
+    /// @dev The maximum allowed adaptation speed per second, a deploy-time ceiling on ADAPTATION_SPEED_AT_BOUNDARY_WAD that keeps the speed math safely within int256, scaled to WAD precision
+    uint256 private constant _MAX_ADAPTATION_SPEED_WAD = 100e18 / uint256(365 days);
 
     /// @dev The maximum linear adaptation the curve can apply: one below Solady expWad's overflow threshold, so expWad never reverts
     /// @dev Derivation: https://github.com/Vectorized/solady/blob/acd959aa4bd04720d640bf4e6a5c71037510cc4b/src/utils/FixedPointMathLib.sol#L215-L217
-    int256 internal constant MAX_LINEAR_ADAPTATION_WAD = (135_305_999_368_893_231_589 - 1);
+    int256 internal constant _MAX_LINEAR_ADAPTATION_WAD = (135_305_999_368_893_231_589 - 1);
 
     /// @notice The speed at which the curve adapts per second when utilization sits at a boundary of its region (0% or 100%), scaled to WAD precision
     /// @dev The actual adaptation speed scales linearly with the normalized distance from the target utilization, reaching this value only at the region's boundary
@@ -48,7 +47,7 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
      * @param _targetUtilizationWAD The target utilization (the kink) for this model, in the range (0, 100%], scaled to WAD precision
      * @param _minYieldShareAtTargetWAD The minimum yield share at target utilization, in the range (0, _maxYieldShareAtTargetWAD], scaled to WAD precision
      * @param _maxYieldShareAtTargetWAD The maximum yield share at target utilization, in the range [_minYieldShareAtTargetWAD, WAD], scaled to WAD precision
-     * @param _adaptationSpeedAtBoundaryWAD The speed at which the curve adapts per second at 0% and 100% utilization, in the range (0, MAX_ADAPTATION_SPEED_WAD], scaled to WAD precision
+     * @param _adaptationSpeedAtBoundaryWAD The speed at which the curve adapts per second at 0% and 100% utilization, in the range (0, _MAX_ADAPTATION_SPEED_WAD], scaled to WAD precision
      */
     constructor(
         uint256 _targetUtilizationWAD,
@@ -60,7 +59,7 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
     {
         require(
             _minYieldShareAtTargetWAD > 0 && _minYieldShareAtTargetWAD <= _maxYieldShareAtTargetWAD && _maxYieldShareAtTargetWAD <= WAD
-                && _adaptationSpeedAtBoundaryWAD > 0 && _adaptationSpeedAtBoundaryWAD <= MAX_ADAPTATION_SPEED_WAD,
+                && _adaptationSpeedAtBoundaryWAD > 0 && _adaptationSpeedAtBoundaryWAD <= _MAX_ADAPTATION_SPEED_WAD,
             INVALID_YDM_INITIALIZATION()
         );
         MIN_YIELD_SHARE_AT_TARGET_WAD = _minYieldShareAtTargetWAD;
@@ -138,7 +137,7 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
         // Compute the new yield share at the target by applying the exponentiated linear adaptation to the previous yield share
         // Exponentiation ensures that the yield share is always non-negative
         // Clamp the linear adaptation to the maximum value to prevent overflows when applying expWAD
-        _linearAdaptationWAD = _linearAdaptationWAD > MAX_LINEAR_ADAPTATION_WAD ? MAX_LINEAR_ADAPTATION_WAD : _linearAdaptationWAD;
+        _linearAdaptationWAD = _linearAdaptationWAD > _MAX_LINEAR_ADAPTATION_WAD ? _MAX_LINEAR_ADAPTATION_WAD : _linearAdaptationWAD;
 
         yieldShareAtTargetWAD = FixedPointMathLib.fullMulDiv(_lastYieldShareAtTargetWAD, uint256(FixedPointMathLib.expWad(_linearAdaptationWAD)), WAD);
         // Clamp the yield share to the market defined bounds

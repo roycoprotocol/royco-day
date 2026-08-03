@@ -27,7 +27,7 @@ abstract contract ChainlinkPriceOracleBase is IRoycoPriceOracle {
 
     /// @dev Value representing the scale factor of the oracle's price precision: 10^(ORACLE.decimals())
     // The oracle is a construction immutable, so its price precision is locked at construction
-    uint256 internal immutable ORACLE_PRICE_PRECISION;
+    uint256 internal immutable _ORACLE_PRICE_PRECISION;
 
     /// @notice Thrown when the Chainlink (compatible) oracle reports a non-positive price
     error INVALID_PRICE();
@@ -45,7 +45,7 @@ abstract contract ChainlinkPriceOracleBase is IRoycoPriceOracle {
         require(_collateralAsset != address(0) && _oracle != address(0), IRoycoAuth.NULL_ADDRESS());
         COLLATERAL_ASSET = _collateralAsset;
         ORACLE = AggregatorV3Interface(_oracle);
-        ORACLE_PRICE_PRECISION = 10 ** AggregatorV3Interface(_oracle).decimals();
+        _ORACLE_PRICE_PRECISION = 10 ** AggregatorV3Interface(_oracle).decimals();
     }
 
     /**
@@ -63,7 +63,7 @@ abstract contract ChainlinkPriceOracleBase is IRoycoPriceOracle {
         require(answeredInRound >= roundId, INCOMPLETE_PRICE());
 
         // Compose the two hops: collateral value in reference assets (WAD) times reference asset price in NAV units, floored once
-        price = toNAVUnits(_getCollateralToReferenceAssetConversionRateWAD().mulDiv(uint256(answer), ORACLE_PRICE_PRECISION, Math.Rounding.Floor));
+        price = toNAVUnits(_getCollateralToReferenceAssetConversionRateWAD().mulDiv(uint256(answer), _ORACLE_PRICE_PRECISION, Math.Rounding.Floor));
         updatedAt = feedUpdatedAt;
     }
 

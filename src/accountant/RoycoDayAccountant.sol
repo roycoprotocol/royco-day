@@ -24,7 +24,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
     /// @dev Storage slot for RoycoDayAccountantState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayAccountantState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ROYCO_DAY_ACCOUNTANT_STORAGE_SLOT = 0x3eb9440b0208b8d20dc454b361ed9d3f272aa9a4fb2bcc89d823d3b8e5663200;
+    bytes32 private constant _ROYCO_DAY_ACCOUNTANT_STORAGE_SLOT = 0x3eb9440b0208b8d20dc454b361ed9d3f272aa9a4fb2bcc89d823d3b8e5663200;
 
     /// @dev Permissions the function to only be callable by the market's kernel
     /// @dev Should be placed on all state mutating NAV synchronization functions
@@ -831,7 +831,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      */
     function _getRoycoDayAccountantStorage() internal pure returns (RoycoDayAccountantState storage $) {
         assembly ("memory-safe") {
-            $.slot := ROYCO_DAY_ACCOUNTANT_STORAGE_SLOT
+            $.slot := _ROYCO_DAY_ACCOUNTANT_STORAGE_SLOT
         }
     }
 }

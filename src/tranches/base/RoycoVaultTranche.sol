@@ -30,7 +30,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
 
     /// @dev Storage slot for RoycoVaultTrancheState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoVaultTrancheState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ROYCO_VAULT_TRANCHE_STORAGE_SLOT = 0xb29e56aa3db56637b513fb077b36928988b241f28eccd4f6a5bd34624bbe3900;
+    bytes32 private constant _ROYCO_VAULT_TRANCHE_STORAGE_SLOT = 0xb29e56aa3db56637b513fb077b36928988b241f28eccd4f6a5bd34624bbe3900;
 
     /// @dev Permissions the function to only be callable by the kernel, the single source of truth for sync-driven share mints
     modifier onlyKernel() {
@@ -307,7 +307,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
      */
     function _getRoycoVaultTrancheStorage() internal pure returns (RoycoVaultTrancheState storage $) {
         assembly ("memory-safe") {
-            $.slot := ROYCO_VAULT_TRANCHE_STORAGE_SLOT
+            $.slot := _ROYCO_VAULT_TRANCHE_STORAGE_SLOT
         }
     }
 }

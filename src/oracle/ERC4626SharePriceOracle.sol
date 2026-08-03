@@ -14,7 +14,7 @@ import { ChainlinkPriceOracleBase } from "./base/ChainlinkPriceOracleBase.sol";
  */
 contract ERC4626SharePriceOracle is ChainlinkPriceOracleBase {
     /// @dev The share amount to pass to convertToAssets() such that the result is scaled to WAD precision
-    uint256 internal immutable ERC4626_SHARES_TO_CONVERT_TO_ASSETS;
+    uint256 internal immutable _ERC4626_SHARES_TO_CONVERT_TO_ASSETS;
 
     /**
      * @notice Constructs the ERC4626 share price to Chainlink (compatible) oracle composed collateral oracle
@@ -28,7 +28,7 @@ contract ERC4626SharePriceOracle is ChainlinkPriceOracleBase {
         // INPUT_DECIMALS = WAD_DECIMALS + SHARE_DECIMALS - BASE_ASSET_DECIMALS
         // OUTPUT_DECIMALS = (WAD_DECIMALS + SHARE_DECIMALS - BASE_ASSET_DECIMALS) + BASE_ASSET_DECIMALS - SHARE_DECIMALS
         // OUTPUT_DECIMALS = WAD_DECIMALS
-        ERC4626_SHARES_TO_CONVERT_TO_ASSETS =
+        _ERC4626_SHARES_TO_CONVERT_TO_ASSETS =
             10 ** (WAD_DECIMALS + IERC4626(_collateralAsset).decimals() - IERC20Metadata(IERC4626(_collateralAsset).asset()).decimals());
     }
 
@@ -39,6 +39,6 @@ contract ERC4626SharePriceOracle is ChainlinkPriceOracleBase {
         override(ChainlinkPriceOracleBase)
         returns (uint256 collateralToReferenceAssetConversionRateWAD)
     {
-        return IERC4626(COLLATERAL_ASSET).convertToAssets(ERC4626_SHARES_TO_CONVERT_TO_ASSETS);
+        return IERC4626(COLLATERAL_ASSET).convertToAssets(_ERC4626_SHARES_TO_CONVERT_TO_ASSETS);
     }
 }

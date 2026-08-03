@@ -37,17 +37,17 @@ library Cache {
      * @dev Each cache key occupies its ordinal slot at this base offset
      * @dev keccak256(abi.encode(uint256(keccak256("Royco.transient.Cache")) - 1)) & ~bytes32(uint256(0xff))
      */
-    bytes32 private constant TRANSIENT_CACHE_BASE_STORAGE_SLOT = 0x70d6b292032d8753f59a7cdffcb7469958b18c62ee56cf41848217b8027ee200;
+    bytes32 private constant _CACHE_BASE_STORAGE_SLOT = 0x70d6b292032d8753f59a7cdffcb7469958b18c62ee56cf41848217b8027ee200;
 
     /// @dev The top bit set on a transient cache slot to mark it populated, so a set slot is distinguishable from an unset one
-    uint256 private constant CACHE_SET_MASK = (1 << 255);
+    uint256 private constant _CACHE_SET_MASK = (1 << 255);
 
     /// @notice Thrown when a value to cache is not strictly less than 2^255, which would collide with the populated marker and read back corrupted
     error CACHE_VALUE_OUT_OF_DOMAIN();
 
     /**
      * @notice Reads a value from the unified transient cache
-     * @dev The top bit (CACHE_SET_MASK) marks a populated slot, so an unset (zero) slot reads as a miss
+     * @dev The top bit (_CACHE_SET_MASK) marks a populated slot, so an unset (zero) slot reads as a miss
      * @dev View-safe: it never writes, so it is callable on the static read path
      * @param _key The key in this cache to read from
      * @return cacheHit Whether the slot holds a populated value
@@ -55,19 +55,19 @@ library Cache {
      */
     function _read(CacheKey _key) internal view returns (bool cacheHit, uint256 value) {
         uint256 slotValue = _getTransientStorageSlot(_key).asUint256().tload();
-        if ((slotValue & CACHE_SET_MASK) != 0) return (true, (slotValue ^ CACHE_SET_MASK));
+        if ((slotValue & _CACHE_SET_MASK) != 0) return (true, (slotValue ^ _CACHE_SET_MASK));
     }
 
     /**
      * @notice Writes a value to the unified transient cache for the remainder of the transaction
-     * @dev The value is stored as `_value | CACHE_SET_MASK`, re-callable to overwrite
+     * @dev The value is stored as `_value | _CACHE_SET_MASK`, re-callable to overwrite
      * @dev The value must be strictly less than 2^255 so the populated marker is unambiguous
      * @param _key The key in this cache to write to
      * @param _value The value to cache
      */
     function _write(CacheKey _key, uint256 _value) internal {
-        require(_value < CACHE_SET_MASK, CACHE_VALUE_OUT_OF_DOMAIN());
-        _getTransientStorageSlot(_key).asUint256().tstore((_value | CACHE_SET_MASK));
+        require(_value < _CACHE_SET_MASK, CACHE_VALUE_OUT_OF_DOMAIN());
+        _getTransientStorageSlot(_key).asUint256().tstore((_value | _CACHE_SET_MASK));
     }
 
     /**
@@ -86,6 +86,6 @@ library Cache {
      * @return The transient slot for the specified cache key
      */
     function _getTransientStorageSlot(CacheKey _key) private pure returns (bytes32) {
-        return TRANSIENT_CACHE_BASE_STORAGE_SLOT.offset(uint256(_key));
+        return _CACHE_BASE_STORAGE_SLOT.offset(uint256(_key));
     }
 }

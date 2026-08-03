@@ -23,7 +23,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory 
     using DispatchLogic for address;
 
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoFactoryV2State")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ROYCO_FACTORY_STORAGE_SLOT = 0x40ecf137e43ccc3fb8e0ec956edc7094cfc159472690a44f90b2be053a987500;
+    bytes32 private constant _ROYCO_FACTORY_STORAGE_SLOT = 0x40ecf137e43ccc3fb8e0ec956edc7094cfc159472690a44f90b2be053a987500;
 
     /// @inheritdoc IRoycoFactory
     address public immutable override(IRoycoFactory) ROYCO_FACTORY_GATEKEEPER;
@@ -264,7 +264,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory 
 
     function _getRoycoFactoryStorage() private pure returns (IRoycoFactory.RoycoFactoryState storage $) {
         assembly ("memory-safe") {
-            $.slot := ROYCO_FACTORY_STORAGE_SLOT
+            $.slot := _ROYCO_FACTORY_STORAGE_SLOT
         }
     }
 }

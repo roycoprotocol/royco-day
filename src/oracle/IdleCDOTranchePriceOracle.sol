@@ -21,7 +21,7 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
     address public immutable IDLE_CDO;
 
     /// @dev The multiplier that scales the CDO's virtual price from the underlying token's decimals to WAD precision
-    uint256 internal immutable CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION;
+    uint256 internal immutable _CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION;
 
     /// @notice Thrown when the collateral asset is not one of the CDO's two tranche tokens
     error COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE();
@@ -52,7 +52,7 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
         // For OUTPUT_DECIMALS to have WAD_DECIMALS of precision:
         // MULTIPLIER_EXPONENT = WAD_DECIMALS - UNDERLYING_DECIMALS
         // The checked subtraction reverts at construction for underlying decimals above WAD_DECIMALS, the edge of the supported precision
-        CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION = 10 ** (WAD_DECIMALS - IERC20Metadata(IIdleCDO(_idleCDO).token()).decimals());
+        _CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION = 10 ** (WAD_DECIMALS - IERC20Metadata(IIdleCDO(_idleCDO).token()).decimals());
     }
 
     /**
@@ -106,6 +106,6 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
     /// @inheritdoc OracleClockBase
     function _getSourcePrice() internal view override(OracleClockBase) returns (uint256 value) {
         // The virtual price is returned in the CDO underlying token's decimals, the multiplier lifts it to WAD precision exactly
-        return IIdleCDO(IDLE_CDO).virtualPrice(COLLATERAL_ASSET) * CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION;
+        return IIdleCDO(IDLE_CDO).virtualPrice(COLLATERAL_ASSET) * _CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION;
     }
 }

@@ -29,8 +29,8 @@ library BalancerV3LiquidityVenueLogic {
     using DispatchLogic for address;
 
     /// @dev The pool token indexes are a venue-initialization invariant
-    uint256 internal constant ST_SHARE_POOL_INDEX = 0;
-    uint256 internal constant QUOTE_ASSET_POOL_INDEX = 1;
+    uint256 private constant _ST_SHARE_POOL_INDEX = 0;
+    uint256 private constant _QUOTE_ASSET_POOL_INDEX = 1;
 
     /**
      * @notice Callback that performs the unbalanced BPT mint inside the unlocked Balancer V3 Vault's context
@@ -62,8 +62,8 @@ library BalancerV3LiquidityVenueLogic {
 
         // The exact senior tranche share and quote asset amounts to add, ordered by the pool's token registration
         uint256[] memory exactAmountsIn = new uint256[](2);
-        exactAmountsIn[ST_SHARE_POOL_INDEX] = _seniorShares;
-        exactAmountsIn[QUOTE_ASSET_POOL_INDEX] = _quoteAssets;
+        exactAmountsIn[_ST_SHARE_POOL_INDEX] = _seniorShares;
+        exactAmountsIn[_QUOTE_ASSET_POOL_INDEX] = _quoteAssets;
 
         // If the pool is initialized, add liquidity directly, else, the pool must be initialized (seeded)
         if (_vault.isPoolInitialized(lptAsset)) {
@@ -81,8 +81,8 @@ library BalancerV3LiquidityVenueLogic {
         } else {
             // The pool's registered tokens, ordered by the pool's token registration
             IERC20[] memory tokens = new IERC20[](2);
-            tokens[ST_SHARE_POOL_INDEX] = IERC20($_kernel.seniorTranche);
-            tokens[QUOTE_ASSET_POOL_INDEX] = IERC20($_kernel.quoteAsset);
+            tokens[_ST_SHARE_POOL_INDEX] = IERC20($_kernel.seniorTranche);
+            tokens[_QUOTE_ASSET_POOL_INDEX] = IERC20($_kernel.quoteAsset);
 
             // Credit this kernel with the BPT minted by seeding the pool's initial balances
             // NOTE: The Vault permanently burns a minimum BPT supply to the null address on initialization, so lptAssets is net of that burn
@@ -146,8 +146,8 @@ library BalancerV3LiquidityVenueLogic {
     {
         // The minimum senior tranche share and quote asset amounts out, ordered by the pool's token registration
         uint256[] memory minAmountsOut = new uint256[](2);
-        minAmountsOut[ST_SHARE_POOL_INDEX] = _minSTSharesOut;
-        minAmountsOut[QUOTE_ASSET_POOL_INDEX] = _minQuoteAssetsOut;
+        minAmountsOut[_ST_SHARE_POOL_INDEX] = _minSTSharesOut;
+        minAmountsOut[_QUOTE_ASSET_POOL_INDEX] = _minQuoteAssetsOut;
 
         // Debit this kernel with the proportional constituent claims tied to the specified amount of LPT assets
         (, uint256[] memory amountsOut,) = _vault.removeLiquidity(
@@ -162,8 +162,8 @@ library BalancerV3LiquidityVenueLogic {
         );
 
         // Set the amounts out to be returned to the caller
-        stShares = amountsOut[ST_SHARE_POOL_INDEX];
-        quoteAssets = amountsOut[QUOTE_ASSET_POOL_INDEX];
+        stShares = amountsOut[_ST_SHARE_POOL_INDEX];
+        quoteAssets = amountsOut[_QUOTE_ASSET_POOL_INDEX];
 
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement
         // The post-remove price is produced only here: the preview's unwind discards the post-remove pool state, so this frame is the only place to capture its mark

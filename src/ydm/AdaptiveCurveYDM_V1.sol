@@ -56,7 +56,7 @@ contract AdaptiveCurveYDM_V1 is BaseAdaptiveCurveYDM {
      * @param _targetUtilizationWAD The target utilization (the kink) for this model, in the range (0, 100%], scaled to WAD precision
      * @param _minYieldShareAtTargetWAD The minimum yield share at target utilization, in the range (0, _maxYieldShareAtTargetWAD], scaled to WAD precision
      * @param _maxYieldShareAtTargetWAD The maximum yield share at target utilization, in the range [_minYieldShareAtTargetWAD, WAD], scaled to WAD precision
-     * @param _adaptationSpeedAtBoundaryWAD The speed at which the curve adapts per second at 0% and 100% utilization, in the range (0, MAX_ADAPTATION_SPEED_WAD], scaled to WAD precision
+     * @param _adaptationSpeedAtBoundaryWAD The speed at which the curve adapts per second at 0% and 100% utilization, in the range (0, _MAX_ADAPTATION_SPEED_WAD], scaled to WAD precision
      */
     constructor(
         uint256 _targetUtilizationWAD,

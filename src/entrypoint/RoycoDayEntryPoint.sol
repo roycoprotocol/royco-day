@@ -41,7 +41,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
 
     /// @dev Storage slot for RoycoDayEntryPointState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayEntryPoint")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ROYCO_DAY_ENTRY_POINT_STORAGE_SLOT = 0x03bd8d6176ab6e234086d98500389a8f80bf2cd4515f169be97ae2e0d147ef00;
+    bytes32 private constant _ROYCO_DAY_ENTRY_POINT_STORAGE_SLOT = 0x03bd8d6176ab6e234086d98500389a8f80bf2cd4515f169be97ae2e0d147ef00;
 
     /// @inheritdoc IRoycoDayEntryPoint
     address public immutable override(IRoycoDayEntryPoint) ROYCO_FACTORY;
@@ -893,7 +893,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
      */
     function _getRoycoDayEntryPointStorage() internal pure returns (RoycoDayEntryPointState storage $) {
         assembly ("memory-safe") {
-            $.slot := ROYCO_DAY_ENTRY_POINT_STORAGE_SLOT
+            $.slot := _ROYCO_DAY_ENTRY_POINT_STORAGE_SLOT
         }
     }
 }

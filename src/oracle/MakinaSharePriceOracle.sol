@@ -18,7 +18,7 @@ contract MakinaSharePriceOracle is ChainlinkPriceOracleBase {
     address public immutable MAKINA_MACHINE;
 
     /// @dev The share amount to pass to convertToAssets() such that the result is scaled to WAD precision
-    uint256 internal immutable MACHINE_SHARES_TO_CONVERT_TO_ASSETS;
+    uint256 internal immutable _MACHINE_SHARES_TO_CONVERT_TO_ASSETS;
 
     /**
      * @notice Constructs the Makina share price to Chainlink (compatible) oracle composed collateral oracle
@@ -39,7 +39,7 @@ contract MakinaSharePriceOracle is ChainlinkPriceOracleBase {
         // INPUT_DECIMALS = WAD_DECIMALS + SHARE_DECIMALS - ACCOUNTING_ASSET_DECIMALS
         // OUTPUT_DECIMALS = (WAD_DECIMALS + SHARE_DECIMALS - ACCOUNTING_ASSET_DECIMALS) + ACCOUNTING_ASSET_DECIMALS - SHARE_DECIMALS
         // OUTPUT_DECIMALS = WAD_DECIMALS
-        MACHINE_SHARES_TO_CONVERT_TO_ASSETS =
+        _MACHINE_SHARES_TO_CONVERT_TO_ASSETS =
             10 ** (WAD_DECIMALS + IERC20Metadata(COLLATERAL_ASSET).decimals() - IERC20Metadata(IMachine(_makinaMachine).accountingToken()).decimals());
     }
 
@@ -50,6 +50,6 @@ contract MakinaSharePriceOracle is ChainlinkPriceOracleBase {
         override(ChainlinkPriceOracleBase)
         returns (uint256 collateralToReferenceAssetConversionRateWAD)
     {
-        return IMachine(MAKINA_MACHINE).convertToAssets(MACHINE_SHARES_TO_CONVERT_TO_ASSETS);
+        return IMachine(MAKINA_MACHINE).convertToAssets(_MACHINE_SHARES_TO_CONVERT_TO_ASSETS);
     }
 }

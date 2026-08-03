@@ -29,7 +29,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @dev Storage slot for RoycoDayKernelState using ERC-7201 pattern
     /// @dev keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayKernelState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ROYCO_DAY_KERNEL_STORAGE_SLOT = 0xc366ce7b07de4bd3f36c874874355fb088fd2057e716d8a9786c17b22e6fec00;
+    bytes32 private constant _ROYCO_DAY_KERNEL_STORAGE_SLOT = 0xc366ce7b07de4bd3f36c874874355fb088fd2057e716d8a9786c17b22e6fec00;
 
     /// @dev Permissions the function to only be callable by this contract via a self-call, the seam through which the delegatecall logic libraries reach callback into the kernel
     modifier onlySelf() {
@@ -614,7 +614,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      */
     function _getRoycoDayKernelStorage() internal pure returns (RoycoDayKernelState storage $) {
         assembly ("memory-safe") {
-            $.slot := ROYCO_DAY_KERNEL_STORAGE_SLOT
+            $.slot := _ROYCO_DAY_KERNEL_STORAGE_SLOT
         }
     }
 }
