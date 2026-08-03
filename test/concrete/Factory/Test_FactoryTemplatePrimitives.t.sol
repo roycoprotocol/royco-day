@@ -34,7 +34,7 @@ contract Test_FactoryTemplatePrimitives is Test {
 
     function setUp() public {
         am = new RoycoAccessManager(address(this));
-        (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
+        (factory, gatekeeper,,) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         am.grantRole(ADMIN_FACTORY_ROLE, address(this), 0);
         am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
@@ -112,34 +112,24 @@ contract Test_FactoryTemplatePrimitives is Test {
     // _applyRoleBindings: the declarative batching loop over the factory's role primitives
     // ---------------------------------------------------------------------
 
-    /// @notice One bindings struct applies every grant and every per-target selector binding in one deployment, and
-    ///         an empty-selector target is skipped without being configured
-    function test_ApplyRoleBindings_BatchesGrantsAndBindings_SkippingEmptyTargets() public {
+    /// @notice One bindings array applies every per-target selector binding in one deployment, and an empty-selector
+    ///         target is skipped without being configured
+    function test_ApplyRoleBindings_BatchesBindings_SkippingEmptyTargets() public {
         address boundTarget = makeAddr("BOUND_TARGET");
         address skippedTarget = makeAddr("SKIPPED_TARGET");
-        address syncHolder = makeAddr("SYNC_HOLDER");
-        address burnerHolder = makeAddr("BURNER_HOLDER");
 
-        BaseDeploymentTemplate.RoleBindings memory bindings;
-        bindings.postInitGrants = new BaseDeploymentTemplate.RoleGrant[](2);
-        bindings.postInitGrants[0] = BaseDeploymentTemplate.RoleGrant({ roleId: SYNC_ROLE, account: syncHolder, executionDelay: 0 });
-        bindings.postInitGrants[1] = BaseDeploymentTemplate.RoleGrant({ roleId: BURNER_ROLE, account: burnerHolder, executionDelay: 0 });
-        bindings.targetBindings = new BaseDeploymentTemplate.TargetBinding[](2);
+        BaseDeploymentTemplate.TargetBinding[] memory bindings = new BaseDeploymentTemplate.TargetBinding[](2);
         bytes4[] memory selectors = new bytes4[](2);
         (selectors[0], selectors[1]) = (bytes4(0xaaaaaaaa), bytes4(0xbbbbbbbb));
         uint64[] memory roleIds = new uint64[](2);
         (roleIds[0], roleIds[1]) = (SYNC_ROLE, BURNER_ROLE);
-        bindings.targetBindings[0] = BaseDeploymentTemplate.TargetBinding({ target: boundTarget, selectors: selectors, roleIds: roleIds });
-        bindings.targetBindings[1] = BaseDeploymentTemplate.TargetBinding({ target: skippedTarget, selectors: new bytes4[](0), roleIds: new uint64[](0) });
+        bindings[0] = BaseDeploymentTemplate.TargetBinding({ target: boundTarget, selectors: selectors, roleIds: roleIds });
+        bindings[1] = BaseDeploymentTemplate.TargetBinding({ target: skippedTarget, selectors: new bytes4[](0), roleIds: new uint64[](0) });
 
         probeTemplate.setAction(MockPrimitivesProbeTemplate.ProbeAction.APPLY_ROLE_BINDINGS);
         probeTemplate.setEncodedRoleBindings(abi.encode(bindings));
         _deploy();
 
-        (bool syncGranted,) = am.hasRole(SYNC_ROLE, syncHolder);
-        (bool burnerGranted,) = am.hasRole(BURNER_ROLE, burnerHolder);
-        assertTrue(syncGranted, "the first grant must land");
-        assertTrue(burnerGranted, "the second grant must land");
         assertEq(am.getTargetFunctionRole(boundTarget, bytes4(0xaaaaaaaa)), SYNC_ROLE, "the first selector must be bound");
         assertEq(am.getTargetFunctionRole(boundTarget, bytes4(0xbbbbbbbb)), BURNER_ROLE, "the second selector must be bound");
         assertTrue(am.wasEverConfigured(boundTarget), "the bound target must be recorded as configured");
@@ -148,11 +138,8 @@ contract Test_FactoryTemplatePrimitives is Test {
 
     /// @notice A binding whose selector and role arrays disagree is rejected before any call reaches the factory
     function test_RevertIf_ApplyRoleBindingsSelectorAndRoleArraysDiffer() public {
-        BaseDeploymentTemplate.RoleBindings memory bindings;
-        bindings.postInitGrants = new BaseDeploymentTemplate.RoleGrant[](0);
-        bindings.targetBindings = new BaseDeploymentTemplate.TargetBinding[](1);
-        bindings.targetBindings[0] =
-            BaseDeploymentTemplate.TargetBinding({ target: makeAddr("TARGET"), selectors: new bytes4[](2), roleIds: new uint64[](1) });
+        BaseDeploymentTemplate.TargetBinding[] memory bindings = new BaseDeploymentTemplate.TargetBinding[](1);
+        bindings[0] = BaseDeploymentTemplate.TargetBinding({ target: makeAddr("TARGET"), selectors: new bytes4[](2), roleIds: new uint64[](1) });
 
         probeTemplate.setAction(MockPrimitivesProbeTemplate.ProbeAction.APPLY_ROLE_BINDINGS);
         probeTemplate.setEncodedRoleBindings(abi.encode(bindings));

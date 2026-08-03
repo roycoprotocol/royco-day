@@ -48,28 +48,6 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
         uint64[] roleIds;
     }
 
-    /**
-     * @notice A role grant applied after deployment (e.g. SYNC_ROLE → accountant)
-     * @custom:field roleId - The role id to grant
-     * @custom:field account - The account receiving the role
-     * @custom:field executionDelay - The access-manager execution delay in seconds applied to the grant
-     */
-    struct RoleGrant {
-        uint64 roleId;
-        address account;
-        uint32 executionDelay;
-    }
-
-    /**
-     * @notice The full role-wiring config a template applies via `_applyRoleBindings`
-     * @custom:field targetBindings - The per-target selector→role maps to install
-     * @custom:field postInitGrants - The role grants to apply after deployment and initialization
-     */
-    struct RoleBindings {
-        TargetBinding[] targetBindings;
-        RoleGrant[] postInitGrants;
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // IMMUTABLE STATE
     // ═══════════════════════════════════════════════════════════════════════════
@@ -205,22 +183,10 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
 
     ///  @notice Applies every binding in `_bindings` by calling back into the factory
-    function _applyRoleBindings(RoleBindings memory _bindings) internal {
-        uint256 numGrants = _bindings.postInitGrants.length;
-        uint64[] memory grantRoleIds = new uint64[](numGrants);
-        address[] memory grantAccounts = new address[](numGrants);
-        uint32[] memory grantExecutionDelays = new uint32[](numGrants);
-        for (uint256 i; i < numGrants; ++i) {
-            RoleGrant memory grant = _bindings.postInitGrants[i];
-            grantRoleIds[i] = grant.roleId;
-            grantAccounts[i] = grant.account;
-            grantExecutionDelays[i] = grant.executionDelay;
-        }
-        ROYCO_FACTORY.grantMarketRole(grantRoleIds, grantAccounts, grantExecutionDelays);
-
-        uint256 numTargets = _bindings.targetBindings.length;
+    function _applyRoleBindings(TargetBinding[] memory _targetBindings) internal {
+        uint256 numTargets = _targetBindings.length;
         for (uint256 i; i < numTargets; ++i) {
-            TargetBinding memory binding = _bindings.targetBindings[i];
+            TargetBinding memory binding = _targetBindings[i];
             uint256 numSelectors = binding.selectors.length;
             require(numSelectors == binding.roleIds.length, LENGTH_MISMATCH());
             if (numSelectors == 0) continue;

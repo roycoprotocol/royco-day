@@ -107,7 +107,7 @@ contract MockPrimitivesProbeTemplate is BaseDeploymentTemplate {
             (lastDeployedProxy,) = ROYCO_FACTORY.deployDeterministicProxyFromTemplate(proxyBeacon, "", proxySalt);
             (lastDeployedProxy, lastAlreadyDeployed) = ROYCO_FACTORY.deployDeterministicProxyFromTemplate(proxyBeacon, "", proxySalt);
         } else if (action == ProbeAction.APPLY_ROLE_BINDINGS) {
-            _applyRoleBindings(abi.decode(encodedRoleBindings, (RoleBindings)));
+            _applyRoleBindings(abi.decode(encodedRoleBindings, (TargetBinding[])));
         } else if (action == ProbeAction.EXEC_AS_FACTORY) {
             ROYCO_FACTORY.executeAsFactory(execTarget, execData);
         } else if (action == ProbeAction.CALL_PEER) {

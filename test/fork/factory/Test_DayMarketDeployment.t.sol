@@ -319,10 +319,12 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         (bool isAdmin,) = ACCESS_MANAGER.hasRole(0, address(FACTORY)); // ADMIN_ROLE == 0
         assertFalse(isAdmin, "the factory must NOT hold ADMIN_ROLE: the gatekeeper holds it instead");
 
+        // The periphery roles sit on the gatekeeper: it drives the entry point and the syncer itself, and the factory
+        // only forwards into its fresh-only entrypoint
         (bool isEntry,) = ACCESS_MANAGER.hasRole(ADMIN_ENTRY_POINT_ROLE, address(FACTORY));
-        assertTrue(isEntry, "factory not ADMIN_ENTRY_POINT_ROLE");
+        assertFalse(isEntry, "the factory must NOT hold ADMIN_ENTRY_POINT_ROLE");
         (bool isSync,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(FACTORY));
-        assertTrue(isSync, "factory not SYNC_ROLE");
+        assertFalse(isSync, "the factory must NOT hold SYNC_ROLE");
 
         // The role it lost lives on the gatekeeper the factory names, and the pairing is mutual
         address gatekeeper = FACTORY.ROYCO_FACTORY_GATEKEEPER();
@@ -463,10 +465,10 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(KERNEL), IRoycoDayKernel.setSequencerUptimeFeed.selector, ADMIN_ORACLE_ROLE);
     }
 
-    /// @notice Key grants exist (the accountant can sync) and every operationally bound role has a live grantee
+    /// @notice Every operationally bound role has a live grantee
+    /// @dev A market deployment mints no roles at all any more: the gatekeeper's grant primitive is gone, so every
+    ///      grant a live market needs comes from governance or the chain-level scaffolding, never from the template
     function test_Auth_EveryBoundRoleHasALiveGrantee() public view {
-        (bool syncAcc,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(ACCOUNTANT));
-        assertTrue(syncAcc, "accountant SYNC_ROLE");
         // The kernel burns through the tranches' kernelBurn, an onlyKernel immutable-address check, so the deployment
         // grants BURNER_ROLE to nobody. The tranches' burn/burnFrom surface stays bound to BURNER_ROLE as a
         // dormant-by-design admin surface, grantable later by governance.

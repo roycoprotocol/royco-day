@@ -20,6 +20,9 @@ import {
     SYNC_ROLE
 } from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
+import { RoycoMarketSyncer } from "../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
+import { RoycoDayEntryPoint } from "../../src/entrypoint/RoycoDayEntryPoint.sol";
+import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoFactory } from "../../src/interfaces/factory/IRoycoFactory.sol";
 
 /**
@@ -44,22 +47,33 @@ library FactoryScaffold {
      * @param _accessManager The access manager to wire against
      * @param _salt The CREATE3 salt for the factory proxy, namespaced to this caller by the deployer
      * @return factory The initialized factory proxy
-     * @return gatekeeper The gatekeeper, holding `ADMIN_ROLE` and pinned to that factory
+     * @return gatekeeper The gatekeeper, holding `ADMIN_ROLE` and pinned to that factory and both periphery singletons
+     * @return entryPoint The entry point singleton the gatekeeper configures each market's tranches on
+     * @return marketSyncer The market syncer singleton the gatekeeper registers each market's kernel on
      */
     function deployFactory(
         RoycoAccessManager _accessManager,
         bytes32 _salt
     )
         internal
-        returns (RoycoFactory factory, RoycoFactoryGatekeeper gatekeeper)
+        returns (RoycoFactory factory, RoycoFactoryGatekeeper gatekeeper, IRoycoDayEntryPoint entryPoint, RoycoMarketSyncer marketSyncer)
     {
         // The proxy's CREATE3 address depends on the salt alone, so it is knowable before anything it points at exists.
         // That is what lets the gatekeeper and the factory each take the other as a constructor immutable
         RoycoCreate3Deployer create3Deployer = new RoycoCreate3Deployer();
         address predictedFactory = create3Deployer.predict(address(this), _salt);
 
-        gatekeeper = new RoycoFactoryGatekeeper(address(_accessManager), predictedFactory);
+        // The gatekeeper pins both periphery singletons, but neither can exist yet: an entry point initializes
+        // against the factory, and the factory is built against this gatekeeper. CREATE3 fixes all three addresses
+        // from their salts alone, so the gatekeeper takes the periphery predicted and the asserts below confirm it
+        address predictedEntryPoint = create3Deployer.predict(address(this), keccak256(abi.encodePacked(_salt, "ENTRY_POINT")));
+        address predictedSyncer = create3Deployer.predict(address(this), keccak256(abi.encodePacked(_salt, "MARKET_SYNCER")));
+
+        gatekeeper = new RoycoFactoryGatekeeper(address(_accessManager), predictedFactory, predictedEntryPoint, predictedSyncer);
         _accessManager.grantRole(ADMIN_ROLE, address(gatekeeper), 0);
+        // The gatekeeper, not the factory, drives the periphery, so it carries both periphery roles
+        _accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, address(gatekeeper), 0);
+        _accessManager.grantRole(SYNC_ROLE, address(gatekeeper), 0);
 
         RoycoFactory impl = new RoycoFactory(address(gatekeeper));
         wireFactoryRoles(_accessManager, predictedFactory);
@@ -68,6 +82,60 @@ library FactoryScaffold {
             create3Deployer.deploy(_salt, abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(impl, abi.encodeCall(RoycoFactory.initialize, (address(_accessManager))))))
         );
         require(address(factory) == predictedFactory, "FactoryScaffold: factory address mismatch");
+
+        // The factory is live, so the periphery can initialize against it. Both must land on the addresses the
+        // gatekeeper was already built around, which is the check its constructor can no longer make
+        entryPoint = IRoycoDayEntryPoint(
+            create3Deployer.deploy(
+                keccak256(abi.encodePacked(_salt, "ENTRY_POINT")),
+                abi.encodePacked(
+                    type(ERC1967Proxy).creationCode,
+                    abi.encode(
+                        address(new RoycoDayEntryPoint(predictedFactory)),
+                        abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
+                    )
+                )
+            )
+        );
+        marketSyncer = RoycoMarketSyncer(
+            create3Deployer.deploy(
+                keccak256(abi.encodePacked(_salt, "MARKET_SYNCER")),
+                abi.encodePacked(
+                    type(ERC1967Proxy).creationCode,
+                    abi.encode(
+                        address(new RoycoMarketSyncer()), abi.encodeCall(RoycoMarketSyncer.initialize, (address(_accessManager), new address[](0)))
+                    )
+                )
+            )
+        );
+        require(address(entryPoint) == predictedEntryPoint && address(marketSyncer) == predictedSyncer, "FactoryScaffold: periphery address mismatch");
+    }
+
+    /// @notice Deploys the entry point and market syncer singletons, mirroring `Deploy.s.sol._deployPeripherySingletons`
+    /// @param _accessManager The access manager governing both singletons
+    /// @param _factory The factory address the entry point pins as its provenance registry
+    function deployPeripherySingletons(
+        RoycoAccessManager _accessManager,
+        address _factory
+    )
+        internal
+        returns (IRoycoDayEntryPoint entryPoint, RoycoMarketSyncer marketSyncer)
+    {
+        entryPoint = IRoycoDayEntryPoint(
+            address(
+                new ERC1967Proxy(
+                    address(new RoycoDayEntryPoint(_factory)),
+                    abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
+                )
+            )
+        );
+        marketSyncer = RoycoMarketSyncer(
+            address(
+                new ERC1967Proxy(
+                    address(new RoycoMarketSyncer()), abi.encodeCall(RoycoMarketSyncer.initialize, (address(_accessManager), new address[](0)))
+                )
+            )
+        );
     }
 
     /// @notice Mirrors `Deploy.s.sol._wireFactoryRoles`: the factory's own selector bindings plus its narrow role set
@@ -85,10 +153,6 @@ library FactoryScaffold {
         _accessManager.setTargetFunctionRole(_factory, _one(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         _accessManager.setTargetFunctionRole(_factory, _one(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
 
-        // The only two roles the factory retains, both solely so `executeAsFactory` can forward periphery
-        // configuration. It holds no authority to configure targets or mint roles: the gatekeeper does both
-        _accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, _factory, 0);
-        _accessManager.grantRole(SYNC_ROLE, _factory, 0);
         // The genesis pool seed is a role-gated deposit the template forwards as the factory
         _accessManager.grantRole(LPT_LP_ROLE, _factory, 0);
     }

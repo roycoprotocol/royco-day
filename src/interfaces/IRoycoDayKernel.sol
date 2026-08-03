@@ -232,6 +232,9 @@ interface IRoycoDayKernel {
     /// @notice Thrown when the LPT asset's decimals are greater than 18
     error INVALID_LPT_ASSET_DECIMALS();
 
+    /// @notice Thrown when the caller is not the accountant
+    error ONLY_ACCOUNTANT();
+
     /// @notice Retrieves the senior tranche address
     /// @return seniorTranche The address of the senior tranche for this Royco market
     function seniorTranche() external view returns (address seniorTranche);
@@ -340,6 +343,16 @@ interface IRoycoDayKernel {
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function syncTrancheAccounting() external returns (SyncedAccountingState memory state);
+
+    /**
+     * @notice Synchronizes and persists the raw and effective NAVs of all tranches from the accountant
+     * @dev Only executes a pre-op sync because there is no operation being executed in the same call as this sync
+     * @dev Never deploys the idle liquidity-premium senior shares: the pool hook routes this sync from inside the venue's
+     *      own frame, where a deployment's venue add would re-enter it
+     * @dev Only callable by the accountant
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
+     */
+    function syncTrancheAccountingFromAccountant() external returns (SyncedAccountingState memory state);
 
     /**
      * @notice Synchronizes and persists the raw and effective NAVs of all tranches, returning the specified tranche's post-sync claims and supply

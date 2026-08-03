@@ -9,6 +9,7 @@ import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol"
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
+import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { MockDeploymentTemplate } from "../../mocks/MockDeploymentTemplate.sol";
@@ -33,7 +34,7 @@ contract Test_FactoryPauseGating is Test {
 
     function setUp() public {
         am = new RoycoAccessManager(address(this));
-        (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
+        (factory, gatekeeper,,) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         am.grantRole(ADMIN_FACTORY_ROLE, address(this), 0);
         am.grantRole(ADMIN_PAUSER_ROLE, address(this), 0);
@@ -86,10 +87,10 @@ contract Test_FactoryPauseGating is Test {
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         factory.setMarketTargetFunctionRole(makeAddr("TARGET"), selectors, roleIds);
 
-        address[] memory accounts = new address[](1);
-        uint32[] memory delays = new uint32[](1);
+        address[] memory tranches = new address[](1);
+        IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](1);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        factory.grantMarketRole(roleIds, accounts, delays);
+        factory.configureMarketPeriphery(tranches, configs, makeAddr("KERNEL"));
 
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         factory.executeAsFactory(makeAddr("TARGET"), "");

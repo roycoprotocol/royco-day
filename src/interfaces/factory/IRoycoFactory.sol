@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
+import { IRoycoDayEntryPoint } from "../IRoycoDayEntryPoint.sol";
 import { IRoycoProtocolTemplate } from "./IRoycoProtocolTemplate.sol";
 
 /**
@@ -116,14 +117,14 @@ interface IRoycoFactory {
     function setMarketTargetFunctionRole(address _target, bytes4[] calldata _selectors, uint64[] calldata _roleIds) external;
 
     /**
-     * @notice Grants each role to an account on the AccessManager, callable only by the active template
-     * @dev The three arrays are index-aligned: `_roleIds[i]` is granted to `_accounts[i]` with `_executionDelays[i]`
-     * @dev ADMIN_ROLE is a forbidden grant
-     * @param _roleIds The role ids to grant, index-aligned with `_accounts`/`_executionDelays`
-     * @param _accounts The accounts receiving each role, index-aligned with `_roleIds`/`_executionDelays`
-     * @param _executionDelays The access-manager execution delay applied to each grant, index-aligned with `_roleIds`/`_accounts`
+     * @notice Configures the in-flight market's periphery through the gatekeeper, callable only by the active template
+     * @dev The factory holds no periphery roles: the gatekeeper does, and it accepts only freshly deployed tranches
+     *      and an unregistered kernel
+     * @param _tranches The market's tranches to configure on the entry point, index-aligned with `_configs`
+     * @param _configs The entry point configuration for each tranche, index-aligned with `_tranches`
+     * @param _kernel The market's kernel, registered on the market syncer
      */
-    function grantMarketRole(uint64[] calldata _roleIds, address[] calldata _accounts, uint32[] calldata _executionDelays) external;
+    function configureMarketPeriphery(address[] calldata _tranches, IRoycoDayEntryPoint.TrancheConfig[] calldata _configs, address _kernel) external;
 
     /**
      * @notice Forwards an arbitrary call as the factory, callable only by the active template

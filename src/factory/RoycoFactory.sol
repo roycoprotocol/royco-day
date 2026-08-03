@@ -5,6 +5,7 @@ import { AccessManagedUpgradeable } from "../../lib/openzeppelin-contracts-upgra
 import { BeaconProxy } from "../../lib/openzeppelin-contracts/contracts/proxy/beacon/BeaconProxy.sol";
 import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
 import { RoycoUUPSBase } from "../base/RoycoUUPSBase.sol";
+import { IRoycoDayEntryPoint } from "../interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
@@ -131,15 +132,15 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory 
 
         // A valid market must have a kernel, a senior tranche, and at least one counterparty tranche: senior capital needs a junior buffer or a liquidity venue to trade against
         require(
-            result.kernel != address(0) && result.seniorTranche != address(0)
-                && (result.juniorTranche != address(0) || result.liquidityProviderTranche != address(0)),
+            result.kernel != address(0) && result.seniorTranche != address(0) && result.juniorTranche != address(0)
+                && result.liquidityProviderTranche != address(0),
             INVALID_DEPLOYMENT_RESULT()
         );
 
         // Register each deployed tranche against the market's kernel, guarding the optional slots so the null address never registers as a tranche
         $.trancheToKernel[result.seniorTranche] = result.kernel;
-        if (result.juniorTranche != address(0)) $.trancheToKernel[result.juniorTranche] = result.kernel;
-        if (result.liquidityProviderTranche != address(0)) $.trancheToKernel[result.liquidityProviderTranche] = result.kernel;
+        $.trancheToKernel[result.juniorTranche] = result.kernel;
+        $.trancheToKernel[result.liquidityProviderTranche] = result.kernel;
 
         // Configure the market's periphery, may read trancheToKernel mapping set above.
         IBaseTemplate(_template).postMarketRegistration(result, _params);
@@ -202,17 +203,17 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory 
     }
 
     /// @inheritdoc IRoycoFactory
-    function grantMarketRole(
-        uint64[] calldata _roleIds,
-        address[] calldata _accounts,
-        uint32[] calldata _executionDelays
+    function configureMarketPeriphery(
+        address[] calldata _tranches,
+        IRoycoDayEntryPoint.TrancheConfig[] calldata _configs,
+        address _kernel
     )
         external
         override(IRoycoFactory)
         whenNotPaused
         onlyActiveTemplate
     {
-        IRoycoFactoryGatekeeper(ROYCO_FACTORY_GATEKEEPER).grantMarketRoles(_roleIds, _accounts, _executionDelays);
+        IRoycoFactoryGatekeeper(ROYCO_FACTORY_GATEKEEPER).configureMarketPeriphery(_tranches, _configs, _kernel);
     }
 
     /// @inheritdoc IRoycoFactory

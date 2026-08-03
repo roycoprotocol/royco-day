@@ -112,7 +112,6 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         // components are then registered through the real executeMarketDeployment pipeline below, so the entry
         // point's provenance reads hit a real factory registry populated by real registration
         _deployEntryPointFactory();
-        _deployEntryPointProxy();
         _deploySyncerAndRegistrationTemplate();
         _wireEntryPointRoleBindings();
 
@@ -134,40 +133,23 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
 
     /// @dev Stands up the real factory triangle and grants the fixture its curation and deployment roles
     function _deployEntryPointFactory() internal {
-        (entryPointFactory, entryPointFactoryGatekeeper) =
+        // The gatekeeper pins the periphery it drives, so the scaffold stands both singletons up alongside it
+        (entryPointFactory, entryPointFactoryGatekeeper, entryPoint, marketSyncer) =
             FactoryScaffold.deployFactory(RoycoAccessManager(address(accessManager)), keccak256("ENTRY_POINT_FACTORY_PROXY"));
+        vm.label(address(entryPoint), "EntryPoint");
+        vm.label(address(marketSyncer), "RoycoMarketSyncer");
         vm.label(address(entryPointFactory), "RoycoFactory");
         // The fixture curates templates and drives deployments itself
         accessManager.grantRole(ADMIN_FACTORY_ROLE, address(this), 0);
         accessManager.grantRole(DEPLOYER_ROLE, address(this), 0);
     }
 
-    /// @dev Deploys the entry point behind an ERC1967 proxy, initialized with no tranche configs: the initial
-    ///      configuration flows through the factory, mirroring the production market deployment path
-    function _deployEntryPointProxy() internal {
-        entryPointImpl = new RoycoDayEntryPoint(address(entryPointFactory));
-        entryPoint = IRoycoDayEntryPoint(
-            address(
-                new ERC1967Proxy(
-                    address(entryPointImpl), abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
-                )
-            )
-        );
-        vm.label(address(entryPoint), "EntryPoint");
-    }
-
-    /// @dev Deploys the real market syncer singleton wired like production, then the minimal real template: canned
-    ///      result naming the fixture's externally deployed components, real BaseDeploymentTemplate registration
-    ///      path, real periphery mixins for the hook-phase configuration
+    /// @dev Registers the minimal real template: canned result naming the fixture's externally deployed components,
+    ///      real BaseDeploymentTemplate registration path, real factory + gatekeeper periphery configuration
     function _deploySyncerAndRegistrationTemplate() internal {
-        RoycoMarketSyncer marketSyncerImpl = new RoycoMarketSyncer();
-        marketSyncer = RoycoMarketSyncer(
-            address(new ERC1967Proxy(address(marketSyncerImpl), abi.encodeCall(RoycoMarketSyncer.initialize, (address(accessManager), new address[](0)))))
-        );
-        vm.label(address(marketSyncer), "RoycoMarketSyncer");
         accessManager.setTargetFunctionRole(address(marketSyncer), _sels(RoycoMarketSyncer.addMarketKernels.selector), SYNC_ROLE);
 
-        registrationTemplate = new MockMarketRegistrationTemplate(IRoycoFactory(address(entryPointFactory)), address(entryPoint), address(marketSyncer));
+        registrationTemplate = new MockMarketRegistrationTemplate(IRoycoFactory(address(entryPointFactory)));
         vm.label(address(registrationTemplate), "MockMarketRegistrationTemplate");
         entryPointFactory.registerTemplate(address(registrationTemplate));
         registrationTemplate.setDeploymentResult(

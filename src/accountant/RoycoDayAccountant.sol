@@ -38,10 +38,10 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     modifier withSyncedAccounting() {
         address kernel = _getRoycoDayAccountantStorage().kernel;
         // Cache the state of the accountant after the pre-operation accounting synchronization
-        SyncedAccountingState memory preOp = IRoycoDayKernel(kernel).syncTrancheAccounting();
+        SyncedAccountingState memory preOp = IRoycoDayKernel(kernel).syncTrancheAccountingFromAccountant();
         _;
         // Retrieve the result of the accounting synchronization after the paramter change
-        SyncedAccountingState memory postOp = IRoycoDayKernel(kernel).syncTrancheAccounting();
+        SyncedAccountingState memory postOp = IRoycoDayKernel(kernel).syncTrancheAccountingFromAccountant();
         // Check that the coverage utilization is at most 100% or it didn't increase/worsen
         // Check that the coverage liquidation utilization didn't get worse or this parameter change did not send the market into a liquidation state
         require(
@@ -673,7 +673,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         require(_jtYDM != $.lptYDM, YDMS_CANNOT_BE_IDENTICAL());
         // Best-effort sync to settle unrealized PNL under the outgoing JT YDM
         // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking JT YDM
-        $.kernel._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
+        $.kernel._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccountingFromAccountant, ()));
         // Initialize and set the new JT YDM for this market
         _initializeYDM(_jtYDM, _jtYDMInitializationData);
         $.jtYDM = _jtYDM;
@@ -687,7 +687,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         require(_lptYDM != $.jtYDM, YDMS_CANNOT_BE_IDENTICAL());
         // Best-effort sync to settle unrealized PNL under the outgoing LPT YDM
         // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking LPT YDM
-        $.kernel._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ()));
+        $.kernel._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccountingFromAccountant, ()));
         // Initialize and set the new LPT YDM for this market
         _initializeYDM(_lptYDM, _lptYDMInitializationData);
         $.lptYDM = _lptYDM;

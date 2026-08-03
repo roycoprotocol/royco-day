@@ -33,7 +33,7 @@ contract Test_FactoryMarketDeployerTransient is Test {
 
     function setUp() public {
         am = new RoycoAccessManager(address(this));
-        (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
+        (factory, gatekeeper,,) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         am.grantRole(ADMIN_FACTORY_ROLE, address(this), 0);
         am.grantRole(DEPLOYER_ROLE, DEPLOYER_ALPHA, 0);

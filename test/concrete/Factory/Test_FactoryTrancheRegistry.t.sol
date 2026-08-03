@@ -34,7 +34,7 @@ contract Test_FactoryTrancheRegistry is Test {
         // grant its (now known) address ADMIN_ROLE, then initialize.
         // The gatekeeper holds ADMIN_ROLE on the factory's behalf; the scaffold stands both up and wires the
         // factory's own selectors and roles
-        (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
+        (factory, gatekeeper,,) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         // Grant the roles the factory's initialize() bound to its gated selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);

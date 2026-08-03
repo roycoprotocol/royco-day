@@ -2,9 +2,11 @@
 pragma solidity ^0.8.28;
 
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
+import { IRoycoDayEntryPoint } from "../interfaces/IRoycoDayEntryPoint.sol";
+import { IRoycoMarketSyncer } from "../interfaces/external/royco-periphery/IRoycoMarketSyncer.sol";
 import { IRoycoAccessManager } from "../interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactoryGatekeeper } from "../interfaces/factory/IRoycoFactoryGatekeeper.sol";
-import { ADMIN_ROLE, BURNER_ROLE, PUBLIC_ROLE, SYNC_ROLE } from "./Roles.sol";
+import { ADMIN_ROLE, PUBLIC_ROLE } from "./Roles.sol";
 
 /**
  * @title RoycoFactoryGatekeeper
@@ -19,6 +21,12 @@ contract RoycoFactoryGatekeeper is IRoycoFactoryGatekeeper {
     /// @inheritdoc IRoycoFactoryGatekeeper
     address public immutable override(IRoycoFactoryGatekeeper) ROYCO_FACTORY;
 
+    /// @inheritdoc IRoycoFactoryGatekeeper
+    address public immutable override(IRoycoFactoryGatekeeper) ROYCO_DAY_ENTRY_POINT;
+
+    /// @inheritdoc IRoycoFactoryGatekeeper
+    address public immutable override(IRoycoFactoryGatekeeper) ROYCO_MARKET_SYNCER;
+
     /// @dev Restricts a call to the one factory this gatekeeper serves
     modifier onlyFactory() {
         require(msg.sender == ROYCO_FACTORY, ONLY_FACTORY());
@@ -29,11 +37,19 @@ contract RoycoFactoryGatekeeper is IRoycoFactoryGatekeeper {
      * @param _roycoAccessManager The access manager this gatekeeper holds `ADMIN_ROLE` on
      * @param _roycoFactory The only address permitted to call this gatekeeper, supplied as the CREATE3 address the
      *        factory proxy will occupy: that address is fixed by its salt, so it is knowable before the proxy exists
+     * @param _roycoDayEntryPoint The chain's entry point singleton, deployed before this gatekeeper
+     * @param _roycoMarketSyncer The chain's market syncer singleton, deployed before this gatekeeper
      */
-    constructor(address _roycoAccessManager, address _roycoFactory) {
-        require(_roycoAccessManager != address(0) && _roycoFactory != address(0), NULL_ADDRESS());
+    constructor(address _roycoAccessManager, address _roycoFactory, address _roycoDayEntryPoint, address _roycoMarketSyncer) {
+        require(
+            _roycoAccessManager != address(0) && _roycoFactory != address(0) && _roycoDayEntryPoint != address(0) && _roycoMarketSyncer != address(0),
+            NULL_ADDRESS()
+        );
+
         ROYCO_ACCESS_MANAGER = _roycoAccessManager;
         ROYCO_FACTORY = _roycoFactory;
+        ROYCO_DAY_ENTRY_POINT = _roycoDayEntryPoint;
+        ROYCO_MARKET_SYNCER = _roycoMarketSyncer;
     }
 
     /// @inheritdoc IRoycoFactoryGatekeeper
@@ -65,26 +81,34 @@ contract RoycoFactoryGatekeeper is IRoycoFactoryGatekeeper {
     }
 
     /// @inheritdoc IRoycoFactoryGatekeeper
-    function grantMarketRoles(
-        uint64[] calldata _roleIds,
-        address[] calldata _accounts,
-        uint32[] calldata _executionDelays
+    function configureMarketPeriphery(
+        address[] calldata _tranches,
+        IRoycoDayEntryPoint.TrancheConfig[] calldata _configs,
+        address _kernel
     )
         external
         override(IRoycoFactoryGatekeeper)
         onlyFactory
     {
-        uint256 numRolesToGrant = _roleIds.length;
-        require(numRolesToGrant == _accounts.length && numRolesToGrant == _executionDelays.length, LENGTH_MISMATCH());
+        uint256 numTranches = _tranches.length;
+        require(numTranches == _configs.length, LENGTH_MISMATCH());
 
-        AccessManager accessManager = AccessManager(ROYCO_ACCESS_MANAGER);
-        for (uint256 i; i < numRolesToGrant; ++i) {
-            require(_roleIds[i] == SYNC_ROLE || _roleIds[i] == BURNER_ROLE, ROLE_FORBIDDEN(_roleIds[i]));
-            // Verify the contract has never been configured
-            _requireNotConfigured(_accounts[i]);
-            accessManager.grantRole(_roleIds[i], _accounts[i], _executionDelays[i]);
+        for (uint256 i; i < numTranches; ++i) {
+            address tranche = _tranches[i];
+            require(tranche != address(0), NULL_ADDRESS());
+            // A configured tranche carries its market's kernel, so a non-null kernel means this tranche is already live
+            require(IRoycoDayEntryPoint(ROYCO_DAY_ENTRY_POINT).getTrancheConfig(tranche).kernel == address(0), TRANCHE_ALREADY_CONFIGURED(tranche));
         }
-        emit MarketRolesGranted(numRolesToGrant);
+
+        IRoycoDayEntryPoint(ROYCO_DAY_ENTRY_POINT).modifyTrancheConfigs(_tranches, _configs);
+
+        // Register the market's kernel on the syncer's batch accounting sync set
+        require(!IRoycoMarketSyncer(ROYCO_MARKET_SYNCER).isMarketKernelRegistered(_kernel), KERNEL_ALREADY_REGISTERED(_kernel));
+        address[] memory kernels = new address[](1);
+        kernels[0] = _kernel;
+        IRoycoMarketSyncer(ROYCO_MARKET_SYNCER).addMarketKernels(kernels);
+
+        emit MarketPeripheryConfigured(_kernel, numTranches);
     }
 
     /// @dev A market deployment may only act on a contract that has never been configured before

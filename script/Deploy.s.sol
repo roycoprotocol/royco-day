@@ -251,10 +251,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     {
         // AccessManager + factory (idempotent within a test via CREATE2).
         bool amExisted;
-        (s.accessManager, s.factory, amExisted) = _deployAccessManagerAndFactory(_deployer);
-
-        // Periphery singletons (entry point + market syncer) the template configures per market.
-        (s.entryPoint, s.marketSyncer) = _deployPeripherySingletons(s.accessManager, address(s.factory));
+        (s.accessManager, s.factory, s.entryPoint, s.marketSyncer, amExisted) = _deployAccessManagerAndFactory(_deployer);
 
         // Role graph (grants + admin/guardian re-pointing) on a freshly deployed AccessManager.
         if (!amExisted) _applyRoleGraph(s.accessManager, _factoryAdmin, _deployer, _roleAssignments);
@@ -271,7 +268,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         }
 
         // Register (or reuse) the Day template for this kernel type.
-        s.template = _getOrRegisterTemplate(s.factory, _config, s.entryPoint, s.marketSyncer, s.roycoBlacklist);
+        s.template = _getOrRegisterTemplate(s.factory, _config, s.roycoBlacklist);
 
         // Register the yield distribution models on the template and open its admin surface. Both are chain-wide and
         // must land before the deployer renounces its admin roles.
@@ -358,7 +355,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice Deploys (or reuses) the standalone RoycoAccessManager, its factory gatekeeper, and the factory.
     /// @dev The role graph is applied by the caller (when `amExisted` is false) AFTER the periphery singletons are
     ///      deployed, so grants that require default (ADMIN_ROLE) role admins can land before pass 2 re-points them.
-    function _deployAccessManagerAndFactory(address _deployer) internal returns (RoycoAccessManager accessManager, RoycoFactory factory, bool amExisted) {
+    function _deployAccessManagerAndFactory(address _deployer)
+        internal
+        returns (RoycoAccessManager accessManager, RoycoFactory factory, address entryPoint, address marketSyncer, bool amExisted)
+    {
         _logSection("Protocol scaffolding");
 
         // Deploy the AccessManager with the deployer as the initial admin so it can wire roles during this broadcast.
@@ -377,14 +377,26 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         bytes32 factoryProxySalt = _singletonSalt("ROYCO_FACTORY_PROXY");
         address factoryProxy = RoycoCreate3Deployer(create3Deployer).predict(_deployer, factoryProxySalt);
 
+        // The gatekeeper pins both periphery singletons as immutables, but neither can exist yet: an entry point's
+        // initializer reads its authority off the factory, and the factory in turn is built against this gatekeeper.
+        // All three addresses are deterministic though, so the gatekeeper takes the periphery predicted and the
+        // deployment below asserts each one landed where it was promised
+        (address predictedEntryPoint, address predictedMarketSyncer) = _predictPeripherySingletons(accessManager, factoryProxy);
+
         // Deploy the factory gatekeeper against the factory address the CREATE3 salt has already fixed
         (address gatekeeper, bool gatekeeperExisted) = deployWithSanityChecks(
-            _singletonSalt("ROYCO_FACTORY_GATEKEEPER"), abi.encodePacked(type(RoycoFactoryGatekeeper).creationCode, abi.encode(amAddr, factoryProxy)), false
+            _singletonSalt("ROYCO_FACTORY_GATEKEEPER"),
+            abi.encodePacked(type(RoycoFactoryGatekeeper).creationCode, abi.encode(amAddr, factoryProxy, predictedEntryPoint, predictedMarketSyncer)),
+            false
         );
         _logDeploy("Gatekeeper         ", gatekeeper, gatekeeperExisted);
 
-        // Hand it the ADMIN_ROLE the factory used to hold.
-        if (!gatekeeperExisted) accessManager.grantRole(ADMIN_ROLE, gatekeeper, 0);
+        // Hand it the ADMIN_ROLE the factory used to hold
+        if (!gatekeeperExisted) {
+            accessManager.grantRole(ADMIN_ROLE, gatekeeper, 0);
+            accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, gatekeeper, 0);
+            accessManager.grantRole(SYNC_ROLE, gatekeeper, 0);
+        }
 
         (address factoryImpl, bool factoryImplExisted) = deployWithSanityChecks(
             _singletonSalt("ROYCO_FACTORY_IMPLEMENTATION"), abi.encodePacked(type(RoycoFactory).creationCode, abi.encode(gatekeeper)), false
@@ -399,6 +411,12 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         }
         factory = RoycoFactory(factoryProxy);
         _logDeploy("Factory (proxy)    ", factoryProxy, factoryProxyExisted);
+
+        // The factory is live, so the periphery can finally initialize against it. Both must land on the addresses the
+        // gatekeeper was already built around, which is the check the gatekeeper's constructor can no longer make
+        (entryPoint, marketSyncer) = _deployPeripherySingletons(accessManager, factoryProxy);
+        require(entryPoint == predictedEntryPoint && marketSyncer == predictedMarketSyncer, "periphery address mismatch");
+        require(IRoycoDayEntryPoint(entryPoint).ROYCO_FACTORY() == factoryProxy, "entry point bound to a different factory");
 
         // Wire the factory roles
         if (!factoryProxyExisted) _wireFactoryRoles(accessManager, factoryProxy);
@@ -422,8 +440,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         _accessManager.setTargetFunctionRole(_factory, _sel(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         _accessManager.setTargetFunctionRole(_factory, _sel(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
 
-        _accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, _factory, 0);
-        _accessManager.grantRole(SYNC_ROLE, _factory, 0);
         _accessManager.grantRole(LPT_LP_ROLE, _factory, 0);
     }
 
@@ -532,18 +548,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
      *      than silently reusing one. The yield distribution models are NOT construction params: they live in the
      *      template's own storage and are registered separately, so shipping a new model shape does not move it
      */
-    function _getOrRegisterTemplate(
-        RoycoFactory _factory,
-        MarketConfig memory _config,
-        address _entryPoint,
-        address _marketSyncer,
-        address _roycoBlacklist
-    )
-        internal
-        returns (address template)
-    {
+    function _getOrRegisterTemplate(RoycoFactory _factory, MarketConfig memory _config, address _roycoBlacklist) internal returns (address template) {
         bool existed;
-        (template, existed) = _deployTemplate(IRoycoFactory(address(_factory)), _config, _entryPoint, _marketSyncer, _roycoBlacklist);
+        (template, existed) = _deployTemplate(IRoycoFactory(address(_factory)), _config, _roycoBlacklist);
         if (!_factory.isTemplateEnabled(template)) _factory.registerTemplate(template);
         _logDeploy("Template           ", template, existed);
     }
@@ -553,17 +560,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
      * @dev Deploys (or reuses) the chain's implementation set and the six yield distribution models, then the template
      *      pinned to them, exactly as the production scaffolding phase does
      */
-    function deployTemplateForTest(
-        IRoycoFactory _factory,
-        MarketConfig memory _config,
-        address _entryPoint,
-        address _marketSyncer,
-        address _roycoBlacklist
-    )
-        public
-        returns (address template)
-    {
-        (template,) = _deployTemplate(_factory, _config, _entryPoint, _marketSyncer, _roycoBlacklist);
+    function deployTemplateForTest(IRoycoFactory _factory, MarketConfig memory _config, address _roycoBlacklist) public returns (address template) {
+        (template,) = _deployTemplate(_factory, _config, _roycoBlacklist);
     }
 
     /**
@@ -602,16 +600,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
      * @dev The implementations and models are deployed (or reused) first, then handed to the template as construction
      *      params. Every market this template deploys shares them
      */
-    function _deployTemplate(
-        IRoycoFactory _factory,
-        MarketConfig memory _config,
-        address _entryPoint,
-        address _marketSyncer,
-        address _roycoBlacklist
-    )
-        internal
-        returns (address template, bool existed)
-    {
+    function _deployTemplate(IRoycoFactory _factory, MarketConfig memory _config, address _roycoBlacklist) internal returns (address template, bool existed) {
         if (_config.kernelType != KernelType.RoycoDayBalancerV3Kernel) revert UnsupportedKernelType(_config.kernelType);
         ChainConfig memory chainConfig = getChainConfig(block.chainid, isTestEnv);
 
@@ -620,8 +609,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         cp.factory = _factory;
         cp.balancerV3PoolFactory = GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory);
         cp.eclpLPOracleFactory = ILPOracleFactoryBase(chainConfig.eclpLPOracleFactory);
-        cp.roycoDayEntryPoint = _entryPoint;
-        cp.roycoMarketSyncer = _marketSyncer;
         cp.roycoBlacklist = _roycoBlacklist;
 
         (template, existed) = deployWithSanityChecks(
@@ -1015,26 +1002,51 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     ///      kernels: the factory (which holds SYNC_ROLE) registers each market's kernel at deployment.
     /// @param _accessManager The AccessManager governing both singletons' restricted functions.
     /// @param _factory The Royco factory baked into the entry point's provenance validation.
+    /// @notice Predicts both periphery singletons' CREATE2 addresses, which the gatekeeper is built against before
+    ///         either can be deployed (an entry point initializes against the factory, which is built against the gatekeeper)
+    /// @dev Must derive each address from EXACTLY the creation code `_deployPeripherySingletons` deploys
+    function _predictPeripherySingletons(AccessManager _accessManager, address _factory) internal view returns (address entryPoint, address marketSyncer) {
+        address entryPointImpl = generateDeterminsticAddress(
+            _singletonSalt("ROYCO_DAY_ENTRY_POINT_IMPLEMENTATION"), abi.encodePacked(type(RoycoDayEntryPoint).creationCode, abi.encode(_factory))
+        );
+        entryPoint =
+            generateDeterminsticAddress(_singletonSalt("ROYCO_DAY_ENTRY_POINT_PROXY"), getERC1967ProxyCreationCode(entryPointImpl, _entryPointInitData()));
+
+        address syncerImpl = generateDeterminsticAddress(_singletonSalt("ROYCO_MARKET_SYNCER_IMPLEMENTATION"), type(RoycoMarketSyncer).creationCode);
+        marketSyncer = generateDeterminsticAddress(
+            _singletonSalt("ROYCO_MARKET_SYNCER_PROXY"), getERC1967ProxyCreationCode(syncerImpl, _syncerInitData(address(_accessManager)))
+        );
+    }
+
+    /// @dev The entry point initializes with no tranche configs: every market's flow through the gatekeeper at deployment
+    function _entryPointInitData() internal pure returns (bytes memory) {
+        return abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)));
+    }
+
+    /// @dev The syncer initializes with no registered kernels: every market's kernel is registered at deployment
+    function _syncerInitData(address _accessManager) internal pure returns (bytes memory) {
+        return abi.encodeCall(RoycoMarketSyncer.initialize, (_accessManager, new address[](0)));
+    }
+
     function _deployPeripherySingletons(AccessManager _accessManager, address _factory) internal returns (address entryPoint, address marketSyncer) {
         // Deploy the entry point implementation + proxy, initialized with no tranche configs.
         (address entryPointImpl, bool entryPointImplExisted) = deployWithSanityChecks(
             _singletonSalt("ROYCO_DAY_ENTRY_POINT_IMPLEMENTATION"), abi.encodePacked(type(RoycoDayEntryPoint).creationCode, abi.encode(_factory)), false
         );
         _logDeploy("EntryPoint (impl)  ", entryPointImpl, entryPointImplExisted);
-        bytes memory entryPointInitData = abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)));
         bool entryPointExisted;
         (entryPoint, entryPointExisted) =
-            deployWithSanityChecks(_singletonSalt("ROYCO_DAY_ENTRY_POINT_PROXY"), getERC1967ProxyCreationCode(entryPointImpl, entryPointInitData), false);
+            deployWithSanityChecks(_singletonSalt("ROYCO_DAY_ENTRY_POINT_PROXY"), getERC1967ProxyCreationCode(entryPointImpl, _entryPointInitData()), false);
         _logDeploy("EntryPoint (proxy) ", entryPoint, entryPointExisted);
 
         // Deploy the market syncer implementation + proxy, initialized with no registered kernels.
         (address syncerImpl, bool syncerImplExisted) =
             deployWithSanityChecks(_singletonSalt("ROYCO_MARKET_SYNCER_IMPLEMENTATION"), type(RoycoMarketSyncer).creationCode, false);
         _logDeploy("MarketSyncer (impl)", syncerImpl, syncerImplExisted);
-        bytes memory syncerInitData = abi.encodeCall(RoycoMarketSyncer.initialize, (address(_accessManager), new address[](0)));
         bool syncerExisted;
-        (marketSyncer, syncerExisted) =
-            deployWithSanityChecks(_singletonSalt("ROYCO_MARKET_SYNCER_PROXY"), getERC1967ProxyCreationCode(syncerImpl, syncerInitData), false);
+        (marketSyncer, syncerExisted) = deployWithSanityChecks(
+            _singletonSalt("ROYCO_MARKET_SYNCER_PROXY"), getERC1967ProxyCreationCode(syncerImpl, _syncerInitData(address(_accessManager))), false
+        );
         _logDeploy("MarketSyncer (proxy)", marketSyncer, syncerExisted);
 
         // Wire each singleton's full role surface on first deployment. Runs before the role graph re-points any

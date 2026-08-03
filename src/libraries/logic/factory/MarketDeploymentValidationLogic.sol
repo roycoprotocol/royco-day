@@ -84,9 +84,9 @@ library MarketDeploymentValidationLogic {
 
     /// @notice Validates the deployer-supplied params before any of the market's contracts exist
     /// @param _rawParams The ABI-encoded `MarketParams` the deployer passed to `deployMarket`
-    function validateMarketParams(bytes calldata _rawParams) external view {
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params =
-            abi.decode(_rawParams, (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams));
+    /// @return params The validated market params
+    function validateMarketParams(bytes calldata _rawParams) external view returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params) {
+        params = abi.decode(_rawParams, (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams));
 
         // The market ID must be non-zero
         require(params.marketId != 0, MARKET_ID_REQUIRED());
@@ -115,6 +115,9 @@ library MarketDeploymentValidationLogic {
 
         // The fee recipient is normally an EOA or multisig, so it is only required to be non-null
         require(params.protocolFeeRecipient != address(0), NULL_MARKET_PARAMETER());
+
+        // The senior tranche self-liquidation bonus must be less than WAD
+        require(params.stSelfLiquidationBonusWAD < WAD, INVALID_ACCOUNTANT_CONFIG());
 
         // The collateral asset oracle is mandatory; the kernel separately pins that it prices THIS collateral asset
         _requireContract(params.collateralAssetOracle);
@@ -220,32 +223,6 @@ library MarketDeploymentValidationLogic {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // POOL VERIFICATION
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice Verifies the Gyro E-CLP pool the template just created before the market is wired against it
-     * @dev Provenance needs no check: the pool came from the template's own call to its pool factory
-     * @param _vault The Balancer V3 vault the pool is registered with
-     * @param _pool The created pool
-     * @param _seniorTranche The senior tranche share expected as the pool's first token
-     * @param _quoteAsset The quote asset expected as the pool's second token
-     */
-    function verifyPool(IVault _vault, address _pool, address _seniorTranche, address _quoteAsset) external view {
-        // Unseeded: no BPT has been minted
-        require(IERC20(_pool).totalSupply() == 0, INVALID_POOL_CONFIGURATION(_pool));
-
-        // Hookless: the kernel is the pool's senior-leg rate provider, and the market registers no hooks contract
-        BalancerV3HooksConfig memory hooksConfig = _vault.getHooksConfig(_pool);
-        require(hooksConfig.hooksContract == address(0), INVALID_POOL_CONFIGURATION(_pool));
-
-        // Exactly {ST share, quote asset}: the market id guarantees the deployed ST share sorts "less" than the
-        // quote token, so the Vault's ascending-order registration puts the senior leg first
-        IERC20[] memory tokens = _vault.getPoolTokens(_pool);
-        require(tokens.length == 2 && address(tokens[0]) == _seniorTranche && address(tokens[1]) == _quoteAsset, INVALID_POOL_CONFIGURATION(_pool));
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT VERIFICATION
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -312,18 +289,21 @@ library MarketDeploymentValidationLogic {
         require(kernel.lptAsset() == _pool, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
         require(kernel.getState().roycoBlacklist == _roycoBlacklist, MARKET_WIRING_VERIFICATION_FAILED(_result.kernel));
 
-        // The market id should guarantee that the deployed ST share is "less" than the quote token
+        // Pool: The market id should guarantee that the deployed ST share is "less" than the quote token
         IERC20[] memory tokens = _vault.getPoolTokens(_pool);
         require(address(tokens[0]) == _result.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_pool));
         require(address(tokens[1]) == kernel.quoteAsset(), MARKET_WIRING_VERIFICATION_FAILED(_pool));
+
+        // Pool: Unseeded: no BPT has been minted
+        require(IERC20(_pool).totalSupply() == 0, INVALID_POOL_CONFIGURATION(_pool));
+
+        // Pool: remains hookless, the kernel serves as its senior-leg rate provider
+        require(_vault.getHooksConfig(_pool).hooksContract == address(0), MARKET_WIRING_VERIFICATION_FAILED(_pool));
 
         // Accountant: kernel binding and the injected JT YDM / LPT LDM instances
         IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = IRoycoDayAccountant(_result.accountant).getState();
         require(accountantState.kernel == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
         require(accountantState.jtYDM == _result.ydm && accountantState.lptYDM == _result.lptYdm, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
-
-        // Pool: remains hookless, the kernel serves as its senior-leg rate provider
-        require(_vault.getHooksConfig(_pool).hooksContract == address(0), MARKET_WIRING_VERIFICATION_FAILED(_pool));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

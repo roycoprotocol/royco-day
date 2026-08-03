@@ -94,7 +94,7 @@ contract Test_IdleCDOMarketDeployment is Test {
         // The factory proxy takes a CREATE3 address, a function of its salt alone, which is what lets the gatekeeper
         // and the factory each hold the other as a constructor immutable. The scaffold stands both up and binds the
         // factory's own selectors and roles, exactly as the deployment script does.
-        (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
+        (factory, gatekeeper, entryPoint, syncer) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         // Every market the template deploys screens against this one blacklist, and the template rejects a null one
         roycoBlacklist = FactoryScaffold.deployBlacklist(am);
@@ -103,19 +103,7 @@ contract Test_IdleCDOMarketDeployment is Test {
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
         am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
 
-        // The REAL periphery singletons the template configures per market: the entry point (initialized empty,
-        // configs flow through the factory) and the market syncer (initialized with no kernels).
-        RoycoDayEntryPoint entryPointImpl = new RoycoDayEntryPoint(address(factory));
-        entryPoint = IRoycoDayEntryPoint(
-            address(
-                new ERC1967Proxy(
-                    address(entryPointImpl), abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
-                )
-            )
-        );
-        RoycoMarketSyncer syncerImpl = new RoycoMarketSyncer();
-        syncer =
-            RoycoMarketSyncer(address(new ERC1967Proxy(address(syncerImpl), abi.encodeCall(RoycoMarketSyncer.initialize, (address(am), new address[](0))))));
+        // The scaffold deployed the REAL periphery singletons alongside the gatekeeper that pins them
 
         // Bind the config selectors the factory drives during deployments (the factory self-granted
         // ADMIN_ENTRY_POINT_ROLE + SYNC_ROLE in its initialize).
@@ -132,7 +120,7 @@ contract Test_IdleCDOMarketDeployment is Test {
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
         template = RoycoDayBalancerV3MarketDeploymentTemplate(
             deployScript.deployTemplateForTest(
-                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer), roycoBlacklist
+                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), roycoBlacklist
             )
         );
 

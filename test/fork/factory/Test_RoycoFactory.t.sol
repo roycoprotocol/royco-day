@@ -44,12 +44,12 @@ import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekee
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { TAG_JT_PROXY, TAG_ST_PROXY } from "../../../src/factory/templates/base/Constants.sol";
-import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/EntryPointConfigurer.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoAccessManager } from "../../../src/interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
+import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { MarketDeploymentValidationLogic } from "../../../src/libraries/logic/factory/MarketDeploymentValidationLogic.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
@@ -108,7 +108,7 @@ contract Test_RoycoFactory is Test {
         // The factory proxy takes a CREATE3 address, a function of its salt alone, which is what lets the gatekeeper
         // and the factory each hold the other as a constructor immutable. The scaffold stands both up and binds the
         // factory's own selectors and roles, exactly as the deployment script does.
-        (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
+        (factory, gatekeeper, entryPoint, syncer) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         // Every market the template deploys screens against this one blacklist, and the template rejects a null one
         roycoBlacklist = FactoryScaffold.deployBlacklist(am);
@@ -122,19 +122,7 @@ contract Test_RoycoFactory is Test {
         am.grantRole(ADMIN_PAUSER_ROLE, address(this), 0);
         am.grantRole(ADMIN_UNPAUSER_ROLE, address(this), 0);
 
-        // The REAL periphery singletons the template configures per market: the entry point (initialized empty,
-        // configs flow through the factory) and the market syncer (initialized with no kernels).
-        RoycoDayEntryPoint entryPointImpl = new RoycoDayEntryPoint(address(factory));
-        entryPoint = IRoycoDayEntryPoint(
-            address(
-                new ERC1967Proxy(
-                    address(entryPointImpl), abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
-                )
-            )
-        );
-        RoycoMarketSyncer syncerImpl = new RoycoMarketSyncer();
-        syncer =
-            RoycoMarketSyncer(address(new ERC1967Proxy(address(syncerImpl), abi.encodeCall(RoycoMarketSyncer.initialize, (address(am), new address[](0))))));
+        // The scaffold deployed the REAL periphery singletons alongside the gatekeeper that pins them
 
         // Bind the config selectors the factory drives during deployments (the factory self-granted
         // ADMIN_ENTRY_POINT_ROLE + SYNC_ROLE in its initialize).
@@ -151,7 +139,7 @@ contract Test_RoycoFactory is Test {
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
         template = RoycoDayBalancerV3MarketDeploymentTemplate(
             deployScript.deployTemplateForTest(
-                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), address(entryPoint), address(syncer), roycoBlacklist
+                IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), roycoBlacklist
             )
         );
 
@@ -264,8 +252,11 @@ contract Test_RoycoFactory is Test {
         assertEq(factory.authority(), address(am), "authority");
         assertEq(factory.ROYCO_AUTHORITY(), address(am), "ROYCO_AUTHORITY");
 
-        (bool hasEntryPoint,) = am.hasRole(ADMIN_ENTRY_POINT_ROLE, address(factory));
-        assertTrue(hasEntryPoint, "factory should hold ADMIN_ENTRY_POINT_ROLE");
+        // The periphery roles sit on the gatekeeper, which drives the entry point and the syncer itself
+        (bool factoryHasEntryPoint,) = am.hasRole(ADMIN_ENTRY_POINT_ROLE, address(factory));
+        assertFalse(factoryHasEntryPoint, "the factory must NOT hold ADMIN_ENTRY_POINT_ROLE");
+        (bool gatekeeperHasEntryPoint,) = am.hasRole(ADMIN_ENTRY_POINT_ROLE, address(gatekeeper));
+        assertTrue(gatekeeperHasEntryPoint, "the gatekeeper must hold ADMIN_ENTRY_POINT_ROLE");
 
         assertEq(am.getTargetFunctionRole(address(factory), IRoycoFactory.executeMarketDeployment.selector), DEPLOYER_ROLE, "deploy role");
         assertEq(am.getTargetFunctionRole(address(factory), IRoycoFactory.registerTemplate.selector), ADMIN_FACTORY_ROLE, "register role");
@@ -292,7 +283,7 @@ contract Test_RoycoFactory is Test {
     /// gatekeeper governs some OTHER manager would have no way to configure anything
     function test_RevertIf_InitializedAgainstAnAccessManagerItsGatekeeperDoesNotGovern() external {
         RoycoAccessManager otherAM = new RoycoAccessManager(address(this));
-        RoycoFactory freshImpl = new RoycoFactory(address(new RoycoFactoryGatekeeper(address(otherAM), address(factory))));
+        RoycoFactory freshImpl = new RoycoFactory(address(new RoycoFactoryGatekeeper(address(otherAM), address(factory), address(entryPoint), address(syncer))));
         vm.expectRevert(IRoycoFactory.FACTORY_GATEKEEPER_MISMATCH.selector);
         new ERC1967Proxy(address(freshImpl), abi.encodeCall(RoycoFactory.initialize, (address(am))));
     }
@@ -367,11 +358,11 @@ contract Test_RoycoFactory is Test {
         // A real template bound to a different factory address must be rejected. The foreign factory has to be a real
         // one: the template reads `ROYCO_AUTHORITY()` off it at construction to set its own access manager. Its entry
         // point must be bound to that same foreign factory, which the template also validates at construction.
-        (RoycoFactory otherFactory,) = FactoryScaffold.deployFactory(am, keccak256("FOREIGN_FACTORY_PROXY"));
+        (RoycoFactory otherFactory,,,) = FactoryScaffold.deployFactory(am, keccak256("FOREIGN_FACTORY_PROXY"));
         RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(address(otherFactory));
         RoycoDayBalancerV3MarketDeploymentTemplate foreign = RoycoDayBalancerV3MarketDeploymentTemplate(
             deployScript.deployTemplateForTest(
-                IRoycoFactory(address(otherFactory)), deployScript.getMarketConfig("snUSD"), address(foreignEntryPoint), address(syncer), roycoBlacklist
+                IRoycoFactory(address(otherFactory)), deployScript.getMarketConfig("snUSD"), roycoBlacklist
             )
         );
         vm.prank(FACTORY_ADMIN);
@@ -379,31 +370,7 @@ contract Test_RoycoFactory is Test {
         factory.registerTemplate(address(foreign));
     }
 
-    /// A template constructed with an entry point bound to a different factory is rejected at construction
-    function test_RevertIf_TemplateConstructedWithMisboundEntryPoint() external {
-        RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(makeAddr("OTHER_FACTORY"));
-        // Construct directly so the raw constructor error is observable. The script's CREATE2 path routes through the
-        // deterministic deployer, which swallows constructor revert data, and its params argument is an external
-        // getMarketConfig call that expectRevert would match instead of the construction. The chain-wide params are
-        // read off the known-good template from setUp, only the entry point is swapped for the misbound one
-        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = RoycoDayBalancerV3MarketDeploymentTemplate
-            .TemplateConstructionParams({
-            factory: IRoycoFactory(address(factory)),
-            balancerV3PoolFactory: template.BALANCER_V3_POOL_FACTORY(),
-            eclpLPOracleFactory: template.ECLP_LP_ORACLE_FACTORY(),
-            bptOracleConstantPriceFeed: template.BPT_ORACLE_CONSTANT_PRICE_FEED(),
-            roycoDayEntryPoint: address(foreignEntryPoint),
-            roycoMarketSyncer: address(syncer),
-            roycoBlacklist: template.ROYCO_BLACKLIST(),
-            seniorTrancheBeacon: template.SENIOR_TRANCHE_BEACON(),
-            juniorTrancheBeacon: template.JUNIOR_TRANCHE_BEACON(),
-            liquidityProviderTrancheBeacon: template.LIQUIDITY_PROVIDER_TRANCHE_BEACON(),
-            kernelBeacon: template.KERNEL_BEACON(),
-            accountantBeacon: template.ACCOUNTANT_BEACON()
-        });
-        vm.expectRevert(EntryPointConfigurer.ENTRY_POINT_BOUND_TO_DIFFERENT_FACTORY.selector);
-        new RoycoDayBalancerV3MarketDeploymentTemplate(cp);
-    }
+
 
     /// Registration is blocked while the factory is paused
     function test_RevertIf_TemplateRegisteredWhilePaused() external {
@@ -511,25 +478,6 @@ contract Test_RoycoFactory is Test {
         assertEq(stored.baseConfig.gateByOracleUpdate, _expected.gateByOracleUpdate, string.concat(_ctx, ": oracle enabled"));
     }
 
-    /// @notice A revoked SYNC_ROLE makes the syncer registration leg of the periphery hook fail, and the whole
-    ///         deployment unwinds atomically: no market contracts, no registry entries, no entry point configs
-    function test_RevertIf_FactoryLacksSyncRole_DeploymentUnwindsAtomically() external {
-        _register();
-        am.revokeRole(SYNC_ROLE, address(factory));
-
-        bytes memory p = _encodedParams(MARKET_ID_A);
-        // The senior tranche + hook proxies are pre-deployed outside the wiring transaction, so the atomic-unwind
-        // check targets the junior tranche proxy, which the template deploys INSIDE `executeMarketDeployment`.
-        address predictedJT = factory.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", MARKET_ID_A, TAG_JT_PROXY)));
-        vm.prank(DEPLOYER);
-        // The syncer's access check rejects the role-stripped factory, and the dispatch bubbles it verbatim
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(factory)));
-        factory.executeMarketDeployment(address(template), p);
-
-        // Atomic unwind: the wiring transaction's contracts and registry entries are gone.
-        assertEq(predictedJT.code.length, 0, "no junior tranche deployed");
-        assertEq(factory.trancheToKernel(predictedJT), address(0), "no registry entry");
-    }
 
     /// @notice Only the factory may drive the periphery configuration hook
     function test_RevertIf_StrangerCallspostMarketRegistration() external {
@@ -739,13 +687,12 @@ contract Test_RoycoFactory is Test {
         addrs[0] = address(this);
         bytes4[] memory selectors = new bytes4[](1);
         uint64[] memory roleIds = new uint64[](1);
-        uint32[] memory delays = new uint32[](1);
 
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
         factory.setMarketTargetFunctionRole(address(this), selectors, roleIds);
 
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
-        factory.grantMarketRole(roleIds, addrs, delays);
+        factory.configureMarketPeriphery(addrs, new IRoycoDayEntryPoint.TrancheConfig[](1), address(this));
 
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
         factory.executeAsFactory(address(this), "");
@@ -807,11 +754,8 @@ contract Test_RoycoFactory is Test {
         _register();
 
         // A DEPLOYER attempting to grant itself ADMIN_FACTORY_ROLE / bind the factory's own registerTemplate selector
-        uint64[] memory roleIds = new uint64[](1);
-        roleIds[0] = ADMIN_FACTORY_ROLE;
         address[] memory accounts = new address[](1);
         accounts[0] = DEPLOYER;
-        uint32[] memory delays = new uint32[](1);
 
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = IRoycoFactory.registerTemplate.selector;
@@ -820,7 +764,7 @@ contract Test_RoycoFactory is Test {
 
         vm.startPrank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
-        factory.grantMarketRole(roleIds, accounts, delays);
+        factory.configureMarketPeriphery(accounts, new IRoycoDayEntryPoint.TrancheConfig[](1), DEPLOYER);
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
         factory.setMarketTargetFunctionRole(address(factory), selectors, bindRoleIds);
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
@@ -1166,8 +1110,6 @@ contract Test_RoycoFactory is Test {
             balancerV3PoolFactory: template.BALANCER_V3_POOL_FACTORY(),
             eclpLPOracleFactory: template.ECLP_LP_ORACLE_FACTORY(),
             bptOracleConstantPriceFeed: template.BPT_ORACLE_CONSTANT_PRICE_FEED(),
-            roycoDayEntryPoint: address(entryPoint),
-            roycoMarketSyncer: address(syncer),
             roycoBlacklist: template.ROYCO_BLACKLIST(),
             seniorTrancheBeacon: template.SENIOR_TRANCHE_BEACON(),
             juniorTrancheBeacon: template.JUNIOR_TRANCHE_BEACON(),

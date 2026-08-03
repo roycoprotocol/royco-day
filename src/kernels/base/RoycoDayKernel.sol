@@ -131,6 +131,20 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // =============================
 
     /// @inheritdoc IRoycoDayKernel
+    function syncTrancheAccountingFromAccountant()
+        public
+        virtual
+        override(IRoycoDayKernel)
+        whenNotPaused
+        nonReentrant
+        withPriceCache
+        returns (SyncedAccountingState memory state)
+    {
+        require(msg.sender == _getRoycoDayKernelStorage().accountant, ONLY_ACCOUNTANT());
+        return AccountingSyncLogic.preOpSyncTrancheAccounting(_getRoycoDayKernelStorage());
+    }
+
+    /// @inheritdoc IRoycoDayKernel
     function syncTrancheAccounting()
         public
         virtual

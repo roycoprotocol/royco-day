@@ -10,6 +10,8 @@ import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol"
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoUUPSBase } from "../../../src/base/RoycoUUPSBase.sol";
+import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
+import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { MockDeploymentTemplate } from "../../mocks/MockDeploymentTemplate.sol";
@@ -25,6 +27,8 @@ import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 contract Test_FactoryTemplateAdmin is Test {
     RoycoAccessManager internal am;
     RoycoFactoryGatekeeper internal gatekeeper;
+    IRoycoDayEntryPoint internal entryPoint;
+    RoycoMarketSyncer internal syncer;
     RoycoFactory internal factory;
     MockDeploymentTemplate internal template;
 
@@ -35,7 +39,7 @@ contract Test_FactoryTemplateAdmin is Test {
 
     function setUp() public {
         am = new RoycoAccessManager(address(this));
-        (factory, gatekeeper) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
+        (factory, gatekeeper, entryPoint, syncer) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
         am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
@@ -91,7 +95,7 @@ contract Test_FactoryTemplateAdmin is Test {
     ///         factory could never configure anything through it
     function test_RevertIf_InitializedAgainstAnAccessManagerItsGatekeeperDoesNotGovern() public {
         RoycoAccessManager otherAccessManager = new RoycoAccessManager(address(this));
-        RoycoFactory freshImpl = new RoycoFactory(address(new RoycoFactoryGatekeeper(address(otherAccessManager), makeAddr("SOME_FACTORY"))));
+        RoycoFactory freshImpl = new RoycoFactory(address(new RoycoFactoryGatekeeper(address(otherAccessManager), address(factory), address(entryPoint), address(syncer))));
         vm.expectRevert(IRoycoFactory.FACTORY_GATEKEEPER_MISMATCH.selector);
         new ERC1967Proxy(address(freshImpl), abi.encodeCall(RoycoFactory.initialize, (address(am))));
     }
@@ -140,7 +144,7 @@ contract Test_FactoryTemplateAdmin is Test {
     /// @notice A template constructed against a different factory is rejected: its primitives would call the wrong
     ///         factory and its window could never open here
     function test_RevertIf_TemplateBoundToDifferentFactoryRegistered() public {
-        (RoycoFactory foreignFactory,) = FactoryScaffold.deployFactory(am, keccak256("FOREIGN_FACTORY_PROXY"));
+        (RoycoFactory foreignFactory,,,) = FactoryScaffold.deployFactory(am, keccak256("FOREIGN_FACTORY_PROXY"));
         MockDeploymentTemplate foreignTemplate = new MockDeploymentTemplate(IRoycoFactory(address(foreignFactory)));
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(IRoycoFactory.TEMPLATE_BOUND_TO_DIFFERENT_FACTORY.selector);
