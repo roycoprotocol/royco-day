@@ -95,7 +95,30 @@ contract Test_FactoryTrancheRegistry is Test {
         factory.executeMarketDeployment(address(template), "");
     }
 
+    /// A two-tranche result (no junior) is accepted: which counterparty tranches a market carries is a
+    /// kernel-family decision, so the factory registers exactly the present tranches and never the null address
+    function test_ExecuteMarketDeployment_NoJuniorMarket_RegistersOnlyPresentTranches() external {
+        address st = makeAddr("ST_NO_JT");
+        address lt = makeAddr("LPT_NO_JT");
+        address kernel = makeAddr("KERNEL_NO_JT");
+        _deploy(_result(st, address(0), lt, kernel));
 
+        assertEq(factory.trancheToKernel(st), kernel, "senior key -> kernel");
+        assertEq(factory.trancheToKernel(lt), kernel, "liquidity key -> kernel");
+        assertEq(factory.trancheToKernel(address(0)), address(0), "the null address must never resolve to a kernel");
+    }
+
+    /// A two-tranche result (no liquidity provider) is accepted and registers exactly the present tranches
+    function test_ExecuteMarketDeployment_NoLiquidityProviderMarket_RegistersOnlyPresentTranches() external {
+        address st = makeAddr("ST_NO_LPT");
+        address jt = makeAddr("JT_NO_LPT");
+        address kernel = makeAddr("KERNEL_NO_LPT");
+        _deploy(_result(st, jt, address(0), kernel));
+
+        assertEq(factory.trancheToKernel(st), kernel, "senior key -> kernel");
+        assertEq(factory.trancheToKernel(jt), kernel, "junior key -> kernel");
+        assertEq(factory.trancheToKernel(address(0)), address(0), "the null address must never resolve to a kernel");
+    }
 
     /// A complete result registers all three tranches (senior, junior, liquidity) against the market's kernel
     function test_ExecuteMarketDeployment_AllThreeTranches_RegisterAgainstKernel() external {

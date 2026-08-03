@@ -237,7 +237,33 @@ contract TestFuzz_ExogenousPoolDrift_Kernel is MarketFuzzTestBase {
         uint256 maxShares = liquidityProviderTranche.maxRedeemMultiAsset(LPT_PROVIDER);
         if (maxShares < 1e6) return;
         uint256 shares = bound(_opSeed, 1e6, maxShares);
-        (AssetClaims memory claims, uint256 quoteOut) = liquidityProviderTranche.previewRedeemMultiAsset(shares);
+        // A dust redemption legitimately hits the no-op-exit guard (INVALID_POST_OP_STATE) whenever a slice
+        // floors to zero at the src's granularity (a 1 wei senior leg whose collateral claim floors to zero
+        // commits a zero-delta ST_REDEMPTION). The preview runs the same op pipeline as execution, so it
+        // rejects there too. Parity then holds on the revert side: the same-state execution must reject
+        // with the same guard, never settle
+        AssetClaims memory claims;
+        uint256 quoteOut;
+        try liquidityProviderTranche.previewRedeemMultiAsset(shares) returns (AssetClaims memory previewedClaims, uint256 previewedQuoteOut) {
+            claims = previewedClaims;
+            quoteOut = previewedQuoteOut;
+        } catch (bytes memory err) {
+            assertTrue(
+                bytes4(err) == IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, "the redeem preview may only reject with the no-op guard"
+            );
+            bool settled;
+            vm.prank(LPT_PROVIDER);
+            try liquidityProviderTranche.redeemMultiAsset(shares, 0, 0, LPT_PROVIDER, LPT_PROVIDER) {
+                settled = true;
+            } catch (bytes memory execErr) {
+                assertTrue(
+                    bytes4(execErr) == IRoycoDayAccountant.INVALID_POST_OP_STATE.selector,
+                    "a rejected preview's execution must reject with the same no-op guard"
+                );
+            }
+            assertFalse(settled, "an exit whose preview rejects must not settle");
+            return;
+        }
         if (toUint256(claims.nav) == 0) return;
         uint256 vaultShares0 = stJtVault.balanceOf(LPT_PROVIDER);
         uint256 quote0 = quoteToken.balanceOf(LPT_PROVIDER);

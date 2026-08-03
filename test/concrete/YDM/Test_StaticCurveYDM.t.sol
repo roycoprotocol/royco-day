@@ -116,24 +116,31 @@ contract Test_StaticCurveYDM is Test {
         ydm.initializeYDMForMarket(1e17, 5e17, uint64(WAD + 1)); // yFull > WAD
     }
 
-    /// yT == 0 is rejected even when the orderings hold (all-zero curve)
-    function test_RevertIf_InitializeYTargetZero_AllZero() public {
+    /// The all-zero curve is accepted as a valid fixed zero yield share and yields 0 at every utilization
+    function test_Initialize_AllZeroCurve_FixedZeroYieldShare() public {
         StaticCurveYDM ydm = _deploy(8e17);
-        vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        ydm.initializeYDMForMarket(0, 0, 0); // yT == 0
+        ydm.initializeYDMForMarket(0, 0, 0);
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 0, "Y(0) == 0");
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 4e17), 0, "below-target leg is flat zero");
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 8e17), 0, "Y at the kink is zero");
+        assertEq(ydm.previewYieldShare(MarketState.FIXED_TERM, WAD), 0, "Y(WAD) == 0");
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, type(uint256).max), 0, "above-WAD caps to the zero curve");
     }
 
-    /// yT == 0 with a positive yFull is rejected: the yT > 0 gate is independent of the ordering checks
-    function test_RevertIf_InitializeYTargetZero_PositiveYFull() public {
+    /// A zero yT with a positive yFull is accepted: the curve is flat zero below the kink then rises
+    /// The above-target leg at U = 9e17 with target 8e17: slopeGte = (5e17-0)*1e18/2e17 = 25e17, Y = 25e17*1e17/1e18 = 25e16
+    function test_Initialize_ZeroUntilTargetThenRising() public {
         StaticCurveYDM ydm = _deploy(8e17);
-        vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        ydm.initializeYDMForMarket(0, 0, 5e17); // yT == 0 though ordering holds
+        ydm.initializeYDMForMarket(0, 0, 5e17);
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 4e17), 0, "below the kink the curve is flat zero");
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 8e17), 0, "Y at the kink is zero");
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 9e17), 25e16, "above the kink the curve rises from zero");
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, WAD), 5e17, "Y(WAD) == yFull");
     }
 
-    /// yT == 0 with a positive y0 is rejected (the ordering also fails, but yT == 0 is the pinned gate)
+    /// A zero yT with a positive y0 is still rejected: the monotonic ordering y0 <= yT fails
     function test_RevertIf_InitializeYTargetZero_PositiveY0() public {
         StaticCurveYDM ydm = _deploy(8e17);
-        // y0=1 > yT=0 also fails ordering, but the point is yT==0 is rejected
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
         ydm.initializeYDMForMarket(1, 0, 1);
     }
@@ -301,36 +308,24 @@ contract Test_StaticCurveYDM is Test {
     }
 
     // =====================================================================
-    // Uninitialized market query reverts
+    // Uninitialized market queries evaluate as the zero curve
     // =====================================================================
 
-    /// previewYieldShare for a never-initialized accountant reverts instead of quoting a zero curve
-    function test_RevertIf_PreviewYieldShareUninitialized() public {
+    /// A never-initialized accountant evaluates as the all-zero curve: the model carries no runtime initialization
+    /// sentinel because the zero curve is a valid fixed zero yield share, and initialization enforcement lives at
+    /// deployment (the accountant's YDM init call and the template's params validation)
+    function test_Uninitialized_EvaluatesAsZeroCurve() public {
         StaticCurveYDM ydm = _deploy(5e17);
-        vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
-        ydm.previewYieldShare(MarketState.PERPETUAL, 0);
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 0, "preview at zero utilization");
+        assertEq(ydm.yieldShare(MarketState.PERPETUAL, 5e17), 0, "yield share at the kink");
+        assertEq(ydm.previewYieldShare(MarketState.FIXED_TERM, type(uint256).max), 0, "above-WAD utilization caps into the zero curve");
     }
 
-    /// yieldShare for a never-initialized accountant reverts instead of paying on a zero curve
-    function test_RevertIf_YieldShareUninitialized() public {
-        StaticCurveYDM ydm = _deploy(5e17);
-        vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
-        ydm.yieldShare(MarketState.PERPETUAL, 5e17);
-    }
-
-    /// The uninitialized gate fires before any utilization handling, even at uint256 max
-    function test_RevertIf_PreviewYieldShareUninitialized_MaxUtilization() public {
-        StaticCurveYDM ydm = _deploy(5e17);
-        vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
-        ydm.previewYieldShare(MarketState.FIXED_TERM, type(uint256).max);
-    }
-
-    /// mapping is keyed by msg.sender: A inits, B (pranked) is still uninitialized.
-    function test_RevertIf_YieldShareQueriedByUninitializedAccountant() public {
+    /// mapping is keyed by msg.sender: A inits, B (pranked) still evaluates the zero curve, never A's curve
+    function test_YieldShare_UninitializedAccountantIsolatedFromInitializedCurve() public {
         StaticCurveYDM ydm = _referenceCurve(); // address(this) initialized
         vm.prank(ACCT_B);
-        vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
-        ydm.yieldShare(MarketState.PERPETUAL, 0);
+        assertEq(ydm.yieldShare(MarketState.PERPETUAL, 0), 0, "an uninitialized sender never reads another sender's curve");
     }
 
     /// The initialized sender queries cleanly (the anti-vacuity control for the per-sender revert above)

@@ -72,10 +72,9 @@ contract StaticCurveYDM is BaseYDM {
      * @param _yieldShareAtFullUtilWAD The yield share at 100% utilization, scaled to WAD precision
      */
     function initializeYDMForMarket(uint64 _yieldShareAtZeroUtilWAD, uint64 _yieldShareAtTargetWAD, uint64 _yieldShareAtFullUtilWAD) external {
-        // Ensure that the static YDM curve is valid
+        // Ensure that the static YDM curve is valid, the all-zero curve is a valid fixed zero yield share
         require(
-            _yieldShareAtZeroUtilWAD <= _yieldShareAtTargetWAD && _yieldShareAtTargetWAD <= _yieldShareAtFullUtilWAD && _yieldShareAtFullUtilWAD <= WAD
-                && _yieldShareAtTargetWAD > 0,
+            _yieldShareAtZeroUtilWAD <= _yieldShareAtTargetWAD && _yieldShareAtTargetWAD <= _yieldShareAtFullUtilWAD && _yieldShareAtFullUtilWAD <= WAD,
             INVALID_YDM_INITIALIZATION()
         );
 
@@ -129,7 +128,6 @@ contract StaticCurveYDM is BaseYDM {
         // Retrieve the static curve for this market
         StaticYieldCurve storage curve = accountantToCurve[msg.sender];
         uint256 yieldShareAtTargetWAD = curve.yieldShareAtTargetWAD;
-        require(yieldShareAtTargetWAD != 0, UNINITIALIZED_YDM());
         // Compute Y(U), rounding down in favor of the paying tranche
         if (utilizationWAD < TARGET_UTILIZATION_WAD) {
             // If utilization is below the target (kink), apply the first leg of Y(U)
