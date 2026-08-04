@@ -153,6 +153,10 @@ library AccountingSyncLogic {
         if (_op == Operation.ST_DEPOSIT || _op == Operation.JT_REDEMPTION) {
             require(state.coverageUtilizationWAD <= WAD, IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED());
         }
+        // Enforce that a JT deposit settles below the liquidation coverage utilization, so fresh junior capital can only disarm the self liquidation bonus and never becomes a partial recapitalization that subsidizes bonuses for ST exits
+        if (_op == Operation.JT_DEPOSIT) {
+            require(state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD, IRoycoDayKernel.JT_DEPOSIT_BLOCKED_DURING_LIQUIDATION());
+        }
         // Enforce the liquidity requirement for operations that can worsen liquidity (raise the senior exposure or reduce the venue's market-making depth)
         (bool inMultiAssetFlow,) = Cache._read(CacheKey.IN_MULTI_ASSET_FLOW);
         bool liquidityRequirementSatisfied = (state.liquidityUtilizationWAD <= WAD);

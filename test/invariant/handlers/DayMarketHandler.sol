@@ -234,6 +234,7 @@ contract DayMarketHandler is DayMarketTestBase {
     bytes4 internal constant SEL_DISABLED_FT = IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector;
     bytes4 internal constant SEL_COVERAGE = IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector;
     bytes4 internal constant SEL_LIQUIDITY = IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
+    bytes4 internal constant SEL_JT_LIQ_BLOCKED = IRoycoDayKernel.JT_DEPOSIT_BLOCKED_DURING_LIQUIDATION.selector;
     bytes4 internal constant SEL_INVALID_POST_OP = IRoycoDayAccountant.INVALID_POST_OP_STATE.selector;
     bytes4 internal constant SEL_ZERO_SHARES = IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector;
     bytes4 internal constant SEL_ERC20_BALANCE = IERC20Errors.ERC20InsufficientBalance.selector;
@@ -375,6 +376,11 @@ contract DayMarketHandler is DayMarketTestBase {
                 // that panic so the handler asserts the boundary revert rather than treating it as a defect
                 if (mintPanics) _expect(p, SEL_PANIC);
                 else if (predShares == 0) _expect(p, SEL_ZERO_SHARES);
+                // Mirror the post-op liquidation gate: a JT deposit must settle strictly below the liquidation
+                // coverage utilization, so a sub-curing deposit into the bonus regime is a predicted revert
+                uint256 jtEffAfter = s.jtEffectiveNAV + (collateralAfter - s.collateralNAV);
+                uint256 utilAfter = RoycoTestMath.computeCoverageUtilization(collateralAfter, s.minCoverageWAD, jtEffAfter);
+                if (utilAfter >= s.coverageLiquidationUtilizationWAD) _expect(p, SEL_JT_LIQ_BLOCKED);
             }
             stJtVault.mintShares(actor, assets);
             uint256 poolSenior0 = seniorTranche.balanceOf(address(balancerVault));
@@ -612,9 +618,8 @@ contract DayMarketHandler is DayMarketTestBase {
                 // it, and an unbounded live utilization keeps the current threshold (a non-move the guard admits)
                 uint256 targetThreshold = bound(_valueSeed, 1.5e18, 8e18);
                 if (targetThreshold <= s.coverageUtilizationWAD) {
-                    targetThreshold = s.coverageUtilizationWAD == type(uint256).max
-                        ? accountant.getState().coverageLiquidationUtilizationWAD
-                        : s.coverageUtilizationWAD + 1;
+                    targetThreshold =
+                        s.coverageUtilizationWAD == type(uint256).max ? accountant.getState().coverageLiquidationUtilizationWAD : s.coverageUtilizationWAD + 1;
                 }
                 accountant.setLiquidationCoverageUtilization(targetThreshold);
             } else if (kind == 3 && !IS_ZERO_LIQUIDITY_PROFILE) {
@@ -1026,8 +1031,7 @@ contract DayMarketHandler is DayMarketTestBase {
             if (_collateralAssets > 0 && !v.stMintPanics && v.stSharesMinted == 0) _expect(p, SEL_ZERO_SHARES);
             if (v.valueAllocated == 0 || v.lptRawAfter <= s.lptRawNAV) _expect(p, SEL_INVALID_POST_OP);
             {
-                uint256 navAt =
-                    RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(s.lptRawNAV, s.lptOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
+                uint256 navAt = RoycoTestMath.getLiquidityProviderTrancheEffectiveNAV(s.lptRawNAV, s.lptOwnedSeniorTrancheShares, s.stEffectiveNAV, s.stSupply);
                 (uint256 predLptShares, bool lptMintPanics) = _mirrorMintShares(v.valueAllocated, navAt, s.lptSupply);
                 if (lptMintPanics) _expect(p, SEL_PANIC);
                 else if (predLptShares == 0) _expect(p, SEL_ZERO_SHARES);
@@ -1956,7 +1960,9 @@ contract DayMarketHandler is DayMarketTestBase {
         uint256[2] memory outs = balancerRouter.removeLiquidityProportional(address(bpt), _burn, pred);
 
         _flag(outs[0] == pred[0] && outs[1] == pred[1], "external removal outputs diverge from the proportional floors");
-        _flag(bpt.totalSupply() == s.bptSupply0 - _burn && bpt.balanceOf(externalLp) == s.extBpt0 - _burn, "external removal burned a different pool-token amount");
+        _flag(
+            bpt.totalSupply() == s.bptSupply0 - _burn && bpt.balanceOf(externalLp) == s.extBpt0 - _burn, "external removal burned a different pool-token amount"
+        );
         {
             IERC20 token0 = stPoolTokenIndex == 0 ? seniorToken : quoteAsIERC20;
             IERC20 token1 = stPoolTokenIndex == 0 ? quoteAsIERC20 : seniorToken;
