@@ -178,6 +178,13 @@ struct ProtocolScaffolding {
 struct ChainConfig {
     address factoryAdmin;
     address protocolFeeRecipient;
+    uint64 stProtocolFeeWAD;
+    uint64 jtProtocolFeeWAD;
+    uint64 jtYieldShareProtocolFeeWAD;
+    uint64 lptYieldShareProtocolFeeWAD;
+    uint64 poolSwapFeePercentage;
+    bool chargeYieldFeeOnSeniorTrancheShares;
+    bool chargeYieldFeeOnQuoteAsset;
     address pauserAddress;
     address unpauserAddress;
     address upgraderAddress;
@@ -217,22 +224,16 @@ struct ChainConfig {
  * @custom:field symbol - The symbol of the Gyro E-CLP BPT
  * @custom:field eclpParams - The E-CLP curve parameters (price bounds and rotation) defining the pool's rate-scaled AMM
  * @custom:field derivedEclpParams - The high-precision derived E-CLP parameters computed off-chain from `eclpParams`
- * @custom:field swapFeePercentage - The pool's swap fee, scaled to WAD (1e18 = 100%)
  * @custom:field quoteAsset - The quote asset (stablecoin) paired against the senior tranche share in the pool
  * @custom:field quoteAssetRateProvider - The rate provider supplying the quote leg's rate to the pool
- * @custom:field chargeYieldFeeOnSeniorTrancheShares - Whether Balancer charges yield fees on the senior leg's rate growth
- * @custom:field chargeYieldFeeOnQuoteAsset - Whether Balancer charges yield fees on the quote leg's rate growth (requires a quote rate provider)
  */
 struct GyroECLPPoolParams {
     string name;
     string symbol;
     IGyroECLPPool.EclpParams eclpParams;
     IGyroECLPPool.DerivedEclpParams derivedEclpParams;
-    uint256 swapFeePercentage;
     address quoteAsset;
     address quoteAssetRateProvider;
-    bool chargeYieldFeeOnSeniorTrancheShares;
-    bool chargeYieldFeeOnQuoteAsset;
 }
 
 struct MarketConfig {
@@ -248,9 +249,6 @@ struct MarketConfig {
     string liquidityProviderTrancheSymbol;
     // Assets
     address collateralAsset;
-    // Collateral asset pricing: the IRoycoPriceOracle wired into the kernel at initialization. When
-    // `collateralAssetOracle` is unset the deploy script deploys the `collateralAssetOracleType` adapter from its
-    // kind-specific params (each OracleType decodes its own struct from the bytes blob).
     address collateralAssetOracle;
     OracleType collateralAssetOracleType;
     bytes collateralAssetOracleSpecificParams;
@@ -264,9 +262,6 @@ struct MarketConfig {
     bytes kernelSpecificParams;
     uint64 stSelfLiquidationBonusWAD;
     // Accountant
-    uint64 stProtocolFeeWAD;
-    uint64 jtProtocolFeeWAD;
-    uint64 jtYieldShareProtocolFeeWAD;
     uint64 minCoverageWAD;
     uint256 coverageLiquidationUtilizationWAD;
     uint24 fixedTermDurationSeconds;

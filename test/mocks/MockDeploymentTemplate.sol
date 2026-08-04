@@ -11,12 +11,23 @@ import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProto
  *         DeploymentResult so tests can hand the factory arbitrary component sets (including zero tranche members)
  */
 contract MockDeploymentTemplate is BaseDeploymentTemplate {
+    /// @dev A non-null placeholder: the base rejects a zero recipient, and no mock market ever pays a fee
+    address internal constant PROTOCOL_FEE_RECIPIENT = address(0xFEE);
+
     /// @dev The canned result deployMarket returns, set by the test before executeMarketDeployment
     IRoycoProtocolTemplate.DeploymentResult private _result;
 
     /// @notice Binds the template to the factory that will drive it
     /// @param _factory The Royco factory this template will be registered with
-    constructor(IRoycoFactory _factory) BaseDeploymentTemplate(_factory) { }
+    constructor(IRoycoFactory _factory)
+        BaseDeploymentTemplate(
+            _factory,
+            BaseDeploymentTemplate.ProtocolFeeConfig({
+                stProtocolFeeWAD: 0, jtProtocolFeeWAD: 0, jtYieldShareProtocolFeeWAD: 0, lptYieldShareProtocolFeeWAD: 0
+            }),
+            PROTOCOL_FEE_RECIPIENT
+        )
+    { }
 
     /// @notice Sets the DeploymentResult the next deployMarket call returns
     /// @param _cannedResult The component set to hand back to the factory
@@ -28,6 +39,7 @@ contract MockDeploymentTemplate is BaseDeploymentTemplate {
     /// @dev Ignores its params and returns the canned result
     function deployMarket(bytes calldata)
         external
+        view
         override(IRoycoProtocolTemplate)
         onlyRoycoFactory
         returns (IRoycoProtocolTemplate.DeploymentResult memory result)

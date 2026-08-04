@@ -18,6 +18,7 @@ import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { DeploymentResult, MarketConfig } from "../../../script/config/DeploymentTypes.sol";
 import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
@@ -39,7 +40,6 @@ import {
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
-import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -285,7 +285,10 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     /// @notice The kernel fee recipient, senior tranche self-liquidation bonus, and tranche names/symbols match the config
     function test_KernelAndTranches_ParamsMatchMarketConfigFile() public view {
         IRoycoDayKernel.RoycoDayKernelState memory ks = KERNEL.getState();
-        assertEq(ks.protocolFeeRecipient, PROTOCOL_FEE_RECIPIENT_ADDRESS, "protocolFeeRecipient");
+        // The recipient is template policy now, deployed from the chain config — and then retuned to the fixture's
+        // recipient wallet by `RoycoDayTestBase._setDeployedMarket` through the kernel's governance setter, so the
+        // suites keep a prankable recipient actor. This asserts the post-retune state the tests actually run against
+        assertEq(ks.protocolFeeRecipient, PROTOCOL_FEE_RECIPIENT_ADDRESS, "the kernel must carry the fixture's retuned protocol fee recipient");
         assertEq(ks.stSelfLiquidationBonusWAD, 0.005e18, "stSelfLiquidationBonus");
 
         assertEq(ST.name(), "Royco Senior Tranche snUSD", "ST name");

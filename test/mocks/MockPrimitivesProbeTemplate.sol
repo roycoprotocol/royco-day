@@ -13,6 +13,9 @@ import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProto
  *         through a PEER template that is not the active one
  */
 contract MockPrimitivesProbeTemplate is BaseDeploymentTemplate {
+    /// @dev A non-null placeholder: the base rejects a zero recipient, and no mock market ever pays a fee
+    address internal constant PROTOCOL_FEE_RECIPIENT = address(0xFEE);
+
     /// @notice What the template does inside its deployment window
     enum ProbeAction {
         NONE,
@@ -54,7 +57,7 @@ contract MockPrimitivesProbeTemplate is BaseDeploymentTemplate {
     /// @notice Whether the second direct deployment reported the proxy as already deployed
     bool public lastAlreadyDeployed;
 
-    constructor(IRoycoFactory _factory) BaseDeploymentTemplate(_factory) { }
+    constructor(IRoycoFactory _factory) BaseDeploymentTemplate(_factory, BaseDeploymentTemplate.ProtocolFeeConfig({ stProtocolFeeWAD: 0, jtProtocolFeeWAD: 0, jtYieldShareProtocolFeeWAD: 0, lptYieldShareProtocolFeeWAD: 0 }), PROTOCOL_FEE_RECIPIENT) { }
 
     function setDeploymentResult(IRoycoProtocolTemplate.DeploymentResult calldata _cannedResult) external {
         _result = _cannedResult;

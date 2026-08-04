@@ -69,7 +69,7 @@ contract Test_MineMarketId is Test {
         address factory = _predictFactory(_deployer);
         MarketConfig memory config = deployScript.getMarketConfig(MARKET_NAME);
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params =
-            deployScript.buildMarketParams(config, deployScript.getMarketId(MARKET_NAME, factory), PROTOCOL_FEE_RECIPIENT, factory, _deployer);
+            deployScript.buildMarketParams(config, deployScript.getMarketId(MARKET_NAME, factory), factory, _deployer);
 
         assertEq(params.quoteAsset, QUOTE_ASSET, "the market's quote leg must be the asset the ordering is mined against");
         assertLt(
@@ -100,9 +100,9 @@ contract Test_MineMarketId is Test {
 
         // Same factory, same seed, same config: only the deploying account differs
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory prodParams =
-            deployScript.buildMarketParams(config, seed, PROTOCOL_FEE_RECIPIENT, prodFactory, PROD_DEPLOYER);
+            deployScript.buildMarketParams(config, seed, prodFactory, PROD_DEPLOYER);
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory localParams =
-            deployScript.buildMarketParams(config, seed, PROTOCOL_FEE_RECIPIENT, prodFactory, localDeployer);
+            deployScript.buildMarketParams(config, seed, prodFactory, localDeployer);
 
         assertTrue(
             _predictSeniorTranche(prodParams, prodFactory, PROD_DEPLOYER) != _predictSeniorTranche(localParams, prodFactory, localDeployer),

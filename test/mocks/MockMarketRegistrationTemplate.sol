@@ -16,6 +16,9 @@ import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProto
  *      fixture (as production deploys implementations externally), which is why the result is injectable
  */
 contract MockMarketRegistrationTemplate is BaseDeploymentTemplate {
+    /// @dev A non-null placeholder: the base rejects a zero recipient, and no mock market ever pays a fee
+    address internal constant PROTOCOL_FEE_RECIPIENT = address(0xFEE);
+
     /// @dev The canned result deployMarket returns, set by the fixture before executeMarketDeployment
     IRoycoProtocolTemplate.DeploymentResult private _result;
 
@@ -30,7 +33,7 @@ contract MockMarketRegistrationTemplate is BaseDeploymentTemplate {
 
     /// @param _factory The Royco factory this template will be registered with
     /// @dev The entry point and syncer are pinned by the gatekeeper, not by a template
-    constructor(IRoycoFactory _factory) BaseDeploymentTemplate(_factory) { }
+    constructor(IRoycoFactory _factory) BaseDeploymentTemplate(_factory, BaseDeploymentTemplate.ProtocolFeeConfig({ stProtocolFeeWAD: 0, jtProtocolFeeWAD: 0, jtYieldShareProtocolFeeWAD: 0, lptYieldShareProtocolFeeWAD: 0 }), PROTOCOL_FEE_RECIPIENT) { }
 
     /// @notice Sets the DeploymentResult the next deployMarket call returns
     /// @param _cannedResult The externally deployed component set to hand back to the factory

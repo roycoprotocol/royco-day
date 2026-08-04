@@ -147,16 +147,16 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
 
     /// @inheritdoc IRoycoVaultTranche
     function convertToShares(TRANCHE_UNIT _assets) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
-        address kernel = kernel();
+        address kernel_ = kernel();
 
         // Value the assets specified in NAV units
         NAV_UNIT value = (TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER)
-            ? IRoycoDayKernel(kernel).convertLPTAssetsToValue(_assets)
-            : IRoycoDayKernel(kernel).convertCollateralAssetsToValue(_assets);
+            ? IRoycoDayKernel(kernel_).convertLPTAssetsToValue(_assets)
+            : IRoycoDayKernel(kernel_).convertCollateralAssetsToValue(_assets);
 
         // Get the post-sync tranche state
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
-            IRoycoDayKernel(kernel).previewSyncTrancheAccountingFor(TRANCHE_TYPE());
+            IRoycoDayKernel(kernel_).previewSyncTrancheAccountingFor(TRANCHE_TYPE());
 
         // We exclude any idle (not reinvested) ST shares from the LPT NAV basis in order to ensure that its NAV per share does not drop due to slippage incurred on reinvestment
         NAV_UNIT navBasis = ((TRANCHE_TYPE() == TrancheType.LIQUIDITY_PROVIDER) ? state.lptRawNAV : trancheClaims.nav);
@@ -178,7 +178,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function kernel() public view virtual override(IRoycoVaultTranche) returns (address kernel) {
+    function kernel() public view virtual override(IRoycoVaultTranche) returns (address) {
         return _getRoycoVaultTrancheStorage().kernel;
     }
 

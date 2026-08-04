@@ -8,7 +8,6 @@ import { IVaultAdmin } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/co
 import { HooksConfig as BalancerV3HooksConfig } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
-import { AccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManaged.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -62,7 +61,7 @@ interface IWithdrawPoolCreatorFeesTwoArgOverload {
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract base for every Royco Day market that has their LPT deployed into a Balancer V3 Gyroscope ECLP pool
  */
-contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, AccessManaged {
+contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     using SafeERC20 for IERC20;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -81,6 +80,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
      * @custom:field liquidityProviderTrancheBeacon - The liquidity provider tranche beacon
      * @custom:field kernelBeacon - The Day kernel beacon for this template's kernel family
      * @custom:field accountantBeacon - The accountant beacon
+     * @custom:field protocolFeeConfig - The protocol fees every market this template deploys starts with
+     * @custom:field balancerPoolConfig - The Balancer pool policy every market's pool is created with
      */
     struct TemplateConstructionParams {
         IRoycoFactory factory;
@@ -93,6 +94,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
         address liquidityProviderTrancheBeacon;
         address kernelBeacon;
         address accountantBeacon;
+        ProtocolFeeConfig protocolFeeConfig;
+        address protocolFeeRecipient;
+        BalancerPoolConfig balancerPoolConfig;
     }
 
     /**
@@ -142,7 +146,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
      * @custom:field poolInitializationParams - The genesis liquidity the pool is seeded with once the market is wired
      * @custom:field jtYdmType - The yield distribution model shape the junior tranche selects from the template's instances
      * @custom:field lptYdmType - The yield distribution model shape the liquidity provider tranche selects from the template's instances
-     * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The ST self-liquidation bonus remitted to redeeming ST LPs once the liquidation coverage threshold is breached, scaled to WAD
      * @custom:field collateralAssetOracle - The collateral asset oracle pricing one whole collateral asset in NAV units
      * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
@@ -163,7 +166,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
         PoolInitializationParams poolInitializationParams;
         string jtYdmType;
         string lptYdmType;
-        address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         address collateralAssetOracle;
         uint48 stalenessThresholdSeconds;
@@ -171,6 +173,18 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
         uint48 gracePeriodSeconds;
         bytes kernelSpecificParams;
         EntryPointTrancheConfigs entryPointTrancheConfigs;
+    }
+
+    /**
+     * @notice The Balancer pool policy every market this template creates its pool with
+     * @custom:field swapFeePercentage - The pool's static swap fee, scaled to WAD
+     * @custom:field chargeYieldFeeOnSeniorTrancheShares - Whether Balancer charges yield fees on the senior leg's rate growth
+     * @custom:field chargeYieldFeeOnQuoteAsset - Whether Balancer charges yield fees on the quote leg's rate growth
+     */
+    struct BalancerPoolConfig {
+        uint64 swapFeePercentage;
+        bool chargeYieldFeeOnSeniorTrancheShares;
+        bool chargeYieldFeeOnQuoteAsset;
     }
 
     /**
@@ -196,25 +210,14 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
     /// @notice Thrown when a construction parameter that must name a live contract holds no code
     error CONSTRUCTION_PARAMETER_HAS_NO_CODE(address subject);
 
-    /// @notice Thrown when a junior and a liquidity provider yield distribution model share an instance, which the accountant rejects
-    error YIELD_DISTRIBUTION_MODELS_NOT_DISTINCT();
-
-    /// @notice Thrown when a market selects a yield distribution model shape this template has no instances for
-    error YDM_NOT_REGISTERED(string ydmType);
-
-    /// @notice Thrown when registering a model shape under an empty name
-    error INVALID_YDM_TYPE();
-
     /// @notice Thrown when the genesis deposit mints too few shares to cover the dead-share lock
     error INSUFFICIENT_GENESIS_SHARES(uint256 shares);
 
-    /**
-     * @notice Emitted when a model shape's instances are registered or replaced
-     * @param ydmType The model shape's name
-     * @param jtYdm The junior tranche's model instance for this shape
-     * @param lptYdm The liquidity provider tranche's model instance for this shape
-     */
-    event YieldDistributionModelsRegistered(string ydmType, address jtYdm, address lptYdm);
+    /// @notice Thrown when the configured pool swap fee falls outside the band the Gyro E-CLP pool accepts
+    error INVALID_SWAP_FEE(uint256 swapFeePercentage);
+
+    /// @notice Emitted when the Balancer pool policy every future market is created with changes
+    event BalancerPoolConfigUpdated(BalancerPoolConfig config);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTANTS
@@ -225,6 +228,12 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
 
     /// @notice The address the dead shares are locked at
     address public constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+
+    /// @notice The lowest swap fee a Gyro E-CLP pool accepts
+    uint64 internal constant MIN_POOL_SWAP_FEE_WAD = 1e12;
+
+    /// @notice The highest swap fee a Gyro E-CLP pool accepts
+    uint64 internal constant MAX_POOL_SWAP_FEE_WAD = 1e18;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // IMMUTABLES
@@ -261,14 +270,15 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
     address public immutable ACCOUNTANT_BEACON;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // YIELD DISTRIBUTION MODEL REGISTRY
+    // CONFIGURATION STATE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice The junior tranche's yield distribution model instance for each registered model shape
-    mapping(string ydmType => address ydm) public jtYdms;
+    /// @notice The Balancer pool policy every future market's pool is created with
+    BalancerPoolConfig public balancerPoolConfig;
 
-    /// @notice The liquidity provider tranche's model instance for each registered model shape
-    mapping(string ydmType => address ydm) public lptYdms;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // YIELD DISTRIBUTION MODEL REGISTRY
+    // ═══════════════════════════════════════════════════════════════════════════
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTRUCTION
@@ -276,7 +286,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
 
     /// @notice Pins the template to the chain-wide contract set it deploys every market against
     /// @param _params The template's construction parameters
-    constructor(TemplateConstructionParams memory _params) AccessManaged(_params.factory.ROYCO_AUTHORITY()) BaseDeploymentTemplate(_params.factory) {
+    constructor(TemplateConstructionParams memory _params) BaseDeploymentTemplate(_params.factory, _params.protocolFeeConfig, _params.protocolFeeRecipient) {
         require(
             address(_params.balancerV3PoolFactory) != address(0) && address(_params.eclpLPOracleFactory) != address(0)
                 && _params.bptOracleConstantPriceFeed != address(0) && _params.roycoBlacklist != address(0) && _params.seniorTrancheBeacon != address(0)
@@ -305,45 +315,24 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
         LIQUIDITY_PROVIDER_TRANCHE_BEACON = _params.liquidityProviderTrancheBeacon;
         KERNEL_BEACON = _params.kernelBeacon;
         ACCOUNTANT_BEACON = _params.accountantBeacon;
+
+        _setBalancerPoolConfig(_params.balancerPoolConfig);
     }
 
-    /**
-     * @notice Registers the junior and liquidity provider model instances for one model shape
-     * @param _ydmType The model shape's name, which markets select by
-     * @param _jtYdm The junior tranche's model instance for this shape
-     * @param _lptYdm The liquidity provider tranche's model instance for this shape
-     */
-    function setYieldDistributionModels(string calldata _ydmType, address _jtYdm, address _lptYdm) external restricted {
-        require(bytes(_ydmType).length != 0, INVALID_YDM_TYPE());
-        require(_jtYdm != address(0) && _lptYdm != address(0), NULL_CONSTRUCTION_PARAMETER());
-        require(_jtYdm != _lptYdm, YIELD_DISTRIBUTION_MODELS_NOT_DISTINCT());
-
-        jtYdms[_ydmType] = _jtYdm;
-        lptYdms[_ydmType] = _lptYdm;
-        emit YieldDistributionModelsRegistered(_ydmType, _jtYdm, _lptYdm);
+    ///  @notice Sets the Balancer pool policy every FUTURE market's pool is created with
+    ///@param _config The new pool policy
+    function setBalancerPoolConfig(BalancerPoolConfig calldata _config) external restricted {
+        _setBalancerPoolConfig(_config);
     }
 
-    /**
-     * @notice Returns the junior tranche's yield distribution model instance for a shape
-     * @dev Reverts on an unregistered shape rather than returning the null address, which would otherwise reach the
-     * accountant's initializer and produce a market wired to no model at all
-     * @param _ydmType The model shape the market selected
-     * @return ydm The junior tranche model instance this template deploys markets against
-     */
-    function jtYdmFor(string memory _ydmType) public view returns (address ydm) {
-        ydm = jtYdms[_ydmType];
-        require(ydm != address(0), YDM_NOT_REGISTERED(_ydmType));
-    }
-
-    /**
-     * @notice Returns the liquidity provider tranche's yield distribution model instance for a shape
-     * @dev Reverts on an unregistered shape, for the same reason as `jtYdmFor`
-     * @param _ydmType The model shape the market selected
-     * @return ydm The liquidity provider tranche model instance this template deploys markets against
-     */
-    function lptYdmFor(string memory _ydmType) public view returns (address ydm) {
-        ydm = lptYdms[_ydmType];
-        require(ydm != address(0), YDM_NOT_REGISTERED(_ydmType));
+    /// @dev The one place the pool policy is validated and written, shared by construction and the admin setter
+    function _setBalancerPoolConfig(BalancerPoolConfig memory _config) internal {
+        require(
+            _config.swapFeePercentage >= MIN_POOL_SWAP_FEE_WAD && _config.swapFeePercentage <= MAX_POOL_SWAP_FEE_WAD,
+            INVALID_SWAP_FEE(_config.swapFeePercentage)
+        );
+        balancerPoolConfig = _config;
+        emit BalancerPoolConfigUpdated(_config);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -387,7 +376,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
     ///  @inheritdoc IRoycoProtocolTemplate
     function deployMarket(bytes calldata _params) external override(IRoycoProtocolTemplate) onlyRoycoFactory returns (DeploymentResult memory result) {
         // Validate the deployer's params
-        MarketParams memory params = MarketDeploymentValidationLogic.validateMarketParams(_params);
+        MarketParams memory params = MarketDeploymentValidationLogic.validateMarketParams(_params, balancerPoolConfig.chargeYieldFeeOnQuoteAsset);
 
         // The base salt is the hash of the params and the deployer's address.
         bytes32 baseSalt = keccak256(abi.encode(params, ROYCO_FACTORY.marketDeployer()));
@@ -410,6 +399,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
             ECLP_LP_ORACLE_FACTORY,
             BPT_ORACLE_CONSTANT_PRICE_FEED,
             params.poolCreationParams,
+            balancerPoolConfig,
             result.seniorTranche,
             params.quoteAsset,
             kernel,
@@ -547,7 +537,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate, A
             lptAsset: _balancerPool,
             quoteAsset: _params.quoteAsset,
             accountant: _result.accountant,
-            protocolFeeRecipient: _params.protocolFeeRecipient,
+            protocolFeeRecipient: protocolFeeRecipient,
             stSelfLiquidationBonusWAD: _params.stSelfLiquidationBonusWAD,
             roycoBlacklist: ROYCO_BLACKLIST,
             collateralAssetOracle: _params.collateralAssetOracle,

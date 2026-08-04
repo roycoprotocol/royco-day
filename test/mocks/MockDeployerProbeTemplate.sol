@@ -13,6 +13,9 @@ import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProto
  *         template's `_seedPool` does, so tests can observe the transient's lifecycle mid-deployment
  */
 contract MockDeployerProbeTemplate is BaseDeploymentTemplate {
+    /// @dev A non-null placeholder: the base rejects a zero recipient, and no mock market ever pays a fee
+    address internal constant PROTOCOL_FEE_RECIPIENT = address(0xFEE);
+
     /// @notice Thrown by the hook when the probe is armed to fail, to observe the transient across an unwound deployment
     error PROBE_HOOK_REVERTED();
 
@@ -34,7 +37,7 @@ contract MockDeployerProbeTemplate is BaseDeploymentTemplate {
     /// @notice When set, the post-registration hook reverts so the deployment unwinds
     bool public revertInHook;
 
-    constructor(IRoycoFactory _factory) BaseDeploymentTemplate(_factory) { }
+    constructor(IRoycoFactory _factory) BaseDeploymentTemplate(_factory, BaseDeploymentTemplate.ProtocolFeeConfig({ stProtocolFeeWAD: 0, jtProtocolFeeWAD: 0, jtYieldShareProtocolFeeWAD: 0, lptYieldShareProtocolFeeWAD: 0 }), PROTOCOL_FEE_RECIPIENT) { }
 
     function setDeploymentResult(IRoycoProtocolTemplate.DeploymentResult calldata _cannedResult) external {
         _result = _cannedResult;

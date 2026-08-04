@@ -162,12 +162,6 @@ abstract contract MarketDeploymentConfig {
     ///      so each deployer gets its own deterministic factory.
     function _predictFactoryProxy(address _deployer, bool _isTest) internal pure returns (address) {
         string memory suffix = _isTest ? "_TEST" : "_PROD";
-        address am = _create2Address(
-            keccak256(abi.encodePacked("ROYCO_ACCESS_MANAGER", suffix)),
-            keccak256(abi.encodePacked(type(RoycoAccessManager).creationCode, abi.encode(_deployer)))
-        );
-        // The proxy is a CREATE3 address: a function of the CREATE3 deployer and the salt alone, independent of the
-        // implementation it points at. That independence is what lets the gatekeeper take it as a constructor argument.
         address create3Deployer =
             _create2Address(keccak256(abi.encodePacked("ROYCO_CREATE3_DEPLOYER", suffix)), keccak256(type(RoycoCreate3Deployer).creationCode));
         return
@@ -201,6 +195,13 @@ abstract contract MarketDeploymentConfig {
         return ChainConfig({
             factoryAdmin: factoryAdmin,
             protocolFeeRecipient: protocolFeeRecipient,
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0.45e18,
+            lptYieldShareProtocolFeeWAD: 0,
+            poolSwapFeePercentage: 1e14, // 1 bp
+            chargeYieldFeeOnSeniorTrancheShares: false,
+            chargeYieldFeeOnQuoteAsset: false,
             pauserAddress: rootRole,
             unpauserAddress: rootRole,
             upgraderAddress: rootRole,
@@ -295,9 +296,6 @@ abstract contract MarketDeploymentConfig {
                 })
             ),
             stSelfLiquidationBonusWAD: 0.005e18,
-            stProtocolFeeWAD: 0.1e18,
-            jtProtocolFeeWAD: 0,
-            jtYieldShareProtocolFeeWAD: 0.45e18,
             minCoverageWAD: 0.1e18,
             coverageLiquidationUtilizationWAD: 1.0009009e18,
             fixedTermDurationSeconds: 0, // stable market, no fixed term
@@ -342,11 +340,8 @@ abstract contract MarketDeploymentConfig {
                     z: -28_859_471_639_991_253_843_240_999_485_797_747_790,
                     dSq: 99_999_999_999_999_999_886_624_093_342_106_115_200
                 }),
-                swapFeePercentage: 1e14, // 1 bp
                 quoteAsset: USDC[block.chainid],
-                quoteAssetRateProvider: address(0), // USDC is a pegged quote: register STANDARD (rate = 1)
-                chargeYieldFeeOnSeniorTrancheShares: false,
-                chargeYieldFeeOnQuoteAsset: false
+                quoteAssetRateProvider: address(0) // USDC is a pegged quote: register STANDARD (rate = 1)
             }),
             stEntryPointConfig: _defaultEntryPointTrancheConfig(),
             jtEntryPointConfig: _defaultEntryPointTrancheConfig(),

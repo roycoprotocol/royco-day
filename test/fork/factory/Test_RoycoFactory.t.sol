@@ -32,6 +32,7 @@ import {
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_FACTORY_ROLE,
     ADMIN_PAUSER_ROLE,
+    ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
@@ -46,6 +47,8 @@ import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { TAG_JT_PROXY, TAG_ST_PROXY } from "../../../src/factory/templates/base/Constants.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
+import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoAccessManager } from "../../../src/interfaces/factory/IRoycoAccessManager.sol";
@@ -145,9 +148,22 @@ contract Test_RoycoFactory is Test {
         // The template resolves a market's yield distribution models out of its own registry, so bind its registration
         // surface and register the config's shapes, exactly as the scaffolding phase does.
         bytes4[] memory ydmSelectors = new bytes4[](1);
-        ydmSelectors[0] = RoycoDayBalancerV3MarketDeploymentTemplate.setYieldDistributionModels.selector;
+        ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
         am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
         deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("snUSD"));
+
+        // The rest of the template's configuration surface, bound exactly as the scaffolding phase does: the pool
+        // policy and the recipient answer to ADMIN_FACTORY_ROLE, the fee set to the same role as each market's own
+        // protocol fee setters
+        bytes4[] memory configSelectors = new bytes4[](2);
+        configSelectors[0] = BaseDeploymentTemplate.setProtocolFeeRecipient.selector;
+        configSelectors[1] = RoycoDayBalancerV3MarketDeploymentTemplate.setBalancerPoolConfig.selector;
+        am.setTargetFunctionRole(address(template), configSelectors, ADMIN_FACTORY_ROLE);
+
+        bytes4[] memory feeSelectors = new bytes4[](1);
+        feeSelectors[0] = BaseDeploymentTemplate.setProtocolFeeConfig.selector;
+        am.setTargetFunctionRole(address(template), feeSelectors, ADMIN_PROTOCOL_FEE_SETTER_ROLE);
+        am.grantRole(ADMIN_PROTOCOL_FEE_SETTER_ROLE, FACTORY_ADMIN, 0);
     }
 
     // ─── helpers ───
@@ -186,7 +202,7 @@ contract Test_RoycoFactory is Test {
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
         _fundPoolSeed(cfg);
-        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, address(factory), DEPLOYER));
     }
 
     /// @dev The `deploy()` flow resolves an unset config oracle itself; the direct-template path must supply it, so
@@ -221,7 +237,7 @@ contract Test_RoycoFactory is Test {
         cfg.minCoverageWAD = 0;
         cfg.poolInitialization.collateralAmount = 10_000e18;
         _fundPoolSeed(cfg);
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, address(factory), DEPLOYER));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -579,7 +595,7 @@ contract Test_RoycoFactory is Test {
         _fundPoolSeed(staticCfg);
         staticCfg.ydmType = YDMType.StaticCurve;
         bytes32 staticId = MARKET_ID_C;
-        bytes memory p = abi.encode(deployScript.buildMarketParams(staticCfg, staticId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(staticCfg, staticId, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory s = factory.executeMarketDeployment(address(template), p);
         assertTrue(s.ydm != a.ydm, "a different YDM model must not share the adaptive markets' JT YDM instance");
@@ -813,9 +829,9 @@ contract Test_RoycoFactory is Test {
 
         // The same seed and the same config, mined for each deployer in turn
         _fundPoolSeedFor(cfg, DEPLOYER);
-        bytes memory pA = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+        bytes memory pA = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, address(factory), DEPLOYER));
         _fundPoolSeedFor(cfg, otherDeployer);
-        bytes memory pB = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT, address(factory), otherDeployer));
+        bytes memory pB = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, address(factory), otherDeployer));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory first = factory.executeMarketDeployment(address(template), pA);
@@ -863,7 +879,7 @@ contract Test_RoycoFactory is Test {
         _fundPoolSeed(cfg);
         cfg.ydmType = YDMType.StaticCurve;
         bytes32 marketId = MARKET_ID_A;
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, address(factory), DEPLOYER));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -896,7 +912,7 @@ contract Test_RoycoFactory is Test {
         cfg.ydmSpecificParams = v1Params;
         cfg.lptYdmSpecificParams = v1Params;
         bytes32 marketId = MARKET_ID_A;
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, address(factory), DEPLOYER));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -923,7 +939,7 @@ contract Test_RoycoFactory is Test {
         cfg.ydmSpecificParams = abi.encode(FixedYDMParams({ fixedYieldShareWAD: 0.11e18 }));
         cfg.lptYdmSpecificParams = abi.encode(FixedYDMParams({ fixedYieldShareWAD: 0 }));
         bytes32 marketId = MARKET_ID_A;
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, address(factory), DEPLOYER));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -951,7 +967,7 @@ contract Test_RoycoFactory is Test {
         MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
         _fundPoolSeed(cfg);
-        return deployScript.buildMarketParams(cfg, MARKET_ID_A, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER);
+        return deployScript.buildMarketParams(cfg, MARKET_ID_A, address(factory), DEPLOYER);
     }
 
     /// @dev Runs a deployment expected to revert with `_err` from the params validation
@@ -1004,12 +1020,6 @@ contract Test_RoycoFactory is Test {
         _expectParamsRevert(p, MarketDeploymentValidationLogic.MARKET_PARAMETER_HAS_NO_CODE.selector);
     }
 
-    /// The fee recipient is normally an EOA or multisig, so only the null address is rejected
-    function test_RevertIf_ProtocolFeeRecipientIsNull() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
-        p.protocolFeeRecipient = address(0);
-        _expectParamsRevert(p, MarketDeploymentValidationLogic.NULL_MARKET_PARAMETER.selector);
-    }
 
     function test_RevertIf_TrancheNameIsEmpty() external {
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
@@ -1045,12 +1055,6 @@ contract Test_RoycoFactory is Test {
         _expectParamsRevert(p, MarketDeploymentValidationLogic.EMPTY_POOL_NAME_OR_SYMBOL.selector);
     }
 
-    /// A swap fee is a percentage of the swap, so it cannot exceed 100%
-    function test_RevertIf_SwapFeeExceedsOneHundredPercent() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
-        p.poolCreationParams.swapFeePercentage = 1e18 + 1;
-        _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_SWAP_FEE.selector);
-    }
 
     /// An inverted E-CLP price range is not an interval, and would produce a nonsensical curve
     function test_RevertIf_EclpPriceRangeIsInverted() external {
@@ -1060,12 +1064,6 @@ contract Test_RoycoFactory is Test {
         _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_ECLP_PRICE_RANGE.selector);
     }
 
-    /// Protocol fees are percentages of the yield they are taken from
-    function test_RevertIf_ProtocolFeeExceedsTheMaximum() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
-        p.accountantParams.stProtocolFeeWAD = uint64(1e18) + 1;
-        _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_ACCOUNTANT_CONFIG.selector);
-    }
 
     /// Coverage must demand less than the whole senior exposure
     function test_RevertIf_MinCoverageIsNotBelowWad() external {
@@ -1098,11 +1096,129 @@ contract Test_RoycoFactory is Test {
     /// consume any AccessManager target's one-time `wasEverConfigured` freshness
     function test_ParamsValidation_RunsBeforeAnyComponentIsDeployed() external {
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
-        p.protocolFeeRecipient = address(0);
+        p.collateralAsset = address(0);
 
         address predictedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", MARKET_ID_A, TAG_ST_PROXY)));
         _expectParamsRevert(p, MarketDeploymentValidationLogic.NULL_MARKET_PARAMETER.selector);
         assertEq(predictedST.code.length, 0, "a rejected deployment must not have deployed the senior tranche");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TEMPLATE CONFIGURATION
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev A fee set with one field raised, for the bound tests
+    function _feeConfig(uint64 _st) internal pure returns (BaseDeploymentTemplate.ProtocolFeeConfig memory) {
+        return BaseDeploymentTemplate.ProtocolFeeConfig({
+            stProtocolFeeWAD: _st, jtProtocolFeeWAD: 0, jtYieldShareProtocolFeeWAD: 0, lptYieldShareProtocolFeeWAD: 0
+        });
+    }
+
+    /// The fees and the recipient are protocol policy, so the deployer cannot express them and the market inherits
+    /// exactly what the template holds
+    function test_ExecuteMarketDeployment_MarketInheritsTheTemplatesFeePolicy() external {
+        _register();
+        IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(MARKET_ID_A);
+
+        (uint64 st, uint64 jt, uint64 jtYield, uint64 lptYield) = template.protocolFeeConfig();
+        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
+        assertEq(a.stProtocolFeeWAD, st, "senior fee must come from the template");
+        assertEq(a.jtProtocolFeeWAD, jt, "junior fee must come from the template");
+        assertEq(a.jtYieldShareProtocolFeeWAD, jtYield, "junior yield-share fee must come from the template");
+        assertEq(a.lptYieldShareProtocolFeeWAD, lptYield, "liquidity yield-share fee must come from the template");
+        assertEq(
+            IRoycoDayKernel(r.kernel).getState().protocolFeeRecipient, template.protocolFeeRecipient(), "recipient must come from the template"
+        );
+    }
+
+    /**
+     * @notice A config change binds FUTURE markets only. A live market holds its own copy, retuned through the
+     *         accountant's own setters — this is the property operators are most likely to assume wrongly
+     */
+    function test_SetProtocolFeeConfig_BindsFutureMarketsOnly() external {
+        _register();
+        IRoycoProtocolTemplate.DeploymentResult memory first = _deploy(MARKET_ID_A);
+        uint64 originalFee = IRoycoDayAccountant(first.accountant).getState().stProtocolFeeWAD;
+
+        vm.prank(FACTORY_ADMIN);
+        template.setProtocolFeeConfig(_feeConfig(0.42e18));
+
+        IRoycoProtocolTemplate.DeploymentResult memory second = _deploy(MARKET_ID_B);
+
+        assertEq(IRoycoDayAccountant(first.accountant).getState().stProtocolFeeWAD, originalFee, "the live market must be untouched");
+        assertEq(IRoycoDayAccountant(second.accountant).getState().stProtocolFeeWAD, 0.42e18, "the new market must take the new fee");
+    }
+
+    /// Each configuration setter is admin-only: a market deployer holds DEPLOYER_ROLE, never the config surface
+    function test_RevertIf_ConfigSettersCalledByNonAdmin() external {
+        // Read the pool config BEFORE pranking: a view call would otherwise consume the prank before the setter runs
+        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory poolConfig = _templateBalancerPoolConfig();
+
+        vm.prank(DEPLOYER);
+        vm.expectPartialRevert(IAccessManaged.AccessManagedUnauthorized.selector);
+        template.setProtocolFeeConfig(_feeConfig(0));
+
+        vm.prank(DEPLOYER);
+        vm.expectPartialRevert(IAccessManaged.AccessManagedUnauthorized.selector);
+        template.setProtocolFeeRecipient(makeAddr("HIJACKED"));
+
+        vm.prank(DEPLOYER);
+        vm.expectPartialRevert(IAccessManaged.AccessManagedUnauthorized.selector);
+        template.setBalancerPoolConfig(poolConfig);
+    }
+
+    /// A protocol fee above 100% is refused, matching the bound the accountant itself enforces
+    function test_RevertIf_ProtocolFeeConfigExceedsTheMaximum() external {
+        vm.expectRevert(BaseDeploymentTemplate.INVALID_PROTOCOL_FEE_CONFIG.selector);
+        vm.prank(FACTORY_ADMIN);
+        template.setProtocolFeeConfig(_feeConfig(uint64(1e18) + 1));
+    }
+
+    /// The recipient can never be nulled: the kernel's own initializer would reject it, and a live market would have
+    /// nowhere to send its fee shares
+    function test_RevertIf_ProtocolFeeRecipientSetToNull() external {
+        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
+        vm.prank(FACTORY_ADMIN);
+        template.setProtocolFeeRecipient(address(0));
+    }
+
+    /// The swap fee is held to Gyro's own band. Below it, Balancer would reject the pool mid-deployment and every
+    /// market this template deploys would fail, so the floor belongs at configuration time
+    function test_RevertIf_SwapFeeOutsideGyrosBand() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory tooLow = _templateBalancerPoolConfig();
+        tooLow.swapFeePercentage = 1e12 - 1;
+        vm.expectPartialRevert(RoycoDayBalancerV3MarketDeploymentTemplate.INVALID_SWAP_FEE.selector);
+        vm.prank(FACTORY_ADMIN);
+        template.setBalancerPoolConfig(tooLow);
+
+        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory tooHigh = _templateBalancerPoolConfig();
+        tooHigh.swapFeePercentage = uint64(1e18) + 1;
+        vm.expectPartialRevert(RoycoDayBalancerV3MarketDeploymentTemplate.INVALID_SWAP_FEE.selector);
+        vm.prank(FACTORY_ADMIN);
+        template.setBalancerPoolConfig(tooHigh);
+    }
+
+    /// The constructor runs the same validator as the setter, so a template can never be born out of bounds
+    function test_RevertIf_TemplateConstructedWithAnInvalidFeeConfig() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _templateConstructionParams();
+        cp.protocolFeeConfig = _feeConfig(uint64(1e18) + 1);
+        vm.expectRevert(BaseDeploymentTemplate.INVALID_PROTOCOL_FEE_CONFIG.selector);
+        new RoycoDayBalancerV3MarketDeploymentTemplate(cp);
+    }
+
+    /// @notice Balancer refuses a leg that pays yield fees with no rate provider to measure them against. The flag is
+    ///         template policy and the rate provider is the deployer's, so the clash is caught before anything deploys
+    ///         rather than inside pool creation, which runs after the senior tranche proxy already exists
+    function test_RevertIf_QuoteYieldFeeChargedWithoutAQuoteRateProvider() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory cfg = _templateBalancerPoolConfig();
+        cfg.chargeYieldFeeOnQuoteAsset = true;
+        vm.prank(FACTORY_ADMIN);
+        template.setBalancerPoolConfig(cfg);
+
+        // The snUSD config leaves the quote leg's rate provider null, so the pool policy and the market disagree
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        assertEq(p.poolCreationParams.quoteAssetRateProvider, address(0), "this market must supply no quote rate provider");
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.QUOTE_RATE_PROVIDER_REQUIRED_FOR_YIELD_FEE.selector);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1148,7 +1264,26 @@ contract Test_RoycoFactory is Test {
             juniorTrancheBeacon: template.JUNIOR_TRANCHE_BEACON(),
             liquidityProviderTrancheBeacon: template.LIQUIDITY_PROVIDER_TRANCHE_BEACON(),
             kernelBeacon: template.KERNEL_BEACON(),
-            accountantBeacon: template.ACCOUNTANT_BEACON()
+            accountantBeacon: template.ACCOUNTANT_BEACON(),
+            protocolFeeConfig: _templateProtocolFeeConfig(),
+            protocolFeeRecipient: template.protocolFeeRecipient(),
+            balancerPoolConfig: _templateBalancerPoolConfig()
+        });
+    }
+
+    /// @dev The live template's fee set, read back through its auto-getter
+    function _templateProtocolFeeConfig() internal view returns (BaseDeploymentTemplate.ProtocolFeeConfig memory) {
+        (uint64 st, uint64 jt, uint64 jtYield, uint64 lptYield) = template.protocolFeeConfig();
+        return BaseDeploymentTemplate.ProtocolFeeConfig({
+            stProtocolFeeWAD: st, jtProtocolFeeWAD: jt, jtYieldShareProtocolFeeWAD: jtYield, lptYieldShareProtocolFeeWAD: lptYield
+        });
+    }
+
+    /// @dev The live template's pool policy, read back through its auto-getter
+    function _templateBalancerPoolConfig() internal view returns (RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory) {
+        (uint64 swapFee, bool chargeSenior, bool chargeQuote) = template.balancerPoolConfig();
+        return RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig({
+            swapFeePercentage: swapFee, chargeYieldFeeOnSeniorTrancheShares: chargeSenior, chargeYieldFeeOnQuoteAsset: chargeQuote
         });
     }
 

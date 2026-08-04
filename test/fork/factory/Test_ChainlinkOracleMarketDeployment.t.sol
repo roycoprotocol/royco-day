@@ -10,6 +10,7 @@ import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
+import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
@@ -112,7 +113,7 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
         // The template resolves a market's yield distribution models out of its own registry, so bind its registration
         // surface and register the config's shapes, exactly as the scaffolding phase does.
         bytes4[] memory ydmSelectors = new bytes4[](1);
-        ydmSelectors[0] = RoycoDayBalancerV3MarketDeploymentTemplate.setYieldDistributionModels.selector;
+        ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
         am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
         deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("snUSD"));
     }
@@ -144,7 +145,7 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
 
     function _encodedParams(bytes32 _marketId, address _oracleCollateralAsset) internal returns (bytes memory) {
         MarketConfig memory cfg = _marketConfig(_oracleCollateralAsset);
-        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+        return abi.encode(deployScript.buildMarketParams(cfg, _marketId, address(factory), DEPLOYER));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -158,7 +159,7 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
     function test_ExecuteMarketDeployment_ChainlinkOracleKernelWiring() external {
         _register();
         MarketConfig memory cfg = _marketConfig(deployScript.getMarketConfig("snUSD").collateralAsset);
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 

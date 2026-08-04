@@ -549,37 +549,37 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function seniorTranche() external view override(IRoycoDayKernel) returns (address seniorTranche) {
+    function seniorTranche() external view override(IRoycoDayKernel) returns (address) {
         return _getRoycoDayKernelStorage().seniorTranche;
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function juniorTranche() external view override(IRoycoDayKernel) returns (address juniorTranche) {
+    function juniorTranche() external view override(IRoycoDayKernel) returns (address) {
         return _getRoycoDayKernelStorage().juniorTranche;
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function collateralAsset() external view override(IRoycoDayKernel) returns (address collateralAsset) {
+    function collateralAsset() external view override(IRoycoDayKernel) returns (address) {
         return _getRoycoDayKernelStorage().collateralAsset;
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function liquidityProviderTranche() external view override(IRoycoDayKernel) returns (address liquidityProviderTranche) {
+    function liquidityProviderTranche() external view override(IRoycoDayKernel) returns (address) {
         return _getRoycoDayKernelStorage().liquidityProviderTranche;
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function lptAsset() external view override(IRoycoDayKernel) returns (address lptAsset) {
+    function lptAsset() external view override(IRoycoDayKernel) returns (address) {
         return _getRoycoDayKernelStorage().lptAsset;
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function quoteAsset() external view override(IRoycoDayKernel) returns (address quoteAsset) {
+    function quoteAsset() external view override(IRoycoDayKernel) returns (address) {
         return _getRoycoDayKernelStorage().quoteAsset;
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function accountant() external view override(IRoycoDayKernel) returns (address accountant) {
+    function accountant() external view override(IRoycoDayKernel) returns (address) {
         return _getRoycoDayKernelStorage().accountant;
     }
 

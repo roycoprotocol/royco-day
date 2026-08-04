@@ -14,6 +14,9 @@ import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProto
  *         these only in the RPC-gated fork factory suite).
  */
 contract MockWiringTemplate is BaseDeploymentTemplate {
+    /// @dev A non-null placeholder: the base rejects a zero recipient, and no mock market ever pays a fee
+    address internal constant PROTOCOL_FEE_RECIPIENT = address(0xFEE);
+
     uint8 public constant MODE_WIRE = 0;
     uint8 public constant MODE_REENTER = 1;
     uint8 public constant MODE_EXEC_FAIL = 2;
@@ -27,7 +30,7 @@ contract MockWiringTemplate is BaseDeploymentTemplate {
     address public wireAccount;
     IRoycoProtocolTemplate.DeploymentResult private _result;
 
-    constructor(IRoycoFactory _factory) BaseDeploymentTemplate(_factory) { }
+    constructor(IRoycoFactory _factory) BaseDeploymentTemplate(_factory, BaseDeploymentTemplate.ProtocolFeeConfig({ stProtocolFeeWAD: 0, jtProtocolFeeWAD: 0, jtYieldShareProtocolFeeWAD: 0, lptYieldShareProtocolFeeWAD: 0 }), PROTOCOL_FEE_RECIPIENT) { }
 
     function setMode(uint8 _mode) external {
         mode = _mode;

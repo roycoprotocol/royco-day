@@ -33,10 +33,6 @@ interface IBaseTemplate is IRoycoProtocolTemplate {
      * @custom:field maxLPTYieldShareWAD - The maximum LPT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
      * @custom:field dustTolerance - The worst case dust tolerance for collateralNAV from underlying NAV quoting/rounding
-     * @custom:field stProtocolFeeWAD - The protocol fee percentage taken from yield earned by the senior tranche, scaled to WAD precision
-     * @custom:field jtProtocolFeeWAD - The protocol fee percentage taken from yield earned by the junior tranche, scaled to WAD precision
-     * @custom:field jtYieldShareProtocolFeeWAD - The protocol fee percentage taken from the junior tranche's yield share (risk premium), scaled to WAD precision
-     * @custom:field lptYieldShareProtocolFeeWAD - The protocol fee percentage taken from the liquidity provider tranche's yield share (liquidity premium), scaled to WAD precision
      */
     struct AccountantDeploymentParams {
         // Deployment configuration
@@ -56,11 +52,6 @@ interface IBaseTemplate is IRoycoProtocolTemplate {
         uint24 fixedTermDurationSeconds;
         // Dust tolerance
         NAV_UNIT dustTolerance;
-        // Protocol fees
-        uint64 stProtocolFeeWAD;
-        uint64 jtProtocolFeeWAD;
-        uint64 jtYieldShareProtocolFeeWAD;
-        uint64 lptYieldShareProtocolFeeWAD;
     }
 
     /// @notice Thrown when a factory-only function is called by another address

@@ -8,6 +8,7 @@ import { TokenInfo, TokenType } from "../../../lib/balancer-v3-monorepo/pkg/inte
 import { LPOracleBase } from "../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/LPOracleBase.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { Test } from "../../../lib/forge-std/src/Test.sol";
+import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
@@ -122,7 +123,7 @@ contract Test_IdleCDOMarketDeployment is Test {
         // The template resolves a market's yield distribution models out of its own registry, so bind its registration
         // surface and register the config's shapes, exactly as the scaffolding phase does.
         bytes4[] memory ydmSelectors = new bytes4[](1);
-        ydmSelectors[0] = RoycoDayBalancerV3MarketDeploymentTemplate.setYieldDistributionModels.selector;
+        ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
         am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
         deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("snUSD"));
     }
@@ -171,7 +172,7 @@ contract Test_IdleCDOMarketDeployment is Test {
     function test_ExecuteMarketDeployment_IdleCDOOracleKernelWiring() external {
         _register();
         MarketConfig memory cfg = _marketConfig();
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 

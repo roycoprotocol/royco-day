@@ -54,9 +54,6 @@ library MarketDeploymentValidationLogic {
     /// @notice Thrown when the pool is created without a pool token name or symbol
     error EMPTY_POOL_NAME_OR_SYMBOL();
 
-    /// @notice Thrown when the pool's swap fee is not a percentage
-    error INVALID_SWAP_FEE(uint256 swapFeePercentage);
-
     /// @notice Thrown when the E-CLP's price range is not a real interval
     error INVALID_ECLP_PRICE_RANGE();
 
@@ -65,6 +62,9 @@ library MarketDeploymentValidationLogic {
 
     /// @notice Thrown when the accountant's economic configuration is out of bounds
     error INVALID_ACCOUNTANT_CONFIG();
+
+    /// @notice Thrown when the template charges a yield fee on the quote leg but the market supplies no rate provider for it
+    error QUOTE_RATE_PROVIDER_REQUIRED_FOR_YIELD_FEE();
 
     /// @notice Thrown when the created Balancer pool is not a fresh, unseeded, hookless `{ST_share, quote}` pool
     error INVALID_POOL_CONFIGURATION(address pool);
@@ -76,12 +76,19 @@ library MarketDeploymentValidationLogic {
     // PARAM VALIDATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * @notice Validates the deployer-supplied params before any of the market's contracts exist
-     * @param _rawParams The ABI-encoded `MarketParams` the deployer passed to `deployMarket`
-     * @return params The validated market params
-     */
-    function validateMarketParams(bytes calldata _rawParams) external view returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params) {
+    /// @notice Validates the deployer-supplied params before any of the market's contracts exist
+    /// @param _rawParams The ABI-encoded `MarketParams` the deployer passed to `deployMarket`
+    /// @param _chargeYieldFeeOnQuoteAsset The template's pool policy for the quote leg, passed in rather than read
+    ///        from storage so this library holds no assumption about the template's layout
+    /// @return params The validated market params
+    function validateMarketParams(
+        bytes calldata _rawParams,
+        bool _chargeYieldFeeOnQuoteAsset
+    )
+        external
+        view
+        returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params)
+    {
         params = abi.decode(_rawParams, (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams));
 
         // The market ID must be non-zero
@@ -109,14 +116,14 @@ library MarketDeploymentValidationLogic {
         // Each tranche selects its model by shape name out of the template's registry, and the empty name is never registered
         require(bytes(params.jtYdmType).length != 0 && bytes(params.lptYdmType).length != 0, EMPTY_YDM_TYPE());
 
-        // The fee recipient is normally an EOA or multisig, so it is only required to be non-null
-        require(params.protocolFeeRecipient != address(0), NULL_MARKET_PARAMETER());
-
         // The senior tranche self-liquidation bonus must be less than WAD
         require(params.stSelfLiquidationBonusWAD < WAD, INVALID_ACCOUNTANT_CONFIG());
 
         // The collateral asset oracle is mandatory; the kernel separately pins that it prices THIS collateral asset
         _requireContract(params.collateralAssetOracle);
+
+        // Balancer rejects a leg that pays yield fees without a rate provider to measure them against.
+        require(!_chargeYieldFeeOnQuoteAsset || params.poolCreationParams.quoteAssetRateProvider != address(0), QUOTE_RATE_PROVIDER_REQUIRED_FOR_YIELD_FEE());
 
         // Optional feeds: null is the documented "not applicable" case, but a non-null one must be live
         if (params.sequencerUptimeFeed != address(0)) _requireCode(params.sequencerUptimeFeed);
@@ -132,9 +139,6 @@ library MarketDeploymentValidationLogic {
     function _validatePoolCreationParams(BalancerV3PoolCreationParams memory _params) private pure {
         // The pool token is a live ERC20 in its own right
         require(bytes(_params.name).length != 0 && bytes(_params.symbol).length != 0, EMPTY_POOL_NAME_OR_SYMBOL());
-
-        // A swap fee is a percentage, so it cannot exceed 100%. The pool factory enforces its own narrower band
-        require(_params.swapFeePercentage <= WAD, INVALID_SWAP_FEE(_params.swapFeePercentage));
 
         // The E-CLP's price range must be a real interval. Gyro validates the full curve at pool construction, but an
         // inverted range is the one mistake worth catching before a pool is created against it
@@ -170,13 +174,6 @@ library MarketDeploymentValidationLogic {
      * @param _params The accountant's deployer-supplied params
      */
     function _validateAccountantParams(IBaseTemplate.AccountantDeploymentParams memory _params) private pure {
-        // Every protocol fee is a percentage of the yield it is taken from
-        require(
-            _params.stProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _params.jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD
-                && _params.jtYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _params.lptYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD,
-            INVALID_ACCOUNTANT_CONFIG()
-        );
-
         // Coverage must demand less than the whole senior exposure, and the liquidation threshold can only be breached after losses
         require(_params.minCoverageWAD < WAD && _params.coverageLiquidationUtilizationWAD > WAD, INVALID_ACCOUNTANT_CONFIG());
 

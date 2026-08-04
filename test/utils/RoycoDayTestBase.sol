@@ -6,7 +6,7 @@ import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { DeploymentResult, RoleAssignment, RoleAssignmentAddresses } from "../../script/config/DeploymentTypes.sol";
-import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
+import { ADMIN_KERNEL_ROLE, ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
@@ -268,6 +268,24 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         vm.label(address(ACCESS_MANAGER), "AccessManager");
 
         _wireExtraRoles();
+
+        // The protocol fee recipient is template policy now (sourced from the chain config), so the deployed market
+        // pays fees to that address rather than the recipient the fixture passes to `deploy`. Retune the LIVE market
+        // to the fixture's recipient wallet the way an operator would — through the kernel's ADMIN_KERNEL_ROLE-gated
+        // setter. The canonical KERNEL_ADMIN grant carries a 2-day execution delay, so grant the admin-role holder a
+        // fresh delay-0 membership for this one setup call rather than warping every suite's clock at deploy time
+        address fndn = _adminRoleHolder();
+        vm.prank(fndn);
+        ACCESS_MANAGER.grantRole(ADMIN_KERNEL_ROLE, fndn, 0);
+        vm.prank(fndn);
+        KERNEL.setProtocolFeeRecipient(PROTOCOL_FEE_RECIPIENT_ADDRESS);
+    }
+
+    /// @dev The AccessManager admin-role holder to prank for setup-time governance: `OWNER_ADDRESS` for a fresh
+    ///      in-memory deploy, the production root multisig when the test forks a chain with a live factory
+    function _adminRoleHolder() internal view returns (address fndn) {
+        (bool ownerIsAdmin,) = ACCESS_MANAGER.hasRole(0, OWNER_ADDRESS);
+        return ownerIsAdmin ? OWNER_ADDRESS : 0x7c405bbD131e42af506d14e752f2e59B19D49997;
     }
 
     /// @dev Wires roles that live in `ExtraRoles` and are intentionally NOT passed through
@@ -276,18 +294,10 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     ///      admin-role holder): `OWNER_ADDRESS` for a fresh in-memory deploy, `ROOT_MULTISIG`
     ///      when the test forks a chain where the factory is already on-chain.
     function _wireExtraRoles() internal {
-        address fndn;
-        (bool ownerIsAdmin,) = ACCESS_MANAGER.hasRole(0, OWNER_ADDRESS);
-        if (ownerIsAdmin) {
-            fndn = OWNER_ADDRESS;
-        } else {
-            // Live-chain factory admin: the production root multisig that holds the AccessManager admin role
-            // (role id 0) on already-deployed factories, pinned as ROOT_MULTISIG in
-            // script/config/MarketDeploymentConfig.sol. Hardcoded here (rather than imported) because that
-            // config is script-side deploy tooling this test base intentionally does not depend on — if the
-            // production admin ever rotates, fork tests hitting a live factory fail loudly on the grant below
-            fndn = 0x7c405bbD131e42af506d14e752f2e59B19D49997;
-        }
+        // Live-chain fallback is the production root multisig, pinned in `_adminRoleHolder`. Hardcoded (rather than
+        // imported from script config) because that config is deploy tooling this test base intentionally does not
+        // depend on — if the production admin ever rotates, fork tests hitting a live factory fail loudly below
+        address fndn = _adminRoleHolder();
 
         // Standard 24h delay matches the canonical UNPAUSER config (and what `ApplySecurityMigration`
         // applies in production). The `_scheduleAndExecuteUnpause` test helper relies on a non-zero

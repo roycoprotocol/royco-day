@@ -56,6 +56,7 @@ import { RoycoCreate3Deployer } from "../src/factory/RoycoCreate3Deployer.sol";
 import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
+import { BaseDeploymentTemplate } from "../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import {
     TAG_ACCOUNTANT_IMPL,
     TAG_ACCOUNTANT_PROXY,
@@ -273,9 +274,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // Register (or reuse) the Day template for this kernel type.
         s.template = _getOrRegisterTemplate(s.factory, _config, s.roycoBlacklist);
 
-        // Register the yield distribution models on the template and open its admin surface. Both are chain-wide and
-        // must land before the deployer renounces its admin roles.
-        _registerYieldDistributionModels(s.accessManager, s.template, _config);
+        // Open the template's configuration surface, then register the yield distribution models through it. Both are
+        // chain-wide and must land before the deployer renounces its admin roles.
+        _bindTemplateConfigurationRoles(s.accessManager, s.template);
+        _registerYieldDistributionModels(s.template, _config);
 
         // Bind each component beacon's upgrade entrypoint. A beacon governs every market of its type, so this is wired
         // once per chain rather than per market, and it replaces the per-proxy upgrade bindings the components carried
@@ -464,8 +466,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (_config.collateralAssetOracle == address(0)) {
             _config.collateralAssetOracle = _deployCollateralAssetOracle(_config, marketId);
         }
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params =
-            _buildMarketParams(_config, marketId, _protocolFeeRecipient, address(_s.factory), _deployer);
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params = _buildMarketParams(_config, marketId, address(_s.factory), _deployer);
 
         // The template pulls the market's genesis pool liquidity from the account calling the factory's deployment
         // entrypoint (the broadcasting deployer here), so approve the template from inside the broadcast
@@ -621,7 +622,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     function buildMarketParams(
         MarketConfig memory _config,
         bytes32 _marketIdSeed,
-        address _protocolFeeRecipient,
         address _factory,
         address _deployer
     )
@@ -629,7 +629,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         pure
         returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory)
     {
-        return _buildMarketParams(_config, _marketIdSeed, _protocolFeeRecipient, _factory, _deployer);
+        return _buildMarketParams(_config, _marketIdSeed, _factory, _deployer);
     }
 
     /**
@@ -647,6 +647,19 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         cp.balancerV3PoolFactory = GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory);
         cp.eclpLPOracleFactory = ILPOracleFactoryBase(chainConfig.eclpLPOracleFactory);
         cp.roycoBlacklist = _roycoBlacklist;
+
+        cp.protocolFeeRecipient = chainConfig.protocolFeeRecipient;
+        cp.protocolFeeConfig = BaseDeploymentTemplate.ProtocolFeeConfig({
+            stProtocolFeeWAD: chainConfig.stProtocolFeeWAD,
+            jtProtocolFeeWAD: chainConfig.jtProtocolFeeWAD,
+            jtYieldShareProtocolFeeWAD: chainConfig.jtYieldShareProtocolFeeWAD,
+            lptYieldShareProtocolFeeWAD: chainConfig.lptYieldShareProtocolFeeWAD
+        });
+        cp.balancerPoolConfig = RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig({
+            swapFeePercentage: chainConfig.poolSwapFeePercentage,
+            chargeYieldFeeOnSeniorTrancheShares: chainConfig.chargeYieldFeeOnSeniorTrancheShares,
+            chargeYieldFeeOnQuoteAsset: chainConfig.chargeYieldFeeOnQuoteAsset
+        });
 
         (template, existed) = deployWithSanityChecks(
             _singletonSalt(string.concat("ROYCO_DAY_BALANCER_V3_TEMPLATE_", vm.toString(keccak256(abi.encode(cp))))),
@@ -753,7 +766,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     function _buildMarketParams(
         MarketConfig memory _config,
         bytes32 _marketIdSeed,
-        address _protocolFeeRecipient,
         address _factory,
         address _deployer
     )
@@ -773,10 +785,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             symbol: _config.gyroECLPPoolParams.symbol,
             eclpParams: _config.gyroECLPPoolParams.eclpParams,
             derivedEclpParams: _config.gyroECLPPoolParams.derivedEclpParams,
-            swapFeePercentage: _config.gyroECLPPoolParams.swapFeePercentage,
-            quoteAssetRateProvider: _config.gyroECLPPoolParams.quoteAssetRateProvider,
-            chargeYieldFeeOnSeniorTrancheShares: _config.gyroECLPPoolParams.chargeYieldFeeOnSeniorTrancheShares,
-            chargeYieldFeeOnQuoteAsset: _config.gyroECLPPoolParams.chargeYieldFeeOnQuoteAsset
+            quoteAssetRateProvider: _config.gyroECLPPoolParams.quoteAssetRateProvider
         });
 
         // Genesis pool liquidity, seeded by the template as a multi-asset deposit once the market is wired
@@ -799,15 +808,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             maxJTYieldShareWAD: uint64(1e18), // uncapped at the WAD ceiling; the real JT cap comes from the JT YDM curve
             maxLPTYieldShareWAD: 0, // LPT liquidity premium disabled in the baseline
             fixedTermDurationSeconds: _config.fixedTermDurationSeconds,
-            dustTolerance: toNAVUnits(_config.dustTolerance),
-            stProtocolFeeWAD: _config.stProtocolFeeWAD,
-            jtProtocolFeeWAD: _config.jtProtocolFeeWAD,
-            jtYieldShareProtocolFeeWAD: _config.jtYieldShareProtocolFeeWAD,
-            lptYieldShareProtocolFeeWAD: 0
+            dustTolerance: toNAVUnits(_config.dustTolerance)
         });
 
         params.kernelSpecificParams = _config.kernelSpecificParams; // the venue params blob (BalancerV3LiquidityVenueDeploymentParams)
-        params.protocolFeeRecipient = _protocolFeeRecipient;
         params.stSelfLiquidationBonusWAD = _config.stSelfLiquidationBonusWAD;
         params.collateralAssetOracle = _config.collateralAssetOracle;
         params.stalenessThresholdSeconds = _config.stalenessThresholdSeconds;
@@ -898,23 +902,30 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     }
 
     /**
-     * @notice Deploys the yield distribution models and registers them on the template, one pair per model shape
-     * @dev Idempotent: the models are CREATE2-deployed at derived salts, and a shape already registered on the
-     *      template is skipped, so a re-run of the script writes nothing
-     * @dev Binds the template's registration surface first, since the deployer needs it to register at all and its
-     *      admin roles are renounced at the end of the scaffolding phase
+     * @notice Binds every selector on the template's configuration surface to the role that governs it
+     * @param _accessManager The access manager governing the template
+     * @param _template The template whose configuration surface is being bound
      */
-    function _registerYieldDistributionModels(AccessManager _accessManager, address _template, MarketConfig memory _config) internal {
-        RoycoDayBalancerV3MarketDeploymentTemplate t = RoycoDayBalancerV3MarketDeploymentTemplate(_template);
+    function _bindTemplateConfigurationRoles(AccessManager _accessManager, address _template) internal {
+        if (IRoycoAccessManager(address(_accessManager)).wasEverConfigured(_template)) return;
 
-        if (!IRoycoAccessManager(address(_accessManager)).wasEverConfigured(_template)) {
-            bytes4[] memory selectors = new bytes4[](1);
-            selectors[0] = RoycoDayBalancerV3MarketDeploymentTemplate.setYieldDistributionModels.selector;
-            _accessManager.setTargetFunctionRole(_template, selectors, ADMIN_FACTORY_ROLE);
-        }
+        bytes4[] memory factoryAdminSelectors = new bytes4[](3);
+        factoryAdminSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
+        factoryAdminSelectors[1] = BaseDeploymentTemplate.setProtocolFeeRecipient.selector;
+        factoryAdminSelectors[2] = RoycoDayBalancerV3MarketDeploymentTemplate.setBalancerPoolConfig.selector;
+        _accessManager.setTargetFunctionRole(_template, factoryAdminSelectors, ADMIN_FACTORY_ROLE);
 
+        // The fee set answers to the same role as each market's own protocol fee setters
+        bytes4[] memory feeSelectors = new bytes4[](1);
+        feeSelectors[0] = BaseDeploymentTemplate.setProtocolFeeConfig.selector;
+        _accessManager.setTargetFunctionRole(_template, feeSelectors, ADMIN_PROTOCOL_FEE_SETTER_ROLE);
+    }
+
+    /**
+     * @notice Deploys the yield distribution models and registers them on the template, one pair per model shape
+     */
+    function _registerYieldDistributionModels(address _template, MarketConfig memory _config) internal {
         registerYieldDistributionModelsForTest(_template, _config);
-        t;
     }
 
     /// @notice The canonical registry name for a model shape, shared by registration and market params
