@@ -193,22 +193,22 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate, AccessManaged {
 
     /**
      * @notice Returns the junior tranche's yield distribution model instance for a shape
+     * @dev Reverts on an unregistered YDM
      * @param _ydmType The model shape the market selected
      * @return ydm The junior tranche model instance this template deploys markets against
      */
     function jtYdmFor(string memory _ydmType) public view returns (address ydm) {
-        ydm = jtYdms[_ydmType];
-        require(ydm != address(0), YDM_NOT_REGISTERED(_ydmType));
+        require((ydm = jtYdms[_ydmType]) != address(0), YDM_NOT_REGISTERED(_ydmType));
     }
 
     /**
      * @notice Returns the liquidity provider tranche's yield distribution model instance for a shape
+     * @dev Reverts on an unregistered YDM
      * @param _ydmType The model shape the market selected
      * @return ydm The liquidity provider tranche model instance this template deploys markets against
      */
     function lptYdmFor(string memory _ydmType) public view returns (address ydm) {
-        ydm = lptYdms[_ydmType];
-        require(ydm != address(0), YDM_NOT_REGISTERED(_ydmType));
+        require((ydm = lptYdms[_ydmType]) != address(0), YDM_NOT_REGISTERED(_ydmType));
     }
 
     /// @dev The one place the fee set is validated and written, shared by construction and the admin setter
@@ -333,7 +333,7 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate, AccessManaged {
     // ROLE BINDING APPLICATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    ///  @notice Applies every binding in `_bindings` by calling back into the factory
+    /// @notice Applies every binding in `_bindings` by calling back into the factory
     function _applyRoleBindings(TargetBinding[] memory _targetBindings) internal {
         uint256 numTargets = _targetBindings.length;
         for (uint256 i; i < numTargets; ++i) {
