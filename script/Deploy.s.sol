@@ -95,6 +95,7 @@ import { RoycoLiquidityProviderTranche } from "../src/tranches/RoycoLiquidityPro
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
 import { AdaptiveCurveYDM_V1 } from "../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../src/ydm/AdaptiveCurveYDM_V2.sol";
+import { FixedYDM } from "../src/ydm/FixedYDM.sol";
 import { StaticCurveYDM } from "../src/ydm/StaticCurveYDM.sol";
 import {
     AdaptiveCurveYDM_V1_Params,
@@ -103,6 +104,7 @@ import {
     ChainlinkPriceOracleParams,
     DeploymentResult,
     ERC4626SharePriceOracleParams,
+    FixedYDMParams,
     GyroECLPPoolParams,
     IdleCDOTranchePriceOracleParams,
     KernelType,
@@ -573,7 +575,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
      */
     function registerYieldDistributionModelsForTest(address _template, MarketConfig memory _config) public {
         RoycoDayBalancerV3MarketDeploymentTemplate t = RoycoDayBalancerV3MarketDeploymentTemplate(_template);
-        for (uint256 i; i < 3; ++i) {
+        for (uint256 i; i < 4; ++i) {
             YDMType ydmType = YDMType(i);
             string memory ydmTypeName_ = ydmTypeName(ydmType);
             address jtYdm = _deployModel("JT model  ", ydmType, _config.jtYdmTargetUtilizationWAD, TAG_YDM);
@@ -731,6 +733,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (_ydmType == YDMType.StaticCurve) creationCode = type(StaticCurveYDM).creationCode;
         else if (_ydmType == YDMType.AdaptiveCurve_V1) creationCode = type(AdaptiveCurveYDM_V1).creationCode;
         else if (_ydmType == YDMType.AdaptiveCurve_V2) creationCode = type(AdaptiveCurveYDM_V2).creationCode;
+        else if (_ydmType == YDMType.Fixed) creationCode = type(FixedYDM).creationCode;
         else revert UnsupportedYDMType(_ydmType);
 
         bool existed;
@@ -839,6 +842,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
                 AdaptiveCurveYDM_V2.initializeYDMForMarket,
                 (ydmParams.yieldShareAtZeroUtilWAD, ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD)
             );
+        } else if (_ydmType == YDMType.Fixed) {
+            FixedYDMParams memory ydmParams = abi.decode(_ydmSpecificParams, (FixedYDMParams));
+            ydmInitializationData = abi.encodeCall(FixedYDM.initializeYDMForMarket, (ydmParams.fixedYieldShareWAD));
         } else {
             revert UnsupportedYDMType(_ydmType);
         }
@@ -855,16 +861,16 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice Builds the ABI-encoded constructor args for a YDM model at the given target utilization
     /// @dev Kept in lockstep with `_ydmComponentId` so the deployed contract type and its constructor args always agree
     function _ydmConstructorArgs(YDMType _ydmType, uint256 _targetUtilizationWAD) internal pure returns (bytes memory ydmConstructorArgs) {
-        if (_ydmType == YDMType.StaticCurve) return abi.encode(_targetUtilizationWAD);
-        if (_ydmType == YDMType.AdaptiveCurve_V1) {
+        if (_ydmType == YDMType.StaticCurve) {
+            return abi.encode(_targetUtilizationWAD);
+        } else if (_ydmType == YDMType.AdaptiveCurve_V1) {
             return abi.encode(
                 _targetUtilizationWAD,
                 ADAPTIVE_YDM_MIN_YIELD_SHARE_AT_TARGET_WAD,
                 ADAPTIVE_YDM_MAX_YIELD_SHARE_AT_TARGET_WAD,
                 ADAPTIVE_YDM_V1_ADAPTATION_SPEED_WAD
             );
-        }
-        if (_ydmType == YDMType.AdaptiveCurve_V2) {
+        } else if (_ydmType == YDMType.AdaptiveCurve_V2) {
             return abi.encode(
                 _targetUtilizationWAD,
                 ADAPTIVE_YDM_MIN_YIELD_SHARE_AT_TARGET_WAD,
@@ -872,7 +878,12 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
                 ADAPTIVE_YDM_V2_ADAPTATION_SPEED_WAD
             );
         }
-        revert UnsupportedYDMType(_ydmType);
+        // The fixed model has no concept of a target utilization and takes no constructor args
+        else if (_ydmType == YDMType.Fixed) {
+            return "";
+        } else {
+            revert UnsupportedYDMType(_ydmType);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -910,9 +921,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @dev The template keys its registry by name, so this is the single place the enum crosses into that namespace
     function ydmTypeName(YDMType _ydmType) public pure returns (string memory) {
         if (_ydmType == YDMType.StaticCurve) return "STATIC_CURVE";
-        if (_ydmType == YDMType.AdaptiveCurve_V1) return "ADAPTIVE_CURVE_V1";
-        if (_ydmType == YDMType.AdaptiveCurve_V2) return "ADAPTIVE_CURVE_V2";
-        revert UnsupportedYDMType(_ydmType);
+        else if (_ydmType == YDMType.AdaptiveCurve_V1) return "ADAPTIVE_CURVE_V1";
+        else if (_ydmType == YDMType.AdaptiveCurve_V2) return "ADAPTIVE_CURVE_V2";
+        else if (_ydmType == YDMType.Fixed) return "FIXED";
+        else revert UnsupportedYDMType(_ydmType);
     }
 
     /// @notice Binds `upgradeTo` on every component beacon to ADMIN_UPGRADER_ROLE, skipping any already configured

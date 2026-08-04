@@ -27,7 +27,8 @@ enum KernelType {
 enum YDMType {
     StaticCurve,
     AdaptiveCurve_V1,
-    AdaptiveCurve_V2
+    AdaptiveCurve_V2,
+    Fixed
 }
 
 /// @notice Collateral asset oracle kinds the deployment path can deploy (one per `src/oracle/` adapter).
@@ -89,6 +90,11 @@ struct StaticCurveYDMParams {
     uint64 yieldShareAtZeroUtilWAD;
     uint64 yieldShareAtTargetUtilWAD;
     uint64 yieldShareAtFullUtilWAD;
+}
+
+/// @notice Initialization params for the fixed YDM: the constant yield share paid at every utilization (zero is a valid fixed share)
+struct FixedYDMParams {
+    uint64 fixedYieldShareWAD;
 }
 
 struct AdaptiveCurveYDM_V1_Params {
