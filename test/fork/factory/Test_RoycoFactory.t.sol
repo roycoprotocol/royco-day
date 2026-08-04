@@ -21,6 +21,7 @@ import {
     AdaptiveCurveYDM_V1_Params,
     DeploymentResult,
     ERC4626SharePriceOracleParams,
+    FixedYDMParams,
     MarketConfig,
     StaticCurveYDMParams,
     YDMType
@@ -55,6 +56,7 @@ import { MarketDeploymentValidationLogic } from "../../../src/libraries/logic/fa
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
+import { FixedYDM } from "../../../src/ydm/FixedYDM.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 
@@ -904,6 +906,40 @@ contract Test_RoycoFactory is Test {
         AdaptiveCurveYDM_V1 refLptV1 = new AdaptiveCurveYDM_V1(cfg.lptYdmTargetUtilizationWAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         assertEq(r.ydm.codehash, address(refJtV1).codehash, "configured AdaptiveCurve_V1, ydm must be AdaptiveCurveYDM_V1");
         assertEq(r.lptYdm.codehash, address(refLptV1).codehash, "configured AdaptiveCurve_V1, lptYdm must be AdaptiveCurveYDM_V1");
+    }
+
+    /// @notice A Fixed ydmType config deploys the FixedYDM model for both tranche slots and the accountant's init
+    ///         call binds the configured fixed share, including through the real template deployment path
+    /// @dev The fixed model takes no constructor args, so one reference codehash covers both slots, and the two
+    ///      deployed instances must still be distinct addresses because the accountant rejects identical YDMs
+    function test_FixedYdmConfig_DeploysFixedModel() external {
+        _register();
+
+        MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
+        _fundPoolSeed(cfg);
+        cfg.ydmType = YDMType.Fixed;
+        // The fixed model takes only the constant share, so re-encode both curves as Fixed params — a one-word init blob that binds on the fixed model
+        cfg.ydmSpecificParams = abi.encode(FixedYDMParams({ fixedYieldShareWAD: 0.11e18 }));
+        cfg.lptYdmSpecificParams = abi.encode(FixedYDMParams({ fixedYieldShareWAD: 0 }));
+        bytes32 marketId = MARKET_ID_A;
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(factory), DEPLOYER));
+
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
+
+        // The deployed model is the configured FixedYDM on both slots, at distinct instance addresses
+        FixedYDM refFixed = new FixedYDM();
+        assertEq(r.ydm.codehash, address(refFixed).codehash, "configured Fixed, ydm must be FixedYDM");
+        assertEq(r.lptYdm.codehash, address(refFixed).codehash, "configured Fixed, lptYdm must be FixedYDM");
+        assertTrue(r.ydm != r.lptYdm, "the two tranche slots must hold distinct instances");
+
+        // The accountant's init bound the configured shares, zero included: the flag marks both initialized
+        (bool jtInitialized, uint64 jtShareWAD) = FixedYDM(r.ydm).accountantToFixedYieldShare(r.accountant);
+        (bool lptInitialized, uint64 lptShareWAD) = FixedYDM(r.lptYdm).accountantToFixedYieldShare(r.accountant);
+        assertTrue(jtInitialized && lptInitialized, "both slots must be initialized for the market's accountant");
+        assertEq(jtShareWAD, 0.11e18, "the JT slot holds the configured fixed share");
+        assertEq(lptShareWAD, 0, "the LPT slot holds the configured zero share");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

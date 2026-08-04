@@ -163,4 +163,27 @@ contract Test_FixedYDM is Test {
         vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
         ydm.yieldShare(MarketState.PERPETUAL, 5e17);
     }
+
+    // =====================================================================
+    // Fuzz: the configured share round-trips verbatim, independent of every input
+    // =====================================================================
+
+    /// Any share in [0, WAD] initializes and both reads return it verbatim at any utilization and state
+    function testFuzz_YieldShare_ReturnsConfiguredShareVerbatim(uint64 share, uint256 u, uint8 stateSeed) public {
+        share = uint64(bound(uint256(share), 0, WAD));
+        MarketState state = (stateSeed % 2 == 0) ? MarketState.PERPETUAL : MarketState.FIXED_TERM;
+
+        FixedYDM ydm = new FixedYDM();
+        ydm.initializeYDMForMarket(share);
+        assertEq(ydm.previewYieldShare(state, u), share, "preview returns the configured share verbatim");
+        assertEq(ydm.yieldShare(state, u), share, "yieldShare returns the configured share verbatim");
+    }
+
+    /// Any share above WAD is rejected by the initialization gate
+    function testFuzz_RevertIf_InitializeShareAboveWad(uint64 share) public {
+        share = uint64(bound(uint256(share), WAD + 1, type(uint64).max));
+        FixedYDM ydm = new FixedYDM();
+        vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
+        ydm.initializeYDMForMarket(share);
+    }
 }

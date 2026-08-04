@@ -67,8 +67,7 @@ contract FixedYDM is IYDM {
     /// @inheritdoc IYDM
     /// @dev The fixed share is independent of the market state and the utilization, so both inputs are ignored
     function yieldShare(MarketState, uint256) external override(IYDM) returns (uint256 yieldShareWAD) {
-        yieldShareWAD = _yieldShare();
-        emit YdmOutput(msg.sender, yieldShareWAD);
+        emit YdmOutput(msg.sender, (yieldShareWAD = _yieldShare()));
     }
 
     /// @dev View helper returning the caller's fixed yield share, failing shut for an uninitialized market
