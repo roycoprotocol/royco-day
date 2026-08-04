@@ -14,9 +14,9 @@ import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 
 /// @title Test_FactoryTrancheRegistry
 /// @notice Pins how `RoycoFactory.executeMarketDeployment` validates a template's `DeploymentResult` and populates the
-///         tranche-to-kernel registry. Every market is anchored on a kernel, a senior tranche, and at least one
-///         counterparty tranche (junior or liquidity provider), which of the two is template-defined, so partial
-///         results register exactly their present tranches and the null address never enters the registry
+///         tranche-to-kernel registry. Every market is anchored on a kernel and all three tranches (senior, junior,
+///         and liquidity provider), so a result missing any component is rejected and the null address never enters
+///         the registry
 contract Test_FactoryTrancheRegistry is Test {
     RoycoAccessManager internal am;
     RoycoFactoryGatekeeper internal gatekeeper;
@@ -86,38 +86,20 @@ contract Test_FactoryTrancheRegistry is Test {
         factory.executeMarketDeployment(address(template), "");
     }
 
-    /// A senior-only result is rejected: senior capital needs a junior buffer or a liquidity venue to trade
-    /// against, so a result with neither counterparty tranche names no valid market
-    function test_ExecuteMarketDeployment_RevertIf_ResultHasNoCounterpartyTranche() external {
-        template.setDeploymentResult(_result(makeAddr("ST_ONLY"), address(0), address(0), makeAddr("KERNEL_ST_ONLY")));
+    /// A template result without a junior tranche is rejected: every market carries all three tranches
+    function test_ExecuteMarketDeployment_RevertIf_ResultHasNoJuniorTranche() external {
+        template.setDeploymentResult(_result(makeAddr("ST"), address(0), makeAddr("LPT"), makeAddr("KERNEL")));
         vm.prank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.INVALID_DEPLOYMENT_RESULT.selector);
         factory.executeMarketDeployment(address(template), "");
     }
 
-    /// A two-tranche result (no junior) is accepted: which counterparty tranches a market carries is a
-    /// kernel-family decision, so the factory registers exactly the present tranches and never the null address
-    function test_ExecuteMarketDeployment_NoJuniorMarket_RegistersOnlyPresentTranches() external {
-        address st = makeAddr("ST_NO_JT");
-        address lt = makeAddr("LPT_NO_JT");
-        address kernel = makeAddr("KERNEL_NO_JT");
-        _deploy(_result(st, address(0), lt, kernel));
-
-        assertEq(factory.trancheToKernel(st), kernel, "senior key -> kernel");
-        assertEq(factory.trancheToKernel(lt), kernel, "liquidity key -> kernel");
-        assertEq(factory.trancheToKernel(address(0)), address(0), "the null address must never resolve to a kernel");
-    }
-
-    /// A two-tranche result (no liquidity provider) is accepted and registers exactly the present tranches
-    function test_ExecuteMarketDeployment_NoLiquidityProviderMarket_RegistersOnlyPresentTranches() external {
-        address st = makeAddr("ST_NO_LPT");
-        address jt = makeAddr("JT_NO_LPT");
-        address kernel = makeAddr("KERNEL_NO_LPT");
-        _deploy(_result(st, jt, address(0), kernel));
-
-        assertEq(factory.trancheToKernel(st), kernel, "senior key -> kernel");
-        assertEq(factory.trancheToKernel(jt), kernel, "junior key -> kernel");
-        assertEq(factory.trancheToKernel(address(0)), address(0), "the null address must never resolve to a kernel");
+    /// A template result without a liquidity provider tranche is rejected: every market carries all three tranches
+    function test_ExecuteMarketDeployment_RevertIf_ResultHasNoLiquidityProviderTranche() external {
+        template.setDeploymentResult(_result(makeAddr("ST"), makeAddr("JT"), address(0), makeAddr("KERNEL")));
+        vm.prank(DEPLOYER);
+        vm.expectRevert(IRoycoFactory.INVALID_DEPLOYMENT_RESULT.selector);
+        factory.executeMarketDeployment(address(template), "");
     }
 
     /// A complete result registers all three tranches (senior, junior, liquidity) against the market's kernel

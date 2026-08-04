@@ -130,17 +130,17 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory 
         // Deploy the market
         result = IBaseTemplate(_template).deployMarket(_params);
 
-        // A valid market must have a kernel, a senior tranche, and at least one counterparty tranche: senior capital needs a junior buffer or a liquidity venue to trade against
+        // A valid market must have a kernel and all three tranches
         require(
-            result.kernel != address(0) && result.seniorTranche != address(0)
-                && (result.juniorTranche != address(0) || result.liquidityProviderTranche != address(0)),
+            result.kernel != address(0) && result.seniorTranche != address(0) && result.juniorTranche != address(0)
+                && result.liquidityProviderTranche != address(0),
             INVALID_DEPLOYMENT_RESULT()
         );
 
-        // Register each deployed tranche against the market's kernel, guarding the optional slots so the null address never registers as a tranche
+        // Register each deployed tranche against the market's kernel
         $.trancheToKernel[result.seniorTranche] = result.kernel;
-        if (result.juniorTranche != address(0)) $.trancheToKernel[result.juniorTranche] = result.kernel;
-        if (result.liquidityProviderTranche != address(0)) $.trancheToKernel[result.liquidityProviderTranche] = result.kernel;
+        $.trancheToKernel[result.juniorTranche] = result.kernel;
+        $.trancheToKernel[result.liquidityProviderTranche] = result.kernel;
 
         // Configure the market's periphery, may read trancheToKernel mapping set above.
         IBaseTemplate(_template).postMarketRegistration(result, _params);
