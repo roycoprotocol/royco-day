@@ -51,7 +51,11 @@ contract BootstrapChainComponent is DeployScriptBase, RoleGraphConfig, TemplateC
         // 3. Role graph (grants pass, then admin/guardian re-pointing) — only on a fresh AccessManager
         ApplyRoleGraphComponent roleGraph = new ApplyRoleGraphComponent(c.accessManager);
         roleGraph.applyRoleGraph(
-            roleGraph.generateRolesAssignments(roleAssignmentAddresses(isTestEnv)), factoryAdmin(isTestEnv), !c.amExisted, _deployerPrivateKey
+            generateRolesAssignments(roleAssignmentAddresses(isTestEnv)),
+            factoryAdmin(isTestEnv),
+            factoryAdminExecutionDelay(isTestEnv),
+            !c.amExisted,
+            _deployerPrivateKey
         );
 
         // 4. The chain's shared blacklist

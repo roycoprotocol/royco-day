@@ -22,11 +22,28 @@ abstract contract EnvConfig {
     uint256 internal constant BASE = 8453;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // CONTROLLING MULTISIG / EOA ADDRESSES
+    // CONTROLLING MULTISIG ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    address internal constant EXECUTOR_MULTISIG = 0x84d37A25e46029CE161111420E07cEb78880119e;
-    address internal constant ROOT_MULTISIG = 0x7c405bbD131e42af506d14e752f2e59B19D49997;
+    /// @notice The FNDN multisig: root owner — ADMIN_ROLE at 72h, rarely
+    ///         transacts. Also unpauser, entry-point fee collection, guardian co-hold, emergency oracle co-hold.
+    address internal constant FNDN = 0x7c405bbD131e42af506d14e752f2e59B19D49997;
+
+    /// @notice The WAY multisig (legacy name EXECUTOR_MULTISIG): the proposer: holds EVERY parameter-update role
+    ///         under delays and schedules all delayed ops
+    address internal constant WAY = 0x84d37A25e46029CE161111420E07cEb78880119e;
+
+    /// @notice 1-of-4 fast-response pause multisig: the SOLE holder of ADMIN_PAUSER_ROLE (immediate)
+    address internal constant WAY_PAUSE = 0xC7605B1891B449B0051d55D083B49D6b46D164bb;
+
+    /// @notice 1-of-4 fast-response veto multisig: co-holds GUARDIAN_ROLE with FNDN (immediate) to cancel any
+    ///         WAY-scheduled operation
+    address internal constant FNDN_VETO = 0xc5Df006FA0647EFF1A55CCF5749ce17772F4d8CB;
+
+    /// @notice AUTO: co-holds LP_ROLE_ADMIN_ROLE with WAY (immediate) to grant/revoke LP
+    ///         roles operationally.
+    address internal constant AUTO = 0xb2B80EBcb7EE285806ddcB26E84a444032D1c244;
+
     address internal constant PROTOCOL_FEE_RECIPIENT = 0x05ea95aE815809D77153Ed3500Ad6d936712b639;
 
     // ═══════════════════════════════════════════════════════════════════════════
