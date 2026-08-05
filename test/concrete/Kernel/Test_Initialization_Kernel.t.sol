@@ -66,7 +66,6 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
             stSelfLiquidationBonusWAD: 0.01e18,
             roycoBlacklist: address(0),
             collateralAssetOracle: _collateralAssetOracle,
-            stalenessThresholdSeconds: 1 days,
             sequencerUptimeFeed: address(0),
             gracePeriodSeconds: 1 hours
         });
@@ -225,17 +224,12 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
         _expectInitRevert(sp, vp, IRoycoAuth.NULL_ADDRESS.selector);
     }
 
-    /// @notice A zero staleness threshold is rejected, it would flag every report stale and brick pricing
-    function test_RevertIf_KernelInitializedWithZeroStalenessThreshold() public {
-        (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
-            _goodInitParams(address(collateralAssetOracle), PROTOCOL_FEE_RECIPIENT);
-        sp.stalenessThresholdSeconds = 0;
-        _expectInitRevert(sp, vp, IRoycoDayKernel.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
-    }
+    // NOTE: the zero-staleness-threshold init rejection moved with the threshold itself: staleness is now an oracle
+    // construction immutable, and its zero-value rejection is covered per adapter in Test_CollateralOracles
 
     /// @notice An oracle pricing a different collateral asset is rejected, the pairing can never mismatch
     function test_RevertIf_KernelInitializedWithMismatchedOracle() public {
-        MockPriceOracle foreignOracle = new MockPriceOracle(makeAddr("FOREIGN_ASSET"), 1e18);
+        MockPriceOracle foreignOracle = new MockPriceOracle(makeAddr("FOREIGN_ASSET"), 1e18, 1 days);
         (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(foreignOracle), PROTOCOL_FEE_RECIPIENT);
         _expectInitRevert(sp, vp, IRoycoDayKernel.COLLATERAL_ASSET_ORACLE_MISMATCH.selector);
@@ -256,7 +250,7 @@ contract Test_Initialization_Kernel is DayMarketTestBase {
      *      the same market wiring against a fresh oracle at 3.0: one whole share must quote 1e18 x 3e18 / 1e18 = 3e18 NAV
      */
     function test_KernelInitializedWithOracle_PricesThroughItFromGenesis() public {
-        MockPriceOracle seededOracle = new MockPriceOracle(address(stJtVault), 3e18);
+        MockPriceOracle seededOracle = new MockPriceOracle(address(stJtVault), 3e18, 1 days);
         DayKernel freshImpl = _freshImpl();
         (IRoycoDayKernel.RoycoDayKernelInitParams memory sp, IBalancerV3LiquidityVenue.BalancerV3LiquidityVenueInitParams memory vp) =
             _goodInitParams(address(seededOracle), PROTOCOL_FEE_RECIPIENT);

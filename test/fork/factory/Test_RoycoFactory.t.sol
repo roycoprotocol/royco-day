@@ -93,6 +93,9 @@ contract Test_RoycoFactory is Test {
     address internal STRANGER = makeAddr("STRANGER");
     address internal PROTOCOL_FEE_RECIPIENT = makeAddr("PROTOCOL_FEE_RECIPIENT");
 
+    /// @dev Mirrors DeployScript.YDM_TARGET_UTILIZATION_WAD: the chain-wide kink every registered model is deployed with
+    uint256 internal constant YDM_TARGET_UTILIZATION_WAD = 0.9e18;
+
     bytes32 internal constant MARKET_ID_A = 0x81c1e5d2e327b2f16a45a4a7b25319edbfa61389ebe2f2d04e269fe48b4ebc7f;
     bytes32 internal constant MARKET_ID_B = 0x6a95a11c1a51be634f7c4739c9b6a47fbf54cbc9d972a7ed0d6926819f8e7a81;
     bytes32 internal constant MARKET_ID_C = 0xf3f7f56087460b0de51563f17f2237a68f7a4526e5719d074824316d23bc2815;
@@ -210,9 +213,7 @@ contract Test_RoycoFactory is Test {
     function _resolveCollateralOracle(MarketConfig memory _cfg) internal {
         if (_cfg.collateralAssetOracle != address(0)) return;
         _cfg.collateralAssetOracle = address(
-            new ERC4626SharePriceOracle(
-                _cfg.collateralAsset, abi.decode(_cfg.collateralAssetOracleSpecificParams, (ERC4626SharePriceOracleParams)).baseAssetToNavAssetFeed
-            )
+            _newErc4626Oracle(_cfg.collateralAsset, _cfg.collateralAssetOracleSpecificParams)
         );
     }
 
@@ -279,7 +280,8 @@ contract Test_RoycoFactory is Test {
         (bool gatekeeperHasEntryPoint,) = am.hasRole(ADMIN_ENTRY_POINT_ROLE, address(gatekeeper));
         assertTrue(gatekeeperHasEntryPoint, "the gatekeeper must hold ADMIN_ENTRY_POINT_ROLE");
 
-        assertEq(am.getTargetFunctionRole(address(factory), IRoycoFactory.executeMarketDeployment.selector), DEPLOYER_ROLE, "deploy role");
+        // Market deployment is permissionless: any funded caller may deploy, so the entrypoint is PUBLIC_ROLE
+        assertEq(am.getTargetFunctionRole(address(factory), IRoycoFactory.executeMarketDeployment.selector), PUBLIC_ROLE, "deploy role");
         assertEq(am.getTargetFunctionRole(address(factory), IRoycoFactory.registerTemplate.selector), ADMIN_FACTORY_ROLE, "register role");
         assertEq(am.getTargetFunctionRole(address(factory), IRoycoFactory.disableTemplate.selector), ADMIN_FACTORY_ROLE, "disable role");
         assertEq(am.getTargetFunctionRole(address(factory), UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE, "upgrade role");
@@ -659,13 +661,20 @@ contract Test_RoycoFactory is Test {
         assertEq(accountant, _r.accountant, string.concat(_ctx, ": accountant"));
     }
 
-    /// Only DEPLOYER_ROLE may execute a market deployment
-    function test_RevertIf_NonDeployerExecutesMarketDeployment() external {
+    /// @notice Market deployment is PERMISSIONLESS: any caller who funds the genesis seed can stand up a market.
+    ///         Protocol policy lives on the template and every component lands in a salt namespaced by the caller,
+    ///         so an open entrypoint cannot misprice or grief another deployer's markets
+    function test_ExecuteMarketDeployment_IsPermissionlessForAnyFundedCaller() external {
         _register();
-        bytes memory p = _encodedParams(MARKET_ID_A);
+
+        MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
+        _fundPoolSeedFor(cfg, STRANGER);
+        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_A, address(factory), STRANGER));
+
         vm.prank(STRANGER);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, STRANGER));
-        factory.executeMarketDeployment(address(template), p);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
+        assertGt(r.kernel.code.length, 0, "a stranger's funded deployment must produce a live market");
     }
 
     /// A never-registered template cannot deploy markets
@@ -747,15 +756,6 @@ contract Test_RoycoFactory is Test {
         factory.disableTemplate(address(template));
     }
 
-    /// @notice The factory admin cannot deploy markets: ADMIN_FACTORY_ROLE curates templates but only
-    ///         DEPLOYER_ROLE may execute a deployment, so the two powers stay separated in both directions
-    function test_RevertIf_FactoryAdminExecutesMarketDeployment() external {
-        _register();
-        bytes memory p = _encodedParams(MARKET_ID_A);
-        vm.prank(FACTORY_ADMIN);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, FACTORY_ADMIN));
-        factory.executeMarketDeployment(address(template), p);
-    }
 
     /**
      * @notice Even legitimate role holders cannot use the template-callable role primitives outside a deployment
@@ -887,9 +887,9 @@ contract Test_RoycoFactory is Test {
         // The deployed model is the configured StaticCurveYDM. The YDMs embed their target utilization as an immutable,
         // so runtime code is target-dependent — compare against reference instances built with the SAME targets the
         // config carries, which isolates the model type as the only difference that matters.
-        StaticCurveYDM refJtStatic = new StaticCurveYDM(cfg.jtYdmTargetUtilizationWAD);
-        StaticCurveYDM refLptStatic = new StaticCurveYDM(cfg.lptYdmTargetUtilizationWAD);
-        AdaptiveCurveYDM_V2 refV2 = new AdaptiveCurveYDM_V2(cfg.jtYdmTargetUtilizationWAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
+        StaticCurveYDM refJtStatic = new StaticCurveYDM(YDM_TARGET_UTILIZATION_WAD);
+        StaticCurveYDM refLptStatic = new StaticCurveYDM(YDM_TARGET_UTILIZATION_WAD);
+        AdaptiveCurveYDM_V2 refV2 = new AdaptiveCurveYDM_V2(YDM_TARGET_UTILIZATION_WAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         assertEq(r.ydm.codehash, address(refJtStatic).codehash, "configured StaticCurve, ydm must be StaticCurveYDM");
         assertEq(r.lptYdm.codehash, address(refLptStatic).codehash, "configured StaticCurve, lptYdm must be StaticCurveYDM");
         // And it is NOT the adaptive model that used to stand in for it under a static config.
@@ -918,8 +918,8 @@ contract Test_RoycoFactory is Test {
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
         // The deployed model is the configured AdaptiveCurveYDM_V1, compared against references built with the same targets
-        AdaptiveCurveYDM_V1 refJtV1 = new AdaptiveCurveYDM_V1(cfg.jtYdmTargetUtilizationWAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
-        AdaptiveCurveYDM_V1 refLptV1 = new AdaptiveCurveYDM_V1(cfg.lptYdmTargetUtilizationWAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
+        AdaptiveCurveYDM_V1 refJtV1 = new AdaptiveCurveYDM_V1(YDM_TARGET_UTILIZATION_WAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
+        AdaptiveCurveYDM_V1 refLptV1 = new AdaptiveCurveYDM_V1(YDM_TARGET_UTILIZATION_WAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         assertEq(r.ydm.codehash, address(refJtV1).codehash, "configured AdaptiveCurve_V1, ydm must be AdaptiveCurveYDM_V1");
         assertEq(r.lptYdm.codehash, address(refLptV1).codehash, "configured AdaptiveCurve_V1, lptYdm must be AdaptiveCurveYDM_V1");
     }
@@ -1290,4 +1290,10 @@ contract Test_RoycoFactory is Test {
     function _emptyResult() internal pure returns (IRoycoProtocolTemplate.DeploymentResult memory r) {
         r; // zero-initialized; only used for event topic matching (data not checked)
     }
+    /// @dev Deploys the config's ERC4626 share-price adapter with its per-hop staleness immutable, as the script does
+    function _newErc4626Oracle(address _collateral, bytes memory _oracleParams) internal returns (ERC4626SharePriceOracle) {
+        ERC4626SharePriceOracleParams memory op = abi.decode(_oracleParams, (ERC4626SharePriceOracleParams));
+        return new ERC4626SharePriceOracle(_collateral, op.baseAssetToNavAssetFeed, op.feedStalenessThresholdSeconds);
+    }
+
 }

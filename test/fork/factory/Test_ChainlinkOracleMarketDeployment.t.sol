@@ -130,7 +130,7 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
     ///      The direct-template path must supply the deployed oracle itself (the `deploy()` flow resolves it).
     function _marketConfig(address _oracleCollateralAsset) internal returns (MarketConfig memory cfg) {
         cfg = deployScript.getMarketConfig("snUSD");
-        cfg.collateralAssetOracle = address(new ChainlinkPriceOracle(_oracleCollateralAsset, NUSD_REDSTONE_ORACLE));
+        cfg.collateralAssetOracle = address(new ChainlinkPriceOracle(_oracleCollateralAsset, NUSD_REDSTONE_ORACLE, 48 hours));
             _fundPoolSeed(cfg);
     }
 

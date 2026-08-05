@@ -5,8 +5,9 @@ import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { DeploymentResult, RoleAssignment, RoleAssignmentAddresses } from "../../script/config/DeploymentTypes.sol";
-import { ADMIN_KERNEL_ROLE, ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
+import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
+import { ChainConfig, DeploymentResult, MarketConfig, RoleAssignment, RoleAssignmentAddresses } from "../../script/config/DeploymentTypes.sol";
+import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, LP_ROLE_ADMIN_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
@@ -148,6 +149,50 @@ abstract contract RoycoDayTestBase is Test, Assertions {
 
         // Deploy the deploy script
         DEPLOY_SCRIPT = new DeployScript();
+        _pinChainPolicyForTests();
+    }
+
+    /// @notice Pins the chain-level policy these suites' reference math and actors assume, without touching the
+    ///         production config: the canonical fee set may evolve, but every arrange and expectation here is written
+    ///         against this one. The recipient is the fixture's prankable wallet, so deployed kernels pay a known actor
+    /// @dev MUST run after `DEPLOY_SCRIPT` is created and before any market deploys through it. Fork bases that stand
+    ///      up their own script instance call this themselves
+    function _pinChainPolicyForTests() internal {
+        ChainConfig memory pinned = DEPLOY_SCRIPT.getChainConfig(block.chainid, false);
+        pinned.protocolFeeRecipient = PROTOCOL_FEE_RECIPIENT_ADDRESS;
+        pinned.stProtocolFeeWAD = 0.1e18;
+        pinned.jtProtocolFeeWAD = 0;
+        pinned.jtYieldShareProtocolFeeWAD = 0.45e18;
+        pinned.lptYieldShareProtocolFeeWAD = 0;
+        // The venue suites' leak and slippage formulas are written against a 1 bp pool swap fee
+        pinned.poolSwapFeePercentage = 1e14;
+        DEPLOY_SCRIPT.overrideChainConfigForTest(pinned);
+
+        // The venue suites' slippage bounds, reinvestment-gate interactions, and staged-premium arranges are
+        // calibrated against the tight snUSD E-CLP curve (lambda 4000); pin it so a curve retune in the canonical
+        // config cannot silently invalidate every calibrated expectation
+        MarketConfig memory snUsd = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+        snUsd.gyroECLPPoolParams.eclpParams = IGyroECLPPool.EclpParams({
+            alpha: 998_502_246_630_054_917,
+            beta: 1_000_200_040_008_001_600,
+            c: 707_106_781_186_547_524,
+            s: 707_106_781_186_547_524,
+            lambda: 4_000_000_000_000_000_000_000
+        });
+        snUsd.gyroECLPPoolParams.derivedEclpParams = IGyroECLPPool.DerivedEclpParams({
+            tauAlpha: IGyroECLPPool.Vector2({
+                x: -94_861_212_813_096_057_289_512_505_574_275_160_547, y: 31_644_119_574_235_279_926_451_292_677_567_331_630
+            }),
+            tauBeta: IGyroECLPPool.Vector2({
+                x: 37_142_269_533_113_549_537_591_131_345_643_981_951, y: 92_846_388_265_400_743_995_957_747_409_218_517_601
+            }),
+            u: 66_001_741_173_104_803_338_721_745_994_955_553_010,
+            v: 62_245_253_919_818_011_890_633_399_060_291_020_887,
+            w: 30_601_134_345_582_732_000_058_913_853_921_008_022,
+            z: -28_859_471_639_991_253_843_240_999_485_797_747_790,
+            dSq: 99_999_999_999_999_999_886_624_093_342_106_115_200
+        });
+        DEPLOY_SCRIPT.overrideMarketConfigForTest(snUsd);
     }
 
     function _setupFork() internal {
@@ -268,17 +313,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         vm.label(address(ACCESS_MANAGER), "AccessManager");
 
         _wireExtraRoles();
-
-        // The protocol fee recipient is template policy now (sourced from the chain config), so the deployed market
-        // pays fees to that address rather than the recipient the fixture passes to `deploy`. Retune the LIVE market
-        // to the fixture's recipient wallet the way an operator would — through the kernel's ADMIN_KERNEL_ROLE-gated
-        // setter. The canonical KERNEL_ADMIN grant carries a 2-day execution delay, so grant the admin-role holder a
-        // fresh delay-0 membership for this one setup call rather than warping every suite's clock at deploy time
-        address fndn = _adminRoleHolder();
-        vm.prank(fndn);
-        ACCESS_MANAGER.grantRole(ADMIN_KERNEL_ROLE, fndn, 0);
-        vm.prank(fndn);
-        KERNEL.setProtocolFeeRecipient(PROTOCOL_FEE_RECIPIENT_ADDRESS);
     }
 
     /// @dev The AccessManager admin-role holder to prank for setup-time governance: `OWNER_ADDRESS` for a fresh
@@ -316,13 +350,33 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         return wallet;
     }
 
+    /// @notice A delay-0 holder of `_role` the fixtures route synchronous admin calls through
+    /// @dev The production role graph puts a 72h EXECUTION delay on most admin grants, so pranking the configured
+    ///      wallets reverts AccessManagerNotScheduled on any direct restricted call. Fixtures instead act through a
+    ///      dedicated per-role wallet the AM admin stands up FRESH with a zero execution delay — a fresh membership
+    ///      takes effect immediately, whereas lowering an existing member's delay is itself time-locked by the old
+    ///      delay. Scheduled-path behavior stays covered by the helpers that schedule + warp + execute for real
+    function _immediateRoleHolder(uint64 _role, string memory _label) internal returns (address holder) {
+        holder = makeAddr(string.concat(_label, "_IMMEDIATE"));
+        (bool isMember,) = ACCESS_MANAGER.hasRole(_role, holder);
+        if (!isMember) {
+            vm.prank(_adminRoleHolder());
+            ACCESS_MANAGER.grantRole(_role, holder, 0);
+        }
+    }
+
+    /// @notice The delay-0 LP-role admin the fixtures grant providers through
+    function _immediateLpRoleAdmin() internal returns (address lpAdmin) {
+        return _immediateRoleHolder(LP_ROLE_ADMIN_ROLE, "LP_ROLE_ADMIN");
+    }
+
     /// @notice Generates a provider address
     /// @param _name The name of the provider
     /// @return provider The provider address
     function _generateProvider(string memory _name, uint64 _role) internal virtual returns (Vm.Wallet memory provider) {
         provider = _initWallet(_name, 10_000_000e6);
 
-        vm.prank(LP_ROLE_ADMIN_ADDRESS);
+        vm.prank(_immediateLpRoleAdmin());
         ACCESS_MANAGER.grantRole(_role, provider.addr, 0);
 
         return provider;
@@ -335,7 +389,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         string memory providerName = string(abi.encodePacked("PROVIDER", vm.toString(index)));
         provider = _initWallet(providerName, 10_000_000e6);
 
-        vm.startPrank(LP_ROLE_ADMIN_ADDRESS);
+        address lpAdmin = _immediateLpRoleAdmin();
+        vm.startPrank(lpAdmin);
         ACCESS_MANAGER.grantRole(ST_LP_ROLE, provider.addr, 0);
         ACCESS_MANAGER.grantRole(JT_LP_ROLE, provider.addr, 0);
         vm.stopPrank();

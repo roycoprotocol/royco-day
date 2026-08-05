@@ -180,11 +180,11 @@ contract Test_FactoryTemplateAdmin is Test {
     // Deployment entrypoint gating + completion event
     // ---------------------------------------------------------------------
 
-    /// @notice Only DEPLOYER_ROLE may execute a deployment
-    function test_RevertIf_NonDeployerExecutesMarketDeployment() public {
+    /// @notice Market deployment is permissionless: an account holding no role at all can drive it
+    function test_ExecuteMarketDeployment_IsPermissionless() public {
         _register();
-        vm.prank(FACTORY_ADMIN);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, FACTORY_ADMIN));
+        address stranger = makeAddr("PERMISSIONLESS_STRANGER");
+        vm.prank(stranger);
         factory.executeMarketDeployment(address(template), "");
     }
 

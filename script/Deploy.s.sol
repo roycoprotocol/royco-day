@@ -131,6 +131,7 @@ import { console2 } from "lib/forge-std/src/console2.sol";
 /// @dev The public surface (`deploy`, `deployFromConfig`, `generateRolesAssignments`, `DeploymentResult`,
 ///      `RoleAssignmentAddresses`, `KernelType`/`YDMType`) is preserved so existing tests need minimal changes.
 contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
+    uint256 internal constant YDM_TARGET_UTILIZATION_WAD = 0.9e18;
     error UnsupportedKernelType(KernelType kernelType);
     error UnsupportedYDMType(YDMType ydmType);
     error UnsupportedOracleType(OracleType oracleType);
@@ -263,13 +264,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
         // Chain's shared blacklist (governed by the AccessManager, not the factory).
         s.roycoBlacklist = _deployBlacklist(address(s.accessManager));
-        {
-            bytes4[] memory blacklistSelectors = new bytes4[](3);
-            blacklistSelectors[0] = RoycoBlacklist.blacklistAccounts.selector;
-            blacklistSelectors[1] = RoycoBlacklist.unblacklistAccounts.selector;
-            blacklistSelectors[2] = RoycoBlacklist.setSanctionsList.selector;
-            s.accessManager.setTargetFunctionRole(s.roycoBlacklist, blacklistSelectors, ADMIN_BLACKLIST_ROLE);
-        }
 
         // Register (or reuse) the Day template for this kernel type.
         s.template = _getOrRegisterTemplate(s.factory, _config, s.roycoBlacklist);
@@ -330,26 +324,26 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice Returns the admin/guardian/delay configuration for a role (ported from legacy Roles).
     function getRoleConfig(uint64 role) public pure returns (RoleConfig memory) {
         if (role == ADMIN_PAUSER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_UPGRADER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
+        if (role == ADMIN_UPGRADER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
         if (role == ST_LP_ROLE || role == JT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == LP_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == LP_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
         if (role == SYNC_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_KERNEL_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
-        if (role == ADMIN_ACCOUNTANT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
-        if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
-        if (role == ADMIN_ORACLE_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_KERNEL_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
+        if (role == ADMIN_ACCOUNTANT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
+        if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
+        if (role == ADMIN_ORACLE_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
         if (role == GUARDIAN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
         if (role == DEPLOYER_ROLE) return RoleConfig({ adminRole: DEPLOYER_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == DEPLOYER_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_FACTORY_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_FACTORY_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
         if (role == ADMIN_UNPAUSER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == LPT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
+        if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
         if (role == ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_BLACKLIST_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_ENTRY_POINT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_BLACKLIST_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
+        if (role == ADMIN_ENTRY_POINT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
+        if (role == ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
         revert UnknownRole(role);
     }
 
@@ -432,9 +426,12 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     ///      not hold ADMIN_ROLE. MUST run before `_applyRoleGraph`, whose second pass re-points SYNC_ROLE's admin away
     ///      from ADMIN_ROLE and would leave the deployer unable to make the SYNC_ROLE grant below.
     function _wireFactoryRoles(AccessManager _accessManager, address _factory) internal {
+        // Market deployment is PERMISSIONLESS: the deployer supplies only tightened per-market params (protocol
+        // policy lives on the template), funds the genesis seed from their own balance, and every component lands in
+        // a salt namespaced by their address — so an open entrypoint cannot grief or misprice another deployer
         bytes4[] memory deployerSelectors = new bytes4[](1);
         deployerSelectors[0] = IRoycoFactory.executeMarketDeployment.selector;
-        _accessManager.setTargetFunctionRole(_factory, deployerSelectors, DEPLOYER_ROLE);
+        _accessManager.setTargetFunctionRole(_factory, deployerSelectors, PUBLIC_ROLE);
 
         bytes4[] memory adminFactorySelectors = new bytes4[](2);
         adminFactorySelectors[0] = IRoycoFactory.registerTemplate.selector;
@@ -474,7 +471,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         uint256 collateralSeed = _config.poolInitialization.collateralAmount;
         if (collateralSeed != 0) IERC20(_config.collateralAsset).approve(_s.template, collateralSeed);
 
-        IRoycoProtocolTemplate.DeploymentResult memory r = _s.factory.executeMarketDeployment(_s.template, abi.encode(params));
+        IRoycoProtocolTemplate.DeploymentResult memory r = _s.factory.executeMarketDeployment{ gas: 16_700_000 }(_s.template, abi.encode(params));
 
         // The template deploys the entire market in this one transaction: every tranche proxy, the Gyro E-CLP pool and
         // its BPT oracle, the accountant, and the kernel, all against the implementations it was constructed with.
@@ -579,8 +576,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         for (uint256 i; i < 4; ++i) {
             YDMType ydmType = YDMType(i);
             string memory ydmTypeName_ = ydmTypeName(ydmType);
-            address jtYdm = _deployModel("JT model  ", ydmType, _config.jtYdmTargetUtilizationWAD, TAG_YDM);
-            address lptYdm = _deployModel("LPT model ", ydmType, _config.lptYdmTargetUtilizationWAD, TAG_LDM);
+            address jtYdm = _deployModel("JT model  ", ydmType, YDM_TARGET_UTILIZATION_WAD, TAG_YDM);
+            address lptYdm = _deployModel("LPT model ", ydmType, YDM_TARGET_UTILIZATION_WAD, TAG_LDM);
             if (t.jtYdms(ydmTypeName_) == jtYdm && t.lptYdms(ydmTypeName_) == lptYdm) continue;
             t.setYieldDistributionModels(ydmTypeName_, jtYdm, lptYdm);
         }
@@ -796,17 +793,16 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.lptYdmType = ydmTypeName(_config.ydmType);
 
         // Accountant params. The template resolves both model instances from its registry by shape name. BOTH YDMs get
-        // initialization data so the accountant initializes each of them. The LPT premium/liquidity overlay is at its zero
-        // baseline (LPT service off) — but the LDM is still deployed, initialized, and distinct from the JT YDM.
+        // initialization data so the accountant initializes each of them.
         params.accountantParams = IBaseTemplate.AccountantDeploymentParams({
             fixedTermGracePeriodSeconds: _config.fixedTermGracePeriodSeconds,
             minCoverageWAD: _config.minCoverageWAD,
             coverageLiquidationUtilizationWAD: _config.coverageLiquidationUtilizationWAD,
-            minLiquidityWAD: 0,
+            minLiquidityWAD: _config.minLiquidityWAD,
             jtYDMInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams),
             lptYDMInitializationData: _buildYDMInitializationData(_config.ydmType, _config.lptYdmSpecificParams),
-            maxJTYieldShareWAD: uint64(1e18), // uncapped at the WAD ceiling; the real JT cap comes from the JT YDM curve
-            maxLPTYieldShareWAD: 0, // LPT liquidity premium disabled in the baseline
+            maxJTYieldShareWAD: _config.maxJTYieldShareWAD,
+            maxLPTYieldShareWAD: _config.maxLPTYieldShareWAD,
             fixedTermDurationSeconds: _config.fixedTermDurationSeconds,
             dustTolerance: toNAVUnits(_config.dustTolerance)
         });
@@ -814,7 +810,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.kernelSpecificParams = _config.kernelSpecificParams; // the venue params blob (BalancerV3LiquidityVenueDeploymentParams)
         params.stSelfLiquidationBonusWAD = _config.stSelfLiquidationBonusWAD;
         params.collateralAssetOracle = _config.collateralAssetOracle;
-        params.stalenessThresholdSeconds = _config.stalenessThresholdSeconds;
         params.sequencerUptimeFeed = _config.sequencerUptimeFeed;
         params.gracePeriodSeconds = _config.gracePeriodSeconds;
         // The oracle's restricted surface bindings are declared per oracle kind here and applied by the template
@@ -974,19 +969,27 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (_config.collateralAssetOracleType == OracleType.ChainlinkPrice) {
             ChainlinkPriceOracleParams memory p = abi.decode(_config.collateralAssetOracleSpecificParams, (ChainlinkPriceOracleParams));
             creationCode = type(ChainlinkPriceOracle).creationCode;
-            ctorArgs = abi.encode(_config.collateralAsset, p.collateralToNavAssetFeed);
+            ctorArgs = abi.encode(_config.collateralAsset, p.collateralToNavAssetFeed, p.feedStalenessThresholdSeconds);
         } else if (_config.collateralAssetOracleType == OracleType.ERC4626SharePrice) {
             ERC4626SharePriceOracleParams memory p = abi.decode(_config.collateralAssetOracleSpecificParams, (ERC4626SharePriceOracleParams));
             creationCode = type(ERC4626SharePriceOracle).creationCode;
-            ctorArgs = abi.encode(_config.collateralAsset, p.baseAssetToNavAssetFeed);
+            ctorArgs = abi.encode(_config.collateralAsset, p.baseAssetToNavAssetFeed, p.feedStalenessThresholdSeconds);
         } else if (_config.collateralAssetOracleType == OracleType.MakinaSharePrice) {
             MakinaSharePriceOracleParams memory p = abi.decode(_config.collateralAssetOracleSpecificParams, (MakinaSharePriceOracleParams));
             creationCode = type(MakinaSharePriceOracle).creationCode;
-            ctorArgs = abi.encode(p.makinaMachine, p.accountingAssetToNavAssetFeed);
+            ctorArgs = abi.encode(p.makinaMachine, p.accountingAssetToNavAssetFeed, p.feedStalenessThresholdSeconds);
         } else if (_config.collateralAssetOracleType == OracleType.IdleCDOTranchePrice) {
             IdleCDOTranchePriceOracleParams memory p = abi.decode(_config.collateralAssetOracleSpecificParams, (IdleCDOTranchePriceOracleParams));
             creationCode = type(IdleCDOTranchePriceOracle).creationCode;
-            ctorArgs = abi.encode(p.idleCDO, _config.collateralAsset, p.underlyingTokenToNavAssetFeed, p.minDeviationWAD, p.lastUpdate);
+            ctorArgs = abi.encode(
+                p.idleCDO,
+                _config.collateralAsset,
+                p.underlyingTokenToNavAssetFeed,
+                p.minDeviationWAD,
+                p.lastUpdate,
+                p.feedStalenessThresholdSeconds,
+                p.virtualPriceStalenessThresholdSeconds
+            );
         } else {
             revert UnsupportedOracleType(_config.collateralAssetOracleType);
         }
@@ -1133,5 +1136,13 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         bool blacklistExisted;
         (blacklist, blacklistExisted) = deployWithSanityChecks(_singletonSalt("ROYCO_BLACKLIST_PROXY"), getERC1967ProxyCreationCode(implAddr, initData), false);
         _logDeploy("Blacklist (proxy)  ", blacklist, blacklistExisted);
+
+        if (!blacklistExisted) {
+            bytes4[] memory blacklistSelectors = new bytes4[](3);
+            blacklistSelectors[0] = RoycoBlacklist.blacklistAccounts.selector;
+            blacklistSelectors[1] = RoycoBlacklist.unblacklistAccounts.selector;
+            blacklistSelectors[2] = RoycoBlacklist.setSanctionsList.selector;
+            AccessManager(_authority).setTargetFunctionRole(blacklist, blacklistSelectors, ADMIN_BLACKLIST_ROLE);
+        }
     }
 }

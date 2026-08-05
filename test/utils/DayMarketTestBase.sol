@@ -272,7 +272,8 @@ abstract contract DayMarketTestBase is Assertions {
         // 3. Oracles: the collateral asset oracle at the cell's initial rate (the kernel's only collateral price
         //    source), the quote-side feed at 1.0, plus a spare sequencer feed handle (sequencer checks are
         //    disabled at init)
-        collateralAssetOracle = new MockPriceOracle(address(stJtVault), _cell.collateralAsset.initialRateWAD);
+        // Staleness is the oracle's own immutable now: the mock enforces it in getPrice exactly as the real adapters
+        collateralAssetOracle = new MockPriceOracle(address(stJtVault), _cell.collateralAsset.initialRateWAD, ORACLE_STALENESS_THRESHOLD_SECONDS);
         collateralPriceWAD = _cell.collateralAsset.initialRateWAD;
         priceFeed = new MockAggregatorV3(PRICE_FEED_DECIMALS, PRICE_FEED_INITIAL_ANSWER);
         sequencerFeed = new MockAggregatorV3(0, 0);
@@ -366,7 +367,6 @@ abstract contract DayMarketTestBase is Assertions {
                     stSelfLiquidationBonusWAD: _params.stSelfLiquidationBonusWAD,
                     roycoBlacklist: address(0),
                     collateralAssetOracle: address(collateralAssetOracle),
-                    stalenessThresholdSeconds: ORACLE_STALENESS_THRESHOLD_SECONDS,
                     sequencerUptimeFeed: address(0),
                     gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS
                 }),

@@ -20,11 +20,17 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
     /// @notice The Idle CDO whose tranche token is the collateral asset
     address public immutable IDLE_CDO;
 
+    /// @notice The maximum age of the virtual-price clock's checkpoint before pricing fails shut
+    uint48 public immutable SOURCE_STALENESS_THRESHOLD_SECONDS;
+
     /// @dev The multiplier that scales the CDO's virtual price from the underlying token's decimals to WAD precision
     uint256 internal immutable _CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION;
 
     /// @notice Thrown when the collateral asset is not one of the CDO's two tranche tokens
     error COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE();
+
+    /// @notice Thrown when the virtual-price clock's checkpoint is older than the source staleness threshold
+    error STALE_VIRTUAL_PRICE();
 
     /**
      * @notice Constructs the Idle CDO tranche virtual price to Chainlink (compatible) oracle composed collateral oracle
@@ -34,17 +40,23 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
      * @param _underlyingTokenToNavAssetOracle The Chainlink (compatible) oracle pricing the CDO's underlying token in NAV units
      * @param _minDeviationWAD The minimum relative deviation from the checkpointed virtual price that counts as an update, scaled to WAD precision (zero counts any change)
      * @param _lastUpdate The deployer-attested timestamp of the virtual price's last update (zero if unknown, which holds pricing and the execution gate shut until the first observed deviation)
+     * @param _feedStalenessThresholdSeconds The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
+     * @param _sourceStalenessThresholdSeconds The maximum age of the virtual-price clock's checkpoint before pricing fails shut, sized to the CDO's update cadence
      */
     constructor(
         address _idleCDO,
         address _tranche,
         address _underlyingTokenToNavAssetOracle,
         uint256 _minDeviationWAD,
-        uint32 _lastUpdate
+        uint32 _lastUpdate,
+        uint48 _feedStalenessThresholdSeconds,
+        uint48 _sourceStalenessThresholdSeconds
     )
-        ChainlinkPriceOracleBase(_tranche, _underlyingTokenToNavAssetOracle)
+        ChainlinkPriceOracleBase(_tranche, _underlyingTokenToNavAssetOracle, _feedStalenessThresholdSeconds)
         OracleClockBase(_lastUpdate, _minDeviationWAD, _readVirtualPriceWAD(_idleCDO, _tranche))
     {
+        require(_sourceStalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
+        SOURCE_STALENESS_THRESHOLD_SECONDS = _sourceStalenessThresholdSeconds;
         IDLE_CDO = _idleCDO;
 
         // virtualPrice returns the value of one whole tranche token scaled to the CDO underlying token's decimals
@@ -73,11 +85,12 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
     /**
      * @inheritdoc ChainlinkPriceOracleBase
      * @notice The price returned is the composed tranche price and updatedAt is the oldest hop's last update
-     * @dev Reports the older of the checkpointed tranche price clock and the Chainlink leg's update timestamp, so a stale feed gates pricing even while the virtual price keeps deviating
+     * @dev Reports the older of the checkpointed tranche price clock and the Chainlink leg's update timestamp
      */
     function getPrice() public view override(ChainlinkPriceOracleBase) returns (NAV_UNIT price, uint256 updatedAt) {
         (price, updatedAt) = ChainlinkPriceOracleBase.getPrice();
         uint256 tranchePriceUpdatedAt = previewPoke();
+        require(tranchePriceUpdatedAt + SOURCE_STALENESS_THRESHOLD_SECONDS >= block.timestamp, STALE_VIRTUAL_PRICE());
         updatedAt = Math.min(updatedAt, tranchePriceUpdatedAt);
     }
 

@@ -17,6 +17,7 @@ import {
     ADMIN_UPGRADER_ROLE,
     DEPLOYER_ROLE,
     LPT_LP_ROLE,
+    PUBLIC_ROLE,
     SYNC_ROLE
 } from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
@@ -140,9 +141,10 @@ library FactoryScaffold {
 
     /// @notice Mirrors `Deploy.s.sol._wireFactoryRoles`: the factory's own selector bindings plus its narrow role set
     function wireFactoryRoles(RoycoAccessManager _accessManager, address _factory) internal {
+        // Market deployment is permissionless, mirroring `Deploy.s.sol._wireFactoryRoles`
         bytes4[] memory deployerSelectors = new bytes4[](1);
         deployerSelectors[0] = IRoycoFactory.executeMarketDeployment.selector;
-        _accessManager.setTargetFunctionRole(_factory, deployerSelectors, DEPLOYER_ROLE);
+        _accessManager.setTargetFunctionRole(_factory, deployerSelectors, PUBLIC_ROLE);
 
         bytes4[] memory adminFactorySelectors = new bytes4[](2);
         adminFactorySelectors[0] = IRoycoFactory.registerTemplate.selector;

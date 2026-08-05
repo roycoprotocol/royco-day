@@ -94,6 +94,7 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
 
         _setupWallets();
         DEPLOY_SCRIPT = new DeployScript();
+        _pinChainPolicyForTests();
 
         // The template pulls the genesis pool seed from the configured funder. Repoint the funder at the broadcasting
         // deployer, which approves the template from inside the script's broadcast, and fund it with the seed legs
@@ -130,7 +131,7 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         EP_USER = _generateProvider("EP_USER", ST_LP_ROLE).addr;
         EP_LPT_PROVIDER = _generateProvider("EP_LPT_PROVIDER", LPT_LP_ROLE).addr;
         EP_RECEIVER = _generateProvider("EP_RECEIVER", ST_LP_ROLE).addr;
-        vm.startPrank(LP_ROLE_ADMIN_ADDRESS);
+        vm.startPrank(_immediateLpRoleAdmin());
         ACCESS_MANAGER.grantRole(JT_LP_ROLE, EP_USER, 0);
         ACCESS_MANAGER.grantRole(LPT_LP_ROLE, EP_USER, 0);
         ACCESS_MANAGER.grantRole(JT_LP_ROLE, EP_RECEIVER, 0);

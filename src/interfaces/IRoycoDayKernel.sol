@@ -23,8 +23,7 @@ interface IRoycoDayKernel {
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
-     * @custom:field collateralAssetOracle - The collateral asset oracle pricing 1 whole collateral asset in NAV units
-     * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
+     * @custom:field collateralAssetOracle - The collateral asset oracle pricing 1 whole collateral asset in NAV units (staleness is enforced inside the oracle, per hop, via its construction immutables)
      * @custom:field sequencerUptimeFeed - The L2 sequencer uptime feed used to gate price queries (the null address when not applicable)
      * @custom:field gracePeriodSeconds - The grace period in seconds after the L2 sequencer is back up before oracle prices are trusted again
      */
@@ -41,7 +40,6 @@ interface IRoycoDayKernel {
         uint64 stSelfLiquidationBonusWAD;
         address roycoBlacklist;
         address collateralAssetOracle;
-        uint48 stalenessThresholdSeconds;
         address sequencerUptimeFeed;
         uint48 gracePeriodSeconds;
     }
@@ -60,8 +58,7 @@ interface IRoycoDayKernel {
      * @custom:field accountant - The address of the accountant for the Royco market
      * @custom:field protocolFeeRecipient - The market's configured protocol fee recipient
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
-     * @custom:field collateralAssetOracle - The collateral asset oracle pricing 1 whole collateral asset in NAV units, also the clock the kernel pokes on every price-cached operation
-     * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
+     * @custom:field collateralAssetOracle - The collateral asset oracle pricing 1 whole collateral asset in NAV units, also the clock the kernel pokes on every price-cached operation (staleness is enforced inside the oracle, per hop, via its construction immutables)
      * @custom:field collateralAssetDecimals - The collateral asset's decimals, from which one whole collateral asset (10 ** decimals) is derived
      * @custom:field sequencerUptimeFeed - The L2 sequencer uptime feed used to gate price queries (the null address when not applicable)
      * @custom:field gracePeriodSeconds - The grace period in seconds after the L2 sequencer is back up before oracle prices are trusted again
@@ -93,7 +90,6 @@ interface IRoycoDayKernel {
         address roycoBlacklist;
         // Slot 9
         address collateralAssetOracle;
-        uint48 stalenessThresholdSeconds;
         // Slot 10
         address sequencerUptimeFeed;
         uint48 gracePeriodSeconds;
@@ -138,9 +134,8 @@ interface IRoycoDayKernel {
     /**
      * @notice Emitted when the collateral asset oracle is updated
      * @param collateralAssetOracle The new collateral asset oracle pricing 1 whole collateral asset in NAV units
-     * @param stalenessThresholdSeconds The new staleness threshold seconds
      */
-    event CollateralAssetOracleUpdated(address indexed collateralAssetOracle, uint48 stalenessThresholdSeconds);
+    event CollateralAssetOracleUpdated(address indexed collateralAssetOracle);
 
     /**
      * @notice Emitted when the L2 sequencer uptime feed (and its grace period) used to gate price queries is updated
@@ -202,14 +197,8 @@ interface IRoycoDayKernel {
     /// @notice Thrown when the collateral asset oracle does not price this market's collateral asset
     error COLLATERAL_ASSET_ORACLE_MISMATCH();
 
-    /// @notice Thrown when the staleness threshold seconds is zero
-    error INVALID_STALENESS_THRESHOLD_SECONDS();
-
     /// @notice Thrown when a sequencer uptime feed is configured with a non-positive grace period
     error INVALID_GRACE_PERIOD_SECONDS();
-
-    /// @notice Thrown when the collateral asset oracle's price is stale
-    error STALE_PRICE();
 
     /// @notice Thrown when the collateral asset oracle's price is invalid
     error INVALID_PRICE();
@@ -510,10 +499,9 @@ interface IRoycoDayKernel {
     /**
      * @notice Sets the collateral asset oracle pricing 1 whole collateral asset in NAV units
      * @param _collateralAssetOracle The new collateral asset oracle
-     * @param _stalenessThresholdSeconds The new staleness threshold seconds
      * @param _syncBeforeUpdate Whether to sync the tranche accounting before updating the collateral asset oracle
      */
-    function setCollateralAssetOracle(address _collateralAssetOracle, uint48 _stalenessThresholdSeconds, bool _syncBeforeUpdate) external;
+    function setCollateralAssetOracle(address _collateralAssetOracle, bool _syncBeforeUpdate) external;
 
     /**
      * @notice Sets the L2 sequencer uptime feed and grace period used to gate price queries

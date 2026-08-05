@@ -285,15 +285,16 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     /// @notice The kernel fee recipient, senior tranche self-liquidation bonus, and tranche names/symbols match the config
     function test_KernelAndTranches_ParamsMatchMarketConfigFile() public view {
         IRoycoDayKernel.RoycoDayKernelState memory ks = KERNEL.getState();
-        // The recipient is template policy now, deployed from the chain config — and then retuned to the fixture's
-        // recipient wallet by `RoycoDayTestBase._setDeployedMarket` through the kernel's governance setter, so the
-        // suites keep a prankable recipient actor. This asserts the post-retune state the tests actually run against
-        assertEq(ks.protocolFeeRecipient, PROTOCOL_FEE_RECIPIENT_ADDRESS, "the kernel must carry the fixture's retuned protocol fee recipient");
+        // The recipient is template policy now: the fixture pins it to its prankable recipient wallet through the
+        // chain-config override (`RoycoDayTestBase._setUpRoyco`), so the kernel inherits it at deployment
+        assertEq(ks.protocolFeeRecipient, PROTOCOL_FEE_RECIPIENT_ADDRESS, "the kernel must carry the fixture's pinned protocol fee recipient");
         assertEq(ks.stSelfLiquidationBonusWAD, 0.005e18, "stSelfLiquidationBonus");
 
-        assertEq(ST.name(), "Royco Senior Tranche snUSD", "ST name");
-        assertEq(ST.symbol(), "ROY-ST-snUSD", "ST symbol");
-        assertEq(LPT.symbol(), "ROY-LPT-snUSD", "LPT symbol");
+        // Tranche metadata is per-market config: assert against the config file itself so a rename never stales this
+        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+        assertEq(ST.name(), cfg.seniorTrancheName, "ST name");
+        assertEq(ST.symbol(), cfg.seniorTrancheSymbol, "ST symbol");
+        assertEq(LPT.symbol(), cfg.liquidityProviderTrancheSymbol, "LPT symbol");
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════

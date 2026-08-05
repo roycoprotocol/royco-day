@@ -24,12 +24,14 @@ contract MakinaSharePriceOracle is ChainlinkPriceOracleBase {
      * @notice Constructs the Makina share price to Chainlink (compatible) oracle composed collateral oracle
      * @param _makinaMachine The Makina machine whose share token is the collateral asset
      * @param _accountingAssetToNavAssetOracle The Chainlink (compatible) oracle pricing the machine's accounting asset in NAV units
+     * @param _feedStalenessThresholdSeconds The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
      */
     constructor(
         address _makinaMachine,
-        address _accountingAssetToNavAssetOracle
+        address _accountingAssetToNavAssetOracle,
+        uint48 _feedStalenessThresholdSeconds
     )
-        ChainlinkPriceOracleBase(IMachine(_makinaMachine).shareToken(), _accountingAssetToNavAssetOracle)
+        ChainlinkPriceOracleBase(IMachine(_makinaMachine).shareToken(), _accountingAssetToNavAssetOracle, _feedStalenessThresholdSeconds)
     {
         MAKINA_MACHINE = _makinaMachine;
 

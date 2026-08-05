@@ -20,8 +20,15 @@ contract ERC4626SharePriceOracle is ChainlinkPriceOracleBase {
      * @notice Constructs the ERC4626 share price to Chainlink (compatible) oracle composed collateral oracle
      * @param _collateralAsset The ERC4626 vault share that is the collateral asset
      * @param _baseAssetToNavAssetOracle The Chainlink (compatible) oracle pricing the vault's base asset in NAV units
+     * @param _feedStalenessThresholdSeconds The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
      */
-    constructor(address _collateralAsset, address _baseAssetToNavAssetOracle) ChainlinkPriceOracleBase(_collateralAsset, _baseAssetToNavAssetOracle) {
+    constructor(
+        address _collateralAsset,
+        address _baseAssetToNavAssetOracle,
+        uint48 _feedStalenessThresholdSeconds
+    )
+        ChainlinkPriceOracleBase(_collateralAsset, _baseAssetToNavAssetOracle, _feedStalenessThresholdSeconds)
+    {
         // Compute the share amount to pass to convertToAssets() such that the result is scaled to WAD precision
         // OUTPUT_DECIMALS = INPUT_DECIMALS + BASE_ASSET_DECIMALS - SHARE_DECIMALS
         // For OUTPUT_DECIMALS to have WAD_DECIMALS of precision:

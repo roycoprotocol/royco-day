@@ -94,7 +94,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         InitializationLogic.initializeKernel(_getRoycoDayKernelStorage(), _params);
 
         // Initialize the collateral asset oracle configuration (the setters validate and emit)
-        _setCollateralAssetOracle(_params.collateralAssetOracle, _params.stalenessThresholdSeconds);
+        _setCollateralAssetOracle(_params.collateralAssetOracle);
         _setSequencerUptimeFeed(_params.sequencerUptimeFeed, _params.gracePeriodSeconds);
     }
 
@@ -359,19 +359,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev Executes an accounting sync after (and optionally before) the update so the fresh oracle's price is committed immediately
-    function setCollateralAssetOracle(
-        address _collateralAssetOracle,
-        uint48 _stalenessThresholdSeconds,
-        bool _syncBeforeUpdate
-    )
-        external
-        override(IRoycoDayKernel)
-        restricted
-    {
+    function setCollateralAssetOracle(address _collateralAssetOracle, bool _syncBeforeUpdate) external override(IRoycoDayKernel) restricted {
         // If specified, sync the tranche accounting to reflect the PNL up to this point in time at the outgoing oracle's price
         if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCache();
         // Update the collateral asset oracle
-        _setCollateralAssetOracle(_collateralAssetOracle, _stalenessThresholdSeconds);
+        _setCollateralAssetOracle(_collateralAssetOracle);
         // Sync the tranche accounting to reflect the PNL from the updated oracle's price (the sync re-initializes the price cache to the new price)
         _preOpSyncTrancheAccountingWithPriceCache();
     }
@@ -400,12 +392,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             require(sequencerStartedAt != 0 && (block.timestamp - sequencerStartedAt) > $.gracePeriodSeconds, GRACE_PERIOD_NOT_OVER());
         }
 
-        // Fetch the collateral asset price in NAV units
-        uint256 updatedAt;
-        (collateralAssetPrice, updatedAt) = IRoycoPriceOracle($.collateralAssetOracle).getPrice();
+        // Fetch the collateral asset price in NAV units.
+        (collateralAssetPrice,) = IRoycoPriceOracle($.collateralAssetOracle).getPrice();
 
         // Conduct sanity checks
-        require((updatedAt + $.stalenessThresholdSeconds) >= block.timestamp, STALE_PRICE());
         require(collateralAssetPrice != ZERO_NAV_UNITS, INVALID_PRICE());
     }
 
@@ -416,20 +406,17 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @notice Sets the new collateral asset oracle
      * @dev The oracle must price this market's collateral asset
      * @param _collateralAssetOracle The new collateral asset oracle
-     * @param _stalenessThresholdSeconds The new staleness threshold seconds
      */
-    function _setCollateralAssetOracle(address _collateralAssetOracle, uint48 _stalenessThresholdSeconds) internal {
+    function _setCollateralAssetOracle(address _collateralAssetOracle) internal {
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
 
         // The kernel has no fallback price source, so the oracle can never be set to the null address
         require(_collateralAssetOracle != address(0), NULL_ADDRESS());
-        require(_stalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
         require(IRoycoPriceOracle(_collateralAssetOracle).COLLATERAL_ASSET() == $.collateralAsset, COLLATERAL_ASSET_ORACLE_MISMATCH());
 
         $.collateralAssetOracle = _collateralAssetOracle;
-        $.stalenessThresholdSeconds = _stalenessThresholdSeconds;
 
-        emit CollateralAssetOracleUpdated(_collateralAssetOracle, _stalenessThresholdSeconds);
+        emit CollateralAssetOracleUpdated(_collateralAssetOracle);
     }
 
     /**

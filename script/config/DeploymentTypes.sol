@@ -113,14 +113,20 @@ struct AdaptiveCurveYDM_V2_Params {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// @notice Params for `OracleType.ChainlinkPrice`: identity hop, the feed prices the collateral asset in NAV units directly.
+/// @dev Staleness thresholds are oracle CONSTRUCTION IMMUTABLES: each adapter judges every timestamped hop against its
+///      own threshold inside `getPrice` and fails shut, so retuning a threshold means redeploying the adapter.
 struct ChainlinkPriceOracleParams {
     address collateralToNavAssetFeed;
+    // The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
+    uint48 feedStalenessThresholdSeconds;
 }
 
 /// @notice Params for `OracleType.ERC4626SharePrice`: share price via `convertToAssets` x the base-asset-to-NAV feed.
 /// @dev The vault is the market's collateral asset itself.
 struct ERC4626SharePriceOracleParams {
     address baseAssetToNavAssetFeed;
+    // The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
+    uint48 feedStalenessThresholdSeconds;
 }
 
 /// @notice Params for `OracleType.MakinaSharePrice`: machine share price via `convertToAssets` x the accounting-asset-to-NAV feed.
@@ -128,17 +134,25 @@ struct ERC4626SharePriceOracleParams {
 struct MakinaSharePriceOracleParams {
     address makinaMachine;
     address accountingAssetToNavAssetFeed;
+    // The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
+    uint48 feedStalenessThresholdSeconds;
 }
 
 /// @notice Params for `OracleType.IdleCDOTranchePrice`: CDO virtual price x the underlying-token-to-NAV feed, deployed
 ///         behind an ERC1967 proxy and initialized with the market AccessManager and the deviation-clock threshold.
 /// @dev The market's collateral asset must be one of the CDO's two tranche tokens (AA or BB).
+/// @dev The only TWO-threshold oracle: the virtual price and the feed have independent update cadences, and each hop
+///      is judged against its own immutable threshold — a slow CDO cadence never loosens the feed's gate.
 struct IdleCDOTranchePriceOracleParams {
     address idleCDO;
     address underlyingTokenToNavAssetFeed;
     uint256 minDeviationWAD;
     // Admin-attested timestamp of the virtual price's last update (zero holds pricing shut until the first observed deviation)
     uint32 lastUpdate;
+    // The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
+    uint48 feedStalenessThresholdSeconds;
+    // The maximum age of the virtual-price clock's checkpoint before pricing fails shut, sized to the CDO's update cadence
+    uint48 virtualPriceStalenessThresholdSeconds;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -251,8 +265,8 @@ struct MarketConfig {
     address collateralAsset;
     address collateralAssetOracle;
     OracleType collateralAssetOracleType;
+    // Per-hop staleness thresholds live INSIDE the oracle-specific params: they are adapter construction immutables
     bytes collateralAssetOracleSpecificParams;
-    uint48 stalenessThresholdSeconds;
     address sequencerUptimeFeed;
     uint48 gracePeriodSeconds;
     // Dust tolerance
@@ -264,13 +278,16 @@ struct MarketConfig {
     // Accountant
     uint64 minCoverageWAD;
     uint256 coverageLiquidationUtilizationWAD;
+    // The share of ST NAV that must sit in the LPT's market-making inventory, scaled to WAD (zero disables the requirement)
+    uint64 minLiquidityWAD;
+    // Caps on the premiums carved out of senior appreciation, scaled to WAD; they may sum to at most WAD
+    uint64 maxJTYieldShareWAD;
+    uint64 maxLPTYieldShareWAD;
     uint24 fixedTermDurationSeconds;
     uint24 fixedTermGracePeriodSeconds; // grace period before the market may first commence a fixed term
     YDMType ydmType;
     bytes ydmSpecificParams; // JT YDM curve
     bytes lptYdmSpecificParams; // LDM curve
-    uint256 jtYdmTargetUtilizationWAD; // JT YDM target-utilization kink
-    uint256 lptYdmTargetUtilizationWAD; // LDM target-utilization kink
     // Liquidity provider tranche: the Gyro E-CLP {ST_share, quote} pool the LPT BPT is minted from.
     GyroECLPPoolParams gyroECLPPoolParams;
     // Genesis pool liquidity

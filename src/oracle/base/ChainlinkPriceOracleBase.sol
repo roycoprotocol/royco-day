@@ -25,6 +25,9 @@ abstract contract ChainlinkPriceOracleBase is IRoycoPriceOracle {
     /// @notice The Chainlink (compatible) oracle pricing the reference asset in NAV units
     AggregatorV3Interface public immutable ORACLE;
 
+    /// @notice The maximum age of the feed's report before pricing fails shut
+    uint48 public immutable FEED_STALENESS_THRESHOLD_SECONDS;
+
     /// @dev Value representing the scale factor of the oracle's price precision: 10^(ORACLE.decimals())
     // The oracle is a construction immutable, so its price precision is locked at construction
     uint256 internal immutable _ORACLE_PRICE_PRECISION;
@@ -35,16 +38,25 @@ abstract contract ChainlinkPriceOracleBase is IRoycoPriceOracle {
     /// @notice Thrown when the Chainlink (compatible) oracle's price is incomplete
     error INCOMPLETE_PRICE();
 
+    /// @notice Thrown when the Chainlink (compatible) oracle's report is older than the feed staleness threshold
+    error STALE_FEED_PRICE();
+
+    /// @notice Thrown when a staleness threshold is constructed as zero, which would fail every price read
+    error INVALID_STALENESS_THRESHOLD_SECONDS();
+
     /**
      * @notice Constructs the Chainlink (compatible) oracle composed price oracle
      * @param _collateralAsset The collateral asset this oracle prices in NAV units
      * @param _oracle The Chainlink (compatible) oracle pricing the reference asset in NAV units
+     * @param _feedStalenessThresholdSeconds The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
      */
-    constructor(address _collateralAsset, address _oracle) {
+    constructor(address _collateralAsset, address _oracle, uint48 _feedStalenessThresholdSeconds) {
         // Sanity checks on the collateral asset and oracle configuration
         require(_collateralAsset != address(0) && _oracle != address(0), IRoycoAuth.NULL_ADDRESS());
+        require(_feedStalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
         COLLATERAL_ASSET = _collateralAsset;
         ORACLE = AggregatorV3Interface(_oracle);
+        FEED_STALENESS_THRESHOLD_SECONDS = _feedStalenessThresholdSeconds;
         _ORACLE_PRICE_PRECISION = 10 ** AggregatorV3Interface(_oracle).decimals();
     }
 
@@ -61,6 +73,7 @@ abstract contract ChainlinkPriceOracleBase is IRoycoPriceOracle {
         // Conduct sanity checks
         require(answer > 0, INVALID_PRICE());
         require(answeredInRound >= roundId, INCOMPLETE_PRICE());
+        require(feedUpdatedAt + FEED_STALENESS_THRESHOLD_SECONDS >= block.timestamp, STALE_FEED_PRICE());
 
         // Compose the two hops: collateral value in reference assets (WAD) times reference asset price in NAV units, floored once
         price = toNAVUnits(_getCollateralToReferenceAssetConversionRateWAD().mulDiv(uint256(answer), _ORACLE_PRICE_PRECISION, Math.Rounding.Floor));

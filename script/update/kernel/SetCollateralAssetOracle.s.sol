@@ -7,7 +7,9 @@ import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 /**
  * @title SetCollateralAssetOracle
  * @notice Generates a Safe transaction batch for updating a kernel's collateral asset oracle
- *         address + staleness threshold across multiple markets and chains.
+ *         address across multiple markets and chains. Staleness thresholds are the oracle's own
+ *         construction immutables: retuning one means deploying a fresh adapter (with the new
+ *         thresholds baked in) and repointing the kernel at it here.
  *
  * @dev `setCollateralAssetOracle` on the kernel is gated by `ADMIN_ORACLE_ROLE`, which has an
  *      execution delay of 0 (Immediate per `Roles`). So this uses the harness's
@@ -27,7 +29,7 @@ contract SetCollateralAssetOracle is ParameterUpdateBase {
 
     string internal constant OUTPUT_SUBDIR = "kernel";
     string internal constant OUTPUT_PREFIX = "set_collateral_asset_oracle";
-    string internal constant BATCH_DESCRIPTION = "Royco Kernel: update collateral asset oracle + staleness threshold";
+    string internal constant BATCH_DESCRIPTION = "Royco Kernel: update collateral asset oracle";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TYPES
@@ -37,7 +39,6 @@ contract SetCollateralAssetOracle is ParameterUpdateBase {
         uint256 chainId;
         string marketName;
         address newOracle;
-        uint48 newStalenessThresholdSeconds;
         /// @dev If true, the kernel will sync tranche accounting at the *old* oracle price
         ///      before swapping in the new one. Set to false when migrating to a feed that's
         ///      already broken/stale to avoid reverting on a final sync.
@@ -72,7 +73,6 @@ contract SetCollateralAssetOracle is ParameterUpdateBase {
      *          chainId: MAINNET,
      *          marketName: SNUSD,
      *          newOracle: 0x...,
-     *          newStalenessThresholdSeconds: 48 hours,
      *          syncBeforeUpdate: true
      *      }));
      *      ```
@@ -111,15 +111,13 @@ contract SetCollateralAssetOracle is ParameterUpdateBase {
                 updates[idx] = UpdateParams({
                     marketName: cfg.marketName,
                     target: addrs.kernel,
-                    callData: abi.encodeCall(IRoycoDayKernel.setCollateralAssetOracle, (cfg.newOracle, cfg.newStalenessThresholdSeconds, cfg.syncBeforeUpdate)),
+                    callData: abi.encodeCall(IRoycoDayKernel.setCollateralAssetOracle, (cfg.newOracle, cfg.syncBeforeUpdate)),
                     description: string.concat(
                         "Set collateral asset oracle for ",
                         cfg.marketName,
                         " to ",
                         vm.toString(cfg.newOracle),
-                        " (staleness=",
-                        vm.toString(uint256(cfg.newStalenessThresholdSeconds)),
-                        "s, sync=",
+                        " (sync=",
                         cfg.syncBeforeUpdate ? "true" : "false",
                         ")"
                     )
@@ -135,27 +133,26 @@ contract SetCollateralAssetOracle is ParameterUpdateBase {
     // VERIFICATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Decodes the calldata and asserts the kernel now returns the expected oracle + threshold.
+    /// @dev Decodes the calldata and asserts the kernel now returns the expected oracle.
     function _verify(UpdateParams memory _params) internal view override {
-        (address expectedOracle, uint48 expectedStaleness,) = _decodeCallData(_params.callData);
+        (address expectedOracle,) = _decodeCallData(_params.callData);
 
         IRoycoDayKernel.RoycoDayKernelState memory state = IRoycoDayKernel(_params.target).getState();
 
         require(state.collateralAssetOracle == expectedOracle, VerificationFailed("Collateral asset oracle address mismatch after execution"));
-        require(state.stalenessThresholdSeconds == expectedStaleness, VerificationFailed("Staleness threshold mismatch after execution"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Strips the 4-byte selector and abi.decodes `(address, uint48, bool)` from the call.
-    function _decodeCallData(bytes memory _cd) internal pure returns (address oracle, uint48 stalenessThresholdSeconds, bool syncBeforeUpdate) {
+    /// @dev Strips the 4-byte selector and abi.decodes `(address, bool)` from the call.
+    function _decodeCallData(bytes memory _cd) internal pure returns (address oracle, bool syncBeforeUpdate) {
         bytes memory args = new bytes(_cd.length - 4);
         for (uint256 i = 0; i < args.length; i++) {
             args[i] = _cd[i + 4];
         }
-        (oracle, stalenessThresholdSeconds, syncBeforeUpdate) = abi.decode(args, (address, uint48, bool));
+        (oracle, syncBeforeUpdate) = abi.decode(args, (address, bool));
     }
 
     function _getUniqueChainIds() internal view returns (uint256[] memory) {

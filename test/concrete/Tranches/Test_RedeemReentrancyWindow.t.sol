@@ -270,7 +270,7 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
 
         // Oracles: the collateral asset oracle at 1.0 over the plain ERC20 (the kernel's only collateral price
         // source) plus the quote-side feed at 1.0 (8 decimals), sequencer checks disabled at init
-        collateralAssetOracle = new MockPriceOracle(address(stJtUnderlying), INITIAL_ORACLE_PRICE_WAD);
+        collateralAssetOracle = new MockPriceOracle(address(stJtUnderlying), INITIAL_ORACLE_PRICE_WAD, ORACLE_STALENESS_THRESHOLD_SECONDS);
         collateralPriceWAD = INITIAL_ORACLE_PRICE_WAD;
         priceFeed = new MockAggregatorV3(PRICE_FEED_DECIMALS, PRICE_FEED_INITIAL_ANSWER);
 
@@ -343,7 +343,6 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
                     stSelfLiquidationBonusWAD: params.stSelfLiquidationBonusWAD,
                     roycoBlacklist: address(0),
                     collateralAssetOracle: address(collateralAssetOracle),
-                    stalenessThresholdSeconds: ORACLE_STALENESS_THRESHOLD_SECONDS,
                     sequencerUptimeFeed: address(0),
                     gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS
                 }),

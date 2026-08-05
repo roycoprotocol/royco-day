@@ -29,7 +29,7 @@ contract Test_ChainlinkIdentityOracle is Test {
         // A 6-decimal collateral directly priced by an 8-decimal feed, the standard USDC / USD shape
         collateral = new MockERC20C("USDC", "USDC", 6);
         feed = new MockAggregatorV3(8, 1e8);
-        oracle = new ChainlinkPriceOracle(address(collateral), address(feed));
+        oracle = new ChainlinkPriceOracle(address(collateral), address(feed), 1 days);
     }
 
     /**
@@ -50,7 +50,7 @@ contract Test_ChainlinkIdentityOracle is Test {
      */
     function test_Identity_floorsFeedPrecisionBeyondWAD() public {
         MockAggregatorV3 preciseFeed = new MockAggregatorV3(21, int256(1e21 + 7));
-        ChainlinkPriceOracle preciseOracle = new ChainlinkPriceOracle(address(collateral), address(preciseFeed));
+        ChainlinkPriceOracle preciseOracle = new ChainlinkPriceOracle(address(collateral), address(preciseFeed), 1 days);
         (NAV_UNIT price,) = preciseOracle.getPrice();
         assertEq(toUint256(price), 1e18, "sub-WAD feed precision must floor away");
 
@@ -102,8 +102,8 @@ contract Test_ChainlinkIdentityOracle is Test {
         assertEq(address(oracle.ORACLE()), address(feed), "the feed is wired");
         assertEq(oracle.version(), 1, "version");
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new ChainlinkPriceOracle(address(0), address(feed));
+        new ChainlinkPriceOracle(address(0), address(feed), 1 days);
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new ChainlinkPriceOracle(address(collateral), address(0));
+        new ChainlinkPriceOracle(address(collateral), address(0), 1 days);
     }
 }

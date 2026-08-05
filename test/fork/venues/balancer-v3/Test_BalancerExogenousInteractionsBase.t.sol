@@ -136,7 +136,7 @@ abstract contract Test_BalancerExogenousInteractionsBase is Test_BalancerLPGateR
      */
     function _makeExternalSeniorDepositor(string memory _name, uint256 _collateralAssets) internal returns (address actor, uint256 stShares) {
         actor = _makeExternalLP(_name);
-        vm.prank(LP_ROLE_ADMIN_ADDRESS);
+        vm.prank(_immediateLpRoleAdmin());
         ACCESS_MANAGER.grantRole(ST_LP_ROLE, actor, 0);
         dealSTAsset(actor, _collateralAssets);
         assertLe(_collateralAssets, toUint256(ST.maxDeposit(actor)), "arrange: the external senior deposit must fit the advertised max");

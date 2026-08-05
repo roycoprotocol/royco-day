@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { ADMIN_ACCOUNTANT_ROLE } from "../../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
@@ -69,16 +70,18 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is ERC4626_Chainlink_Ker
         return (toUint256(ST.totalAssets().nav) * WAD) / supply;
     }
 
-    /// @dev Runs an accountant setter through its 2-day AccessManager execution delay while keeping the base->NAV feed
-    ///      fresh across the warp (via the per-kernel `_refreshOraclesAfterWarp` seam). Without this, the 2-day warp
-    ///      staleness-invalidates the real feed and the setter's `withSyncedAccounting` sync reverts.
+    /// @dev Runs an accountant setter through its AccessManager execution delay while keeping the base->NAV feed
+    ///      fresh across the warp (via the per-kernel `_refreshOraclesAfterWarp` seam). Without this, the warp
+    ///      staleness-invalidates the real feed and the setter's `withSyncedAccounting` sync reverts. The delay is
+    ///      read live from the AccessManager so the helper tracks the roles configuration instead of a baked value.
     function _execAccountantSetterFresh(bytes memory _data) internal {
         _pinOracleFresh(); // freeze the feed's live value into the mock while it is still fresh (before the warp)
 
+        (, uint32 executionDelay) = ACCESS_MANAGER.hasRole(ADMIN_ACCOUNTANT_ROLE, ACCOUNTANT_ADMIN_ADDRESS);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         ACCESS_MANAGER.schedule(address(ACCOUNTANT), _data, 0);
 
-        vm.warp(block.timestamp + 2 days + 1);
+        vm.warp(block.timestamp + uint256(executionDelay) + 1);
         _refreshOraclesAfterWarp(); // re-stamp the mocked feed at the warped time so the setter's sync clears staleness
 
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);

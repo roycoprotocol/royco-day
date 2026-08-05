@@ -15,8 +15,15 @@ contract MockPriceOracle is IRoycoPriceOracle {
     /// @notice Thrown by every oracle function when revert mode is armed
     error ORACLE_REVERT_MODE();
 
+    /// @notice Thrown when the report is older than the staleness threshold, mirroring the real adapters' fail-shut
+    ///         getPrice (same error signature as ChainlinkPriceOracleBase, so selectors match across the two)
+    error STALE_FEED_PRICE();
+
     /// @inheritdoc IRoycoPriceOracle
     address public immutable COLLATERAL_ASSET;
+
+    /// @notice The staleness threshold getPrice judges the report against, immutable like the real adapters'
+    uint48 public immutable FEED_STALENESS_THRESHOLD_SECONDS;
 
     /// @dev The price of 1 whole collateral asset in NAV units, WAD scaled
     uint256 private _priceWAD;
@@ -31,9 +38,11 @@ contract MockPriceOracle is IRoycoPriceOracle {
      * @notice Deploys the mock oracle with a single fresh report
      * @param _collateralAsset The collateral asset this oracle prices in NAV units
      * @param _initialPriceWAD The initial price of 1 whole collateral asset in NAV units, WAD scaled
+     * @param _feedStalenessThresholdSeconds The staleness threshold getPrice enforces, mirroring the real adapters
      */
-    constructor(address _collateralAsset, uint256 _initialPriceWAD) {
+    constructor(address _collateralAsset, uint256 _initialPriceWAD, uint48 _feedStalenessThresholdSeconds) {
         COLLATERAL_ASSET = _collateralAsset;
+        FEED_STALENESS_THRESHOLD_SECONDS = _feedStalenessThresholdSeconds;
         _priceWAD = _initialPriceWAD;
         _updatedAt = block.timestamp;
     }
@@ -43,8 +52,11 @@ contract MockPriceOracle is IRoycoPriceOracle {
     // =============================
 
     /// @inheritdoc IRoycoPriceOracle
+    /// @dev Staleness is enforced HERE, as in the real adapters: warping time past the threshold (or rewinding
+    ///      updatedAt through its knob) makes pricing fail shut while poke/previewPoke keep reporting the clock
     function getPrice() external view override(IRoycoPriceOracle) returns (NAV_UNIT price, uint256 updatedAt) {
         require(!_revertMode, ORACLE_REVERT_MODE());
+        require(_updatedAt + FEED_STALENESS_THRESHOLD_SECONDS >= block.timestamp, STALE_FEED_PRICE());
         return (toNAVUnits(_priceWAD), _updatedAt);
     }
 

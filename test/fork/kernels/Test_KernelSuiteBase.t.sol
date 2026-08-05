@@ -13,7 +13,14 @@ import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/to
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
-import { ADMIN_ACCOUNTANT_ROLE, ADMIN_UNPAUSER_ROLE, LPT_LP_ROLE } from "../../../src/factory/Roles.sol";
+import {
+    ADMIN_ACCOUNTANT_ROLE,
+    ADMIN_BLACKLIST_ROLE,
+    ADMIN_MARKET_OPS_ROLE,
+    ADMIN_ORACLE_ROLE,
+    ADMIN_UNPAUSER_ROLE,
+    LPT_LP_ROLE
+} from "../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
@@ -142,6 +149,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         _setupWallets();
         DEPLOY_SCRIPT = new DeployScript();
+        _pinChainPolicyForTests();
 
         // Deploy the market end-to-end through the real script (concrete test selects the config by name).
         _setDeployedMarket(_deployKernelAndMarket());
@@ -852,16 +860,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice Establishes a nonzero senior self-liquidation bonus when the deployed market config ships zero.
-    /// @dev The setter is bound to the delay-0 kernel admin role, so no scheduling is needed.
+    /// @dev The production market-ops grant carries a 72h execution delay; act through a delay-0 holder.
     function _ensureSelfLiquidationBonusConfigured() internal {
         if (KERNEL.getState().stSelfLiquidationBonusWAD != 0) return;
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(_immediateRoleHolder(ADMIN_MARKET_OPS_ROLE, "MARKET_OPS"));
         KERNEL.setSeniorTrancheSelfLiquidationBonus(0.005e18);
     }
 
-    /// @notice Raises the market's dust tolerance via the delay-0 market ops role (held by the kernel admin wallet).
+    /// @notice Raises the market's dust tolerance via a delay-0 market ops holder.
     function _raiseDustTolerance(NAV_UNIT _tol) internal {
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(_immediateRoleHolder(ADMIN_MARKET_OPS_ROLE, "MARKET_OPS"));
         ACCOUNTANT.setDustTolerance(_tol);
     }
 
@@ -1025,8 +1033,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _blacklist(address _account) internal {
         address[] memory accounts = new address[](1);
         accounts[0] = _account;
-        // The blacklist admin surface is gated by ADMIN_BLACKLIST_ROLE, granted to the market-ops admin.
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        // The blacklist admin surface is gated by ADMIN_BLACKLIST_ROLE, whose production grant carries a 72h
+        // execution delay; act through a delay-0 holder
+        vm.prank(_immediateRoleHolder(ADMIN_BLACKLIST_ROLE, "BLACKLIST_ADMIN"));
         BLACKLIST.blacklistAccounts(accounts);
     }
 
@@ -1060,7 +1069,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      *      a wrong role binding), which fails the test loudly instead of silently skipping the premium tests.
      */
     function _trySetReinvestmentSlippage(uint64 _slippageWAD) internal virtual returns (bool ok) {
-        vm.prank(ORACLE_ADMIN_ADDRESS);
+        // The configured oracle admin's grant carries the production 72h execution delay; act through a delay-0 holder
+        vm.prank(_immediateRoleHolder(ADMIN_ORACLE_ROLE, "ORACLE_ADMIN"));
         bytes memory returnData;
         (ok, returnData) = address(KERNEL).call(abi.encodeWithSignature("setMaxReinvestmentSlippage(uint64)", _slippageWAD));
         if (!ok && returnData.length != 0) fail("the reinvestment slippage seam exists but its setter reverted");
@@ -4507,7 +4517,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         if (testConfig.hasLiquidityProviderTranche) {
             _seedDefaultLPT();
             // Grant eve the LPT LP role so the blacklist screen (not the auth gate) is what rejects the LPT flows
-            vm.prank(LP_ROLE_ADMIN_ADDRESS);
+            vm.prank(_immediateLpRoleAdmin());
             ACCESS_MANAGER.grantRole(LPT_LP_ROLE, eve, 0);
             eveLPTShares = LPT.balanceOf(LPT_ALICE_ADDRESS) / 10;
             vm.prank(LPT_ALICE_ADDRESS);

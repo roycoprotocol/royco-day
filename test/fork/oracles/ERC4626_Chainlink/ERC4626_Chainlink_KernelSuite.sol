@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
+import { ChainlinkPriceOracleBase } from "../../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { Test_BalancerExogenousInteractionsBase } from "../../venues/balancer-v3/Test_BalancerExogenousInteractionsBase.t.sol";
 
@@ -70,9 +70,10 @@ abstract contract ERC4626_Chainlink_KernelSuite is Test_BalancerExogenousInterac
         return false;
     }
 
-    /// @dev The kernel's collateral oracle staleness selector, enabling the abstract suite's staleness brick test.
+    /// @dev The staleness selector the collateral oracle fails shut with, enabling the abstract suite's staleness
+    ///      brick test: the check lives in the adapter's getPrice now, judged against its immutable feed threshold.
     function _oracleStalenessSelector() internal pure virtual override returns (bytes4) {
-        return IRoycoDayKernel.STALE_PRICE.selector;
+        return ChainlinkPriceOracleBase.STALE_FEED_PRICE.selector;
     }
 
     /**

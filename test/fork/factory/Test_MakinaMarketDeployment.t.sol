@@ -151,7 +151,7 @@ contract Test_MakinaMarketDeployment is Test {
     function _marketConfig(address _machine, address _collateralAsset) internal returns (MarketConfig memory cfg) {
         cfg = deployScript.getMarketConfig("snUSD");
         cfg.collateralAsset = _collateralAsset;
-        cfg.collateralAssetOracle = address(new MakinaSharePriceOracle(_machine, USDC_USD_FEED));
+        cfg.collateralAssetOracle = address(new MakinaSharePriceOracle(_machine, USDC_USD_FEED, 48 hours));
             _fundPoolSeed(cfg);
     }
 

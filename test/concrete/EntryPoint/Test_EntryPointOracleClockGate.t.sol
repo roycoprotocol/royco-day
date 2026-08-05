@@ -47,7 +47,7 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
     /// @dev Rotates the market's collateral asset oracle to the specified replacement through the kernel admin surface
     function _rotateOracle(address _oracle) internal {
         vm.prank(ORACLE_ADMIN);
-        kernel.setCollateralAssetOracle(_oracle, ORACLE_STALENESS_THRESHOLD_SECONDS, false);
+        kernel.setCollateralAssetOracle(_oracle, false);
     }
 
     // ---------------------------------------------------------------------
@@ -402,7 +402,7 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
         uint256 queuedAt = block.timestamp;
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
 
-        MockPriceOracle replacement = new MockPriceOracle(address(stJtVault), cell.collateralAsset.initialRateWAD);
+        MockPriceOracle replacement = new MockPriceOracle(address(stJtVault), cell.collateralAsset.initialRateWAD, ORACLE_STALENESS_THRESHOLD_SECONDS);
         replacement.setUpdatedAt(queuedAt);
         _rotateOracle(address(replacement));
 
@@ -424,7 +424,7 @@ contract Test_EntryPointOracleGate is EntryPointTestBase {
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
 
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
-        MockPriceOracle replacement = new MockPriceOracle(address(stJtVault), cell.collateralAsset.initialRateWAD);
+        MockPriceOracle replacement = new MockPriceOracle(address(stJtVault), cell.collateralAsset.initialRateWAD, ORACLE_STALENESS_THRESHOLD_SECONDS);
         _rotateOracle(address(replacement));
 
         uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);

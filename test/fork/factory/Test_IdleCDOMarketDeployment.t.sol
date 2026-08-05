@@ -61,6 +61,11 @@ contract Test_IdleCDOMarketDeployment is Test {
     /// @dev The deviation-clock threshold the adapter pins as a construction immutable (0.1%)
     uint256 internal constant MIN_DEVIATION_WAD = 0.001e18;
 
+    /// @dev The per-hop staleness immutables: the Chainlink leg tight (24h heartbeat doubled), the virtual-price
+    ///      clock wide (Pareto steps the CDO NAV ~weekly)
+    uint48 internal constant FEED_STALENESS_THRESHOLD_SECONDS = 48 hours;
+    uint48 internal constant SOURCE_STALENESS_THRESHOLD_SECONDS = 8 days;
+
     address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // non-tranche collateral for the guard test
 
     RoycoAccessManager internal am;
@@ -140,7 +145,17 @@ contract Test_IdleCDOMarketDeployment is Test {
     ///      proxy, no beacon, no authority (mirrors `_deployCollateralAssetOracle`).
     function _deployIdleOracle(address _tranche) internal returns (address oracle) {
         // The attested last update is now: the deployer vouches the virtual price is current at deployment.
-        return address(new IdleCDOTranchePriceOracle(PARETO_FALCONX_CDO, _tranche, USDC_USD_FEED, MIN_DEVIATION_WAD, uint32(block.timestamp)));
+        return address(
+            new IdleCDOTranchePriceOracle(
+                PARETO_FALCONX_CDO,
+                _tranche,
+                USDC_USD_FEED,
+                MIN_DEVIATION_WAD,
+                uint32(block.timestamp),
+                FEED_STALENESS_THRESHOLD_SECONDS,
+                SOURCE_STALENESS_THRESHOLD_SECONDS
+            )
+        );
     }
 
     /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold the quote and
@@ -259,6 +274,8 @@ contract Test_IdleCDOMarketDeployment is Test {
     ///         mispointed market from silently pricing the wrong asset
     function test_RevertIf_CollateralIsNotACDOTranche() external {
         vm.expectRevert(IdleCDOTranchePriceOracle.COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE.selector);
-        new IdleCDOTranchePriceOracle(PARETO_FALCONX_CDO, SNUSD_VAULT, USDC_USD_FEED, MIN_DEVIATION_WAD, 0);
+        new IdleCDOTranchePriceOracle(
+            PARETO_FALCONX_CDO, SNUSD_VAULT, USDC_USD_FEED, MIN_DEVIATION_WAD, 0, FEED_STALENESS_THRESHOLD_SECONDS, SOURCE_STALENESS_THRESHOLD_SECONDS
+        );
     }
 }
