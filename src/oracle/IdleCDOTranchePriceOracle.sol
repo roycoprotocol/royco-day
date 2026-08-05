@@ -28,7 +28,6 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
 
     /**
      * @notice Constructs the Idle CDO tranche virtual price to Chainlink (compatible) oracle composed collateral oracle
-     * @dev The clock's baseline is read from the CDO through the static helper because a base constructor cannot reach this contract's immutables
      * @param _idleCDO The Idle CDO whose tranche token is the collateral asset
      * @param _tranche The CDO tranche token (AA or BB) this oracle prices into NAV units
      * @param _underlyingTokenToNavAssetOracle The Chainlink (compatible) oracle pricing the CDO's underlying token in NAV units
@@ -43,8 +42,12 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
         uint32 _lastUpdate
     )
         ChainlinkPriceOracleBase(_tranche, _underlyingTokenToNavAssetOracle)
-        OracleClockBase(_lastUpdate, _minDeviationWAD, _readVirtualPriceWAD(_idleCDO, _tranche))
+        OracleClockBase(_lastUpdate, _minDeviationWAD)
     {
+        require(_idleCDO != address(0), IRoycoAuth.NULL_ADDRESS());
+        // virtualPrice treats any unknown address as the BB tranche, so the tranche must be validated here
+        require(_tranche == IIdleCDO(_idleCDO).AATranche() || _tranche == IIdleCDO(_idleCDO).BBTranche(), COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE());
+
         IDLE_CDO = _idleCDO;
 
         // virtualPrice returns the value of one whole tranche token scaled to the CDO underlying token's decimals
@@ -53,21 +56,9 @@ contract IdleCDOTranchePriceOracle is OracleClockBase, ChainlinkPriceOracleBase 
         // MULTIPLIER_EXPONENT = WAD_DECIMALS - UNDERLYING_DECIMALS
         // The checked subtraction reverts at construction for underlying decimals above WAD_DECIMALS, the edge of the supported precision
         _CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION = 10 ** (WAD_DECIMALS - IERC20Metadata(IIdleCDO(_idleCDO).token()).decimals());
-    }
 
-    /**
-     * @notice Validates the CDO configuration and reads the CDO's live virtual price for the tranche, lifted to WAD precision
-     * @dev Static construction helper: it takes every input explicitly so the clock base's constructor can receive the baseline before this contract's immutables exist
-     * @dev Runs before every constructor body, so it carries the configuration sanity checks and their clean errors
-     * @param _idleCDO The Idle CDO to read the virtual price from
-     * @param _tranche The CDO tranche token whose virtual price is read
-     * @return priceWAD The tranche's virtual price in WAD precision
-     */
-    function _readVirtualPriceWAD(address _idleCDO, address _tranche) private view returns (uint256 priceWAD) {
-        require(_idleCDO != address(0), IRoycoAuth.NULL_ADDRESS());
-        // virtualPrice treats any unknown address as the BB tranche, so the tranche must be validated here
-        require(_tranche == IIdleCDO(_idleCDO).AATranche() || _tranche == IIdleCDO(_idleCDO).BBTranche(), COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE());
-        return IIdleCDO(_idleCDO).virtualPrice(_tranche) * (10 ** (WAD_DECIMALS - IERC20Metadata(IIdleCDO(_idleCDO).token()).decimals()));
+        // Checkpoint the construction baseline through the same source read every poke uses
+        _initializeOracleClock(_getSourcePrice());
     }
 
     /**

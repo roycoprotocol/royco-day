@@ -310,7 +310,7 @@ contract Test_CollateralOracles is Test {
         assertEq(lastUpdatedAt, 0, "a zero attested checkpoint stamps nothing");
         assertEq(cdoOracle.version(), 1, "version");
         assertEq(cdoOracle.description(), string.concat("AA_FalconXUSDC / ", feed.description()), "the description chains through the feed");
-        // The helper validates the CDO before any constructor body, so a null CDO fails its null check first
+        // The constructor body's typed null check rejects a null CDO before any read can touch it
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
         new IdleCDOTranchePriceOracle(address(0), address(aaTranche), address(feed), 0, 0);
         // The CDO's virtualPrice silently computes the BB price for any unknown address, so membership is checked

@@ -32,7 +32,7 @@ contract Test_OracleClocks is Test {
         return new MockCheckpointClock(address(source), 0, _minDeviationWAD);
     }
 
-    function _lastValue(MockCheckpointClock _clock) internal view returns (uint256) {
+    function _lastOraclePrice(MockCheckpointClock _clock) internal view returns (uint256) {
         (uint160 lastValue,) = _clock.getOracleClockState();
         return lastValue;
     }
@@ -48,7 +48,7 @@ contract Test_OracleClocks is Test {
 
     function test_checkpointClock_constructionRecordsBaselineWithoutStamping() public {
         MockCheckpointClock clock = _deployCheckpointClock(0);
-        assertEq(_lastValue(clock), 1e18, "construction must record the source's current value as the baseline");
+        assertEq(_lastOraclePrice(clock), 1e18, "construction must record the source's current value as the baseline");
         assertEq(_lastUpdatedAt(clock), 0, "construction must never manufacture an update timestamp");
         assertEq(clock.poke(), 0, "a zero attested checkpoint fails shut: no update is reported until the first observed deviation");
     }
@@ -92,11 +92,20 @@ contract Test_OracleClocks is Test {
         // a queue when the deployer can attest to the source's true last update
         MockCheckpointClock clock = new MockCheckpointClock(address(source), uint32(block.timestamp - 100), 0);
         assertEq(clock.poke(), block.timestamp - 100, "the attested checkpoint must seed the clock");
-        assertEq(_lastValue(clock), 1e18, "the baseline value must still be the source's current reading");
+        assertEq(_lastOraclePrice(clock), 1e18, "the baseline value must still be the source's current reading");
 
         // The current timestamp is the boundary: an attestation at exactly now is a genuine (freshest possible) claim
         MockCheckpointClock fresh = new MockCheckpointClock(address(source), uint32(block.timestamp), 0);
         assertEq(fresh.poke(), block.timestamp, "an attestation at exactly now must be accepted");
+    }
+
+    function test_checkpointClock_RevertIf_BaselineRewrittenAfterConstruction() public {
+        // The baseline initializer keys on the account carrying no code during creation, so a deployed clock's
+        // baseline can never be rewritten and the checkpoint only ever moves through poke's deviation path
+        MockCheckpointClock clock = _deployCheckpointClock(0);
+        vm.expectRevert(OracleClockBase.CLOCK_BASELINE_ONLY_AT_CONSTRUCTION.selector);
+        clock.attemptRuntimeBaselineRewrite(2e18);
+        assertEq(_lastOraclePrice(clock), 1e18, "the deployed baseline must stay the construction reading");
     }
 
     function test_checkpointClock_constructionRejectsFutureCheckpoint() public {
@@ -158,7 +167,7 @@ contract Test_OracleClocks is Test {
         // The next observable deviation opens the gate: 1% from the construction baseline (not the muted reading)
         source.setValue(1.01e18);
         assertEq(clock.poke(), uint32(block.timestamp), "the next threshold deviation must open the gate");
-        assertEq(_lastValue(clock), 1.01e18, "the checkpoint must move to the deviated value");
+        assertEq(_lastOraclePrice(clock), 1.01e18, "the checkpoint must move to the deviated value");
     }
 
     /**
@@ -181,7 +190,7 @@ contract Test_OracleClocks is Test {
         // The redeploy pins the tighter threshold and baselines at the live reading without stamping
         MockCheckpointClock redeployed = new MockCheckpointClock(address(source), 0, 0.01e18);
         assertEq(redeployed.MIN_DEVIATION_WAD(), 0.01e18, "the redeploy must pin the new threshold");
-        assertEq(_lastValue(redeployed), 1.01e18, "the redeploy must baseline at the live reading");
+        assertEq(_lastOraclePrice(redeployed), 1.01e18, "the redeploy must baseline at the live reading");
         assertEq(_lastUpdatedAt(redeployed), 0, "the redeploy must not manufacture an update timestamp");
 
         // A 1% move from the redeploy's baseline checkpoints on the new clock while the old one stays muted
@@ -214,7 +223,7 @@ contract Test_OracleClocks is Test {
         vm.warp(block.timestamp + 1 hours);
         source.setValue(1e18 + 1);
         assertEq(clock.poke(), uint32(block.timestamp), "a one-wei change must checkpoint under a zero threshold");
-        assertEq(_lastValue(clock), 1e18 + 1, "the checkpointed value must track the source");
+        assertEq(_lastOraclePrice(clock), 1e18 + 1, "the checkpointed value must track the source");
     }
 
     function test_checkpointClock_thresholdGatesSubDeviationChanges() public {
@@ -229,7 +238,7 @@ contract Test_OracleClocks is Test {
         // A 1% move from the CHECKPOINT (not from the last observation) must checkpoint
         source.setValue(1e18 + 0.01e18);
         assertEq(clock.poke(), uint32(block.timestamp), "a threshold-exact move must advance the clock");
-        assertEq(_lastValue(clock), 1e18 + 0.01e18, "the checkpoint must move to the deviated value");
+        assertEq(_lastOraclePrice(clock), 1e18 + 0.01e18, "the checkpoint must move to the deviated value");
     }
 
     function test_checkpointClock_downwardDeviationCountsSymmetrically() public {
@@ -253,7 +262,7 @@ contract Test_OracleClocks is Test {
         source.setValue(1e18);
         uint256 resolvedAt = clock.poke();
         assertEq(resolvedAt, uint32(block.timestamp), "the first nonzero observation must checkpoint off a zero baseline");
-        assertEq(_lastValue(clock), 1e18, "the checkpoint must move to the observed value");
+        assertEq(_lastOraclePrice(clock), 1e18, "the checkpoint must move to the observed value");
 
         // Once the baseline is nonzero the threshold applies again: a sub-threshold move leaves the checkpoint where
         // it is, so poke keeps reporting the earlier stamp rather than advancing to now
@@ -281,12 +290,12 @@ contract Test_OracleClocks is Test {
         vm.warp(block.timestamp + 1 hours);
         source.setValue(0);
         assertEq(clock.poke(), uint32(block.timestamp), "the drop to zero must checkpoint as a full deviation");
-        assertEq(_lastValue(clock), 0, "the checkpoint must move to zero");
+        assertEq(_lastOraclePrice(clock), 0, "the checkpoint must move to zero");
 
         vm.warp(block.timestamp + 1 hours);
         source.setValue(1e18);
         assertEq(clock.poke(), uint32(block.timestamp), "the recovery off a zero checkpoint must checkpoint too");
-        assertEq(_lastValue(clock), 1e18, "the checkpoint must move to the recovered value");
+        assertEq(_lastOraclePrice(clock), 1e18, "the checkpoint must move to the recovered value");
 
         // A zero source that STAYS zero is not a deviation, so a wiped-out source cannot stamp the clock repeatedly:
         // the checkpoint holds at the drop's timestamp instead of advancing on every poke
