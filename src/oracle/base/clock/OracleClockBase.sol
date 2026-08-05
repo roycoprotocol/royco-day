@@ -8,20 +8,20 @@ import { WAD } from "../../../libraries/Constants.sol";
 /**
  * @title OracleClockBase
  * @author Shivaansh Kapoor, Ankur Dubey
- * @notice Abstract oracle clock for pull-based pricing sources that expose only a current value with no update timestamp
- * @dev Each poke reads the source and checkpoints a new update timestamp when the value has deviated beyond the immutable threshold since the last checkpoint, deriving conservative update times for the source
+ * @notice Abstract oracle clock for pull-based pricing sources that expose only a current price with no update timestamp
+ * @dev Each poke reads the source and checkpoints a new update timestamp when the price has deviated beyond the immutable threshold since the last checkpoint, deriving conservative update times for the source
  * @dev Fully permissionless and admin-free: the only mutable state is the checkpoint pair poke advances mechanically, so the clock has no authority, no upgrade path, and no configuration surface
- * @dev A source update the clock cannot observe (a republish at an identical or sub-threshold value) conservatively holds the entry point's execution gate shut until the next observable deviation, and reconfiguration is a redeploy plus a kernel oracle repoint
+ * @dev A source update the clock cannot observe (a republish at an identical or sub-threshold price) conservatively holds the entry point's execution gate shut until the next observable deviation, and reconfiguration is a redeploy plus a kernel oracle repoint
  */
 abstract contract OracleClockBase {
     using Math for uint256;
     using SafeCast for uint256;
 
-    /// @notice The minimum relative deviation from the checkpointed value that counts as an update, scaled to WAD precision (zero counts any change)
+    /// @notice The minimum relative deviation from the checkpointed price that counts as an update, scaled to WAD precision (zero counts any change)
     uint256 public immutable MIN_DEVIATION_WAD;
 
-    /// @dev The value observed at the last checkpoint (the construction baseline before the first deviation)
-    uint160 private _lastValue;
+    /// @dev The oracle price observed at the last checkpoint (the construction baseline before the first deviation)
+    uint160 private _lastOraclePrice;
 
     /// @dev The timestamp of the last checkpoint (the deployer-attested initial checkpoint until the first observed deviation)
     uint32 private _lastUpdatedAt;
@@ -32,32 +32,34 @@ abstract contract OracleClockBase {
     /// @notice Thrown when the minimum deviation threshold is not strictly less than 100% (WAD)
     error INVALID_MIN_DEVIATION_WAD();
 
+    /// @notice Thrown when the clock baseline is written outside construction
+    error CLOCK_BASELINE_ONLY_AT_CONSTRUCTION();
+
     /**
-     * @notice Constructs the oracle clock, recording the source's current value as the baseline and the deployer-attested initial checkpoint
-     * @dev The baseline arrives as an argument because a base constructor cannot read the concrete clock's immutables through the _getSourcePrice virtual yet
+     * @notice Constructs the oracle clock, recording the deployer-attested initial checkpoint
+     * @dev The deriving oracle checkpoints the baseline via _initializeOracleClock once its immutables exist, so the baseline flows through the same _getSourcePrice read every poke uses
      * @dev The deployer is responsible for the accuracy of the initial checkpoint: it must be the source's genuine last update time, and a zero conservatively reports no update yet (holding the entry point's execution gate shut)
      * @dev A threshold at or above 100% would mute all downward updates (a downward deviation caps at exactly WAD), making the clock asymmetric
      * @param _lastUpdate The deployer-attested timestamp of the source's last update (zero if unknown)
-     * @param _minDeviationWAD The minimum relative deviation from the checkpointed value that counts as an update, scaled to WAD precision (zero counts any change)
-     * @param _baselineValue The source's value at construction, the checkpoint the first deviation is measured against
+     * @param _minDeviationWAD The minimum relative deviation from the checkpointed price that counts as an update, scaled to WAD precision (zero counts any change)
      */
-    constructor(uint32 _lastUpdate, uint256 _minDeviationWAD, uint256 _baselineValue) {
+    constructor(uint32 _lastUpdate, uint256 _minDeviationWAD) {
         // The checkpoint must never start in the future: it would satisfy the execution gate without a genuine update
         require(_lastUpdate <= block.timestamp, INVALID_LAST_UPDATE_TIMESTAMP());
         require(_minDeviationWAD < WAD, INVALID_MIN_DEVIATION_WAD());
         MIN_DEVIATION_WAD = _minDeviationWAD;
-        (_lastValue, _lastUpdatedAt) = (_baselineValue.toUint160(), _lastUpdate);
+        _lastUpdatedAt = _lastUpdate;
     }
 
     /**
-     * @notice Observes the source, checkpointing a new update timestamp if its value deviated beyond the threshold
+     * @notice Observes the source, checkpointing a new update timestamp if its price deviated beyond the threshold
      * @dev Satisfies IRoycoPriceOracle.poke for pull-based sources: a zero (no deviation observed yet) conservatively holds the entry point's execution gate shut
      * @return lastUpdatedAt The timestamp of the last observed update of the source (zero if none observed yet)
      */
     function poke() public virtual returns (uint256 lastUpdatedAt) {
         // Observe the source, and update the checkpoint and clock if it deviated
-        (uint256 value, bool deviated) = _observeDeviation();
-        if (deviated) (_lastValue, _lastUpdatedAt) = (value.toUint160(), uint32(block.timestamp));
+        (uint256 price, bool deviated) = _observeOraclePriceDeviation();
+        if (deviated) (_lastOraclePrice, _lastUpdatedAt) = (price.toUint160(), uint32(block.timestamp));
         return _lastUpdatedAt;
     }
 
@@ -70,42 +72,53 @@ abstract contract OracleClockBase {
      */
     function previewPoke() public view virtual returns (uint256 lastUpdatedAt) {
         // Observe the source, and report the current timestamp if it deviated
-        (, bool deviated) = _observeDeviation();
+        (, bool deviated) = _observeOraclePriceDeviation();
         return deviated ? block.timestamp : _lastUpdatedAt;
     }
 
     /**
      * @notice Returns the clock's checkpoint pair
-     * @return lastValue The value observed at the last checkpoint
+     * @return lastOraclePrice The oracle price observed at the last checkpoint
      * @return lastUpdatedAt The timestamp of the last checkpoint
      */
-    function getOracleClockState() external view returns (uint160 lastValue, uint32 lastUpdatedAt) {
-        return (_lastValue, _lastUpdatedAt);
-    }
-
-    /**
-     * @notice Returns whether the observed value deviated from the checkpointed value beyond the immutable threshold
-     * @param _value The value observed by this poke
-     * @param _checkpointValue The value observed at the last checkpoint
-     * @return deviated Whether the deviation counts as an update
-     */
-    function _hasDeviated(uint256 _value, uint256 _checkpointValue) internal view returns (bool deviated) {
-        if (_value == _checkpointValue) return false;
-        if (MIN_DEVIATION_WAD == 0) return true;
-        // A zero checkpoint has no relative scale to measure against, so any nonzero observation is a full deviation
-        if (_checkpointValue == 0) return true;
-        uint256 delta = (_value > _checkpointValue) ? (_value - _checkpointValue) : (_checkpointValue - _value);
-        return (WAD.mulDiv(delta, _checkpointValue) >= MIN_DEVIATION_WAD);
+    function getOracleClockState() external view returns (uint160 lastOraclePrice, uint32 lastUpdatedAt) {
+        return (_lastOraclePrice, _lastUpdatedAt);
     }
 
     /**
      * @notice Observes the source's current price against the checkpoint
-     * @return value The source's current price
-     * @return deviated Whether the observation deviated from the checkpointed value beyond the immutable threshold
+     * @return price The source's current price
+     * @return deviated Whether the observation deviated from the checkpointed price beyond the immutable threshold
      */
-    function _observeDeviation() internal view returns (uint256 value, bool deviated) {
-        value = _getSourcePrice();
-        deviated = _hasDeviated(value, _lastValue);
+    function _observeOraclePriceDeviation() internal view returns (uint256 price, bool deviated) {
+        price = _getSourcePrice();
+        deviated = _hasOraclePriceDeviated(price, _lastOraclePrice);
+    }
+
+    /**
+     * @notice Returns whether the observed oracle price deviated from the checkpointed price beyond the immutable threshold
+     * @param _price The oracle price observed by this poke
+     * @param _checkpointPrice The oracle price observed at the last checkpoint
+     * @return deviated Whether the deviation counts as an update
+     */
+    function _hasOraclePriceDeviated(uint256 _price, uint256 _checkpointPrice) internal view returns (bool deviated) {
+        if (_price == _checkpointPrice) return false;
+        if (MIN_DEVIATION_WAD == 0) return true;
+        // A zero checkpointed price has no relative scale to measure against, so any nonzero observation is a full deviation
+        if (_checkpointPrice == 0) return true;
+        uint256 delta = (_price > _checkpointPrice) ? (_price - _checkpointPrice) : (_checkpointPrice - _price);
+        return (WAD.mulDiv(delta, _checkpointPrice) >= MIN_DEVIATION_WAD);
+    }
+
+    /**
+     * @notice Checkpoints the construction-time oracle price as the baseline the first deviation is measured against
+     * @dev Called once from the deriving oracle's constructor body after its immutables are assigned, so the baseline can flow through the same _getSourcePrice read every poke uses
+     * @dev Construction-only: the account carries no code while its creation code runs, so a runtime call fails shut and the baseline can never be rewritten after deployment
+     * @param _initialOraclePrice The oracle's price at construction, never a clock timestamp
+     */
+    function _initializeOracleClock(uint256 _initialOraclePrice) internal {
+        require(address(this).code.length == 0, CLOCK_BASELINE_ONLY_AT_CONSTRUCTION());
+        _lastOraclePrice = _initialOraclePrice.toUint160();
     }
 
     /// @notice Returns the source's current price, implemented by the concrete clock

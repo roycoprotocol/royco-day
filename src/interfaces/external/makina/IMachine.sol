@@ -10,6 +10,9 @@ interface IMachine {
     /// @notice Address of the accounting token
     function accountingToken() external view returns (address);
 
+    /// @notice Timestamp of the last global accounting update
+    function lastGlobalAccountingTime() external view returns (uint256);
+
     /**
      * @notice Returns the amount of accounting tokens that the Machine would exchange for the amount of shares provided
      * @param shares The amount of shares

@@ -317,8 +317,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         _setBalancerPoolConfig(_params.balancerPoolConfig);
     }
 
-    ///  @notice Sets the Balancer pool policy every FUTURE market's pool is created with
-    ///@param _config The new pool policy
+    /// @notice Sets the Balancer pool policy every FUTURE market's pool is created with
+    /// @param _config The new pool policy
     function setBalancerPoolConfig(BalancerPoolConfig calldata _config) external restricted {
         _setBalancerPoolConfig(_config);
     }
@@ -371,7 +371,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     // DEPLOY
     // ═══════════════════════════════════════════════════════════════════════════
 
-    ///  @inheritdoc IRoycoProtocolTemplate
+    /// @inheritdoc IRoycoProtocolTemplate
     function deployMarket(bytes calldata _params) external override(IRoycoProtocolTemplate) onlyRoycoFactory returns (DeploymentResult memory result) {
         // Validate the deployer's params
         MarketParams memory params = MarketDeploymentValidationLogic.validateMarketParams(_params, balancerPoolConfig.chargeYieldFeeOnQuoteAsset);

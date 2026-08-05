@@ -215,6 +215,9 @@ interface IRoycoDayKernel {
     /// @notice Thrown when the market's liquidity requirement is violated
     error LIQUIDITY_REQUIREMENT_VIOLATED();
 
+    /// @notice Thrown when a JT deposit settles with the market still at or above its liquidation coverage utilization
+    error JT_DEPOSIT_BLOCKED_DURING_LIQUIDATION();
+
     /// @notice Thrown when the collateral asset's decimals are greater than 18
     error INVALID_COLLATERAL_ASSET_DECIMALS();
 

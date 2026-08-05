@@ -3,11 +3,11 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
-import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title TestFuzz_MaxDepositAndWithdrawal_Kernel
@@ -222,7 +222,71 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         uint256 lptRawAfter = toUint256(accountant.getState().lastLPTRawNAV);
         assertGe(lptRawAfter, requiredFloor, "the max redemption must leave the required liquidity floor in the pool");
         assertLe(
-            RoycoTestMath.computeLiquidityUtilization(st, 0.05e18, lptRawAfter), WAD, "liquidity utilization must hold at or below 100% after the max redemption"
+            RoycoTestMath.computeLiquidityUtilization(st, 0.05e18, lptRawAfter),
+            WAD,
+            "liquidity utilization must hold at or below 100% after the max redemption"
         );
+    }
+
+    /**
+     * Scenario: crash the shared collateral price to an arbitrary depth (from no crash at all to a fully wiped
+     * junior buffer), then attempt an arbitrary-size JT deposit. The deposit must settle strictly below the liquidation
+     * coverage utilization or revert on the exact layered gate the mirror derives, so no gate can under- or over-fire.
+     *
+     * Mirror (the crash routes the whole loss through the junior buffer first, then the senior residual): the
+     * post-crash mark is c1 = quote(1400e18) with stEff1 = min(1000e18, c1) and jtEff1 = c1 - stEff1. The deposit
+     * re-marks the whole holding, so c2 = quote(1400e18 + a) and the settled buffer is jtEff1 + (c2 - c1). The gates
+     * layer in execution order: a covered drawdown past the dust tolerance opens the JT observation period and
+     * rejects on the fixed-term gate first (unless the buffer is wiped or the liquidation threshold is breached,
+     * both of which force the market perpetual to keep senior exits open), then a deposit whose own quote floors
+     * to zero rejects on the zero-share mint, and only then does the post-op liquidation gate decide
+     */
+    function testFuzz_JTDeposit_LiquidationGateFiresExactlyOnTheMirror(uint256 _rateSeed, uint256 _assetsSeed) public {
+        _seedFlatMarket(1000e18, 400e18, 2e8);
+        // Uniform from no crash at all to a 95% drawdown (any price at or below ~0.714 wipes the junior buffer)
+        int256 bpsDrop = int256(bound(_rateSeed, 0, 9500));
+        uint256 assets = bound(_assetsSeed, 1, 1e24);
+        applySTPnL(-bpsDrop);
+        uint256 liquidationThreshold = params.coverageLiquidationUtilizationWAD;
+
+        // The mirror's post-crash and post-deposit marks from the kernel's live conversion (derivation above)
+        uint256 c1 = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(uint256(1400e18))));
+        uint256 jtEff1 = c1 - Math.min(1000e18, c1);
+        uint256 c2 = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1400e18 + assets)));
+        uint256 depositValue = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(assets)));
+        uint256 utilizationPre = RoycoTestMath.computeCoverageUtilization(c1, params.minCoverageWAD, jtEff1);
+        uint256 utilizationAfter = RoycoTestMath.computeCoverageUtilization(c2, params.minCoverageWAD, jtEff1 + (c2 - c1));
+
+        // The pre-op sync decides the market state the deposit is checked against: a covered above-dust drawdown
+        // enters the JT observation period unless the wiped buffer or the breached threshold forces perpetual
+        bool entersFixedTerm = (1400e18 - c1) > params.dustTolerance && jtEff1 != 0 && utilizationPre < liquidationThreshold;
+
+        stJtVault.mintShares(JT_PROVIDER, assets);
+        vm.startPrank(JT_PROVIDER);
+        stJtVault.approve(address(juniorTranche), assets);
+        if (entersFixedTerm) {
+            // The observation period rejects every JT deposit before size or the liquidation gate can matter
+            vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
+            juniorTranche.deposit(toTrancheUnits(assets), JT_PROVIDER);
+        } else if (depositValue == 0) {
+            // A deposit that quotes to zero value prices to zero shares and rejects before the post-op gate
+            vm.expectRevert(IRoycoDayKernel.MUST_MINT_NON_ZERO_SHARES.selector);
+            juniorTranche.deposit(toTrancheUnits(assets), JT_PROVIDER);
+        } else if (utilizationAfter >= liquidationThreshold) {
+            // A sub-curing deposit into the bonus regime reverts on the gate
+            vm.expectRevert(IRoycoDayKernel.JT_DEPOSIT_BLOCKED_DURING_LIQUIDATION.selector);
+            juniorTranche.deposit(toTrancheUnits(assets), JT_PROVIDER);
+        } else {
+            // Every other deposit settles, and the settled marks sit strictly below the liquidation threshold
+            uint256 mintedShares = juniorTranche.deposit(toTrancheUnits(assets), JT_PROVIDER);
+            assertGt(mintedShares, 0, "a settled JT deposit must mint shares");
+            IRoycoDayAccountant.RoycoDayAccountantState memory acct = accountant.getState();
+            assertLt(
+                RoycoTestMath.computeCoverageUtilization(toUint256(acct.lastCollateralNAV), params.minCoverageWAD, toUint256(acct.lastJTEffectiveNAV)),
+                liquidationThreshold,
+                "a settled JT deposit must leave the market strictly below the liquidation threshold"
+            );
+        }
+        vm.stopPrank();
     }
 }

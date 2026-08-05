@@ -30,7 +30,7 @@ library DepositLogic {
      * @notice Processes the in-kind deposit of a specified amount of the tranche's own assets into the specified tranche
      * @dev Assumes that the funds are transferred to the kernel before the deposit call is made
      * @dev Screens the caller and receiver against the market's blacklist so no blacklisted account can initiate or receive the deposit
-     * @dev ST and JT deposits are enabled only in a PERPETUAL market state, the ST deposit granted that the market's coverage and liquidity requirements are satisfied post-deposit
+     * @dev ST and JT deposits are enabled only in a PERPETUAL market state, the ST deposit granted that the market's coverage and liquidity requirements are satisfied post-deposit, the JT deposit granted that it settles below the liquidation coverage utilization
      * @dev An in-kind LPT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state (including fixed-term) and enforces no requirements
      * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
@@ -77,7 +77,7 @@ library DepositLogic {
         IRoycoVaultTranche(AssetLedgerLogic._getTrancheAddress($, _trancheType)).kernelMint(_receiver, trancheSharesMinted);
 
         // Execute a post-deposit sync on accounting, enforcing the market's coverage and liquidity requirements against new senior exposure
-        // A JT deposit grows the loss-absorption buffer and an in-kind LPT deposit only adds market-making depth, so the post-op enforces nothing for them
+        // A JT deposit grows the loss-absorption buffer but must settle below the liquidation coverage utilization, an in-kind LPT deposit only adds market-making depth so the post-op enforces nothing for it
         AccountingSyncLogic.postOpSyncTrancheAccounting($, toDepositOperation(_trancheType), ZERO_NAV_UNITS);
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made

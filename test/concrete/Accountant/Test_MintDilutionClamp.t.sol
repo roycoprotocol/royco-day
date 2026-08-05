@@ -74,7 +74,8 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
      *         floor((supply + 1) x MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)) = (supply + 1) x (1e12 - 1): the depositor captures all but one
      *         part in 1e12 of the tranche, and the supply grows by a bounded factor instead of x value
      *         (pre-clamp, this deposit would have minted supply x value ~ 1e21 times more). Preview parity
-     *         must hold on the clamped branch too
+     *         must hold on the clamped branch too. The deposit is sized to cure the liquidation breach, since the
+     *         post-op gate rejects any wiped-buffer entry that leaves the market at or above the threshold
      */
     function test_MintDilutionClamp_WipedTrancheDeposit_MintsExactlyTheCapWithPreviewParity() public {
         // Wipe the junior tranche to exactly zero effective NAV (see the contract docstring derivation)
@@ -84,9 +85,11 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
         uint256 supplyBefore = juniorTranche.totalSupply();
         assertGt(supplyBefore, 0, "the wiped supply must remain outstanding");
 
-        uint256 assets = 1e18;
+        // The wiped state reads infinite coverage utilization, so the post-op liquidation gate requires the deposit
+        // to cure the breach in one shot: 5000e18 assets quote to 3000e18 NAV, landing the mark at 81_000e18 against
+        // the ~80_489e18 cure floor, while still binding the clamp by ~22 orders of magnitude over the ~1e12 threshold
+        uint256 assets = 5000e18;
         uint256 value = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(assets)));
-        // The bind holds: value ~ 0.6e18 NAV wei over the 1-wei pinned denominator, far past the ~1e12 bind threshold
         assertGt(value * (WAD - MAX_MINT_DILUTION_WAD), MAX_MINT_DILUTION_WAD, "the dilution deposit must bind the clamp");
         uint256 cap = Math.mulDiv(supplyBefore + VS, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
 
@@ -96,6 +99,10 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
         assertEq(minted, cap, "the dilution mint clamps to exactly the cap");
         assertEq(minted, predicted, "preview parity at the clamped mint");
         assertEq(minted, RoycoTestMath.convertToShares(value, 0, supplyBefore), "mirror agreement at the clamped mint");
+
+        // The curing deposit settles the market strictly below the liquidation threshold, disarming the gate
+        state = _sync();
+        assertLt(state.coverageUtilizationWAD, state.coverageLiquidationUtilizationWAD, "the curing deposit must disarm the liquidation regime");
 
         // The capture guarantee in both directions: the depositor owns at most (1 - residual) of the post-mint
         // supply, and at least that minus the cap's floor dust — near-total capture, bounded growth
