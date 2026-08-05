@@ -4248,8 +4248,15 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // The zero-NAV state prices through the virtual-value offset (denominator 0 + VIRTUAL_VALUE = 1 wei), the
         // collapsed-price regime arms the clamp, and the deposit's NAV value dwarfs the bind threshold (~1e12 wei)
-        // so min(cap, fair) resolves to the cap
-        uint256 assets = testConfig.initialFunding / 1000;
+        // so min(cap, fair) resolves to the cap. The post-op liquidation gate requires the wiped-buffer deposit to
+        // cure the breach in one shot (post-op mark C2 must satisfy C2 * m <= (C2 - stEff) * (L - 1) with the wiped
+        // buffer contributing nothing), while the unbacked-holder pin below needs the WAD coverage gate to stay
+        // breached, so the deposit delta targets the midpoint of the band (c1 * m / (L - 1 - m), c1 * m / (WAD - m))
+        uint256 cureDeltaLo =
+            Math.mulDiv(toUint256(a.lastCollateralNAV), a.minCoverageWAD, a.coverageLiquidationUtilizationWAD - 1 - a.minCoverageWAD, Math.Rounding.Ceil);
+        uint256 cureDeltaHi = Math.mulDiv(toUint256(a.lastCollateralNAV), a.minCoverageWAD, WAD - a.minCoverageWAD);
+        assertLt(cureDeltaLo, cureDeltaHi, "arrange: the leaf's cured-but-still-covered band must be non-empty");
+        uint256 assets = toUint256(KERNEL.convertValueToCollateralAssets(toNAVUnits((cureDeltaLo + cureDeltaHi) / 2)));
         NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
         uint256 expectedShares = _expectedShares(value, jtSupplyPre, ZERO_NAV_UNITS);
         assertGt(toUint256(value) * (WAD - MAX_MINT_DILUTION), MAX_MINT_DILUTION, "arrange: the dilution deposit must bind the clamp");
@@ -4264,6 +4271,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(r.shares, expectedShares, "deposit shares must match the zero-NAV denominator formula exactly");
         _assertCommittedConservation();
         _assertSolvency();
+        // The curing deposit disarms the liquidation regime while the WAD coverage gate stays breached for the pin below
+        uint256 settledCoverageUtilizationWAD = _snap().coverageUtilizationWAD;
+        assertLt(settledCoverageUtilizationWAD, ACCOUNTANT.getState().coverageLiquidationUtilizationWAD, "the curing deposit must settle below the threshold");
+        assertGt(settledCoverageUtilizationWAD, WAD, "the curing deposit must leave the WAD coverage gate breached");
 
         // The unbacked holder is diluted to its floor-scaled dust claim, valued through convertToAssets:
         // previewRedeem simulates the real redemption and bubbles the still-breached coverage gate like exec
