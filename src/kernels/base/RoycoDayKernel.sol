@@ -392,10 +392,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             require(sequencerStartedAt != 0 && (block.timestamp - sequencerStartedAt) > $.gracePeriodSeconds, GRACE_PERIOD_NOT_OVER());
         }
 
-        // Fetch the collateral asset price in NAV units.
+        // Fetch the collateral asset price in NAV units and ensure it is non-zero
         (collateralAssetPrice,) = IRoycoPriceOracle($.collateralAssetOracle).getPrice();
-
-        // Conduct sanity checks
         require(collateralAssetPrice != ZERO_NAV_UNITS, INVALID_PRICE());
     }
 

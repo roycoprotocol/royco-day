@@ -108,15 +108,21 @@ struct AdaptiveCurveYDM_V2_Params {
 struct ChainlinkPriceOracleParams {
     address collateralToNavAssetFeed;
     // The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
-    uint48 feedStalenessThresholdSeconds;
+    uint32 chainlinkOracleStalenessThresholdSeconds;
 }
 
 /// @notice Params for `OracleType.ERC4626SharePrice`: share price via `convertToAssets` x the base-asset-to-NAV feed.
 /// @dev The vault is the market's collateral asset itself.
 struct ERC4626SharePriceOracleParams {
     address baseAssetToNavAssetFeed;
+    // The minimum relative deviation from the checkpointed share price that counts as an update (zero counts any change)
+    uint256 minDeviationWAD;
+    // Deployer-attested timestamp of the share price's last update (zero holds pricing shut until the first observed deviation)
+    uint32 lastUpdate;
     // The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
-    uint48 feedStalenessThresholdSeconds;
+    uint32 chainlinkOracleStalenessThresholdSeconds;
+    // The maximum age of the share-price clock's checkpoint before pricing fails shut, sized past the vault's longest plausible flat stretch
+    uint32 vaultSharePriceStalenessThresholdSeconds;
 }
 
 /// @notice Params for `OracleType.MakinaSharePrice`: machine share price via `convertToAssets` x the accounting-asset-to-NAV feed.
@@ -125,7 +131,9 @@ struct MakinaSharePriceOracleParams {
     address makinaMachine;
     address accountingAssetToNavAssetFeed;
     // The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
-    uint48 feedStalenessThresholdSeconds;
+    uint32 chainlinkOracleStalenessThresholdSeconds;
+    // The maximum age of the machine's last global accounting before pricing fails shut, sized to the machine's accounting cadence
+    uint32 makinaAccountingStalenessThresholdSeconds;
 }
 
 /// @notice Params for `OracleType.IdleCDOTranchePrice`: CDO virtual price x the underlying-token-to-NAV feed
@@ -137,9 +145,9 @@ struct IdleCDOTranchePriceOracleParams {
     // Admin-attested timestamp of the virtual price's last update (zero holds pricing shut until the first observed deviation)
     uint32 lastUpdate;
     // The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
-    uint48 feedStalenessThresholdSeconds;
+    uint32 chainlinkOracleStalenessThresholdSeconds;
     // The maximum age of the virtual-price clock's checkpoint before pricing fails shut, sized to the CDO's update cadence
-    uint48 virtualPriceStalenessThresholdSeconds;
+    uint32 cdoPriceStalenessThresholdSeconds;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

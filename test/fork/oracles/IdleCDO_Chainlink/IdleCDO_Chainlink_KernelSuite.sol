@@ -88,7 +88,7 @@ abstract contract IdleCDO_Chainlink_KernelSuite is Test_BalancerExogenousInterac
 
     /// @dev The staleness selector the collateral oracle fails shut with, enabling the abstract suite's staleness
     ///      brick test. The brick warp exceeds BOTH hop thresholds and the base checks the feed hop first, so the
-    ///      composed oracle surfaces the feed's error rather than STALE_VIRTUAL_PRICE.
+    ///      composed oracle surfaces the feed's error rather than STALE_SOURCE_PRICE.
     function _oracleStalenessSelector() internal pure virtual override returns (bytes4) {
         return ChainlinkPriceOracleBase.STALE_FEED_PRICE.selector;
     }

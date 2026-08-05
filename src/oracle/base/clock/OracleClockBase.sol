@@ -59,7 +59,7 @@ abstract contract OracleClockBase {
     function poke() public virtual returns (uint256 lastUpdatedAt) {
         // Observe the source, and update the checkpoint and clock if it deviated
         (uint256 price, bool deviated) = _observeOraclePriceDeviation();
-        if (deviated) (_lastOraclePrice, _lastUpdatedAt) = (price.toUint160(), uint32(block.timestamp));
+        if (deviated) (_lastOraclePrice, _lastUpdatedAt) = (price.toUint160(), block.timestamp.toUint32());
         return _lastUpdatedAt;
     }
 

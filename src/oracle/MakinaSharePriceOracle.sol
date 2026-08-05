@@ -20,23 +20,35 @@ contract MakinaSharePriceOracle is ChainlinkPriceOracleBase {
     /// @notice The Makina machine whose share token is the collateral asset
     address public immutable MAKINA_MACHINE;
 
+    /// @notice The maximum age of the machine's last global accounting before pricing fails shut
+    uint32 public immutable MAKINA_ACCOUNTING_STALENESS_THRESHOLD_SECONDS;
+
     /// @dev The share amount to pass to convertToAssets() such that the result is scaled to WAD precision
     uint256 internal immutable _MACHINE_SHARES_TO_CONVERT_TO_ASSETS;
+
+    /// @notice Thrown when the machine's last global accounting is older than the accounting staleness threshold
+    error STALE_MAKINA_ACCOUNTING();
 
     /**
      * @notice Constructs the Makina share price to Chainlink (compatible) oracle composed collateral oracle
      * @param _makinaMachine The Makina machine whose share token is the collateral asset
      * @param _accountingAssetToNavAssetOracle The Chainlink (compatible) oracle pricing the machine's accounting asset in NAV units
-     * @param _feedStalenessThresholdSeconds The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
+     * @param _chainlinkOracleStalenessThresholdSeconds The maximum age of the Chainlink (compatible) oracle's report before pricing fails shut, sized to its heartbeat
+     * @param _makinaAccountingStalenessThresholdSeconds The maximum age of the machine's last global accounting before pricing fails shut, sized to the machine's accounting cadence
      */
     constructor(
         address _makinaMachine,
         address _accountingAssetToNavAssetOracle,
-        uint48 _feedStalenessThresholdSeconds
+        uint32 _chainlinkOracleStalenessThresholdSeconds,
+        uint32 _makinaAccountingStalenessThresholdSeconds
     )
-        ChainlinkPriceOracleBase(IMachine(_makinaMachine).shareToken(), _accountingAssetToNavAssetOracle, _feedStalenessThresholdSeconds)
+        ChainlinkPriceOracleBase(IMachine(_makinaMachine).shareToken(), _accountingAssetToNavAssetOracle, _chainlinkOracleStalenessThresholdSeconds)
     {
+        // Conduct sanity checks on the accounting staleness threshold
+        require(_makinaAccountingStalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
+
         MAKINA_MACHINE = _makinaMachine;
+        MAKINA_ACCOUNTING_STALENESS_THRESHOLD_SECONDS = _makinaAccountingStalenessThresholdSeconds;
 
         // Compute the share amount to pass to convertToAssets() such that the result is scaled to WAD precision
         // OUTPUT_DECIMALS = INPUT_DECIMALS + ACCOUNTING_ASSET_DECIMALS - SHARE_DECIMALS
@@ -52,10 +64,13 @@ contract MakinaSharePriceOracle is ChainlinkPriceOracleBase {
      * @inheritdoc ChainlinkPriceOracleBase
      * @notice The price returned is the composed share price and updatedAt is the oldest hop's last update
      * @dev Reports the older of the machine's last global accounting time and the Chainlink leg's update timestamp, so a feed update alone never advances the clock while the machine's AUM report stays stale
+     * @dev Fails shut when the machine's last global accounting is older than the accounting staleness threshold, the machine-hop counterpart of the base's feed staleness gate
      */
     function getPrice() public view override(ChainlinkPriceOracleBase) returns (NAV_UNIT price, uint256 updatedAt) {
         (price, updatedAt) = ChainlinkPriceOracleBase.getPrice();
-        updatedAt = Math.min(updatedAt, IMachine(MAKINA_MACHINE).lastGlobalAccountingTime());
+        uint256 makinaAccountingUpdatedAt = IMachine(MAKINA_MACHINE).lastGlobalAccountingTime();
+        require((makinaAccountingUpdatedAt + MAKINA_ACCOUNTING_STALENESS_THRESHOLD_SECONDS) >= block.timestamp, STALE_MAKINA_ACCOUNTING());
+        updatedAt = Math.min(updatedAt, makinaAccountingUpdatedAt);
     }
 
     /// @inheritdoc ChainlinkPriceOracleBase

@@ -38,11 +38,11 @@ contract MockPriceOracle is IRoycoPriceOracle {
      * @notice Deploys the mock oracle with a single fresh report
      * @param _collateralAsset The collateral asset this oracle prices in NAV units
      * @param _initialPriceWAD The initial price of 1 whole collateral asset in NAV units, WAD scaled
-     * @param _feedStalenessThresholdSeconds The staleness threshold getPrice enforces, mirroring the real adapters
+     * @param _chainlinkOracleStalenessThresholdSeconds The staleness threshold getPrice enforces, mirroring the real adapters
      */
-    constructor(address _collateralAsset, uint256 _initialPriceWAD, uint48 _feedStalenessThresholdSeconds) {
+    constructor(address _collateralAsset, uint256 _initialPriceWAD, uint32 _chainlinkOracleStalenessThresholdSeconds) {
         COLLATERAL_ASSET = _collateralAsset;
-        FEED_STALENESS_THRESHOLD_SECONDS = _feedStalenessThresholdSeconds;
+        FEED_STALENESS_THRESHOLD_SECONDS = _chainlinkOracleStalenessThresholdSeconds;
         _priceWAD = _initialPriceWAD;
         _updatedAt = block.timestamp;
     }

@@ -31,8 +31,14 @@ abstract contract Market_SnUSD is DayMarketRegistryBase {
                 specificParams: abi.encode(
                     ERC4626SharePriceOracleParams({
                         baseAssetToNavAssetFeed: 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95,
+                        // The vault accrues continuously, so any observed share-price change counts as an update
+                        minDeviationWAD: 0,
+                        // Attested share-price update timestamp as of deployment
+                        lastUpdate: 1_782_400_000,
                         // RedStone pushes updates ~every 12 hours; 48h staleness threshold for safety
-                        feedStalenessThresholdSeconds: 48 hours
+                        chainlinkOracleStalenessThresholdSeconds: 48 hours,
+                        // Reward vesting moves the share price every block; 8 days covers any plausible flat stretch
+                        vaultSharePriceStalenessThresholdSeconds: 8 days
                     })
                 )
             }),

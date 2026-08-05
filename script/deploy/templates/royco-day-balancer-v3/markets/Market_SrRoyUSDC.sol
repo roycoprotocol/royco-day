@@ -26,7 +26,13 @@ abstract contract Market_SrRoyUSDC is DayMarketRegistryBase {
                 specificParams: abi.encode(
                     ERC4626SharePriceOracleParams({
                         baseAssetToNavAssetFeed: 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6,
-                        feedStalenessThresholdSeconds: 48 hours // USDC/USD heartbeat is 24h; doubled for safety
+                        // The vault accrues continuously, so any observed share-price change counts as an update
+                        minDeviationWAD: 0,
+                        // Attested share-price update timestamp as of deployment
+                        lastUpdate: 1_782_400_000,
+                        chainlinkOracleStalenessThresholdSeconds: 48 hours, // USDC/USD heartbeat is 24h; doubled for safety
+                        // Yield accrual moves the share price continuously; 8 days covers any plausible flat stretch
+                        vaultSharePriceStalenessThresholdSeconds: 8 days
                     })
                 )
             }),

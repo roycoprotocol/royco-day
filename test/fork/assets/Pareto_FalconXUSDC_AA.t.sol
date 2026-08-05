@@ -65,8 +65,8 @@ contract Pareto_FalconXUSDC_AA is IdleCDO_Chainlink_KernelSuite {
                 lastUpdate: uint32(block.timestamp),
                 // Per-hop staleness immutables: the Chainlink leg tight (24h heartbeat doubled), the virtual-price
                 // clock wide enough for the CDO's slow cadence
-                feedStalenessThresholdSeconds: 48 hours,
-                virtualPriceStalenessThresholdSeconds: 8 days
+                chainlinkOracleStalenessThresholdSeconds: 48 hours,
+                cdoPriceStalenessThresholdSeconds: 8 days
             })
         );
 

@@ -45,15 +45,24 @@ abstract contract CollateralOracleDeployer is DeployScriptBase {
         if (o.oracleType == OracleType.ChainlinkPrice) {
             ChainlinkPriceOracleParams memory p = abi.decode(o.specificParams, (ChainlinkPriceOracleParams));
             creationCode = type(ChainlinkPriceOracle).creationCode;
-            ctorArgs = abi.encode(_config.collateralAsset, p.collateralToNavAssetFeed, p.feedStalenessThresholdSeconds);
+            ctorArgs = abi.encode(_config.collateralAsset, p.collateralToNavAssetFeed, p.chainlinkOracleStalenessThresholdSeconds);
         } else if (o.oracleType == OracleType.ERC4626SharePrice) {
             ERC4626SharePriceOracleParams memory p = abi.decode(o.specificParams, (ERC4626SharePriceOracleParams));
             creationCode = type(ERC4626SharePriceOracle).creationCode;
-            ctorArgs = abi.encode(_config.collateralAsset, p.baseAssetToNavAssetFeed, p.feedStalenessThresholdSeconds);
+            ctorArgs = abi.encode(
+                _config.collateralAsset,
+                p.baseAssetToNavAssetFeed,
+                p.minDeviationWAD,
+                p.lastUpdate,
+                p.chainlinkOracleStalenessThresholdSeconds,
+                p.vaultSharePriceStalenessThresholdSeconds
+            );
         } else if (o.oracleType == OracleType.MakinaSharePrice) {
             MakinaSharePriceOracleParams memory p = abi.decode(o.specificParams, (MakinaSharePriceOracleParams));
             creationCode = type(MakinaSharePriceOracle).creationCode;
-            ctorArgs = abi.encode(p.makinaMachine, p.accountingAssetToNavAssetFeed, p.feedStalenessThresholdSeconds);
+            ctorArgs = abi.encode(
+                p.makinaMachine, p.accountingAssetToNavAssetFeed, p.chainlinkOracleStalenessThresholdSeconds, p.makinaAccountingStalenessThresholdSeconds
+            );
         } else if (o.oracleType == OracleType.IdleCDOTranchePrice) {
             IdleCDOTranchePriceOracleParams memory p = abi.decode(o.specificParams, (IdleCDOTranchePriceOracleParams));
             creationCode = type(IdleCDOTranchePriceOracle).creationCode;
@@ -63,8 +72,8 @@ abstract contract CollateralOracleDeployer is DeployScriptBase {
                 p.underlyingTokenToNavAssetFeed,
                 p.minDeviationWAD,
                 p.lastUpdate,
-                p.feedStalenessThresholdSeconds,
-                p.virtualPriceStalenessThresholdSeconds
+                p.chainlinkOracleStalenessThresholdSeconds,
+                p.cdoPriceStalenessThresholdSeconds
             );
         } else {
             revert UnsupportedOracleType(o.oracleType);

@@ -30,7 +30,13 @@ abstract contract Market_APYX is DayMarketRegistryBase {
                     // Chainlink apxUSD/USD exchange rate (https://data.chain.link/feeds/ethereum/mainnet/apxusd-usd-exchange-rate)
                     ERC4626SharePriceOracleParams({
                         baseAssetToNavAssetFeed: 0x651b101f72F82630cf59c68E6EE4305aFBd3B1F5,
-                        feedStalenessThresholdSeconds: 48 hours // the feed pushes ~every 12 hours; 48h mirrors dawn
+                        // The vault accrues continuously, so any observed share-price change counts as an update
+                        minDeviationWAD: 0,
+                        // Attested share-price update timestamp as of deployment
+                        lastUpdate: 1_782_400_000,
+                        chainlinkOracleStalenessThresholdSeconds: 48 hours, // the feed pushes ~every 12 hours; 48h mirrors dawn
+                        // Yield accrual moves the share price continuously; 8 days covers any plausible flat stretch
+                        vaultSharePriceStalenessThresholdSeconds: 8 days
                     })
                 )
             }),

@@ -8,16 +8,19 @@ import { TokenInfo, TokenType } from "../../../lib/balancer-v3-monorepo/pkg/inte
 import { LPOracleBase } from "../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/LPOracleBase.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
+import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
+import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
+import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AggregatorV3Interface } from "../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
@@ -27,9 +30,6 @@ import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoPr
 import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { NAV_UNIT } from "../../../src/libraries/Units.sol";
 import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
-import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
-import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
-import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 
@@ -64,8 +64,8 @@ contract Test_IdleCDOMarketDeployment is Test {
 
     /// @dev The per-hop staleness immutables: the Chainlink leg tight (24h heartbeat doubled), the virtual-price
     ///      clock wide (Pareto steps the CDO NAV ~weekly)
-    uint48 internal constant FEED_STALENESS_THRESHOLD_SECONDS = 48 hours;
-    uint48 internal constant SOURCE_STALENESS_THRESHOLD_SECONDS = 8 days;
+    uint32 internal constant FEED_STALENESS_THRESHOLD_SECONDS = 48 hours;
+    uint32 internal constant CDO_PRICE_STALENESS_THRESHOLD_SECONDS = 8 days;
 
     address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // non-tranche collateral for the guard test
 
@@ -154,7 +154,7 @@ contract Test_IdleCDOMarketDeployment is Test {
                 MIN_DEVIATION_WAD,
                 uint32(block.timestamp),
                 FEED_STALENESS_THRESHOLD_SECONDS,
-                SOURCE_STALENESS_THRESHOLD_SECONDS
+                CDO_PRICE_STALENESS_THRESHOLD_SECONDS
             )
         );
     }
@@ -227,8 +227,10 @@ contract Test_IdleCDOMarketDeployment is Test {
             virtualPriceWAD.mulDiv(uint256(answer), 10 ** AggregatorV3Interface(USDC_USD_FEED).decimals()),
             "composed price != CDO virtual price x feed"
         );
-        assertLt(feedUpdatedAt, oracle.previewPoke(), "the feed must be the older hop at this pinned block");
-        assertEq(updatedAt, Math.min(feedUpdatedAt, oracle.previewPoke()), "report timestamp must be the older of the deviation clock and the feed");
+        (, uint32 reportClockUpdatedAt) = oracle.getOracleClockState();
+        assertLt(feedUpdatedAt, reportClockUpdatedAt, "the feed must be the older hop at this pinned block");
+        assertEq(updatedAt, feedUpdatedAt, "report timestamp must be the older of the deviation clock and the feed");
+        assertEq(oracle.previewPoke(), updatedAt, "previewPoke must agree with getPrice's report timestamp");
         assertGt(NAV_UNIT.unwrap(price), 0.01e18, "composed price implausibly low");
         assertLt(NAV_UNIT.unwrap(price), 100e18, "composed price implausibly high");
 
@@ -276,7 +278,7 @@ contract Test_IdleCDOMarketDeployment is Test {
     function test_RevertIf_CollateralIsNotACDOTranche() external {
         vm.expectRevert(IdleCDOTranchePriceOracle.COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE.selector);
         new IdleCDOTranchePriceOracle(
-            PARETO_FALCONX_CDO, SNUSD_VAULT, USDC_USD_FEED, MIN_DEVIATION_WAD, 0, FEED_STALENESS_THRESHOLD_SECONDS, SOURCE_STALENESS_THRESHOLD_SECONDS
+            PARETO_FALCONX_CDO, SNUSD_VAULT, USDC_USD_FEED, MIN_DEVIATION_WAD, 0, FEED_STALENESS_THRESHOLD_SECONDS, CDO_PRICE_STALENESS_THRESHOLD_SECONDS
         );
     }
 }

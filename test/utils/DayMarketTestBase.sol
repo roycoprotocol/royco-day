@@ -73,7 +73,7 @@ abstract contract DayMarketTestBase is Assertions {
     // =============================
 
     /// @dev Collateral asset oracle staleness threshold wired into the kernel at initialization
-    uint48 internal constant ORACLE_STALENESS_THRESHOLD_SECONDS = 1 days;
+    uint32 internal constant ORACLE_STALENESS_THRESHOLD_SECONDS = 1 days;
 
     /// @dev Sequencer grace period wired into the kernel at initialization (inert until a test wires a sequencer feed)
     uint48 internal constant ORACLE_GRACE_PERIOD_SECONDS = 1 hours;

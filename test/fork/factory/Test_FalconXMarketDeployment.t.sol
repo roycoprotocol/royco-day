@@ -11,6 +11,9 @@ import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/to
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { ERC4626SharePriceOracleParams, IdleCDOTranchePriceOracleParams } from "../../../script/config/DeploymentTypes.sol";
+import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
+import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, JT_LP_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
@@ -28,10 +31,8 @@ import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoPr
 import { NAV_UNIT, TRANCHE_UNIT } from "../../../src/libraries/Units.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
+import { ClockedChainlinkPriceOracleBase } from "../../../src/oracle/base/ClockedChainlinkPriceOracleBase.sol";
 import { ChainlinkPriceOracleBase } from "../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
-import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
-import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
-import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 
@@ -136,9 +137,7 @@ contract Test_FalconXMarketDeployment is Test {
     ///      ERC4626 share-price oracle is deployed directly and the 18-decimal sUSDe genesis seed is dealt
     function _deployUpstreamSrRoyUsdc() internal {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
-        cfg.oracle.deployed = address(
-            _newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams)
-        );
+        cfg.oracle.deployed = address(_newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams));
         deal(cfg.pool.quoteAsset, DEPLOYER, cfg.poolInitialization.quoteAmount);
         vm.prank(DEPLOYER);
         IERC20(cfg.pool.quoteAsset).approve(address(template), cfg.poolInitialization.quoteAmount);
@@ -196,8 +195,8 @@ contract Test_FalconXMarketDeployment is Test {
                 p.underlyingTokenToNavAssetFeed,
                 p.minDeviationWAD,
                 _attestedLastUpdate,
-                p.feedStalenessThresholdSeconds,
-                p.virtualPriceStalenessThresholdSeconds
+                p.chainlinkOracleStalenessThresholdSeconds,
+                p.cdoPriceStalenessThresholdSeconds
             )
         );
     }
@@ -259,8 +258,7 @@ contract Test_FalconXMarketDeployment is Test {
         IdleCDOTranchePriceOracle oracle = IdleCDOTranchePriceOracle(kernel.getCollateralAssetOracle());
         assertEq(oracle.IDLE_CDO(), PARETO_FALCONX_CDO, "oracle CDO != configured CDO");
         assertEq(oracle.COLLATERAL_ASSET(), AA_TRANCHE_TOKEN, "oracle collateral != market collateral");
-        IdleCDOTranchePriceOracleParams memory p =
-            abi.decode(registry.getDayMarketConfig("FalconX").oracle.specificParams, (IdleCDOTranchePriceOracleParams));
+        IdleCDOTranchePriceOracleParams memory p = abi.decode(registry.getDayMarketConfig("FalconX").oracle.specificParams, (IdleCDOTranchePriceOracleParams));
         assertEq(oracle.MIN_DEVIATION_WAD(), p.minDeviationWAD, "deviation threshold != configured");
 
         // The composed price is live against the real CDO: AA virtual price lifted from the underlying's decimals to
@@ -284,11 +282,10 @@ contract Test_FalconXMarketDeployment is Test {
     function test_PerHopStaleness_FeedGateStaysTightDespiteTheSlowClock() external {
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
         IdleCDOTranchePriceOracle oracle = IdleCDOTranchePriceOracle(IRoycoDayKernel(r.kernel).getCollateralAssetOracle());
-        IdleCDOTranchePriceOracleParams memory p =
-            abi.decode(registry.getDayMarketConfig("FalconX").oracle.specificParams, (IdleCDOTranchePriceOracleParams));
-        assertEq(oracle.FEED_STALENESS_THRESHOLD_SECONDS(), p.feedStalenessThresholdSeconds, "feed threshold != configured immutable");
-        assertEq(oracle.SOURCE_STALENESS_THRESHOLD_SECONDS(), p.virtualPriceStalenessThresholdSeconds, "clock threshold != configured immutable");
-        assertLt(oracle.FEED_STALENESS_THRESHOLD_SECONDS(), oracle.SOURCE_STALENESS_THRESHOLD_SECONDS(), "the delta only exists when the gates differ");
+        IdleCDOTranchePriceOracleParams memory p = abi.decode(registry.getDayMarketConfig("FalconX").oracle.specificParams, (IdleCDOTranchePriceOracleParams));
+        assertEq(oracle.FEED_STALENESS_THRESHOLD_SECONDS(), p.chainlinkOracleStalenessThresholdSeconds, "feed threshold != configured immutable");
+        assertEq(oracle.SOURCE_PRICE_STALENESS_THRESHOLD_SECONDS(), p.cdoPriceStalenessThresholdSeconds, "clock threshold != configured immutable");
+        assertLt(oracle.FEED_STALENESS_THRESHOLD_SECONDS(), oracle.SOURCE_PRICE_STALENESS_THRESHOLD_SECONDS(), "the delta only exists when the gates differ");
 
         // Three days: past the feed's 48h gate, inside the clock's 8-day gate — the FEED hop fails shut
         vm.warp(block.timestamp + 3 days);
@@ -303,7 +300,7 @@ contract Test_FalconXMarketDeployment is Test {
             abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
             abi.encode(roundId, answer, block.timestamp, block.timestamp, answeredInRound)
         );
-        vm.expectRevert(IdleCDOTranchePriceOracle.STALE_VIRTUAL_PRICE.selector);
+        vm.expectRevert(ClockedChainlinkPriceOracleBase.STALE_SOURCE_PRICE.selector);
         oracle.getPrice();
     }
 
@@ -364,10 +361,17 @@ contract Test_FalconXMarketDeployment is Test {
         assertEq(a.jtYDM, r.ydm, "accountant JT model != registry instance");
         assertEq(a.lptYDM, r.lptYdm, "accountant LPT model != registry instance");
     }
+
     /// @dev Deploys the config's ERC4626 share-price adapter with its per-hop staleness immutable, as the script does
     function _newErc4626Oracle(address _collateral, bytes memory _oracleParams) internal returns (ERC4626SharePriceOracle) {
         ERC4626SharePriceOracleParams memory op = abi.decode(_oracleParams, (ERC4626SharePriceOracleParams));
-        return new ERC4626SharePriceOracle(_collateral, op.baseAssetToNavAssetFeed, op.feedStalenessThresholdSeconds);
+        return new ERC4626SharePriceOracle(
+            _collateral,
+            op.baseAssetToNavAssetFeed,
+            op.minDeviationWAD,
+            op.lastUpdate,
+            op.chainlinkOracleStalenessThresholdSeconds,
+            op.vaultSharePriceStalenessThresholdSeconds
+        );
     }
-
 }

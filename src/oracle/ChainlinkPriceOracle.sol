@@ -17,14 +17,14 @@ contract ChainlinkPriceOracle is ChainlinkPriceOracleBase {
      * @notice Constructs the Chainlink (compatible) collateral oracle
      * @param _collateralAsset The collateral asset the feed directly prices in NAV units
      * @param _collateralToNavAssetOracle The Chainlink (compatible) oracle pricing the collateral asset in NAV units
-     * @param _feedStalenessThresholdSeconds The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
+     * @param _chainlinkOracleStalenessThresholdSeconds The maximum age of the Chainlink (compatible) oracle's report before pricing fails shut, sized to its heartbeat
      */
     constructor(
         address _collateralAsset,
         address _collateralToNavAssetOracle,
-        uint48 _feedStalenessThresholdSeconds
+        uint32 _chainlinkOracleStalenessThresholdSeconds
     )
-        ChainlinkPriceOracleBase(_collateralAsset, _collateralToNavAssetOracle, _feedStalenessThresholdSeconds)
+        ChainlinkPriceOracleBase(_collateralAsset, _collateralToNavAssetOracle, _chainlinkOracleStalenessThresholdSeconds)
     { }
 
     /// @inheritdoc IRoycoPriceOracle

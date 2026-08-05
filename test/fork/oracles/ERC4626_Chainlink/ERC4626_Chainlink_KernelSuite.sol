@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ChainlinkPriceOracleBase } from "../../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
+import { IERC20Metadata, IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
+import { ERC4626SharePriceOracle } from "../../../../src/oracle/ERC4626SharePriceOracle.sol";
+import { ChainlinkPriceOracleBase } from "../../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
 import { Test_BalancerExogenousInteractionsBase } from "../../venues/balancer-v3/Test_BalancerExogenousInteractionsBase.t.sol";
 
 /**
@@ -22,6 +24,11 @@ abstract contract ERC4626_Chainlink_KernelSuite is Test_BalancerExogenousInterac
     /// @dev Cached base->NAV feed answer, mocked once then moved by `simulate*`; re-stamped fresh after warps.
     int256 internal _mockedOracleAnswer;
     bool internal _oracleMocked;
+
+    /// @dev Cached vault share price at the oracle's probe amount, seeded from the REAL vault on first use.
+    ///      The suite's PnL axis is the feed, so the share price stays at this reading for the whole campaign.
+    uint256 internal _mockedSharePrice;
+    bool internal _sharePriceMocked;
 
     /// @dev The base(asset)->NAV Chainlink-compatible feed backing this market (e.g. the RedStone nUSD feed for snUSD).
     function _baseAssetToNavOracle() internal view virtual returns (address);
@@ -82,8 +89,41 @@ abstract contract ERC4626_Chainlink_KernelSuite is Test_BalancerExogenousInterac
      *      move) and stamped fresh, so admin-op warps never leave the market quoting a stale feed.
      */
     function _refreshOraclesAfterWarp() internal virtual override {
+        // Re-stamp the feed leg fresh
         if (!_oracleMocked) _pinOracleFresh();
         else _applyOracleMock(_baseAssetToNavOracle());
+
+        // Re-checkpoint the share-price clock fresh without moving the price: the vault's share price is static
+        // at the pinned fork block (the PnL axis is the feed), so the clock is advanced through a price-neutral
+        // double poke (bump one wei, poke, restore, poke), which the market's zero deviation threshold counts
+        // as two observed updates while leaving the price bit-identical
+        if (!_sharePriceMocked) _seedSharePriceMock();
+        uint256 restore = _mockedSharePrice;
+        _applySharePriceMock(restore + 1);
+        _pokeCollateralOracle();
+        _applySharePriceMock(restore);
+        _pokeCollateralOracle();
+    }
+
+    /// @dev Commits a clock checkpoint on the kernel's collateral oracle at the current share-price reading.
+    function _pokeCollateralOracle() internal {
+        ERC4626SharePriceOracle(KERNEL.getCollateralAssetOracle()).poke();
+    }
+
+    /// @dev Seeds the share-price mock from the REAL vault's live reading at the oracle's probe amount (a 0% move).
+    function _seedSharePriceMock() internal {
+        _mockedSharePrice = IERC4626(testConfig.stAsset).convertToAssets(_sharePriceProbeAmount());
+        _sharePriceMocked = true;
+    }
+
+    /// @dev The share amount the oracle passes to convertToAssets() for a WAD-scaled reading, recomputed from the
+    ///      vault's decimals exactly as the oracle's construction does
+    function _sharePriceProbeAmount() internal view returns (uint256) {
+        return 10 ** (18 + IERC4626(testConfig.stAsset).decimals() - IERC20Metadata(IERC4626(testConfig.stAsset).asset()).decimals());
+    }
+
+    function _applySharePriceMock(uint256 _sharePrice) internal {
+        vm.mockCall(testConfig.stAsset, abi.encodeWithSelector(IERC4626.convertToAssets.selector, _sharePriceProbeAmount()), abi.encode(_sharePrice));
     }
 
     /// @dev Freeze the base->NAV feed's live value into the mock (a 0% move) while it is still fresh, so a later warp can

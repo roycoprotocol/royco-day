@@ -8,6 +8,7 @@ import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOr
 import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
 import { MakinaSharePriceOracle } from "../../../src/oracle/MakinaSharePriceOracle.sol";
 import { ChainlinkPriceOracleBase } from "../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
+import { ClockedChainlinkPriceOracleBase } from "../../../src/oracle/base/ClockedChainlinkPriceOracleBase.sol";
 import { OracleClockBase } from "../../../src/oracle/base/clock/OracleClockBase.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockERC20C } from "../../mocks/MockERC20C.sol";
@@ -26,10 +27,12 @@ contract Test_CollateralOracles is Test {
     /// @dev Base timestamp so poke and update timestamps assert against stable absolute values
     uint256 internal constant T0 = 1_700_000_000;
 
-    /// @dev The per-hop staleness immutables the suite constructs with: the feed hop tight, the CDO clock hop wide,
-    ///      so the two gates can be crossed independently
-    uint48 internal constant FEED_STALENESS = 1 days;
-    uint48 internal constant SOURCE_STALENESS = 30 days;
+    /// @dev The per-hop staleness immutables the suite constructs with: the feed hop tight, the CDO clock and
+    ///      Makina accounting hops wide, so the gates can be crossed independently
+    uint32 internal constant FEED_STALENESS = 1 days;
+    uint32 internal constant CDO_PRICE_STALENESS = 30 days;
+    uint32 internal constant MAKINA_ACCOUNTING_STALENESS = 2 days;
+    uint32 internal constant VAULT_SHARE_PRICE_STALENESS = 3 days;
 
     MockERC20C internal referenceAsset;
     MockERC4626C internal vault;
@@ -52,13 +55,13 @@ contract Test_CollateralOracles is Test {
         referenceAsset = new MockERC20C("NUSD", "NUSD", 6);
         vault = new MockERC4626C(address(referenceAsset), "Staked NUSD", "sNUSD", 18);
         feed = new MockAggregatorV3(8, 1e8);
-        erc4626Oracle = new ERC4626SharePriceOracle(address(vault), address(feed), FEED_STALENESS);
+        erc4626Oracle = new ERC4626SharePriceOracle(address(vault), address(feed), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS);
 
         // Makina: an 18-decimal share over a 6-decimal accounting asset, sharing the same feed shape
         machineShare = new MockERC20C("DUSD", "DUSD", 18);
         MockERC20C accountingAsset = new MockERC20C("USDC", "USDC", 6);
         machine = new MockMakinaMachine(address(machineShare), address(accountingAsset), 1e18);
-        makinaOracle = new MakinaSharePriceOracle(address(machine), address(feed), FEED_STALENESS);
+        makinaOracle = new MakinaSharePriceOracle(address(machine), address(feed), FEED_STALENESS, MAKINA_ACCOUNTING_STALENESS);
 
         // Idle CDO: an AA tranche over a 6-decimal underlying, virtual price in underlying decimals, composed
         // with the shared feed as a fully immutable direct deployment with a zero deviation threshold
@@ -70,13 +73,13 @@ contract Test_CollateralOracles is Test {
 
     /// @dev Deploys the CDO tranche price oracle for the tranche with the specified deviation threshold and no attested checkpoint
     function _deployCDOOracle(address _tranche, uint256 _minDeviationWAD) internal returns (IdleCDOTranchePriceOracle oracle) {
-        return new IdleCDOTranchePriceOracle(address(cdo), _tranche, address(feed), _minDeviationWAD, 0, FEED_STALENESS, SOURCE_STALENESS);
+        return new IdleCDOTranchePriceOracle(address(cdo), _tranche, address(feed), _minDeviationWAD, 0, FEED_STALENESS, CDO_PRICE_STALENESS);
     }
 
     /// @dev Deploys the CDO oracle with an attested clock checkpoint, so getPrice's virtual-price hop starts FRESH
     ///      (an unattested zero checkpoint holds pricing shut under the source staleness gate)
     function _deploySeededCDOOracle(address _tranche, uint32 _lastUpdate) internal returns (IdleCDOTranchePriceOracle oracle) {
-        return new IdleCDOTranchePriceOracle(address(cdo), _tranche, address(feed), 0, _lastUpdate, FEED_STALENESS, SOURCE_STALENESS);
+        return new IdleCDOTranchePriceOracle(address(cdo), _tranche, address(feed), 0, _lastUpdate, FEED_STALENESS, CDO_PRICE_STALENESS);
     }
 
     /*----------------------------------------------------------------------
@@ -108,20 +111,70 @@ contract Test_CollateralOracles is Test {
         assertEq(toUint256(price), 1_234_567_890_000_000_003, "the composition floors the full product once");
     }
 
-    /// The share hop is always current, so the feed's update timestamp passes through unchanged next to the composed price
-    function test_ERC4626_feedUpdatedAtPassesThrough() public {
+    /// The report's timestamp is the OLDER hop: an older feed binds it, and with the share price at its attested
+    /// construction checkpoint the clock binds once the feed is fresher
+    function test_ERC4626_updatedAtIsTheOlderOfFeedAndShareClock() public {
         vault.setRate(1e18);
         feed.setAll(7, 2e8, T0 - 50, T0 - 10, 9);
         (NAV_UNIT price, uint256 updatedAt) = erc4626Oracle.getPrice();
         assertEq(toUint256(price), 2e18, "the composed price replaces the feed answer");
-        assertEq(updatedAt, T0 - 10, "the feed updatedAt passes through: the live share hop is always current");
+        assertEq(updatedAt, T0 - 10, "the older feed hop binds the report");
+
+        // A fresher feed hands the clock to the attested share-price checkpoint
+        vm.warp(T0 + 100);
+        feed.setUpdatedAt(T0 + 100);
+        (, updatedAt) = erc4626Oracle.getPrice();
+        assertEq(updatedAt, T0, "the attested share-price checkpoint binds once the feed is fresher");
     }
 
-    /// poke and previewPoke report the feed's update timestamp: the oracle network timestamps its own updates
-    function test_ERC4626_pokeReportsFeedUpdatedAt() public {
-        feed.setUpdatedAt(T0 - 123);
-        assertEq(erc4626Oracle.poke(), T0 - 123, "poke must pass the feed's update timestamp");
-        assertEq(erc4626Oracle.previewPoke(), T0 - 123, "previewPoke must agree with poke on a timestamp-forwarding oracle");
+    /// A feed heartbeat alone never advances the clock: poke keeps the attested checkpoint until the share
+    /// price itself is seen to move, which then stamps its observation time
+    function test_ERC4626_feedHeartbeatAloneNeverAdvancesTheClock() public {
+        vm.warp(T0 + 100);
+        feed.setUpdatedAt(T0 + 100);
+        assertEq(erc4626Oracle.poke(), T0, "a feed heartbeat alone must never advance the clock");
+        assertEq(erc4626Oracle.previewPoke(), T0, "previewPoke agrees while the share price is unmoved");
+
+        // A share-price move is the genuine update: the clock stamps its observation time
+        vault.setRate(1.01e18);
+        assertEq(erc4626Oracle.poke(), T0 + 100, "a share-price deviation checkpoints the clock");
+
+        // The mirror direction: a fresh deviation cannot outrun an older feed, the gate waits for the slower hop
+        feed.setUpdatedAt(T0 + 50);
+        vault.setRate(1.02e18);
+        assertEq(erc4626Oracle.poke(), T0 + 50, "a share-price deviation with an older feed reports the feed's timestamp");
+    }
+
+    /**
+     * The share-price hop's staleness gate: pricing fails shut once the checkpoint is older than the threshold,
+     * however fresh the feed is, the exact boundary age still prices, and a fresh deviation re-opens pricing
+     */
+    function test_ERC4626_RevertIf_SharePriceCheckpointStale() public {
+        // The exact boundary age still prices and binds the report's clock
+        vm.warp(T0 + VAULT_SHARE_PRICE_STALENESS);
+        feed.setUpdatedAt(block.timestamp);
+        (, uint256 updatedAt) = erc4626Oracle.getPrice();
+        assertEq(updatedAt, T0, "the boundary-age checkpoint still prices and binds the clock");
+
+        // One second past the boundary fails shut on the share hop despite the fresh feed
+        vm.warp(T0 + VAULT_SHARE_PRICE_STALENESS + 1);
+        feed.setUpdatedAt(block.timestamp);
+        vm.expectRevert(ClockedChainlinkPriceOracleBase.STALE_SOURCE_PRICE.selector);
+        erc4626Oracle.getPrice();
+
+        // A fresh share-price deviation reads as current and re-opens pricing
+        vault.setRate(1.02e18);
+        (, updatedAt) = erc4626Oracle.getPrice();
+        assertEq(updatedAt, block.timestamp, "an observed deviation re-opens pricing at the current timestamp");
+    }
+
+    /// An unattested zero checkpoint holds pricing shut under the share-price staleness gate until the first deviation
+    function test_ERC4626_unattestedCheckpointHoldsPricingShut() public {
+        ERC4626SharePriceOracle unattested = new ERC4626SharePriceOracle(address(vault), address(feed), 0, 0, FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS);
+        vm.warp(T0 + VAULT_SHARE_PRICE_STALENESS + 1);
+        feed.setUpdatedAt(block.timestamp);
+        vm.expectRevert(ClockedChainlinkPriceOracleBase.STALE_SOURCE_PRICE.selector);
+        unattested.getPrice();
     }
 
     /// A non-positive feed price cannot compose into an honest collateral price
@@ -150,9 +203,9 @@ contract Test_CollateralOracles is Test {
             erc4626Oracle.description(), string.concat("sNUSD / ", feed.description()), "the description reads as the triangulated pair chain through the feed"
         );
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new ERC4626SharePriceOracle(address(0), address(feed), FEED_STALENESS);
+        new ERC4626SharePriceOracle(address(0), address(feed), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS);
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new ERC4626SharePriceOracle(address(vault), address(0), FEED_STALENESS);
+        new ERC4626SharePriceOracle(address(vault), address(0), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS);
     }
 
     /*----------------------------------------------------------------------
@@ -222,6 +275,24 @@ contract Test_CollateralOracles is Test {
         assertEq(makinaOracle.poke(), T0 + 100, "the clock advances once the AUM report lands");
     }
 
+    /**
+     * The machine-hop staleness gate: pricing fails shut once the last global accounting is older than the
+     * accounting staleness threshold, however fresh the feed leg is, and the exact boundary age still prices
+     */
+    function test_Makina_RevertIf_AccountingOlderThanStalenessThreshold() public {
+        // A fresh feed cannot carry a stale AUM report: only the machine hop is old here
+        vm.warp(T0 + 10 days);
+        feed.setUpdatedAt(block.timestamp);
+        machine.setLastGlobalAccountingTime(block.timestamp - MAKINA_ACCOUNTING_STALENESS - 1);
+        vm.expectRevert(MakinaSharePriceOracle.STALE_MAKINA_ACCOUNTING.selector);
+        makinaOracle.getPrice();
+
+        // The exact boundary age still prices and, as the older hop, binds the report's clock
+        machine.setLastGlobalAccountingTime(block.timestamp - MAKINA_ACCOUNTING_STALENESS);
+        (, uint256 updatedAt) = makinaOracle.getPrice();
+        assertEq(updatedAt, block.timestamp - MAKINA_ACCOUNTING_STALENESS, "the boundary-age accounting hop must price and bind the clock");
+    }
+
     /*----------------------------------------------------------------------
                         IdleCDOTranchePriceOracle
     ----------------------------------------------------------------------*/
@@ -242,62 +313,70 @@ contract Test_CollateralOracles is Test {
         assertEq(seeded.decimals(), 18, "prices are reported at WAD precision");
 
         // The unattested oracle prices nothing: the zero checkpoint is stale by construction until a deviation
-        vm.expectRevert(IdleCDOTranchePriceOracle.STALE_VIRTUAL_PRICE.selector);
+        vm.expectRevert(ClockedChainlinkPriceOracleBase.STALE_SOURCE_PRICE.selector);
         cdoOracle.getPrice();
     }
 
     /**
-     * The two clock questions split across the two legs: a feed heartbeat alone never advances poke, only a
-     * virtual price deviation does, and getPrice's updatedAt keeps tracking the clock instead of the feed
+     * poke reports the composed report's timestamp, the oldest hop, so NEITHER leg alone opens the execution
+     * gate: a feed heartbeat is bound by the unmoved clock, and a virtual price deviation is bound by an older feed
      */
-    function test_IdleCDO_pokeKeysOnVirtualPriceNotTheFeed() public {
-        assertEq(cdoOracle.poke(), 0, "the construction baseline carries no update timestamp");
+    function test_IdleCDO_pokeReportsTheOldestHop() public {
+        IdleCDOTranchePriceOracle seeded = _deploySeededCDOOracle(address(aaTranche), uint32(T0));
 
         // A fresh feed heartbeat is invisible to the clock: the tranche price has not moved
         vm.warp(T0 + 100);
         feed.setUpdatedAt(T0 + 100);
-        assertEq(cdoOracle.poke(), 0, "a feed heartbeat alone must never open the execution gate");
+        assertEq(seeded.poke(), T0, "a feed heartbeat alone must never open the execution gate");
 
         // A virtual price move checkpoints the clock at the wall-clock time it was observed, and the checkpoint persists
         cdo.setVirtualPrice(1.02e6);
-        assertEq(cdoOracle.poke(), T0 + 100, "a virtual price deviation checkpoints the clock");
+        assertEq(seeded.poke(), T0 + 100, "a virtual price deviation checkpoints the clock");
         vm.warp(T0 + 200);
-        assertEq(cdoOracle.poke(), T0 + 100, "the checkpoint persists until the next observed change");
+        feed.setUpdatedAt(T0 + 200);
+        assertEq(seeded.poke(), T0 + 100, "the checkpoint persists until the next observed change");
 
         // A later feed heartbeat leaves getPrice's updatedAt pinned at the clock checkpoint
         feed.setUpdatedAt(T0 + 142);
-        (, uint256 updatedAt) = cdoOracle.getPrice();
+        (, uint256 updatedAt) = seeded.getPrice();
         assertEq(updatedAt, T0 + 100, "updatedAt tracks the virtual price clock while the feed moves freely");
+
+        // The mirror direction: a fresh deviation cannot outrun an older feed, the gate waits for the slower hop
+        cdo.setVirtualPrice(1.03e6);
+        assertEq(seeded.poke(), T0 + 142, "a virtual price deviation with an older feed reports the feed's timestamp");
     }
 
     /**
-     * previewPoke reports the deviation it observes at the current timestamp without committing a checkpoint, so an
-     * uncommitted deviation keeps reporting the live block.timestamp until a poke commits it
+     * previewPoke reports what a poke would (the oldest hop) without committing a checkpoint: an uncommitted
+     * deviation keeps floating with block.timestamp under a fresh feed until a poke commits it
      */
     function test_IdleCDO_previewPokeReportsWithoutCommitting() public {
+        IdleCDOTranchePriceOracle seeded = _deploySeededCDOOracle(address(aaTranche), uint32(T0));
         vm.warp(T0 + 100);
-        assertEq(cdoOracle.previewPoke(), 0, "an unchanged virtual price reports the stored zero checkpoint");
+        feed.setUpdatedAt(T0 + 100);
+        assertEq(seeded.previewPoke(), T0, "an unchanged virtual price reports the stored checkpoint");
 
-        // An observed deviation reports the current timestamp exactly as a poke would stamp it
+        // An observed deviation under a fresh feed reports the current timestamp exactly as a poke would stamp it
         cdo.setVirtualPrice(1.02e6);
-        assertEq(cdoOracle.previewPoke(), T0 + 100, "a deviation previews the current timestamp");
+        assertEq(seeded.previewPoke(), T0 + 100, "a deviation previews the current timestamp");
 
         // Nothing was committed, so the same deviation re-previews at the new current timestamp
         vm.warp(T0 + 200);
-        assertEq(cdoOracle.previewPoke(), T0 + 200, "an uncommitted deviation floats with block.timestamp");
-        // getPrice reports the OLDER hop: the feed was stamped at construction (T0), older than the floating clock
-        (, uint256 updatedAt) = cdoOracle.getPrice();
-        assertEq(updatedAt, T0, "getPrice's updatedAt is the older of the feed and the clock");
-        // With a feed stamped fresher than the clock, the clock becomes the older hop and getPrice reports it
-        feed.setUpdatedAt(T0 + 300);
-        (, updatedAt) = cdoOracle.getPrice();
-        assertEq(updatedAt, T0 + 200, "getPrice's updatedAt is the older of the feed and the clock");
-        feed.setUpdatedAt(T0);
+        feed.setUpdatedAt(T0 + 200);
+        assertEq(seeded.previewPoke(), T0 + 200, "an uncommitted deviation floats with block.timestamp");
 
-        // A poke commits the checkpoint, after which previewPoke reports the stored value
-        assertEq(cdoOracle.poke(), T0 + 200, "the poke commits the floating deviation");
+        // The older feed hop binds the preview exactly as it binds getPrice
+        feed.setUpdatedAt(T0 + 150);
+        assertEq(seeded.previewPoke(), T0 + 150, "the older feed hop binds the preview");
+        (, uint256 updatedAt) = seeded.getPrice();
+        assertEq(updatedAt, T0 + 150, "previewPoke and getPrice report the same oldest-hop timestamp");
+
+        // A poke commits the checkpoint, after which previewPoke reports the stored value under a fresh feed
+        feed.setUpdatedAt(T0 + 200);
+        assertEq(seeded.poke(), T0 + 200, "the poke commits the floating deviation");
         vm.warp(T0 + 300);
-        assertEq(cdoOracle.previewPoke(), T0 + 200, "after the commit the stored checkpoint is reported");
+        feed.setUpdatedAt(T0 + 300);
+        assertEq(seeded.previewPoke(), T0 + 200, "after the commit the stored checkpoint is reported");
     }
 
     /**
@@ -306,10 +385,12 @@ contract Test_CollateralOracles is Test {
      * 1.0201e6 is exactly 1% (floor(1e18 * 10100 / 1010000) = 1e16 >= threshold, checkpointed)
      */
     function test_IdleCDO_deviationThresholdGatesTheClock() public {
-        IdleCDOTranchePriceOracle gated = _deployCDOOracle(address(aaTranche), 0.01e18);
+        IdleCDOTranchePriceOracle gated =
+            new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0.01e18, uint32(T0), FEED_STALENESS, CDO_PRICE_STALENESS);
         vm.warp(T0 + 100);
+        feed.setUpdatedAt(T0 + 100);
         cdo.setVirtualPrice(1.015e6);
-        assertEq(gated.poke(), 0, "a sub-threshold move never counts as an update");
+        assertEq(gated.poke(), T0, "a sub-threshold move never counts as an update");
         cdo.setVirtualPrice(1.0201e6);
         assertEq(gated.poke(), T0 + 100, "a move at the threshold checkpoints");
     }
@@ -322,7 +403,7 @@ contract Test_CollateralOracles is Test {
         assertEq(address(cdoOracle.ORACLE()), address(feed), "the feed is wired");
         assertEq(cdoOracle.MIN_DEVIATION_WAD(), 0, "the deviation threshold is a construction immutable");
         assertEq(cdoOracle.FEED_STALENESS_THRESHOLD_SECONDS(), FEED_STALENESS, "the feed hop's staleness threshold is a construction immutable");
-        assertEq(cdoOracle.SOURCE_STALENESS_THRESHOLD_SECONDS(), SOURCE_STALENESS, "the clock hop's staleness threshold is a construction immutable");
+        assertEq(cdoOracle.SOURCE_PRICE_STALENESS_THRESHOLD_SECONDS(), CDO_PRICE_STALENESS, "the clock hop's staleness threshold is a construction immutable");
         // The clock baselines at the live virtual price lifted to WAD (1.01e6 at 6 underlying decimals is 1.01e18)
         (uint160 lastValue, uint32 lastUpdatedAt) = cdoOracle.getOracleClockState();
         assertEq(lastValue, 1.01e18, "the clock baselines at the construction-time virtual price in WAD");
@@ -331,13 +412,13 @@ contract Test_CollateralOracles is Test {
         assertEq(cdoOracle.description(), string.concat("AA_FalconXUSDC / ", feed.description()), "the description chains through the feed");
         // The constructor body's typed null check rejects a null CDO before any read can touch it
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new IdleCDOTranchePriceOracle(address(0), address(aaTranche), address(feed), 0, 0, FEED_STALENESS, SOURCE_STALENESS);
+        new IdleCDOTranchePriceOracle(address(0), address(aaTranche), address(feed), 0, 0, FEED_STALENESS, CDO_PRICE_STALENESS);
         // The CDO's virtualPrice silently computes the BB price for any unknown address, so membership is checked
         vm.expectRevert(IdleCDOTranchePriceOracle.COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE.selector);
-        new IdleCDOTranchePriceOracle(address(cdo), makeAddr("NOT_A_TRANCHE"), address(feed), 0, 0, FEED_STALENESS, SOURCE_STALENESS);
+        new IdleCDOTranchePriceOracle(address(cdo), makeAddr("NOT_A_TRANCHE"), address(feed), 0, 0, FEED_STALENESS, CDO_PRICE_STALENESS);
         // The clock's threshold bound is enforced at construction like every other immutable
         vm.expectRevert(OracleClockBase.INVALID_MIN_DEVIATION_WAD.selector);
-        new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 1e18, 0, FEED_STALENESS, SOURCE_STALENESS);
+        new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 1e18, 0, FEED_STALENESS, CDO_PRICE_STALENESS);
     }
 
     /// The oracle prices the BB (junior) tranche identically: virtualPrice works for either CDO tranche
@@ -381,22 +462,83 @@ contract Test_CollateralOracles is Test {
         // Fresh feed, stale clock: the feed re-stamps but the checkpoint ages past the source gate
         feed.setUpdatedAt(block.timestamp);
         cdo.setVirtualPrice(1.01e6); // back to the checkpointed baseline: no deviation, the clock stays at T0
-        vm.warp(T0 + SOURCE_STALENESS + 1);
+        vm.warp(T0 + CDO_PRICE_STALENESS + 1);
         feed.setUpdatedAt(block.timestamp);
-        vm.expectRevert(IdleCDOTranchePriceOracle.STALE_VIRTUAL_PRICE.selector);
+        vm.expectRevert(ClockedChainlinkPriceOracleBase.STALE_SOURCE_PRICE.selector);
         seeded.getPrice();
     }
 
     /// Both thresholds are construction immutables and a zero threshold is rejected at construction, per hop
     function test_RevertIf_StalenessThresholdConstructedZero() public {
         vm.expectRevert(ChainlinkPriceOracleBase.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
-        new ERC4626SharePriceOracle(address(vault), address(feed), 0);
+        new ERC4626SharePriceOracle(address(vault), address(feed), 0, 0, 0, VAULT_SHARE_PRICE_STALENESS);
         vm.expectRevert(ChainlinkPriceOracleBase.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
-        new MakinaSharePriceOracle(address(machine), address(feed), 0);
+        new ERC4626SharePriceOracle(address(vault), address(feed), 0, 0, FEED_STALENESS, 0);
         vm.expectRevert(ChainlinkPriceOracleBase.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
-        new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0, 0, 0, SOURCE_STALENESS);
+        new MakinaSharePriceOracle(address(machine), address(feed), 0, MAKINA_ACCOUNTING_STALENESS);
+        vm.expectRevert(ChainlinkPriceOracleBase.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
+        new MakinaSharePriceOracle(address(machine), address(feed), FEED_STALENESS, 0);
+        vm.expectRevert(ChainlinkPriceOracleBase.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
+        new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0, 0, 0, CDO_PRICE_STALENESS);
         vm.expectRevert(ChainlinkPriceOracleBase.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
         new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0, 0, FEED_STALENESS, 0);
+    }
+
+    /// Every adapter in the family is a plain immutable contract: no initializer, no tick, no setter, no fallback
+    function test_OracleFamily_hasNoAdminSurface() public {
+        address[2] memory oracles = [address(erc4626Oracle), address(makinaOracle)];
+        for (uint256 i = 0; i < oracles.length; i++) {
+            (bool initOk,) = oracles[i].call(abi.encodeWithSignature("initialize(address,uint256,uint32)", address(this), uint256(0), uint32(0)));
+            assertFalse(initOk, "the oracle is not a proxy and exposes no initializer");
+            (bool tickOk,) = oracles[i].call(abi.encodeWithSignature("tick()"));
+            assertFalse(tickOk, "the removed tick selector must not be callable");
+            (bool setOk,) = oracles[i].call(abi.encodeWithSignature("setMinDeviationWAD(uint256)", uint256(0.01e18)));
+            assertFalse(setOk, "no threshold setter exists");
+        }
+    }
+
+    /**
+     * The probe-amount decimals algebra holds on an inverted shape (6-decimal share over an 18-decimal base
+     * asset): the probe is 10^(18 + 6 - 18) = 1e6 shares, whose conversion is the WAD share rate verbatim
+     * Derivation: rate 1.02e18 and feed 1.00005e8: price = floor(1.02e18 * 100005000 / 1e8) = 1.020051e18
+     */
+    function test_ERC4626_invertedDecimalShapeComposesExactly() public {
+        MockERC20C wideAsset = new MockERC20C("WIDE", "WIDE", 18);
+        MockERC4626C narrowVault = new MockERC4626C(address(wideAsset), "Narrow Share", "nSHARE", 6);
+        narrowVault.setRate(1.02e18);
+        feed.setAnswer(1.00005e8);
+        ERC4626SharePriceOracle narrow =
+            new ERC4626SharePriceOracle(address(narrowVault), address(feed), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS);
+        (NAV_UNIT price,) = narrow.getPrice();
+        assertEq(toUint256(price), 1.020051e18, "the inverted shape composes through the same probe algebra");
+    }
+
+    /// The Makina probe algebra holds on an inverted shape (6-decimal share over an 18-decimal accounting asset)
+    function test_Makina_invertedDecimalShapeComposesExactly() public {
+        MockERC20C narrowShare = new MockERC20C("nDUSD", "nDUSD", 6);
+        MockERC20C wideAccounting = new MockERC20C("WUSD", "WUSD", 18);
+        MockMakinaMachine narrowMachine = new MockMakinaMachine(address(narrowShare), address(wideAccounting), 1.02e18);
+        feed.setAnswer(1.00005e8);
+        MakinaSharePriceOracle narrow = new MakinaSharePriceOracle(address(narrowMachine), address(feed), FEED_STALENESS, MAKINA_ACCOUNTING_STALENESS);
+        (NAV_UNIT price,) = narrow.getPrice();
+        assertEq(toUint256(price), 1.020051e18, "the inverted shape composes through the same probe algebra");
+    }
+
+    /// A null machine cannot construct: the share-token resolution in the base constructor argument has no code
+    /// to call, so deployment reverts (untyped, before any typed check can run)
+    function test_RevertIf_Makina_nullMachineConstruction() public {
+        vm.expectRevert();
+        new MakinaSharePriceOracle(address(0), address(feed), FEED_STALENESS, MAKINA_ACCOUNTING_STALENESS);
+    }
+
+    /// poke and previewPoke dispatch through the overridden getPrice, so all three report the same oldest hop
+    function test_Makina_pokeAgreesWithGetPrice() public {
+        machine.setLastGlobalAccountingTime(T0 - 40);
+        feed.setUpdatedAt(T0 - 10);
+        (, uint256 updatedAt) = makinaOracle.getPrice();
+        assertEq(updatedAt, T0 - 40, "getPrice reports the older accounting hop");
+        assertEq(makinaOracle.poke(), updatedAt, "poke must agree with getPrice's report timestamp");
+        assertEq(makinaOracle.previewPoke(), updatedAt, "previewPoke must agree with getPrice's report timestamp");
     }
 
     /// The oracle is a plain immutable contract: no initializer, no tick, no threshold setter, no fallback
@@ -411,11 +553,12 @@ contract Test_CollateralOracles is Test {
 
     /// An attested construction checkpoint seeds the clock, and a future one fails shut
     function test_IdleCDO_constructionCheckpointSeedsTheClock() public {
-        IdleCDOTranchePriceOracle seeded = new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0, uint32(T0 - 100), FEED_STALENESS, SOURCE_STALENESS);
+        IdleCDOTranchePriceOracle seeded =
+            new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0, uint32(T0 - 100), FEED_STALENESS, CDO_PRICE_STALENESS);
         assertEq(seeded.poke(), T0 - 100, "the attested checkpoint is the clock's starting update");
 
         vm.expectRevert(OracleClockBase.INVALID_LAST_UPDATE_TIMESTAMP.selector);
-        new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0, uint32(T0 + 1), FEED_STALENESS, SOURCE_STALENESS);
+        new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0, uint32(T0 + 1), FEED_STALENESS, CDO_PRICE_STALENESS);
     }
 
     /**
@@ -425,14 +568,16 @@ contract Test_CollateralOracles is Test {
      * gate by fiat, and reconfiguration is a redeploy plus a kernel oracle repoint
      */
     function test_IdleCDO_blindSpotFailsShutWithoutTick() public {
+        IdleCDOTranchePriceOracle seeded = _deploySeededCDOOracle(address(aaTranche), uint32(T0));
         vm.warp(T0 + 100);
-        assertEq(cdoOracle.poke(), 0, "an unchanged virtual price must never stamp the clock");
-        (bool tickOk,) = address(cdoOracle).call(abi.encodeWithSignature("tick()"));
+        feed.setUpdatedAt(T0 + 100);
+        assertEq(seeded.poke(), T0, "an unchanged virtual price must never stamp the clock");
+        (bool tickOk,) = address(seeded).call(abi.encodeWithSignature("tick()"));
         assertFalse(tickOk, "no lever exists to stamp the blind spot");
-        assertEq(cdoOracle.poke(), 0, "the gate stays shut after the failed stamp attempt");
+        assertEq(seeded.poke(), T0, "the gate stays shut after the failed stamp attempt");
 
         // The next observable deviation opens the gate at its observation time
         cdo.setVirtualPrice(1.02e6);
-        assertEq(cdoOracle.poke(), T0 + 100, "the next observable deviation opens the gate");
+        assertEq(seeded.poke(), T0 + 100, "the next observable deviation opens the gate");
     }
 }

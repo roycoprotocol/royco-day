@@ -2,11 +2,11 @@
 pragma solidity ^0.8.28;
 
 import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
-import { DispatchMode } from "../../../src/libraries/Types.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
+import { DispatchMode } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
@@ -22,6 +22,24 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *      wrong admin collapses the deployment's privilege separation
  */
 contract Test_AdminAndGates_Kernel is DayMarketTestBase {
+    /// The kernel refuses to price against a zero composed collateral report whatever the oracle returns: the
+    /// zero-price guard is the kernel's own, independent of the oracle-side feed validations, so a broken or
+    /// collapsed conversion hop can never mark NAV at zero
+    function test_RevertIf_CollateralOracleReportsZeroPrice() public {
+        setOracleMode(ORACLE_MODE_ZERO);
+        vm.expectRevert(IRoycoDayKernel.INVALID_PRICE.selector);
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(uint256(1e18)));
+
+        // A negative-answer source surfaces identically: NAV prices are unsigned so it reads as zero
+        setOracleMode(ORACLE_MODE_NEGATIVE);
+        vm.expectRevert(IRoycoDayKernel.INVALID_PRICE.selector);
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(uint256(1e18)));
+
+        // Restoring the oracle restores pricing
+        setOracleMode(ORACLE_MODE_NONE);
+        assertTrue(kernel.convertCollateralAssetsToValue(toTrancheUnits(uint256(1e18))) != ZERO_NAV_UNITS, "a restored oracle prices again");
+    }
+
     /// @dev An unprivileged address probing every gated entrypoint
     address internal ATTACKER;
 

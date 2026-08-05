@@ -8,24 +8,20 @@ import { TokenInfo, TokenType } from "../../../lib/balancer-v3-monorepo/pkg/inte
 import { LPOracleBase } from "../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/LPOracleBase.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
-import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
-import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
-import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
-import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
-import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
-import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
-import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
+import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
+import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
+import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
+import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { TAG_KERNEL_PROXY } from "../../../src/factory/templates/base/Constants.sol";
-import {
-    RoycoDayBalancerV3MarketDeploymentTemplate
-} from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AggregatorV3Interface } from "../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
@@ -35,6 +31,8 @@ import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoPr
 import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { NAV_UNIT } from "../../../src/libraries/Units.sol";
 import { MakinaSharePriceOracle } from "../../../src/oracle/MakinaSharePriceOracle.sol";
+import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
+import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 
 /// @title Test_MakinaMarketDeployment
 /// @notice Fork test for the single Day template (`RoycoDayBalancerV3MarketDeploymentTemplate`) deployed against a
@@ -149,8 +147,8 @@ contract Test_MakinaMarketDeployment is Test {
     function _marketConfig(address _machine, address _collateralAsset) internal returns (DayMarketConfig memory cfg) {
         cfg = registry.getDayMarketConfig("snUSD");
         cfg.collateralAsset = _collateralAsset;
-        cfg.oracle.deployed = address(new MakinaSharePriceOracle(_machine, USDC_USD_FEED, 48 hours));
-            _fundPoolSeed(cfg);
+        cfg.oracle.deployed = address(new MakinaSharePriceOracle(_machine, USDC_USD_FEED, 48 hours, 24 hours));
+        _fundPoolSeed(cfg);
     }
 
     function _encodedParams(bytes32 _marketId, address _machine, address _collateralAsset) internal returns (bytes memory) {

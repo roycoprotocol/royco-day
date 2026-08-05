@@ -236,7 +236,14 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
     /// @dev Deploys the config's ERC4626 share-price adapter with its per-hop staleness immutable, as the script does
     function _newErc4626Oracle(address _collateral, bytes memory _oracleParams) internal returns (ERC4626SharePriceOracle) {
         ERC4626SharePriceOracleParams memory op = abi.decode(_oracleParams, (ERC4626SharePriceOracleParams));
-        return new ERC4626SharePriceOracle(_collateral, op.baseAssetToNavAssetFeed, op.feedStalenessThresholdSeconds);
+        return new ERC4626SharePriceOracle(
+            _collateral,
+            op.baseAssetToNavAssetFeed,
+            op.minDeviationWAD,
+            op.lastUpdate,
+            op.chainlinkOracleStalenessThresholdSeconds,
+            op.vaultSharePriceStalenessThresholdSeconds
+        );
     }
 
 }

@@ -37,8 +37,8 @@ abstract contract Market_FalconX is DayMarketRegistryBase {
                         // Per-hop thresholds, each sized to ITS source: the Chainlink USDC/USD leg keeps its tight 48h
                         // gate (24h heartbeat, doubled), while the virtual-price clock gets 8 days for Pareto's ~WEEKLY
                         // cadence — the slow CDO no longer loosens the feed
-                        feedStalenessThresholdSeconds: 48 hours,
-                        virtualPriceStalenessThresholdSeconds: 8 days
+                        chainlinkOracleStalenessThresholdSeconds: 48 hours,
+                        cdoPriceStalenessThresholdSeconds: 8 days
                     })
                 )
             }),
