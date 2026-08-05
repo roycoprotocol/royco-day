@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { ADMIN_FACTORY_ROLE, DEPLOYER_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_FACTORY_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
@@ -37,7 +37,6 @@ contract Test_FactoryTrancheRegistry is Test {
 
         // Grant the roles the factory's initialize() bound to its gated selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
-        am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
 
         // A canned-result template bound to this factory: registration only checks the template points back at
         // this factory, so no initialization step is needed.

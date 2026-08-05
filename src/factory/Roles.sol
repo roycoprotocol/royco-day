@@ -64,8 +64,6 @@ uint64 constant ADMIN_BALANCER_POOL_MANAGER_ROLE = uint64(uint256(keccak256(abi.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 uint64 constant ADMIN_FACTORY_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_FACTORY_ROLE"))));
-uint64 constant DEPLOYER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_DEPLOYER_ROLE"))));
-uint64 constant DEPLOYER_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_DEPLOYER_ROLE_ADMIN_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // META ROLES

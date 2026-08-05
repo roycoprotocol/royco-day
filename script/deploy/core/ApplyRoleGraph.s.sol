@@ -18,8 +18,6 @@ import {
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
-    DEPLOYER_ROLE,
-    DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
@@ -67,8 +65,8 @@ contract ApplyRoleGraphComponent is DeployScriptBase, RoleGraphConfig {
         // Ensure the factory admin holds ADMIN_ROLE (role 0).
         if (_factoryAdmin != _deployer) am.grantRole(ADMIN_ROLE, _factoryAdmin, 0);
 
-        // The deployer needs DEPLOYER_ROLE (executeMarketDeployment) + ADMIN_FACTORY_ROLE (registerTemplate).
-        am.grantRole(DEPLOYER_ROLE, _deployer, 0);
+        // The deployer needs ADMIN_FACTORY_ROLE for the bootstrap's admin-gated steps (registerTemplate, the
+        // template's configuration-surface bindings, YDM registration); market deployment itself is PUBLIC.
         am.grantRole(ADMIN_FACTORY_ROLE, _deployer, 0);
 
         // Pass 1: grant every assignment WHILE each role's admin is still ADMIN_ROLE (role 0), which the deployer holds.
@@ -90,7 +88,7 @@ contract ApplyRoleGraphComponent is DeployScriptBase, RoleGraphConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](21);
+        roleAssignments = new RoleAssignment[](19);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -102,16 +100,14 @@ contract ApplyRoleGraphComponent is DeployScriptBase, RoleGraphConfig {
         roleAssignments[8] = _assignment(ST_LP_ROLE, _addresses.protocolFeeRecipientAddress);
         roleAssignments[9] = _assignment(JT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
         roleAssignments[10] = _assignment(GUARDIAN_ROLE, _addresses.guardianAddress);
-        roleAssignments[11] = _assignment(DEPLOYER_ROLE, _addresses.deployerAddress);
-        roleAssignments[12] = _assignment(DEPLOYER_ROLE_ADMIN_ROLE, _addresses.deployerAdminAddress);
-        roleAssignments[13] = _assignment(ADMIN_UNPAUSER_ROLE, _addresses.unpauserAddress);
-        roleAssignments[14] = _assignment(LPT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
-        roleAssignments[15] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
-        roleAssignments[16] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
-        roleAssignments[17] = _assignment(ADMIN_BLACKLIST_ROLE, _addresses.marketOpsAddress);
-        roleAssignments[18] = _assignment(ADMIN_ENTRY_POINT_ROLE, _addresses.adminEntryPointAddress);
-        roleAssignments[19] = _assignment(ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, _addresses.entryPointFeeCollectorAddress);
-        roleAssignments[20] = _assignment(ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE, _addresses.marketReinvestLiquidityPremiumAddress);
+        roleAssignments[11] = _assignment(ADMIN_UNPAUSER_ROLE, _addresses.unpauserAddress);
+        roleAssignments[12] = _assignment(LPT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
+        roleAssignments[13] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
+        roleAssignments[14] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
+        roleAssignments[15] = _assignment(ADMIN_BLACKLIST_ROLE, _addresses.marketOpsAddress);
+        roleAssignments[16] = _assignment(ADMIN_ENTRY_POINT_ROLE, _addresses.adminEntryPointAddress);
+        roleAssignments[17] = _assignment(ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, _addresses.entryPointFeeCollectorAddress);
+        roleAssignments[18] = _assignment(ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE, _addresses.marketReinvestLiquidityPremiumAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -131,8 +127,6 @@ contract ApplyRoleGraphComponent is DeployScriptBase, RoleGraphConfig {
         if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
         if (role == ADMIN_ORACLE_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
         if (role == GUARDIAN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
-        if (role == DEPLOYER_ROLE) return RoleConfig({ adminRole: DEPLOYER_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == DEPLOYER_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_FACTORY_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 72 hours });
         if (role == ADMIN_UNPAUSER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == LPT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });

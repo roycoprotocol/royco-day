@@ -9,9 +9,6 @@ import { EnvConfig } from "./EnvConfig.sol";
  */
 abstract contract BlacklistConfig is EnvConfig {
     /// @notice Returns the canonical Chainalysis sanctions oracle for the given chain.
-    /// @dev Consumed by the SetSanctionsList ops script to wire the shared blacklist's screening list per chain.
-    ///      Returns the null address for chains without a known oracle (e.g. local/test chains), which disables
-    ///      Chainalysis screening while leaving the local blacklist mapping fully functional.
     function getChainalysisSanctionsList(uint256 _chainId) public pure returns (address) {
         // Chainalysis deploys its sanctions oracle at the same address on most chains; Base is the exception.
         if (_chainId == 1 || _chainId == 43_114 || _chainId == 42_161) {

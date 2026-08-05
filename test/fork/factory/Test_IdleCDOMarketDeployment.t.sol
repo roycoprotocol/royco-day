@@ -13,7 +13,7 @@ import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/in
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
@@ -106,7 +106,6 @@ contract Test_IdleCDOMarketDeployment is Test {
 
         // Grant the factory-facing roles the initialize() call bound to selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
-        am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
 
         // The scaffold deployed the REAL periphery singletons alongside the gatekeeper that pins them
 
@@ -130,8 +129,8 @@ contract Test_IdleCDOMarketDeployment is Test {
         // surface and register the config's shapes, exactly as the scaffolding phase does.
         bytes4[] memory ydmSelectors = new bytes4[](1);
         ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
-        am.grantRole(DEPLOYER_ROLE, address(scaffold.ydms), 0);
+        am.setTargetFunctionRole(address(template), ydmSelectors, ADMIN_FACTORY_ROLE);
+        am.grantRole(ADMIN_FACTORY_ROLE, address(scaffold.ydms), 0);
         scaffold.ydms.registerModels();
     }
 

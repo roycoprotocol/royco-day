@@ -14,7 +14,7 @@ import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
@@ -72,7 +72,6 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         roycoBlacklist = FactoryScaffold.deployBlacklist(am);
 
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
-        am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
 
         bytes4[] memory entryPointSelectors = new bytes4[](1);
         entryPointSelectors[0] = IRoycoDayEntryPoint.modifyTrancheConfigs.selector;
@@ -88,8 +87,8 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
 
         bytes4[] memory ydmSelectors = new bytes4[](1);
         ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
-        am.grantRole(DEPLOYER_ROLE, address(scaffold.ydms), 0);
+        am.setTargetFunctionRole(address(template), ydmSelectors, ADMIN_FACTORY_ROLE);
+        am.grantRole(ADMIN_FACTORY_ROLE, address(scaffold.ydms), 0);
         scaffold.ydms.registerModels();
 
         // Pin the config's external addresses against the live chain, so an address typo in the config file fails

@@ -16,8 +16,6 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
-    DEPLOYER_ROLE,
-    DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
@@ -55,7 +53,7 @@ contract Test_Roles is Test {
      */
     function test_RoleIds_PairwiseDistinct_AndReservedAdminPublicValuesAvoided() public pure {
         // parallel arrays: the role-name string each id must hash from, and the imported constant under test
-        string[21] memory names = [
+        string[19] memory names = [
             string("ROYCO_ADMIN_PAUSER_ROLE"),
             "ROYCO_ADMIN_UNPAUSER_ROLE",
             "ROYCO_ADMIN_UPGRADER_ROLE",
@@ -73,12 +71,10 @@ contract Test_Roles is Test {
             "ROYCO_ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE",
             "ROYCO_ADMIN_BALANCER_POOL_MANAGER_ROLE",
             "ROYCO_ADMIN_FACTORY_ROLE",
-            "ROYCO_DEPLOYER_ROLE",
-            "ROYCO_DEPLOYER_ROLE_ADMIN_ROLE",
             "ROYCO_LP_ROLE_ADMIN_ROLE",
             "ROYCO_GUARDIAN_ROLE"
         ];
-        uint64[21] memory ids = [
+        uint64[19] memory ids = [
             ADMIN_PAUSER_ROLE,
             ADMIN_UNPAUSER_ROLE,
             ADMIN_UPGRADER_ROLE,
@@ -96,8 +92,6 @@ contract Test_Roles is Test {
             ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
             ADMIN_BALANCER_POOL_MANAGER_ROLE,
             ADMIN_FACTORY_ROLE,
-            DEPLOYER_ROLE,
-            DEPLOYER_ROLE_ADMIN_ROLE,
             LP_ROLE_ADMIN_ROLE,
             GUARDIAN_ROLE
         ];
@@ -109,7 +103,7 @@ contract Test_Roles is Test {
         assertEq(ST_LP_ROLE, 0x858ca8ea411ba2c3, "ST_LP_ROLE hand-derived anchor");
         assertEq(GUARDIAN_ROLE, 0x2bc4420d29f38eba, "GUARDIAN_ROLE hand-derived anchor");
 
-        for (uint256 i = 0; i < 21; ++i) {
+        for (uint256 i = 0; i < 19; ++i) {
             // each id must equal the derivation formula applied to its own role-name string, so a role whose
             // constant was copy-pasted with the wrong string (hashing to another role's id) fails by name here
             assertEq(ids[i], uint64(uint256(keccak256(abi.encode(names[i])))), names[i]);
@@ -118,7 +112,7 @@ contract Test_Roles is Test {
             // type(uint64).max is AccessManager's PUBLIC_ROLE: a role hashing to it would open its targets to all
             assertNotEq(ids[i], type(uint64).max, names[i]);
             // pairwise distinctness: any two roles sharing an id would each inherit the other's permissions
-            for (uint256 j = i + 1; j < 21; ++j) {
+            for (uint256 j = i + 1; j < 19; ++j) {
                 assertNotEq(ids[i], ids[j], string.concat(names[i], " collides with ", names[j]));
             }
         }

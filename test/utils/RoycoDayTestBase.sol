@@ -468,8 +468,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 adminOracleAddress: ORACLE_ADMIN_ADDRESS,
                 lpRoleAdminAddress: LP_ROLE_ADMIN_ADDRESS,
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
-                deployerAddress: DEPLOYER_ADDRESS,
-                deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS,
                 protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
                 balancerPoolManagerAddress: KERNEL_ADMIN_ADDRESS,
                 marketOpsAddress: KERNEL_ADMIN_ADDRESS,

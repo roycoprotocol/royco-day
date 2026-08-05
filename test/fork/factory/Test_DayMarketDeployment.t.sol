@@ -34,7 +34,6 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
-    DEPLOYER_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
     PUBLIC_ROLE,
@@ -488,16 +487,13 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertTrue(marketOps, "market ops granted");
     }
 
-    /// The deploy script renounces the hot deployer key's super-admin surface, keeping only DEPLOYER_ROLE
+    /// The pipeline renounces the hot deployer key's ENTIRE admin surface: market deployment is PUBLIC, so the
+    /// deployer key retains no standing at all once the bootstrap is finalized
     function test_Auth_DeployerPrivilegesDropped() public view {
-        // The deploy script renounces the hot deployer key's super-admin surface after deployment completes.
         (bool isAdmin,) = ACCESS_MANAGER.hasRole(0, DEPLOYER_ADDRESS); // ADMIN_ROLE == 0
         assertFalse(isAdmin, "deployer still ADMIN_ROLE");
         (bool isFactoryAdmin,) = ACCESS_MANAGER.hasRole(ADMIN_FACTORY_ROLE, DEPLOYER_ADDRESS);
         assertFalse(isFactoryAdmin, "deployer still ADMIN_FACTORY_ROLE");
-        // DEPLOYER_ROLE (executeMarketDeployment only) is retained.
-        (bool isDeployer,) = ACCESS_MANAGER.hasRole(DEPLOYER_ROLE, DEPLOYER_ADDRESS);
-        assertTrue(isDeployer, "deployer lost DEPLOYER_ROLE");
     }
 
     /// mint is an immutable-address check on THIS market's kernel, not an AccessManager role (cross-market bleed defense)

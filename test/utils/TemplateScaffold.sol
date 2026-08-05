@@ -18,9 +18,10 @@ import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../src/factory/te
  *         per-component deploy scripts (implementations -> template -> YDM registry -> market param builder) against
  *         the caller's scaffolded factory, replacing the old monolith's `deployTemplateForTest` /
  *         `registerYieldDistributionModelsForTest` / `buildMarketParams` surface.
- * @dev `standUp` does NOT register the YDM models: the caller binds `setYieldDistributionModels` to DEPLOYER_ROLE,
- *      grants that role to `result.ydms`, and calls `result.ydms.registerModels()` — mirroring the auth choreography
- *      these suites assert on. Everything deployed here is CREATE2/CREATE3-idempotent per (chain, factory).
+ * @dev `standUp` does NOT register the YDM models: the caller binds `setYieldDistributionModels` to
+ *      ADMIN_FACTORY_ROLE (the production binding), grants that role to `result.ydms`, and calls
+ *      `result.ydms.registerModels()` — mirroring the auth choreography these suites assert on. Everything deployed
+ *      here is CREATE2/CREATE3-idempotent per (chain, factory).
  */
 library TemplateScaffold {
     struct Result {

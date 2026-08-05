@@ -15,7 +15,6 @@ import {
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
-    DEPLOYER_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
     PUBLIC_ROLE,
@@ -140,7 +139,6 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         vm.label(address(entryPointFactory), "RoycoFactory");
         // The fixture curates templates and drives deployments itself
         accessManager.grantRole(ADMIN_FACTORY_ROLE, address(this), 0);
-        accessManager.grantRole(DEPLOYER_ROLE, address(this), 0);
     }
 
     /// @dev Registers the minimal real template: canned result naming the fixture's externally deployed components,

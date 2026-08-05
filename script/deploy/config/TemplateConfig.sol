@@ -22,13 +22,12 @@ abstract contract TemplateConfig is EnvConfig {
     TemplatePolicy internal templatePolicyOverride;
 
     constructor() {
-        // Mainnet: Balancer deployment task 20260126-v3-gyro-eclp-v2 (ACTIVE)
+        // https://docs.balancer.fi/developer-reference/contracts/deployment-addresses/mainnet.html
         GYRO_ECLP_POOL_FACTORY[1] = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
-        // Arbitrum counterpart of the SAME task, so the create/verify interface is identical
-        GYRO_ECLP_POOL_FACTORY[42_161] = 0xe31715e75207acC8bfadd96902FF522058928479;
-
-        // Balancer's canonical E-CLP LP oracle factory (task 20260209-v3-gyro-eclp-oracle, ACTIVE) per chain
         ECLP_LP_ORACLE_FACTORY[1] = 0x301EDe5Fd4f9d7266B09c3A2E38F97776447154B;
+
+        // https://docs.balancer.fi/developer-reference/contracts/deployment-addresses/arbitrum.html
+        GYRO_ECLP_POOL_FACTORY[42_161] = 0xe31715e75207acC8bfadd96902FF522058928479;
         ECLP_LP_ORACLE_FACTORY[42_161] = 0xD9E91f7aD501929b089992842a3f193795E6479e;
     }
 

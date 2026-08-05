@@ -40,50 +40,30 @@ abstract contract DayMarketRegistryBase is EnvConfig {
 
     error MarketConfigNotFound(string marketName);
     error MarketChainIdMismatch(string marketName, uint256 expectedChainId, uint256 actualChainId);
-    error MarketIdNotConfigured(string marketName, address factory);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // MINED MARKET IDs (per market, per factory)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice The mined marketId SEED to use for `marketName` when deploying against `factory`, keyed by the factory
-    ///         proxy address predicted from this build's creation code
+    /// @notice PRE-MINED marketId seed overrides, keyed by (market, factory). Only entries mined offline live here —
+    ///         every other (market, factory) pair derives its seed on demand in `getMarketId`
     mapping(bytes32 marketNameHash => mapping(address factory => bytes32 marketId)) internal _marketIds;
 
-    /// @notice Registers each market's mined marketId seed, keyed by the factory it deploys against
+    /// @notice The production factory the pre-mined seeds were mined against (pinned by Test_DeterministicAddresses)
+    address internal constant PROD_FACTORY = 0xa093c0EbD81d1350a8bb8cD11d273A38cF45f390;
+
+    /// @notice Registers the pre-mined marketId seeds, keyed by the factory address each was mined against
     function _initializeMinedMarketIds() internal {
-        bytes32 snUSDHash = keccak256(bytes(SNUSD));
-        // snUSD against the production factory (prod deployer, "_PROD" salts), mined offline at nonce 0.
-        _marketIds[snUSDHash][RoycoDeterministic.predictFactoryProxy(DEPLOYER, false)] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
-        // snUSD against the local test-harness factory ("_PROD" salts, the suite runs on the prod config).
-        address localFactory = RoycoDeterministic.predictFactoryProxy(TEST_HARNESS_DEPLOYER, false);
-        _marketIds[snUSDHash][localFactory] = RoycoDeterministic.marketIdSeed(SNUSD, localFactory);
-        // snUSD against the test-environment factory (test salts, prod deployer key).
-        address testEnvFactory = RoycoDeterministic.predictFactoryProxy(DEPLOYER, true);
-        _marketIds[snUSDHash][testEnvFactory] = RoycoDeterministic.marketIdSeed(SNUSD, testEnvFactory);
-
-        // Every other market, seeded per factory from the build-time seed the params builder mines on top of
-        _seedMarketIdsForAllFactories(SRROYUSDC);
-        _seedMarketIdsForAllFactories(FALCONX);
-        _seedMarketIdsForAllFactories(APYX);
-    }
-
-    /// @notice Seeds `_name`'s market id for the production, local test-harness, and test-environment factories
-    function _seedMarketIdsForAllFactories(string memory _name) internal {
-        bytes32 nameHash = keccak256(bytes(_name));
-        address prodFactory = RoycoDeterministic.predictFactoryProxy(DEPLOYER, false);
-        address localFactory = RoycoDeterministic.predictFactoryProxy(TEST_HARNESS_DEPLOYER, false);
-        address testEnvFactory = RoycoDeterministic.predictFactoryProxy(DEPLOYER, true);
-        _marketIds[nameHash][prodFactory] = RoycoDeterministic.marketIdSeed(_name, prodFactory);
-        _marketIds[nameHash][localFactory] = RoycoDeterministic.marketIdSeed(_name, localFactory);
-        _marketIds[nameHash][testEnvFactory] = RoycoDeterministic.marketIdSeed(_name, testEnvFactory);
+        // snUSD against the production factory, mined offline at nonce 0
+        _marketIds[keccak256(bytes(SNUSD))][PROD_FACTORY] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
     }
 
     /// @notice The market id SEED for `_marketName` against `_factory`, which the params builder mines on top of
-    /// @dev Reverts if none is configured
+    /// @dev A pre-mined override wins when one is registered; otherwise the seed derives purely from the
+    ///      (market, factory) pair, so ANY factory works — no deployer address enters the derivation
     function getMarketId(string memory _marketName, address _factory) public view returns (bytes32 marketId) {
         marketId = _marketIds[keccak256(bytes(_marketName))][_factory];
-        require(marketId != bytes32(0), MarketIdNotConfigured(_marketName, _factory));
+        if (marketId == bytes32(0)) marketId = RoycoDeterministic.marketIdSeed(_marketName, _factory);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

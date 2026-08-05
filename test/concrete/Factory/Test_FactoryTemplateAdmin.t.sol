@@ -5,7 +5,7 @@ import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { ADMIN_FACTORY_ROLE, ADMIN_UPGRADER_ROLE, DEPLOYER_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_FACTORY_ROLE, ADMIN_UPGRADER_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
@@ -42,7 +42,6 @@ contract Test_FactoryTemplateAdmin is Test {
         (factory, gatekeeper, entryPoint, syncer) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
-        am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
         am.grantRole(ADMIN_UPGRADER_ROLE, UPGRADER, 0);
 
         template = new MockDeploymentTemplate(IRoycoFactory(address(factory)));

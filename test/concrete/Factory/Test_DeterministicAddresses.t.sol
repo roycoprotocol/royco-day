@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { EnvConfig } from "../../../script/deploy/config/EnvConfig.sol";
 import { RoycoDeterministic } from "../../../script/deploy/utils/RoycoDeterministic.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 
@@ -15,7 +14,14 @@ import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol"
 /// @dev If a trip is INTENTIONAL (a deliberate salt bump or contract change), recapture the constants in one commit
 ///      that says so. The mined prod snUSD market id in the config registry is a second, independent canary: it is
 ///      only valid against the prod factory address pinned here.
-contract Test_DeterministicAddresses is Test, EnvConfig {
+contract Test_DeterministicAddresses is Test {
+    // The deployer EOAs the captured predictions derive from. These live HERE, not in the script configs: the
+    // deploy pipeline itself has no dependency on any particular deployer address — every prediction derives from
+    // the broadcasting key at run time. The canary pins the historical (deployer -> address) captures only.
+    address internal constant DEPLOYER = 0x35518D5E1fD8105FC325c5c171c329c3B10b254c;
+    /// @dev The test harness deployer, `vm.createWallet("DEPLOYER")` (private key keccak256("DEPLOYER")).
+    address internal constant TEST_HARNESS_DEPLOYER = 0x3A383B39c10856a75B9E3f6eda6fCC8fC3334050;
+
     // Captured 2026-08-06 from the pre-split monolith (TEST_SALT_SUFFIX = "_TEST_3243241421")
     address internal constant PROD_FACTORY = 0xa093c0EbD81d1350a8bb8cD11d273A38cF45f390;
     address internal constant LOCAL_HARNESS_FACTORY = 0xDed778B5bB6B3a3bA77F93220188d660D711Bf65;

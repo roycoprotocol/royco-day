@@ -26,7 +26,6 @@ import {
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
-    DEPLOYER_ROLE,
     PUBLIC_ROLE,
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
@@ -117,7 +116,6 @@ contract Test_RoycoFactory is Test {
 
         // Grant the factory-facing roles the scaffold bound to the factory's selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
-        am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
         am.grantRole(ADMIN_UPGRADER_ROLE, UPGRADER, 0);
         // The scaffold binds the factory's pause/unpause to the pauser/unpauser roles, so this test contract (the AM
         // admin) needs them to pause/unpause the factory directly.
@@ -147,8 +145,8 @@ contract Test_RoycoFactory is Test {
         // surface and register the config's shapes, exactly as the scaffolding phase does.
         bytes4[] memory ydmSelectors = new bytes4[](1);
         ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
-        am.grantRole(DEPLOYER_ROLE, address(scaffold.ydms), 0);
+        am.setTargetFunctionRole(address(template), ydmSelectors, ADMIN_FACTORY_ROLE);
+        am.grantRole(ADMIN_FACTORY_ROLE, address(scaffold.ydms), 0);
         scaffold.ydms.registerModels();
 
         // The rest of the template's configuration surface, bound exactly as the scaffolding phase does: the pool
@@ -195,7 +193,7 @@ contract Test_RoycoFactory is Test {
     }
 
     /// @dev Externally deploys the snUSD market's impls/YDMs/pool and pre-deploys its ST + hook proxies (as the
-    ///      the YDM component, which holds DEPLOYER_ROLE), then builds the encoded template params from the SAME config.
+    ///      the YDM component, which holds ADMIN_FACTORY_ROLE), then builds the encoded template params from the SAME config.
     ///      `_marketId` must place the senior tranche as pool token0 for this suite's `factory` (see MARKET_ID_A/B).
     function _encodedParams(bytes32 _marketId) internal returns (bytes memory) {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("snUSD");
@@ -740,8 +738,8 @@ contract Test_RoycoFactory is Test {
     // ROLE-ESCALATION ATTEMPTS (adversarial)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice A deployer key cannot reach the factory-admin surface: holding DEPLOYER_ROLE grants deployment
-    ///         only, so a compromised deployer cannot register or disable templates to redirect future markets
+    /// @notice A deployer key cannot reach the factory-admin surface: market deployment is PUBLIC and grants no
+    ///         standing, so a compromised deployer key cannot register or disable templates to redirect future markets
     function test_RevertIf_DeployerCallsFactoryAdminSurface() external {
         _register();
         vm.prank(DEPLOYER);
@@ -765,14 +763,14 @@ contract Test_RoycoFactory is Test {
     function test_RevertIf_RoleHolderCallsTemplatePrimitivesOutsideDeploymentWindow() external {
         _register();
 
-        // A DEPLOYER attempting to grant itself ADMIN_FACTORY_ROLE / bind the factory's own registerTemplate selector
+        // A market deployer attempting to grant itself ADMIN_ROLE / bind the factory's own registerTemplate selector
         address[] memory accounts = new address[](1);
         accounts[0] = DEPLOYER;
 
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = IRoycoFactory.registerTemplate.selector;
         uint64[] memory bindRoleIds = new uint64[](1);
-        bindRoleIds[0] = DEPLOYER_ROLE;
+        bindRoleIds[0] = ADMIN_FACTORY_ROLE;
 
         vm.startPrank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
@@ -818,7 +816,6 @@ contract Test_RoycoFactory is Test {
         _register();
 
         address otherDeployer = makeAddr("OTHER_DEPLOYER");
-        am.grantRole(DEPLOYER_ROLE, otherDeployer, 0);
 
         DayMarketConfig memory cfg = registry.getDayMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
@@ -1148,7 +1145,7 @@ contract Test_RoycoFactory is Test {
         assertEq(IRoycoDayAccountant(second.accountant).getState().stProtocolFeeWAD, 0.42e18, "the new market must take the new fee");
     }
 
-    /// Each configuration setter is admin-only: a market deployer holds DEPLOYER_ROLE, never the config surface
+    /// Each configuration setter is admin-only: a market deployer needs no role at all, never the config surface
     function test_RevertIf_ConfigSettersCalledByNonAdmin() external {
         // Read the pool config BEFORE pranking: a view call would otherwise consume the prank before the setter runs
         RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory poolConfig = _templateBalancerPoolConfig();

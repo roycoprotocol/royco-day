@@ -20,8 +20,6 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
-    DEPLOYER_ROLE,
-    DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
@@ -64,9 +62,9 @@ contract Test_DeployScriptConfig is Test {
      *         after grants have already landed. This test guarantees pass 2 can never hit that revert
      */
     function test_GetRoleConfig_ResolvesEveryGeneratedRoleAssignment() public view {
-        // 18 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
+        // 16 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
         // The fee recipient deliberately carries three LP roles (ST/JT/LPT) and market ops carries the blacklist
-        // admin role alongside its own, which is how 18 addresses fan out to 21 assignments.
+        // admin role alongside its own, which is how 16 addresses fan out to 19 assignments.
         RoleAssignmentAddresses memory addresses = RoleAssignmentAddresses({
             pauserAddress: address(0x1001),
             unpauserAddress: address(0x1002),
@@ -78,8 +76,6 @@ contract Test_DeployScriptConfig is Test {
             adminOracleAddress: address(0x1008),
             lpRoleAdminAddress: address(0x1009),
             guardianAddress: address(0x100A),
-            deployerAddress: address(0x100B),
-            deployerAdminAddress: address(0x100C),
             protocolFeeRecipientAddress: address(0x100D),
             balancerPoolManagerAddress: address(0x100E),
             marketOpsAddress: address(0x100F),
@@ -90,10 +86,10 @@ contract Test_DeployScriptConfig is Test {
 
         RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
 
-        // Independently derived count: the address surface is 18 fields, of which the fee recipient maps to the
-        // three LP roles, market ops maps to its own role plus the blacklist admin role, and the other 16 map
-        // one-to-one, so 16 + 3 + 2 = 21 assignments.
-        assertEq(assignments.length, 21, "one assignment per (role, assignee) pair: 16 one-to-one + 3 LP roles on the fee recipient + 2 on market ops");
+        // Independently derived count: the address surface is 16 fields, of which the fee recipient maps to the
+        // three LP roles, market ops maps to its own role plus the blacklist admin role, and the other 14 map
+        // one-to-one, so 14 + 3 + 2 = 19 assignments.
+        assertEq(assignments.length, 19, "one assignment per (role, assignee) pair: 14 one-to-one + 3 LP roles on the fee recipient + 2 on market ops");
 
         for (uint256 i; i < assignments.length; ++i) {
             uint64 role = assignments[i].role;
@@ -103,10 +99,10 @@ contract Test_DeployScriptConfig is Test {
             RoleConfig memory cfg = deployScript.getRoleConfig(role);
 
             // The admin re-pointing in pass 2 is only safe if every target admin role is itself rooted in the
-            // graph: ADMIN_ROLE (held by the factory admin), or one of the two meta-admin roles that pass 1
-            // granted to a concrete address (LP_ROLE_ADMIN_ROLE, DEPLOYER_ROLE_ADMIN_ROLE). Any other admin would
-            // orphan the role: nobody could ever grant or revoke it after the deployer renounces.
-            bool adminRooted = cfg.adminRole == ADMIN_ROLE || cfg.adminRole == LP_ROLE_ADMIN_ROLE || cfg.adminRole == DEPLOYER_ROLE_ADMIN_ROLE;
+            // graph: ADMIN_ROLE (held by the factory admin), or the meta-admin role that pass 1 granted to a
+            // concrete address (LP_ROLE_ADMIN_ROLE). Any other admin would orphan the role: nobody could ever
+            // grant or revoke it after the deployer renounces.
+            bool adminRooted = cfg.adminRole == ADMIN_ROLE || cfg.adminRole == LP_ROLE_ADMIN_ROLE;
             assertTrue(adminRooted, "role admin must be ADMIN_ROLE or a granted meta-admin role");
 
             // Same closed-world requirement for guardians: GUARDIAN_ROLE for every role except GUARDIAN_ROLE
@@ -118,11 +114,10 @@ contract Test_DeployScriptConfig is Test {
             // pass 2 disagree about who administers the role.
             assertEq(assignments[i].roleAdminRole, cfg.adminRole, "assignment admin must match the resolved role config");
 
-            // Hand-derived admin per role: the three LP roles sit under LP_ROLE_ADMIN_ROLE, DEPLOYER_ROLE sits
-            // under DEPLOYER_ROLE_ADMIN_ROLE, and every other role is administered by ADMIN_ROLE directly.
+            // Hand-derived admin per role: the three LP roles sit under LP_ROLE_ADMIN_ROLE, and every other role
+            // is administered by ADMIN_ROLE directly.
             uint64 expectedAdmin = ADMIN_ROLE;
             if (role == ST_LP_ROLE || role == JT_LP_ROLE || role == LPT_LP_ROLE) expectedAdmin = LP_ROLE_ADMIN_ROLE;
-            if (role == DEPLOYER_ROLE) expectedAdmin = DEPLOYER_ROLE_ADMIN_ROLE;
             assertEq(cfg.adminRole, expectedAdmin, "admin does not match the hand-derived role graph");
 
             // Hand-derived guardian per role: ADMIN_ROLE guards GUARDIAN_ROLE, GUARDIAN_ROLE guards the rest.
@@ -131,10 +126,11 @@ contract Test_DeployScriptConfig is Test {
         }
 
         // The emitted role set itself, hand-listed from the deployment's operational surface (pause/unpause,
-        // upgrade, sync, kernel/accountant/fee/venue admin, LP admin + the three LP roles, guardian, deployer +
-        // its admin, Balancer pool manager, market ops + blacklist admin, entry point config + fee collection,
-        // liquidity-premium reinvestment). Order-pinned so a silent drop or reorder is loud.
-        uint64[21] memory expectedRoles = [
+        // upgrade, sync, kernel/accountant/fee/venue admin, LP admin + the three LP roles, guardian, Balancer
+        // pool manager, market ops + blacklist admin, entry point config + fee collection, liquidity-premium
+        // reinvestment). Market deployment is PUBLIC, so no deployer role appears. Order-pinned so a silent drop
+        // or reorder is loud.
+        uint64[19] memory expectedRoles = [
             ADMIN_PAUSER_ROLE,
             ADMIN_UPGRADER_ROLE,
             SYNC_ROLE,
@@ -146,8 +142,6 @@ contract Test_DeployScriptConfig is Test {
             ST_LP_ROLE,
             JT_LP_ROLE,
             GUARDIAN_ROLE,
-            DEPLOYER_ROLE,
-            DEPLOYER_ROLE_ADMIN_ROLE,
             ADMIN_UNPAUSER_ROLE,
             LPT_LP_ROLE,
             ADMIN_BALANCER_POOL_MANAGER_ROLE,

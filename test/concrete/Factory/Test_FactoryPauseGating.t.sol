@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
-import { ADMIN_FACTORY_ROLE, ADMIN_PAUSER_ROLE, ADMIN_UNPAUSER_ROLE, DEPLOYER_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_FACTORY_ROLE, ADMIN_PAUSER_ROLE, ADMIN_UNPAUSER_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
@@ -39,7 +39,6 @@ contract Test_FactoryPauseGating is Test {
         am.grantRole(ADMIN_FACTORY_ROLE, address(this), 0);
         am.grantRole(ADMIN_PAUSER_ROLE, address(this), 0);
         am.grantRole(ADMIN_UNPAUSER_ROLE, address(this), 0);
-        am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
 
         template = new MockDeploymentTemplate(IRoycoFactory(address(factory)));
         factory.registerTemplate(address(template));

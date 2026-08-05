@@ -11,7 +11,7 @@ import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/to
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { ERC4626SharePriceOracleParams, IdleCDOTranchePriceOracleParams } from "../../../script/config/DeploymentTypes.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, DEPLOYER_ROLE, JT_LP_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, JT_LP_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
@@ -92,7 +92,6 @@ contract Test_FalconXMarketDeployment is Test {
         roycoBlacklist = FactoryScaffold.deployBlacklist(am);
 
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
-        am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
 
         bytes4[] memory entryPointSelectors = new bytes4[](1);
         entryPointSelectors[0] = IRoycoDayEntryPoint.modifyTrancheConfigs.selector;
@@ -108,9 +107,9 @@ contract Test_FalconXMarketDeployment is Test {
 
         bytes4[] memory ydmSelectors = new bytes4[](1);
         ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
+        am.setTargetFunctionRole(address(template), ydmSelectors, ADMIN_FACTORY_ROLE);
         // Both markets run AdaptiveCurve_V2, so one registration serves the upstream and the FalconX deployment
-        am.grantRole(DEPLOYER_ROLE, address(scaffold.ydms), 0);
+        am.grantRole(ADMIN_FACTORY_ROLE, address(scaffold.ydms), 0);
         scaffold.ydms.registerModels();
 
         vm.prank(FACTORY_ADMIN);

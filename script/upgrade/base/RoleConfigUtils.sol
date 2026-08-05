@@ -16,8 +16,6 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
-    DEPLOYER_ROLE,
-    DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
@@ -74,10 +72,6 @@ abstract contract RoleConfigUtils {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == GUARDIAN_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
-        } else if (role == DEPLOYER_ROLE) {
-            return RoleConfig({ adminRole: DEPLOYER_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        } else if (role == DEPLOYER_ROLE_ADMIN_ROLE) {
-            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == BURNER_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
         } else if (role == ADMIN_UNPAUSER_ROLE) {

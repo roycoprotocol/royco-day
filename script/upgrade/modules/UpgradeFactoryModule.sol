@@ -11,8 +11,6 @@ import {
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
-    DEPLOYER_ROLE,
-    DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
@@ -66,7 +64,7 @@ contract UpgradeFactoryModule is UpgradeModuleBase, RoleConfigUtils {
     ///      Ordering is stable so snapshot encoding and verification stay aligned.
     ///      Add an entry here when a new role is introduced in `Roles`.
     function _allRoles() internal pure returns (uint64[] memory roles) {
-        roles = new uint64[](15);
+        roles = new uint64[](13);
         roles[0] = _ADMIN_ROLE; // OpenZeppelin AccessManager default
         roles[1] = ADMIN_PAUSER_ROLE;
         roles[2] = ADMIN_UPGRADER_ROLE;
@@ -78,10 +76,8 @@ contract UpgradeFactoryModule is UpgradeModuleBase, RoleConfigUtils {
         roles[8] = ADMIN_ACCOUNTANT_ROLE;
         roles[9] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
         roles[10] = ADMIN_ORACLE_ROLE;
-        roles[11] = DEPLOYER_ROLE;
-        roles[12] = LP_ROLE_ADMIN_ROLE;
-        roles[13] = DEPLOYER_ROLE_ADMIN_ROLE;
-        roles[14] = GUARDIAN_ROLE;
+        roles[11] = LP_ROLE_ADMIN_ROLE;
+        roles[12] = GUARDIAN_ROLE;
     }
 
     /// @dev Accounts whose membership we snapshot per-role. Both multisigs cover the protocol's

@@ -51,8 +51,6 @@ abstract contract RoleGraphConfig is EnvConfig {
             adminOracleAddress: rootRole,
             lpRoleAdminAddress: rootRole,
             guardianAddress: guardian,
-            deployerAddress: DEPLOYER,
-            deployerAdminAddress: rootRole,
             protocolFeeRecipientAddress: protocolFeeRecipient,
             balancerPoolManagerAddress: rootRole,
             marketOpsAddress: rootRole,

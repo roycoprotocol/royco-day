@@ -56,8 +56,6 @@ struct RoleAssignmentAddresses {
     address adminOracleAddress;
     address lpRoleAdminAddress;
     address guardianAddress;
-    address deployerAddress;
-    address deployerAdminAddress;
     address protocolFeeRecipientAddress;
     address balancerPoolManagerAddress;
     address marketOpsAddress;
@@ -130,11 +128,8 @@ struct MakinaSharePriceOracleParams {
     uint48 feedStalenessThresholdSeconds;
 }
 
-/// @notice Params for `OracleType.IdleCDOTranchePrice`: CDO virtual price x the underlying-token-to-NAV feed, deployed
-///         behind an ERC1967 proxy and initialized with the market AccessManager and the deviation-clock threshold.
+/// @notice Params for `OracleType.IdleCDOTranchePrice`: CDO virtual price x the underlying-token-to-NAV feed
 /// @dev The market's collateral asset must be one of the CDO's two tranche tokens (AA or BB).
-/// @dev The only TWO-threshold oracle: the virtual price and the feed have independent update cadences, and each hop
-///      is judged against its own immutable threshold — a slow CDO cadence never loosens the feed's gate.
 struct IdleCDOTranchePriceOracleParams {
     address idleCDO;
     address underlyingTokenToNavAssetFeed;
@@ -232,8 +227,6 @@ struct ChainDeployment {
 // TEMPLATE POLICY (SYSTEM configuration the template is constructed with)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// @notice The SYSTEM policy baked into the template at construction: protocol fees, the fee recipient, and the
-///         Balancer pool's swap-fee/yield-fee configuration. No market deployer chooses these.
 struct TemplatePolicy {
     address protocolFeeRecipient;
     uint64 stProtocolFeeWAD;

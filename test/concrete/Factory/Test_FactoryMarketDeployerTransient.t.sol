@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { ADMIN_FACTORY_ROLE, DEPLOYER_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_FACTORY_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
@@ -36,8 +36,6 @@ contract Test_FactoryMarketDeployerTransient is Test {
         (factory, gatekeeper,,) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         am.grantRole(ADMIN_FACTORY_ROLE, address(this), 0);
-        am.grantRole(DEPLOYER_ROLE, DEPLOYER_ALPHA, 0);
-        am.grantRole(DEPLOYER_ROLE, DEPLOYER_BETA, 0);
 
         probeTemplate = new MockDeployerProbeTemplate(IRoycoFactory(address(factory)));
         factory.registerTemplate(address(probeTemplate));

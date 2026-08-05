@@ -5,7 +5,7 @@ import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, BURNER_ROLE, DEPLOYER_ROLE, PUBLIC_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, BURNER_ROLE, PUBLIC_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
@@ -40,7 +40,6 @@ contract Test_FactoryDeploymentWiring is Test {
         (factory, gatekeeper,,) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         am.grantRole(ADMIN_FACTORY_ROLE, address(this), 0);
-        am.grantRole(DEPLOYER_ROLE, address(this), 0);
 
         template = new MockWiringTemplate(IRoycoFactory(address(factory)));
         factory.registerTemplate(address(template));
@@ -215,8 +214,7 @@ contract Test_FactoryDeploymentWiring is Test {
     // ---------------------------------------------------------------------
 
     function test_NO_ACTIVE_TEMPLATE_onReentrantExecuteMarketDeployment() public {
-        // The reentrant call must pass the `restricted` (DEPLOYER_ROLE) gate to reach the singleton guard.
-        am.grantRole(DEPLOYER_ROLE, address(template), 0);
+        // Market deployment is PUBLIC, so the reentrant call reaches the singleton guard with no role needed.
         template.setMode(template.MODE_REENTER());
         vm.expectRevert(IRoycoFactory.NO_ACTIVE_TEMPLATE.selector);
         factory.executeMarketDeployment(address(template), "");
