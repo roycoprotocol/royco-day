@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoMarketSyncer } from "../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { RoycoDayEntryPoint } from "../../src/entrypoint/RoycoDayEntryPoint.sol";

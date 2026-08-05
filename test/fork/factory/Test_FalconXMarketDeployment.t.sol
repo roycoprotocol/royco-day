@@ -10,8 +10,7 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { DeployScript } from "../../../script/Deploy.s.sol";
-import { ERC4626SharePriceOracleParams, IdleCDOTranchePriceOracleParams, MarketConfig } from "../../../script/config/DeploymentTypes.sol";
+import { ERC4626SharePriceOracleParams, IdleCDOTranchePriceOracleParams } from "../../../script/config/DeploymentTypes.sol";
 import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, DEPLOYER_ROLE, JT_LP_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
@@ -30,7 +29,11 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../../../src/libraries/Units.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
 import { ChainlinkPriceOracleBase } from "../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
+import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
+import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
+import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 
 /// @title Test_FalconXMarketDeployment
 /// @notice Fork test for the FalconX market config: a Pareto IdleCDO AA-tranche collateral behind the composed
@@ -60,7 +63,8 @@ contract Test_FalconXMarketDeployment is Test {
     RoycoAccessManager internal am;
     RoycoFactoryGatekeeper internal gatekeeper;
     RoycoFactory internal factory;
-    DeployScript internal deployScript;
+    DayMarketRegistry internal registry;
+    DeployMarketComponent internal marketBuilder;
     RoycoDayBalancerV3MarketDeploymentTemplate internal template;
     IRoycoDayEntryPoint internal entryPoint;
     RoycoMarketSyncer internal syncer;
@@ -97,28 +101,28 @@ contract Test_FalconXMarketDeployment is Test {
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
-        deployScript = new DeployScript();
-        am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
-        template = RoycoDayBalancerV3MarketDeploymentTemplate(
-            deployScript.deployTemplateForTest(IRoycoFactory(address(factory)), deployScript.getMarketConfig("srRoyUSDC"), roycoBlacklist)
-        );
+        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory, roycoBlacklist);
+        registry = scaffold.registry;
+        marketBuilder = scaffold.market;
+        template = scaffold.template;
 
         bytes4[] memory ydmSelectors = new bytes4[](1);
         ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
         am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
         // Both markets run AdaptiveCurve_V2, so one registration serves the upstream and the FalconX deployment
-        deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("srRoyUSDC"));
+        am.grantRole(DEPLOYER_ROLE, address(scaffold.ydms), 0);
+        scaffold.ydms.registerModels();
 
         vm.prank(FACTORY_ADMIN);
         factory.registerTemplate(address(template));
 
         // Pin the FalconX config's external addresses against the live chain, so an address typo in the config file
         // fails here with a named reason instead of deep inside a deployment
-        MarketConfig memory cfg = deployScript.getMarketConfig("FalconX");
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("FalconX");
         assertEq(cfg.collateralAsset, AA_TRANCHE_TOKEN, "config collateral != Pareto AA tranche");
         assertEq(IIdleCDO(PARETO_FALCONX_CDO).AATranche(), AA_TRANCHE_TOKEN, "AA tranche is not the configured CDO's");
         assertEq(IERC20Metadata(AA_TRANCHE_TOKEN).decimals(), 18, "AA tranche decimals drifted");
-        IdleCDOTranchePriceOracleParams memory p = abi.decode(cfg.collateralAssetOracleSpecificParams, (IdleCDOTranchePriceOracleParams));
+        IdleCDOTranchePriceOracleParams memory p = abi.decode(cfg.oracle.specificParams, (IdleCDOTranchePriceOracleParams));
         assertEq(p.idleCDO, PARETO_FALCONX_CDO, "config CDO != Pareto FalconX CDO");
         assertEq(p.underlyingTokenToNavAssetFeed, USDC_USD_FEED, "config feed != Chainlink USDC/USD");
 
@@ -132,15 +136,15 @@ contract Test_FalconXMarketDeployment is Test {
     /// @dev Deploys the srRoyUSDC market from its own config, exactly as Test_SrRoyUsdcMarketDeployment does: the
     ///      ERC4626 share-price oracle is deployed directly and the 18-decimal sUSDe genesis seed is dealt
     function _deployUpstreamSrRoyUsdc() internal {
-        MarketConfig memory cfg = deployScript.getMarketConfig("srRoyUSDC");
-        cfg.collateralAssetOracle = address(
-            _newErc4626Oracle(cfg.collateralAsset, cfg.collateralAssetOracleSpecificParams)
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
+        cfg.oracle.deployed = address(
+            _newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams)
         );
-        deal(cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER, cfg.poolInitialization.quoteAmount);
+        deal(cfg.pool.quoteAsset, DEPLOYER, cfg.poolInitialization.quoteAmount);
         vm.prank(DEPLOYER);
-        IERC20(cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), cfg.poolInitialization.quoteAmount);
+        IERC20(cfg.pool.quoteAsset).approve(address(template), cfg.poolInitialization.quoteAmount);
 
-        bytes memory params = abi.encode(deployScript.buildMarketParams(cfg, SRROYUSDC_MARKET_ID_SEED, address(factory), DEPLOYER));
+        bytes memory params = abi.encode(marketBuilder.buildMarketParams(cfg, SRROYUSDC_MARKET_ID_SEED, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), params);
         upstreamSt = r.seniorTranche;
@@ -176,16 +180,16 @@ contract Test_FalconXMarketDeployment is Test {
     /// @dev The FalconX config with its two deploy-time seams resolved for THIS scaffold: the quote leg re-pointed at
     ///      the upstream market just deployed (the config bakes live test-env addresses that don't exist at the fork
     ///      block), and the CDO deviation clock attested to now — the step the config's `lastUpdate: 0` demands
-    function _falconConfig() internal returns (MarketConfig memory cfg) {
-        cfg = deployScript.getMarketConfig("FalconX");
-        cfg.gyroECLPPoolParams.quoteAsset = upstreamSt;
-        cfg.gyroECLPPoolParams.quoteAssetRateProvider = upstreamKernel;
-        cfg.collateralAssetOracle = _deployCollateralOracle(cfg, uint32(block.timestamp));
+    function _falconConfig() internal returns (DayMarketConfig memory cfg) {
+        cfg = registry.getDayMarketConfig("FalconX");
+        cfg.pool.quoteAsset = upstreamSt;
+        cfg.pool.quoteAssetRateProvider = upstreamKernel;
+        cfg.oracle.deployed = _deployCollateralOracle(cfg, uint32(block.timestamp));
         _fundPoolSeed(cfg);
     }
 
-    function _deployCollateralOracle(MarketConfig memory _cfg, uint32 _attestedLastUpdate) internal returns (address) {
-        IdleCDOTranchePriceOracleParams memory p = abi.decode(_cfg.collateralAssetOracleSpecificParams, (IdleCDOTranchePriceOracleParams));
+    function _deployCollateralOracle(DayMarketConfig memory _cfg, uint32 _attestedLastUpdate) internal returns (address) {
+        IdleCDOTranchePriceOracleParams memory p = abi.decode(_cfg.oracle.specificParams, (IdleCDOTranchePriceOracleParams));
         return address(
             new IdleCDOTranchePriceOracle(
                 p.idleCDO,
@@ -201,14 +205,14 @@ contract Test_FalconXMarketDeployment is Test {
 
     /// @dev The genesis seed is pulled from the deployment caller: the quote leg is upstream ST SHARES, minted for
     ///      real in setUp, so only the approval is granted here
-    function _fundPoolSeed(MarketConfig memory _cfg) internal {
+    function _fundPoolSeed(DayMarketConfig memory _cfg) internal {
         assertGe(IERC20(upstreamSt).balanceOf(DEPLOYER), _cfg.poolInitialization.quoteAmount, "deployer must hold the upstream ST seed");
         vm.prank(DEPLOYER);
         IERC20(upstreamSt).approve(address(template), _cfg.poolInitialization.quoteAmount);
     }
 
     function _deploy() internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
-        bytes memory p = abi.encode(deployScript.buildMarketParams(_falconConfig(), FALCONX_MARKET_ID_SEED, address(factory), DEPLOYER));
+        bytes memory p = abi.encode(marketBuilder.buildMarketParams(_falconConfig(), FALCONX_MARKET_ID_SEED, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         return factory.executeMarketDeployment(address(template), p);
     }
@@ -257,7 +261,7 @@ contract Test_FalconXMarketDeployment is Test {
         assertEq(oracle.IDLE_CDO(), PARETO_FALCONX_CDO, "oracle CDO != configured CDO");
         assertEq(oracle.COLLATERAL_ASSET(), AA_TRANCHE_TOKEN, "oracle collateral != market collateral");
         IdleCDOTranchePriceOracleParams memory p =
-            abi.decode(deployScript.getMarketConfig("FalconX").collateralAssetOracleSpecificParams, (IdleCDOTranchePriceOracleParams));
+            abi.decode(registry.getDayMarketConfig("FalconX").oracle.specificParams, (IdleCDOTranchePriceOracleParams));
         assertEq(oracle.MIN_DEVIATION_WAD(), p.minDeviationWAD, "deviation threshold != configured");
 
         // The composed price is live against the real CDO: AA virtual price lifted from the underlying's decimals to
@@ -282,7 +286,7 @@ contract Test_FalconXMarketDeployment is Test {
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
         IdleCDOTranchePriceOracle oracle = IdleCDOTranchePriceOracle(IRoycoDayKernel(r.kernel).getCollateralAssetOracle());
         IdleCDOTranchePriceOracleParams memory p =
-            abi.decode(deployScript.getMarketConfig("FalconX").collateralAssetOracleSpecificParams, (IdleCDOTranchePriceOracleParams));
+            abi.decode(registry.getDayMarketConfig("FalconX").oracle.specificParams, (IdleCDOTranchePriceOracleParams));
         assertEq(oracle.FEED_STALENESS_THRESHOLD_SECONDS(), p.feedStalenessThresholdSeconds, "feed threshold != configured immutable");
         assertEq(oracle.SOURCE_STALENESS_THRESHOLD_SECONDS(), p.virtualPriceStalenessThresholdSeconds, "clock threshold != configured immutable");
         assertLt(oracle.FEED_STALENESS_THRESHOLD_SECONDS(), oracle.SOURCE_STALENESS_THRESHOLD_SECONDS(), "the delta only exists when the gates differ");
@@ -309,14 +313,14 @@ contract Test_FalconXMarketDeployment is Test {
     ///         seeding rates the senior leg through the market's own kernel, which pokes the shut oracle. The config
     ///         bakes a REAL attested timestamp, which is exactly why it must be re-attested before every deploy
     function test_RevertIf_TheVirtualPriceClockIsNotAttested() external {
-        MarketConfig memory cfg = deployScript.getMarketConfig("FalconX");
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("FalconX");
 
-        cfg.gyroECLPPoolParams.quoteAsset = upstreamSt;
-        cfg.gyroECLPPoolParams.quoteAssetRateProvider = upstreamKernel;
-        cfg.collateralAssetOracle = _deployCollateralOracle(cfg, 0); // unattested: pricing held shut
+        cfg.pool.quoteAsset = upstreamSt;
+        cfg.pool.quoteAssetRateProvider = upstreamKernel;
+        cfg.oracle.deployed = _deployCollateralOracle(cfg, 0); // unattested: pricing held shut
         _fundPoolSeed(cfg);
 
-        bytes memory params = abi.encode(deployScript.buildMarketParams(cfg, FALCONX_MARKET_ID_SEED, address(factory), DEPLOYER));
+        bytes memory params = abi.encode(marketBuilder.buildMarketParams(cfg, FALCONX_MARKET_ID_SEED, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         vm.expectRevert();
         factory.executeMarketDeployment(address(template), params);
@@ -325,7 +329,7 @@ contract Test_FalconXMarketDeployment is Test {
     /// @notice The genesis seed lands in TRANCHE SHARES: the pool opens with quote-only depth paid in upstream ST,
     ///         the dead-share lock is parked, and the deployer's upstream ST balance funds exactly the seed
     function test_ExecuteMarketDeployment_GenesisSeedPaidInUpstreamSeniorShares() external {
-        MarketConfig memory cfg = deployScript.getMarketConfig("FalconX");
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("FalconX");
         uint256 stBalanceBefore = IERC20(upstreamSt).balanceOf(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
         address pool = IRoycoDayKernel(r.kernel).lptAsset();
@@ -349,13 +353,13 @@ contract Test_FalconXMarketDeployment is Test {
     /// @notice The sheet economics land in the accountant: the 10% market-making floor, the never-binding premium
     ///         caps, and DISTINCT AdaptiveCurve_V2 instances for the JT risk premium and the LPT liquidity premium
     function test_ExecuteMarketDeployment_FalconXEconomicsConfigured() external {
-        MarketConfig memory cfg = deployScript.getMarketConfig("FalconX");
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("FalconX");
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
-        assertEq(a.minLiquidityWAD, cfg.minLiquidityWAD, "minLiquidityWAD");
-        assertEq(a.maxJTYieldShareWAD, cfg.maxJTYieldShareWAD, "maxJTYieldShareWAD");
-        assertEq(a.maxLPTYieldShareWAD, cfg.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
+        assertEq(a.minLiquidityWAD, cfg.accountant.minLiquidityWAD, "minLiquidityWAD");
+        assertEq(a.maxJTYieldShareWAD, cfg.accountant.maxJTYieldShareWAD, "maxJTYieldShareWAD");
+        assertEq(a.maxLPTYieldShareWAD, cfg.accountant.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
         assertLe(uint256(a.maxJTYieldShareWAD) + a.maxLPTYieldShareWAD, 1e18, "caps must sum within the senior gain");
         assertTrue(a.jtYDM != a.lptYDM, "JT and LPT must hold distinct model instances");
         assertEq(a.jtYDM, r.ydm, "accountant JT model != registry instance");

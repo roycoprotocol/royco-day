@@ -24,7 +24,7 @@ import {
     LP_ROLE_ADMIN_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
-} from "../../src/factory/Roles.sol";
+} from "../../../src/factory/Roles.sol";
 
 /**
  * @title RoleConfigUtils

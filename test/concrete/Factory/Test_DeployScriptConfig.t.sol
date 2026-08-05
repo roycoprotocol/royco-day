@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { DeployScript } from "../../../script/Deploy.s.sol";
+import { ApplyRoleGraphComponent } from "../../../script/deploy/core/ApplyRoleGraph.s.sol";
 import { RoleAssignment, RoleAssignmentAddresses, RoleConfig } from "../../../script/config/DeploymentTypes.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -33,7 +33,7 @@ import { MockERC20C } from "../../mocks/MockERC20C.sol";
 
 /**
  * @title Test_DeployScriptConfig
- * @notice Pins the DeployScript pure configuration helpers that a mainnet deployment resolves before any state
+ * @notice Pins the role-graph component's pure configuration helpers that a mainnet deployment resolves before any state
  *         change: the generated role-assignment set, the per-role admin/guardian graph behind it, and the marketId
  *         derivation the CREATE2 component salts hang off
  * @dev These helpers are pure, so they are exercised on a plain instance with no fork. A hole here surfaces
@@ -42,7 +42,7 @@ import { MockERC20C } from "../../mocks/MockERC20C.sol";
  */
 contract Test_DeployScriptConfig is Test {
     /// @dev Plain instance, its role and marketId helpers need no chain state
-    DeployScript internal deployScript;
+    ApplyRoleGraphComponent internal deployScript;
 
     /// @dev Mainnet USDC, the quote asset the script's constructor derives pool names from
     address internal constant MAINNET_USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
@@ -53,7 +53,7 @@ contract Test_DeployScriptConfig is Test {
         // read that token, the etch only lets construction complete.
         vm.chainId(1);
         vm.etch(MAINNET_USDC, address(new MockERC20C("USD Coin", "USDC", 6)).code);
-        deployScript = new DeployScript();
+        deployScript = new ApplyRoleGraphComponent(address(0));
     }
 
     /**
@@ -171,7 +171,7 @@ contract Test_DeployScriptConfig is Test {
      */
     function test_RevertIf_GetRoleConfigQueriedWithUnmappedRole() public {
         // The revert must carry the exact queried id so the operator can see WHICH role the config mis-references.
-        vm.expectRevert(abi.encodeWithSelector(DeployScript.UnknownRole.selector, BURNER_ROLE));
+        vm.expectRevert(abi.encodeWithSelector(ApplyRoleGraphComponent.UnknownRole.selector, BURNER_ROLE));
         deployScript.getRoleConfig(BURNER_ROLE);
     }
 }

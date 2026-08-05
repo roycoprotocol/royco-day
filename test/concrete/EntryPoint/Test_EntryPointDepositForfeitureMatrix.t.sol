@@ -3,9 +3,8 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
-import { AssetClaims, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
+import { AssetClaims, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";

@@ -8,18 +8,7 @@ import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { RoycoCreate3Deployer } from "../../src/factory/RoycoCreate3Deployer.sol";
 import { RoycoFactoryGatekeeper } from "../../src/factory/RoycoFactoryGatekeeper.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {
-    ADMIN_ENTRY_POINT_ROLE,
-    ADMIN_FACTORY_ROLE,
-    ADMIN_PAUSER_ROLE,
-    ADMIN_ROLE,
-    ADMIN_UNPAUSER_ROLE,
-    ADMIN_UPGRADER_ROLE,
-    DEPLOYER_ROLE,
-    LPT_LP_ROLE,
-    PUBLIC_ROLE,
-    SYNC_ROLE
-} from "../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_PAUSER_ROLE, ADMIN_ROLE, ADMIN_UNPAUSER_ROLE, ADMIN_UPGRADER_ROLE, LPT_LP_ROLE, PUBLIC_ROLE, SYNC_ROLE } from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { RoycoMarketSyncer } from "../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { RoycoDayEntryPoint } from "../../src/entrypoint/RoycoDayEntryPoint.sol";
@@ -28,13 +17,13 @@ import { IRoycoFactory } from "../../src/interfaces/factory/IRoycoFactory.sol";
 
 /**
  * @title FactoryScaffold
- * @notice Stands up the access manager / gatekeeper / factory triangle the way `Deploy.s.sol` does, for the hand-rolled
+ * @notice Stands up the access manager / gatekeeper / factory triangle the way `DeployCoreComponent` does, for the hand-rolled
  *         fixtures that build a factory without running the deployment script
  * @dev The factory does NOT hold `ADMIN_ROLE`. The gatekeeper holds it, admits only never-before-configured targets,
  *      and applies the two role grants a deployment makes; the factory keeps only `ADMIN_ENTRY_POINT_ROLE` and
  *      `SYNC_ROLE`, purely so `executeAsFactory` can forward periphery configuration. The factory also
  *      no longer binds its own selectors during `initialize`, so this helper applies them exactly as
- *      `Deploy.s.sol._wireFactoryRoles` does. A fixture that skips this leaves the factory's selectors unbound, which
+ *      `DeployCoreComponent._wireFactoryRoles` does. A fixture that skips this leaves the factory's selectors unbound, which
  *      resolves to `ADMIN_ROLE` and makes `registerTemplate` / `executeMarketDeployment` callable only by root
  * @dev Ordering, mirroring the script: access manager, then the CREATE3 deployer, then the factory proxy address it
  *      resolves (a function of the salt alone), then the gatekeeper against that address, then the factory
@@ -112,7 +101,7 @@ library FactoryScaffold {
         require(address(entryPoint) == predictedEntryPoint && address(marketSyncer) == predictedSyncer, "FactoryScaffold: periphery address mismatch");
     }
 
-    /// @notice Deploys the entry point and market syncer singletons, mirroring `Deploy.s.sol._deployPeripherySingletons`
+    /// @notice Deploys the entry point and market syncer singletons, mirroring `DeployPeripheryComponent`
     /// @param _accessManager The access manager governing both singletons
     /// @param _factory The factory address the entry point pins as its provenance registry
     function deployPeripherySingletons(
@@ -139,9 +128,9 @@ library FactoryScaffold {
         );
     }
 
-    /// @notice Mirrors `Deploy.s.sol._wireFactoryRoles`: the factory's own selector bindings plus its narrow role set
+    /// @notice Mirrors `DeployCoreComponent._wireFactoryRoles`: the factory's own selector bindings plus its narrow role set
     function wireFactoryRoles(RoycoAccessManager _accessManager, address _factory) internal {
-        // Market deployment is permissionless, mirroring `Deploy.s.sol._wireFactoryRoles`
+        // Market deployment is permissionless, mirroring `DeployCoreComponent._wireFactoryRoles`
         bytes4[] memory deployerSelectors = new bytes4[](1);
         deployerSelectors[0] = IRoycoFactory.executeMarketDeployment.selector;
         _accessManager.setTargetFunctionRole(_factory, deployerSelectors, PUBLIC_ROLE);
@@ -160,7 +149,7 @@ library FactoryScaffold {
     }
 
     /**
-     * @notice Stands up the chain's blacklist singleton the way `Deploy.s.sol._deployBlacklist` does
+     * @notice Stands up the chain's blacklist singleton the way `DeployBlacklistComponent` does
      * @dev The template pins one blacklist for every market it deploys and rejects the null address, so a fixture that
      *      builds a template by hand needs a real one. Deployed with no sanctions list and an empty initial set, which
      *      is what the script does too: the Chainalysis list is wired later by an ops script

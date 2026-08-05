@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { toUint256 } from "../../src/libraries/Units.sol";
 import { FixtureCell } from "../utils/FixtureTypes.sol";
 import { cellE } from "../utils/TokenConfigs.sol";
 import { MockERC20C } from "../mocks/MockERC20C.sol";

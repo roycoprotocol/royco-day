@@ -6,7 +6,6 @@ import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { Ownable } from "../../../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
 import { UpgradeableBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
-import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { RoycoDayBalancerV3Kernel as DayKernel } from "../../../src/kernels/RoycoDayBalancerV3Kernel.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";

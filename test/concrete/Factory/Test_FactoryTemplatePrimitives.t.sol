@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { UpgradeableBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
-import { ADMIN_FACTORY_ROLE, ADMIN_ROLE, BURNER_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_FACTORY_ROLE, BURNER_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";

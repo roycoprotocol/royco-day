@@ -5,10 +5,8 @@ import { ILPOracleFactoryBase } from "../../../lib/balancer-v3-monorepo/pkg/inte
 import { IProtocolFeeController } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IProtocolFeeController.sol";
 import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
 import { IVaultAdmin } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultAdmin.sol";
-import { HooksConfig as BalancerV3HooksConfig } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
-import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IRoycoAuth } from "../../interfaces/IRoycoAuth.sol";
@@ -35,7 +33,6 @@ import {
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_UNPAUSER_ROLE,
-    ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
@@ -430,7 +427,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         _validateDeployment(params, result, balancerPool);
 
         // Apply selector->role bindings.
-        _applyRoleBindings(_buildRoleBindings(params, result));
+        _applyRoleBindings(_buildRoleBindings(result));
 
         // Record the Balancer V3 pool and BPT oracle.
         result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool, bptOracle: bptOracle }));
@@ -570,7 +567,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
 
     /// @notice Assembles the market's full role-binding config, pairing each deployment's runtime target addresses with
     ///         the selector/role sets from the per-target binding helpers and the deployer-declared oracle bindings
-    function _buildRoleBindings(MarketParams memory _params, DeploymentResult memory _result) internal view returns (TargetBinding[] memory) {
+    function _buildRoleBindings(DeploymentResult memory _result) internal view returns (TargetBinding[] memory) {
         // Runtime target addresses, index-aligned with the binding helpers below
         address[7] memory targets = [
             _result.seniorTranche,

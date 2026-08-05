@@ -9,7 +9,6 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { JT_LP_ROLE, LPT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { MarketState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";

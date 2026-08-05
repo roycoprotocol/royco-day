@@ -498,7 +498,7 @@ abstract contract ECLPExitLiquidityBase is Test {
         });
     }
 
-    /// Production params (MarketDeploymentConfig.sol:276-295 literals) — the T1 contrast baseline.
+    /// Production params (the srRoyUSDC E-CLP literals in script/deploy/templates/royco-day-balancer-v3/markets) — the T1 contrast baseline.
     function _eclpParamsProd() internal pure returns (IGyroECLPPool.EclpParams memory) {
         return IGyroECLPPool.EclpParams({
             alpha: 998_502_246_630_054_917,

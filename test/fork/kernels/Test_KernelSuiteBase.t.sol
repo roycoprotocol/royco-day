@@ -11,7 +11,8 @@ import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/inte
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { DeployScript } from "../../../script/Deploy.s.sol";
+import { BootstrapChainComponent } from "../../../script/deploy/BootstrapChain.s.sol";
+import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
 import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -39,7 +40,7 @@ import { RoycoDayTestBase } from "../../utils/RoycoDayTestBase.sol";
 /**
  * @title Test_KernelSuiteBase
  * @notice The one exhaustive kernel suite every Day fork market runs. `setUp` reads the market's `TestConfig`,
- *         forks the configured network, deploys the market end-to-end through the real `DeployScript` (via the
+ *         forks the configured network, deploys the market end-to-end through the real deployment pipeline (via the
  *         `_deployKernelAndMarket` hook, which selects a market config by name from the config file), wires every deployed
  *         contract into member vars (including the Day-only LPT/pool/hook/LDM topology the script's result omits), and
  *         funds the ST/JT providers. The venue module and oracle layer plug in the market's mechanics and asset
@@ -63,7 +64,7 @@ import { RoycoDayTestBase } from "../../utils/RoycoDayTestBase.sol";
  *        - `_oracleStalenessSelector` must return the oracle's staleness error selector, `bytes4(0)` skips that test
  *        - `_trySetReinvestmentSlippage` needs an override only when the default setter signature does not match
  *      - ASSET leaf (`Neutrl_snUSD`, in `test/fork/assets/`): extends the oracle layer and supplies config only:
- *        `getTestConfig`, `_deployKernelAndMarket` (market name into the real `DeployScript`), the
+ *        `getTestConfig`, `_deployKernelAndMarket` (market name into the real pipeline), the
  *        `maxTrancheUnitDelta`/`maxNAVDelta` rounding tolerances, and any addresses the oracle layer declares (for
  *        example the base->NAV feed).
  *      Layering rule: kernel-behavior assertions live ONLY in this suite base, venue mechanics and tests live ONLY
@@ -93,7 +94,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // HOOKS IMPLEMENTED BY SHAPE BASES / CONCRETE MARKET FILES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys the kernel + market for this test, typically `DEPLOY_SCRIPT.deploy(getMarketConfig("<name>"), ...)`.
+    /// @notice Deploys the kernel + market for this test, typically `_deployMarketThroughPipeline(MARKET_REGISTRY.getDayMarketConfig("<name>"))`.
     function _deployKernelAndMarket() internal virtual returns (DeploymentResult memory result);
 
     /// @inheritdoc IKernelTestHooks
@@ -148,7 +149,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         }
 
         _setupWallets();
-        DEPLOY_SCRIPT = new DeployScript();
+        BOOTSTRAP = new BootstrapChainComponent(false, address(0));
+        MARKET_REGISTRY = new DayMarketRegistry();
         _pinChainPolicyForTests();
 
         // Deploy the market end-to-end through the real script (concrete test selects the config by name).
@@ -164,7 +166,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             LPT = IRoycoVaultTranche(KERNEL.liquidityProviderTranche());
             POOL = KERNEL.lptAsset();
             LPT_YDM = ACCOUNTANT.getState().lptYDM;
-            VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
+            (address gyroECLPPoolFactory,) = BOOTSTRAP.venueFactories(block.chainid);
+            VAULT = IVault(address(GyroECLPPoolFactory(gyroECLPPoolFactory).getVault()));
             BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
             assertEq(BALANCER_HOOK, address(0), "setup: the pool must deploy hookless, the kernel rate provider replaces the hook");
             vm.label(address(LPT), "LPT");

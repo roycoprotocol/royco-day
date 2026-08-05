@@ -7,7 +7,7 @@ import { Test_EntryPointForkBase } from "../Test_EntryPointForkBase.t.sol";
  * @title Neutrl_snUSD_EntryPoint
  * @notice The RoycoDayEntryPoint fork suite against the Neutrl snUSD mainnet market: ST/JT are the snUSD ERC4626
  *         vault share priced base(nUSD)->NAV via the RedStone feed, the LPT holds the {snUSD_share, USDC} Gyro
- *         E-CLP BPT, and the entry point is the production singleton the DeployScript wires. The inherited tests
+ *         E-CLP BPT, and the entry point is the production singleton the deploy pipeline wires. The inherited tests
  *         run the full request/execute/cancel lifecycle with hand-derived forfeiture numbers on the real assets
  * @dev Skips (like every config-driven fork suite) when MAINNET_RPC_URL is not configured
  */

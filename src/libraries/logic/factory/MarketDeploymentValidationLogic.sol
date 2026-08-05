@@ -2,18 +2,15 @@
 pragma solidity ^0.8.28;
 
 import { IVault } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
-import { HooksConfig as BalancerV3HooksConfig } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { IAccessManaged } from "../../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { ADMIN_ROLE, PUBLIC_ROLE } from "../../../factory/Roles.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoDayAccountant } from "../../../interfaces/IRoycoDayAccountant.sol";
-import { IRoycoDayEntryPoint } from "../../../interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
 import { IBaseTemplate } from "../../../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtocolTemplate.sol";
-import { MAX_PROTOCOL_FEE_WAD, WAD } from "../../Constants.sol";
+import { WAD } from "../../Constants.sol";
 import { TrancheType } from "../../Types.sol";
 import { BalancerV3PoolCreationParams } from "../liquidity-venue/BalancerV3VenueCreationLogic.sol";
 

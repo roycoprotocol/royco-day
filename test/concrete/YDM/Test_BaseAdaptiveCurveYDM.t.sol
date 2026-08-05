@@ -6,7 +6,6 @@ import { IYDM } from "../../../src/interfaces/IYDM.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { MarketState } from "../../../src/libraries/Types.sol";
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
-import { BaseAdaptiveCurveYDM } from "../../../src/ydm/base/BaseAdaptiveCurveYDM.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { MockAdaptiveCurveYDM } from "../../mocks/MockAdaptiveCurveYDM.sol";
 

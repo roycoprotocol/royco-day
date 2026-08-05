@@ -5,7 +5,7 @@ import { Test, Vm } from "../../lib/forge-std/src/Test.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
-import { WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
+import { ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
 import { MarketState, Operation, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { MockAccountantKernel } from "../mocks/MockAccountantKernel.sol";

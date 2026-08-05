@@ -7,15 +7,17 @@ import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { DeployScript } from "../../../script/Deploy.s.sol";
-import { DeploymentResult, MarketConfig } from "../../../script/config/DeploymentTypes.sol";
+import { BootstrapChainComponent } from "../../../script/deploy/BootstrapChain.s.sol";
+import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
+import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import { ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, JT_LP_ROLE, LPT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AggregatorV3Interface } from "../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { NAV_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { RoycoDayTestBase } from "../../utils/RoycoDayTestBase.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
@@ -27,7 +29,7 @@ interface IPermit2ApproveLike {
 /**
  * @title Test_EntryPointForkBase
  * @notice The RoycoDayEntryPoint's request/execute/cancel lifecycle against a REAL market deployed end-to-end
- *         through the production DeployScript on a mainnet fork: deposits with hand-derived share forfeiture,
+ *         through the production deployment pipeline on a mainnet fork: deposits with hand-derived share forfeiture,
  *         redemptions in every RedemptionMode with the exact value skim, executor bonuses paid in shares/claims,
  *         production expiry windows, and the self-liquidation bonus flowing through un-skimmed
  * @dev Extends RoycoDayTestBase (the test-free scaffold) rather than the kernel-suite chain, so this leaf carries
@@ -44,7 +46,7 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
     // CONCRETE-MARKET HOOKS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev The market config name the DeployScript deploys (e.g. "snUSD")
+    /// @dev The market config name the pipeline deploys (e.g. "snUSD")
     function _marketName() internal pure virtual returns (string memory);
 
     /// @dev The base(asset)->NAV Chainlink-compatible feed backing the market's collateral oracle
@@ -93,26 +95,20 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         vm.createSelectFork(rpc, _forkBlockNumber());
 
         _setupWallets();
-        DEPLOY_SCRIPT = new DeployScript();
+        BOOTSTRAP = new BootstrapChainComponent(false, address(0));
+        MARKET_REGISTRY = new DayMarketRegistry();
         _pinChainPolicyForTests();
 
         // The template pulls the genesis pool seed from the configured funder. Repoint the funder at the broadcasting
         // deployer, which approves the template from inside the script's broadcast, and fund it with the seed legs
-        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig(_marketName());
-        deal(cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
+        DayMarketConfig memory cfg = MARKET_REGISTRY.getDayMarketConfig(_marketName());
+        deal(cfg.pool.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
         if (cfg.poolInitialization.collateralAmount != 0) {
             deal(cfg.collateralAsset, DEPLOYER.addr, cfg.poolInitialization.collateralAmount);
         }
 
         // Deploy the market end-to-end through the real script and capture the production entry point
-        DeploymentResult memory result = DEPLOY_SCRIPT.deploy(
-            cfg,
-            OWNER_ADDRESS,
-            PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            DEPLOY_SCRIPT.getChainConfig(block.chainid, false).scheduledOperationsExpirySeconds,
-            _generateRoleAssignments(),
-            DEPLOYER.privateKey
-        );
+        DeploymentResult memory result = _deployMarketThroughPipeline(cfg);
         _setDeployedMarket(result);
         ENTRY_POINT = IRoycoDayEntryPoint(result.entryPoint);
         vm.label(address(ENTRY_POINT), "EntryPoint");
@@ -122,7 +118,8 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         QUOTE_UNIT = 10 ** IERC20Metadata(QUOTE_ASSET).decimals();
         LPT = IRoycoVaultTranche(KERNEL.liquidityProviderTranche());
         POOL = KERNEL.lptAsset();
-        VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
+        (address gyroECLPPoolFactory,) = BOOTSTRAP.venueFactories(block.chainid);
+        VAULT = IVault(address(GyroECLPPoolFactory(gyroECLPPoolFactory).getVault()));
         vm.label(address(LPT), "LPT");
         vm.label(POOL, "BalancerPool");
 

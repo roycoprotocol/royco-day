@@ -5,7 +5,7 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
-import { NAV_UNIT, toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { MarketParamsConfig, defaultParams, zeroLiquidityParams } from "../../utils/MarketParams.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";

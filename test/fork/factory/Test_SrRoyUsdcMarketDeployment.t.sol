@@ -8,8 +8,7 @@ import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IERC4626 } from "../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { DeployScript } from "../../../script/Deploy.s.sol";
-import { ERC4626SharePriceOracleParams, MarketConfig } from "../../../script/config/DeploymentTypes.sol";
+import { ERC4626SharePriceOracleParams } from "../../../script/config/DeploymentTypes.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
@@ -23,7 +22,11 @@ import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { NAV_UNIT } from "../../../src/libraries/Units.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
+import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
+import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
+import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 
 /// @title Test_SrRoyUsdcMarketDeployment
 /// @notice Fork test for the srRoyUSDC market config: an srRoyUSDC (ERC4626 over USDC) senior/junior pair whose LPT
@@ -46,7 +49,8 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
     RoycoAccessManager internal am;
     RoycoFactoryGatekeeper internal gatekeeper;
     RoycoFactory internal factory;
-    DeployScript internal deployScript;
+    DayMarketRegistry internal registry;
+    DeployMarketComponent internal marketBuilder;
     RoycoDayBalancerV3MarketDeploymentTemplate internal template;
     IRoycoDayEntryPoint internal entryPoint;
     RoycoMarketSyncer internal syncer;
@@ -77,24 +81,24 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
-        deployScript = new DeployScript();
-        am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
-        template = RoycoDayBalancerV3MarketDeploymentTemplate(
-            deployScript.deployTemplateForTest(IRoycoFactory(address(factory)), deployScript.getMarketConfig("srRoyUSDC"), roycoBlacklist)
-        );
+        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory, roycoBlacklist);
+        registry = scaffold.registry;
+        marketBuilder = scaffold.market;
+        template = scaffold.template;
 
         bytes4[] memory ydmSelectors = new bytes4[](1);
         ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
         am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
-        deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("srRoyUSDC"));
+        am.grantRole(DEPLOYER_ROLE, address(scaffold.ydms), 0);
+        scaffold.ydms.registerModels();
 
         // Pin the config's external addresses against the live chain, so an address typo in the config file fails
         // here with a named reason instead of deep inside a deployment
-        MarketConfig memory cfg = deployScript.getMarketConfig("srRoyUSDC");
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
         assertEq(cfg.collateralAsset, SRROYUSDC_VAULT, "config collateral != srRoyUSDC vault");
         assertEq(IERC4626(cfg.collateralAsset).asset(), IERC4626(SRROYUSDC_VAULT).asset(), "vault underlying drifted");
-        assertEq(cfg.gyroECLPPoolParams.quoteAsset, SUSDE, "config quote != sUSDe");
-        assertEq(cfg.gyroECLPPoolParams.quoteAssetRateProvider, SUSDE_RATE_PROVIDER, "config rate provider != sUSDe provider");
+        assertEq(cfg.pool.quoteAsset, SUSDE, "config quote != sUSDe");
+        assertEq(cfg.pool.quoteAssetRateProvider, SUSDE_RATE_PROVIDER, "config rate provider != sUSDe provider");
     }
 
     // ─── helpers ───
@@ -106,23 +110,23 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
 
     /// @dev The config leaves the oracle unset for the `deploy()` flow to resolve; the direct-template path deploys
     ///      the ERC4626 share-price adapter itself: srRoyUSDC share -> USDC via convertToAssets, USDC -> NAV via the feed
-    function _marketConfig() internal returns (MarketConfig memory cfg) {
-        cfg = deployScript.getMarketConfig("srRoyUSDC");
-        cfg.collateralAssetOracle = address(
-            _newErc4626Oracle(cfg.collateralAsset, cfg.collateralAssetOracleSpecificParams)
+    function _marketConfig() internal returns (DayMarketConfig memory cfg) {
+        cfg = registry.getDayMarketConfig("srRoyUSDC");
+        cfg.oracle.deployed = address(
+            _newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams)
         );
         _fundPoolSeed(cfg);
     }
 
     /// @dev The genesis seed is pulled from the deployment caller: fund and approve the 18-decimal sUSDe quote leg
-    function _fundPoolSeed(MarketConfig memory _cfg) internal {
-        deal(_cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER, _cfg.poolInitialization.quoteAmount);
+    function _fundPoolSeed(DayMarketConfig memory _cfg) internal {
+        deal(_cfg.pool.quoteAsset, DEPLOYER, _cfg.poolInitialization.quoteAmount);
         vm.prank(DEPLOYER);
-        IERC20(_cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
+        IERC20(_cfg.pool.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
     }
 
     function _deploy() internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
-        bytes memory p = abi.encode(deployScript.buildMarketParams(_marketConfig(), MARKET_ID_SEED, address(factory), DEPLOYER));
+        bytes memory p = abi.encode(marketBuilder.buildMarketParams(_marketConfig(), MARKET_ID_SEED, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         return factory.executeMarketDeployment(address(template), p);
     }
@@ -177,13 +181,13 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
     ///         accountant carries two DISTINCT AdaptiveCurve_V2 instances for the JT and LPT
     function test_ExecuteMarketDeployment_LiquidityPremiumConfigured() external {
         _register();
-        MarketConfig memory cfg = deployScript.getMarketConfig("srRoyUSDC");
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
-        assertEq(a.minLiquidityWAD, cfg.minLiquidityWAD, "minLiquidityWAD");
-        assertEq(a.maxJTYieldShareWAD, cfg.maxJTYieldShareWAD, "maxJTYieldShareWAD");
-        assertEq(a.maxLPTYieldShareWAD, cfg.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
+        assertEq(a.minLiquidityWAD, cfg.accountant.minLiquidityWAD, "minLiquidityWAD");
+        assertEq(a.maxJTYieldShareWAD, cfg.accountant.maxJTYieldShareWAD, "maxJTYieldShareWAD");
+        assertEq(a.maxLPTYieldShareWAD, cfg.accountant.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
         assertLe(uint256(a.maxJTYieldShareWAD) + a.maxLPTYieldShareWAD, 1e18, "caps must sum within the senior gain");
         assertTrue(a.jtYDM != a.lptYDM, "JT and LPT must hold distinct model instances");
         assertEq(a.jtYDM, r.ydm, "accountant JT model != registry instance");
@@ -194,7 +198,7 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
     ///         parked, and the deployer holds the remainder — the exact flow a 6-decimals-assumption seed would break
     function test_ExecuteMarketDeployment_GenesisSeedWithEighteenDecimalQuote() external {
         _register();
-        MarketConfig memory cfg = deployScript.getMarketConfig("srRoyUSDC");
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
         address pool = IRoycoDayKernel(r.kernel).lptAsset();
 
@@ -221,11 +225,11 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
     ///      property pinned here is that it fails at all, and unwinds
     function test_RevertIf_SeedIsDustAgainstTheQuoteDecimals() external {
         _register();
-        MarketConfig memory cfg = _marketConfig();
+        DayMarketConfig memory cfg = _marketConfig();
         cfg.poolInitialization.quoteAmount = 1e6; // "$1" under a 6-decimals assumption; ~1e-12 sUSDe in reality
         _fundPoolSeed(cfg);
 
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID_SEED, address(factory), DEPLOYER));
+        bytes memory p = abi.encode(marketBuilder.buildMarketParams(cfg, MARKET_ID_SEED, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         vm.expectRevert();
         factory.executeMarketDeployment(address(template), p);

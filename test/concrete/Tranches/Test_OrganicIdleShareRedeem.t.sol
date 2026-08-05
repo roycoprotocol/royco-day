@@ -8,7 +8,6 @@ import { toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title Test_OrganicIdleShareRedeem

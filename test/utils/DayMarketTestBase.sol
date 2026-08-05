@@ -2,11 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { IVault } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
-import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { ERC20BurnableUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { BeaconProxy } from "../../lib/openzeppelin-contracts/contracts/proxy/beacon/BeaconProxy.sol";
-import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { UpgradeableBeacon } from "../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { CREATE3 } from "../../../lib/solady/src/utils/CREATE3.sol";
-import { Test } from "lib/forge-std/src/Test.sol";
-import { DeployScript } from "../../../script/Deploy.s.sol";
-import { MarketConfig } from "../../../script/config/DeploymentTypes.sol";
-import { RoycoCreate3Deployer } from "../../../src/factory/RoycoCreate3Deployer.sol";
+import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
+import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
+import { MarketUpstream } from "../../../script/config/DeploymentTypes.sol";
+import { RoycoDeterministic } from "../../../script/deploy/utils/RoycoDeterministic.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
-import { TAG_ST_PROXY } from "../../../src/factory/templates/base/Constants.sol";
+import { Test } from "lib/forge-std/src/Test.sol";
 
 /**
  * @title Test_MineMarketId
@@ -21,9 +21,9 @@ import { TAG_ST_PROXY } from "../../../src/factory/templates/base/Constants.sol"
  *      the ordering check and every deployment reverts
  */
 contract Test_MineMarketId is Test {
-    DeployScript internal deployScript;
+    DayMarketRegistry internal registry;
+    DeployMarketComponent internal marketBuilder;
 
-    address internal constant DETERMINISTIC_CREATE2_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
     address internal constant PROD_DEPLOYER = 0x35518D5E1fD8105FC325c5c171c329c3B10b254c;
     // snUSD's quote leg (USDC mainnet), the address the senior-tranche proxy must sort below.
     address internal constant QUOTE_ASSET = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
@@ -31,26 +31,21 @@ contract Test_MineMarketId is Test {
     string internal constant MARKET_NAME = "snUSD";
 
     function setUp() public {
-        // Fork so USDC has code (DeployScript's config init reads the quote asset's symbol()).
+        // Fork so USDC has code (the registry's config init reads the quote asset's symbol()).
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), vm.envOr("FORK_BLOCK", uint256(25_400_000)));
-        deployScript = new DeployScript();
+        registry = new DayMarketRegistry();
+        marketBuilder = new DeployMarketComponent(
+            MarketUpstream({ accessManager: address(0), factory: address(0), entryPoint: address(0), marketSyncer: address(0), roycoBlacklist: address(0), template: address(0) })
+        );
     }
 
-    /// @dev CREATE2 address under the canonical deterministic deployer.
-    function _c2(bytes32 _salt, bytes memory _code) internal pure returns (address) {
-        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), DETERMINISTIC_CREATE2_FACTORY, _salt, keccak256(_code))))));
-    }
-
-    /// @dev The production ("_PROD" salts) factory proxy a given deployer stands up. Mirrors
-    ///      DeployScript._deployAccessManagerAndFactory; the whole test suite runs on the production config.
+    /// @dev The production ("_PROD" salts) factory proxy a given deployer stands up — the SAME library derivation
+    ///      the deploy pipeline and the config registry use, so this guard can no longer drift from either.
     function _predictFactory(address _deployer) internal pure returns (address) {
-        // The proxy is a CREATE3 address off the protocol's CREATE3 deployer, so it depends on the salt alone
-        address create3Deployer = _c2(keccak256("ROYCO_CREATE3_DEPLOYER_PROD"), type(RoycoCreate3Deployer).creationCode);
-        return CREATE3.predictDeterministicAddress(keccak256(abi.encode(_deployer, keccak256("ROYCO_FACTORY_PROXY_PROD"))), create3Deployer);
+        return RoycoDeterministic.predictFactoryProxy(_deployer, false);
     }
 
     /// @dev The senior-tranche CREATE3 proxy address the template will land on for these exact params and deployer.
-    ///      Mirrors RoycoDayBalancerV3MarketDeploymentTemplate.deployMarket + BaseDeploymentTemplate._marketComponentSalt
     function _predictSeniorTranche(
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory _params,
         address _factory,
@@ -60,16 +55,15 @@ contract Test_MineMarketId is Test {
         pure
         returns (address)
     {
-        bytes32 baseSalt = keccak256(abi.encode(_params, _deployer));
-        return CREATE3.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", baseSalt, TAG_ST_PROXY)), _factory);
+        return RoycoDeterministic.predictSeniorTranche(_params, _factory, _deployer);
     }
 
     /// @dev Builds the market's real params for `_deployer` (which mines the id) and asserts the ordering invariant
     function _assertMinedIdPutsSeniorTrancheFirst(address _deployer) internal view {
         address factory = _predictFactory(_deployer);
-        MarketConfig memory config = deployScript.getMarketConfig(MARKET_NAME);
+        DayMarketConfig memory config = registry.getDayMarketConfig(MARKET_NAME);
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params =
-            deployScript.buildMarketParams(config, deployScript.getMarketId(MARKET_NAME, factory), factory, _deployer);
+            marketBuilder.buildMarketParams(config, registry.getMarketId(MARKET_NAME, factory), factory, _deployer);
 
         assertEq(params.quoteAsset, QUOTE_ASSET, "the market's quote leg must be the asset the ordering is mined against");
         assertLt(
@@ -95,14 +89,12 @@ contract Test_MineMarketId is Test {
     function test_MinedMarketId_IsScopedToTheDeployer() public {
         address localDeployer = vm.createWallet("DEPLOYER").addr;
         address prodFactory = _predictFactory(PROD_DEPLOYER);
-        MarketConfig memory config = deployScript.getMarketConfig(MARKET_NAME);
-        bytes32 seed = deployScript.getMarketId(MARKET_NAME, prodFactory);
+        DayMarketConfig memory config = registry.getDayMarketConfig(MARKET_NAME);
+        bytes32 seed = registry.getMarketId(MARKET_NAME, prodFactory);
 
         // Same factory, same seed, same config: only the deploying account differs
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory prodParams =
-            deployScript.buildMarketParams(config, seed, prodFactory, PROD_DEPLOYER);
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory localParams =
-            deployScript.buildMarketParams(config, seed, prodFactory, localDeployer);
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory prodParams = marketBuilder.buildMarketParams(config, seed, prodFactory, PROD_DEPLOYER);
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory localParams = marketBuilder.buildMarketParams(config, seed, prodFactory, localDeployer);
 
         assertTrue(
             _predictSeniorTranche(prodParams, prodFactory, PROD_DEPLOYER) != _predictSeniorTranche(localParams, prodFactory, localDeployer),

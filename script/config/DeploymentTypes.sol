@@ -4,9 +4,7 @@ pragma solidity ^0.8.28;
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
-import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
@@ -14,12 +12,6 @@ import { IYDM } from "../../src/interfaces/IYDM.sol";
 // ═══════════════════════════════════════════════════════════════════════════
 // ENUMS
 // ═══════════════════════════════════════════════════════════════════════════
-
-/// @notice Day kernel types the deployment path can deploy.
-/// @dev New Day kernel types are added here as they ship.
-enum KernelType {
-    RoycoDayBalancerV3Kernel
-}
 
 /// @notice The yield distribution model shapes the deployment path can deploy
 /// @dev The template keys its model registry by name rather than by this enum, so a new shape can be registered on a
@@ -33,7 +25,7 @@ enum YDMType {
 
 /// @notice Collateral asset oracle kinds the deployment path can deploy (one per `src/oracle/` adapter).
 /// @dev New oracle adapters are added here as they ship. Each kind decodes its own params struct from
-///      `MarketConfig.collateralAssetOracleSpecificParams` (mirroring how `ydmSpecificParams` is typed by `ydmType`).
+///      `CollateralOracleConfig.specificParams` (typed by `oracleType`, mirroring the YDM selections).
 enum OracleType {
     ChainlinkPrice,
     ERC4626SharePrice,
@@ -173,24 +165,76 @@ struct DeploymentResult {
     address marketSyncer;
 }
 
-/// @notice The chain-level protocol scaffolding a market is deployed against (shared singletons + the market's template).
-/// @dev Bundled into one struct so the deploy script can pass it around as a single stack slot (via-IR stack budget).
-struct ProtocolScaffolding {
-    AccessManager accessManager;
-    RoycoFactory factory;
+// ═══════════════════════════════════════════════════════════════════════════
+// PIPELINE STRUCTS (upstream address handover between component scripts)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// @notice The core script's output: the chain's auth + factory backbone (predicted periphery included)
+struct CoreDeployment {
+    address accessManager;
+    address create3Deployer;
+    address gatekeeper;
+    address factory;
+    address entryPoint;
+    address marketSyncer;
+    bool amExisted;
+    bool factoryExisted;
+}
+
+/// @notice Upstream addresses the periphery script is constructed with
+struct PeripheryUpstream {
+    address accessManager;
+    address factory;
+}
+
+/// @notice The chain-wide component beacons + the BPT oracle feed the template is constructed against
+struct ImplementationSet {
+    address seniorTrancheBeacon;
+    address juniorTrancheBeacon;
+    address liquidityProviderTrancheBeacon;
+    address accountantBeacon;
+    address kernelBeacon;
+    address bptOracleConstantPriceFeed;
+}
+
+/// @notice Upstream addresses the template script is constructed with
+struct TemplateUpstream {
+    address accessManager;
+    address factory;
+    address roycoBlacklist;
+    ImplementationSet impls;
+}
+
+/// @notice Upstream addresses the market script is constructed with (the fully bootstrapped chain)
+struct MarketUpstream {
+    address accessManager;
+    address factory;
     address entryPoint;
     address marketSyncer;
     address roycoBlacklist;
     address template;
-    bytes32 marketId;
+}
+
+/// @notice The bootstrap orchestrator's output: everything a chain needs before any market exists
+struct ChainDeployment {
+    address accessManager;
+    address gatekeeper;
+    address factory;
+    address entryPoint;
+    address marketSyncer;
+    address roycoBlacklist;
+    address template;
+    ImplementationSet impls;
+    bool amExisted;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CHAIN-SPECIFIC CONFIG (defined once per chain)
+// TEMPLATE POLICY (SYSTEM configuration the template is constructed with)
 // ═══════════════════════════════════════════════════════════════════════════
 
-struct ChainConfig {
-    address factoryAdmin;
+/// @notice The SYSTEM policy baked into the template at construction: protocol fees, the fee recipient, and the
+///         Balancer pool's swap-fee/yield-fee configuration. No market deployer chooses these.
+struct TemplatePolicy {
     address protocolFeeRecipient;
     uint64 stProtocolFeeWAD;
     uint64 jtProtocolFeeWAD;
@@ -199,31 +243,6 @@ struct ChainConfig {
     uint64 poolSwapFeePercentage;
     bool chargeYieldFeeOnSeniorTrancheShares;
     bool chargeYieldFeeOnQuoteAsset;
-    address pauserAddress;
-    address unpauserAddress;
-    address upgraderAddress;
-    address syncRoleAddress;
-    address adminKernelAddress;
-    address adminAccountantAddress;
-    address adminProtocolFeeSetterAddress;
-    address adminOracleAddress;
-    address lpRoleAdminAddress;
-    address guardianAddress;
-    address deployerAddress;
-    address deployerAdminAddress;
-    uint32 scheduledOperationsExpirySeconds;
-    // Day: the Balancer V3 Gyro E-CLP pool factory the LPT pool is created against.
-    address gyroECLPPoolFactory;
-    // Day: Balancer's E-CLP LP oracle factory; the template deploys each market's BPT oracle through it.
-    address eclpLPOracleFactory;
-    // Foundation ("fndn") operational role holders.
-    address balancerPoolManagerAddress;
-    address marketOpsAddress;
-    // Holder of the dedicated liquidity-premium reinvestment retry knob (split from market ops).
-    address marketReinvestLiquidityPremiumAddress;
-    // Entry point admins: config changes (delays, oracle gate flags, enable flags) and protocol fee collection.
-    address adminEntryPointAddress;
-    address entryPointFeeCollectorAddress;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -248,52 +267,4 @@ struct GyroECLPPoolParams {
     IGyroECLPPool.DerivedEclpParams derivedEclpParams;
     address quoteAsset;
     address quoteAssetRateProvider;
-}
-
-struct MarketConfig {
-    // Market identification
-    string marketName;
-    uint256 chainId;
-    // Tranche metadata
-    string seniorTrancheName;
-    string seniorTrancheSymbol;
-    string juniorTrancheName;
-    string juniorTrancheSymbol;
-    string liquidityProviderTrancheName;
-    string liquidityProviderTrancheSymbol;
-    // Assets
-    address collateralAsset;
-    address collateralAssetOracle;
-    OracleType collateralAssetOracleType;
-    // Per-hop staleness thresholds live INSIDE the oracle-specific params: they are adapter construction immutables
-    bytes collateralAssetOracleSpecificParams;
-    address sequencerUptimeFeed;
-    uint48 gracePeriodSeconds;
-    // Dust tolerance
-    uint256 dustTolerance;
-    // Kernel
-    KernelType kernelType;
-    bytes kernelSpecificParams;
-    uint64 stSelfLiquidationBonusWAD;
-    // Accountant
-    uint64 minCoverageWAD;
-    uint256 coverageLiquidationUtilizationWAD;
-    // The share of ST NAV that must sit in the LPT's market-making inventory, scaled to WAD (zero disables the requirement)
-    uint64 minLiquidityWAD;
-    // Caps on the premiums carved out of senior appreciation, scaled to WAD; they may sum to at most WAD
-    uint64 maxJTYieldShareWAD;
-    uint64 maxLPTYieldShareWAD;
-    uint24 fixedTermDurationSeconds;
-    uint24 fixedTermGracePeriodSeconds; // grace period before the market may first commence a fixed term
-    YDMType ydmType;
-    bytes ydmSpecificParams; // JT YDM curve
-    bytes lptYdmSpecificParams; // LDM curve
-    // Liquidity provider tranche: the Gyro E-CLP {ST_share, quote} pool the LPT BPT is minted from.
-    GyroECLPPoolParams gyroECLPPoolParams;
-    // Genesis pool liquidity
-    RoycoDayBalancerV3MarketDeploymentTemplate.PoolInitializationParams poolInitialization;
-    // Entry point config per tranche
-    IRoycoDayEntryPoint.TrancheConfig stEntryPointConfig;
-    IRoycoDayEntryPoint.TrancheConfig jtEntryPointConfig;
-    IRoycoDayEntryPoint.TrancheConfig lptEntryPointConfig;
 }

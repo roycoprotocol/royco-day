@@ -4,9 +4,15 @@ pragma solidity ^0.8.28;
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { DeployScript } from "../../script/Deploy.s.sol";
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
-import { ChainConfig, DeploymentResult, MarketConfig, RoleAssignment, RoleAssignmentAddresses } from "../../script/config/DeploymentTypes.sol";
+import { BootstrapChainComponent } from "../../script/deploy/BootstrapChain.s.sol";
+import { RenounceDeployerRolesComponent } from "../../script/deploy/core/RenounceDeployerRoles.s.sol";
+import { DayMarketRegistry } from "../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
+import { DayMarketConfig } from "../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
+import { DeployMarketComponent } from "../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
+import {
+    ChainDeployment, DeploymentResult, MarketUpstream, RoleAssignmentAddresses, TemplatePolicy
+} from "../../script/config/DeploymentTypes.sol";
 import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, LP_ROLE_ADMIN_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
@@ -102,8 +108,10 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     // Royco Deployments
     // -----------------------------------------
 
-    // Deploy Script
-    DeployScript internal DEPLOY_SCRIPT;
+    // Deployment pipeline components (simulation-only instances; each broadcasts as the fixture's DEPLOYER)
+    BootstrapChainComponent internal BOOTSTRAP;
+    DayMarketRegistry internal MARKET_REGISTRY;
+    ChainDeployment internal CHAIN;
 
     // Deployments
     RoycoFactory internal FACTORY;
@@ -147,18 +155,21 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         _setupFork();
         _setupWallets();
 
-        // Deploy the deploy script
-        DEPLOY_SCRIPT = new DeployScript();
+        // Stand up the deployment pipeline components
+        BOOTSTRAP = new BootstrapChainComponent(false, address(0));
+        MARKET_REGISTRY = new DayMarketRegistry();
         _pinChainPolicyForTests();
     }
 
     /// @notice Pins the chain-level policy these suites' reference math and actors assume, without touching the
     ///         production config: the canonical fee set may evolve, but every arrange and expectation here is written
-    ///         against this one. The recipient is the fixture's prankable wallet, so deployed kernels pay a known actor
-    /// @dev MUST run after `DEPLOY_SCRIPT` is created and before any market deploys through it. Fork bases that stand
-    ///      up their own script instance call this themselves
+    ///         against this one. The recipient is the fixture's prankable wallet, so deployed kernels pay a known
+    ///         actor. Also re-points the whole role graph at the fixture's prankable wallets and the ADMIN_ROLE at
+    ///         OWNER — what the legacy script took as per-deploy arguments now rides the component overrides
+    /// @dev MUST run after `BOOTSTRAP`/`MARKET_REGISTRY` are created and before any market deploys through them. Fork
+    ///      bases that stand up their own component instances call this themselves
     function _pinChainPolicyForTests() internal {
-        ChainConfig memory pinned = DEPLOY_SCRIPT.getChainConfig(block.chainid, false);
+        TemplatePolicy memory pinned = BOOTSTRAP.templatePolicy(false);
         pinned.protocolFeeRecipient = PROTOCOL_FEE_RECIPIENT_ADDRESS;
         pinned.stProtocolFeeWAD = 0.1e18;
         pinned.jtProtocolFeeWAD = 0;
@@ -166,20 +177,24 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         pinned.lptYieldShareProtocolFeeWAD = 0;
         // The venue suites' leak and slippage formulas are written against a 1 bp pool swap fee
         pinned.poolSwapFeePercentage = 1e14;
-        DEPLOY_SCRIPT.overrideChainConfigForTest(pinned);
+        BOOTSTRAP.overrideTemplatePolicyForTest(pinned);
+
+        // The fixtures act through role-specific prankable wallets, with OWNER as the AccessManager admin
+        BOOTSTRAP.overrideFactoryAdminForTest(OWNER_ADDRESS);
+        BOOTSTRAP.overrideRoleAssignmentAddressesForTest(_fixtureRoleAssignmentAddresses());
 
         // The venue suites' slippage bounds, reinvestment-gate interactions, and staged-premium arranges are
         // calibrated against the tight snUSD E-CLP curve (lambda 4000); pin it so a curve retune in the canonical
         // config cannot silently invalidate every calibrated expectation
-        MarketConfig memory snUsd = DEPLOY_SCRIPT.getMarketConfig("snUSD");
-        snUsd.gyroECLPPoolParams.eclpParams = IGyroECLPPool.EclpParams({
+        DayMarketConfig memory snUsd = MARKET_REGISTRY.getDayMarketConfig("snUSD");
+        snUsd.pool.eclpParams = IGyroECLPPool.EclpParams({
             alpha: 998_502_246_630_054_917,
             beta: 1_000_200_040_008_001_600,
             c: 707_106_781_186_547_524,
             s: 707_106_781_186_547_524,
             lambda: 4_000_000_000_000_000_000_000
         });
-        snUsd.gyroECLPPoolParams.derivedEclpParams = IGyroECLPPool.DerivedEclpParams({
+        snUsd.pool.derivedEclpParams = IGyroECLPPool.DerivedEclpParams({
             tauAlpha: IGyroECLPPool.Vector2({
                 x: -94_861_212_813_096_057_289_512_505_574_275_160_547, y: 31_644_119_574_235_279_926_451_292_677_567_331_630
             }),
@@ -192,7 +207,34 @@ abstract contract RoycoDayTestBase is Test, Assertions {
             z: -28_859_471_639_991_253_843_240_999_485_797_747_790,
             dSq: 99_999_999_999_999_999_886_624_093_342_106_115_200
         });
-        DEPLOY_SCRIPT.overrideMarketConfigForTest(snUsd);
+        MARKET_REGISTRY.overrideDayMarketConfigForTest(snUsd);
+    }
+
+    /// @notice Deploys a market through the REAL pipeline, exactly as the runbook composes it: bootstrap the chain
+    ///         (idempotent — re-runs reuse everything), drop the deployer's admin roles (legacy `deploy()` parity:
+    ///         admin-gated setup ends before any market lands), then deploy the market from its config struct
+    function _deployMarketThroughPipeline(DayMarketConfig memory _cfg) internal returns (DeploymentResult memory result) {
+        DeployMarketComponent market = _marketComponent();
+        result = market.deployMarket(_cfg, MARKET_REGISTRY.getMarketId(_cfg.marketName, CHAIN.factory), DEPLOYER.privateKey);
+    }
+
+    /// @notice Bootstraps the chain (idempotent), drops the deployer's admin roles, and returns a market component
+    ///         wired to the resulting chain — for tests that need the component itself (e.g. to try/catch a deploy)
+    function _marketComponent() internal returns (DeployMarketComponent market) {
+        CHAIN = BOOTSTRAP.bootstrap(DEPLOYER.privateKey);
+
+        new RenounceDeployerRolesComponent(CHAIN.accessManager).execute(BOOTSTRAP.factoryAdmin(false), !CHAIN.amExisted, DEPLOYER.privateKey);
+
+        market = new DeployMarketComponent(
+            MarketUpstream({
+                accessManager: CHAIN.accessManager,
+                factory: CHAIN.factory,
+                entryPoint: CHAIN.entryPoint,
+                marketSyncer: CHAIN.marketSyncer,
+                roycoBlacklist: CHAIN.roycoBlacklist,
+                template: CHAIN.template
+            })
+        );
     }
 
     function _setupFork() internal {
@@ -412,10 +454,9 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         return (0, "");
     }
 
-    /// @notice Generates role assignments using the role-specific addresses
-    /// @return roleAssignments Array of role assignment configurations
-    function _generateRoleAssignments() internal view returns (RoleAssignment[] memory roleAssignments) {
-        return DEPLOY_SCRIPT.generateRolesAssignments(
+    /// @notice The fixture's role-holder wallets, in the shape the role-graph component assigns from
+    function _fixtureRoleAssignmentAddresses() internal view returns (RoleAssignmentAddresses memory) {
+        return (
             RoleAssignmentAddresses({
                 pauserAddress: PAUSER_ADDRESS,
                 unpauserAddress: UNPAUSER_ADDRESS,

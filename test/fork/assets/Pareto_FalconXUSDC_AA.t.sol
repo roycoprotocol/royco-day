@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { DeploymentResult, IdleCDOTranchePriceOracleParams, MarketConfig, OracleType } from "../../../script/config/DeploymentTypes.sol";
+import { DeploymentResult, IdleCDOTranchePriceOracleParams, OracleType } from "../../../script/config/DeploymentTypes.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../../src/libraries/Units.sol";
 import { IdleCDO_Chainlink_KernelSuite } from "../oracles/IdleCDO_Chainlink/IdleCDO_Chainlink_KernelSuite.sol";
 
@@ -10,7 +11,7 @@ import { IdleCDO_Chainlink_KernelSuite } from "../oracles/IdleCDO_Chainlink/Idle
  * @notice The ASSET layer of the fork chain: the concrete Day market fixture for the Pareto FalconX USDC AA market
  *         (ST/JT are the REAL Pareto Idle CDO's AA tranche token, priced tranche->underlying(USDC) via the CDO's
  *         virtualPrice and underlying->NAV via the Chainlink USDC/USD feed; the LPT holds the `{AA_share, USDC}`
- *         Gyro E-CLP BPT). The inherited `setUp` forks mainnet, deploys the market through the real `DeployScript`,
+ *         Gyro E-CLP BPT). The inherited `setUp` forks mainnet, deploys the market through the real deployment pipeline,
  *         and captures every contract into member vars — the market is ready to test. No `test_*` methods here:
  *         extending the IdleCDO+Chainlink oracle layer (which sits on the Balancer venue module, which sits on the
  *         abstract kernel suite) makes this one leaf carry the kernel suite plus the venue suites.
@@ -51,10 +52,10 @@ contract Pareto_FalconXUSDC_AA is IdleCDO_Chainlink_KernelSuite {
     function _deployKernelAndMarket() internal override returns (DeploymentResult memory) {
         // Clone the registered snUSD market shape (same 18-decimal collateral over a USDC quote pool) and swap in
         // the CDO AA tranche collateral with its composed virtual-price oracle, deployed by the script itself
-        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+        DayMarketConfig memory cfg = MARKET_REGISTRY.getDayMarketConfig("snUSD");
         cfg.collateralAsset = AA_TRANCHE_TOKEN;
-        cfg.collateralAssetOracleType = OracleType.IdleCDOTranchePrice;
-        cfg.collateralAssetOracleSpecificParams = abi.encode(
+        cfg.oracle.oracleType = OracleType.IdleCDOTranchePrice;
+        cfg.oracle.specificParams = abi.encode(
             IdleCDOTranchePriceOracleParams({
                 idleCDO: PARETO_FALCONX_CDO,
                 underlyingTokenToNavAssetFeed: USDC_USD_FEED,
@@ -71,18 +72,11 @@ contract Pareto_FalconXUSDC_AA is IdleCDO_Chainlink_KernelSuite {
 
         // The template pulls the genesis pool seed from the configured funder. Repoint the funder at the broadcasting
         // deployer, which approves the template from inside the script's broadcast, and fund it with the seed legs
-        deal(cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
+        deal(cfg.pool.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
         if (cfg.poolInitialization.collateralAmount != 0) {
             deal(cfg.collateralAsset, DEPLOYER.addr, cfg.poolInitialization.collateralAmount);
         }
-        return DEPLOY_SCRIPT.deploy(
-            cfg,
-            OWNER_ADDRESS,
-            PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            DEPLOY_SCRIPT.getChainConfig(block.chainid, false).scheduledOperationsExpirySeconds,
-            _generateRoleAssignments(),
-            DEPLOYER.privateKey
-        );
+        return _deployMarketThroughPipeline(cfg);
     }
 
     function maxTrancheUnitDelta() public pure override returns (TRANCHE_UNIT) {

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { DeployScript } from "../../../script/Deploy.s.sol";
-import { DeploymentResult, MarketConfig } from "../../../script/config/DeploymentTypes.sol";
+import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../../src/libraries/Units.sol";
 import { ERC4626_Chainlink_KernelSuite } from "../oracles/ERC4626_Chainlink/ERC4626_Chainlink_KernelSuite.sol";
 
@@ -10,7 +10,7 @@ import { ERC4626_Chainlink_KernelSuite } from "../oracles/ERC4626_Chainlink/ERC4
  * @title Neutrl_snUSD
  * @notice The ASSET layer of the fork chain: the concrete Day market fixture for the Neutrl snUSD market (ST/JT are the
  *         snUSD ERC4626 vault, priced base(nUSD)->NAV via the RedStone nUSD feed; the LPT holds the `{snUSD_share, USDC}`
- *         Gyro E-CLP BPT). The inherited `setUp` forks mainnet, deploys the market through the real `DeployScript`, and
+ *         Gyro E-CLP BPT). The inherited `setUp` forks mainnet, deploys the market through the real deployment pipeline, and
  *         captures every contract into member vars — the market is ready to test. No `test_*` methods here: extending the
  *         ERC4626+Chainlink oracle layer (which sits on the Balancer venue module, which sits on the abstract kernel
  *         suite) makes this one leaf carry the kernel suite plus the venue suites.
@@ -39,19 +39,12 @@ contract Neutrl_snUSD is ERC4626_Chainlink_KernelSuite {
     function _deployKernelAndMarket() internal override returns (DeploymentResult memory) {
         // The template pulls the genesis pool seed from the configured funder. Repoint the funder at the broadcasting
         // deployer, which approves the template from inside the script's broadcast, and fund it with the seed legs
-        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
-        deal(cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
+        DayMarketConfig memory cfg = MARKET_REGISTRY.getDayMarketConfig("snUSD");
+        deal(cfg.pool.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
         if (cfg.poolInitialization.collateralAmount != 0) {
             deal(cfg.collateralAsset, DEPLOYER.addr, cfg.poolInitialization.collateralAmount);
         }
-        return DEPLOY_SCRIPT.deploy(
-            cfg,
-            OWNER_ADDRESS,
-            PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            DEPLOY_SCRIPT.getChainConfig(block.chainid, false).scheduledOperationsExpirySeconds,
-            _generateRoleAssignments(),
-            DEPLOYER.privateKey
-        );
+        return _deployMarketThroughPipeline(cfg);
     }
 
     function maxTrancheUnitDelta() public pure override returns (TRANCHE_UNIT) {

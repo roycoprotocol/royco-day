@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
-import { ADMIN_ROLE, BURNER_ROLE, PUBLIC_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ROLE, PUBLIC_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
 
 /**

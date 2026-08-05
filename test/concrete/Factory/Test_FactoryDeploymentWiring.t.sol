@@ -5,23 +5,13 @@ import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
-import {
-    ADMIN_ENTRY_POINT_ROLE,
-    ADMIN_FACTORY_ROLE,
-    ADMIN_ROLE,
-    ADMIN_UPGRADER_ROLE,
-    BURNER_ROLE,
-    DEPLOYER_ROLE,
-    PUBLIC_ROLE,
-    SYNC_ROLE
-} from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, BURNER_ROLE, DEPLOYER_ROLE, PUBLIC_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { MockWiringTemplate } from "../../mocks/MockWiringTemplate.sol";
-import { UninitializedERC1967Proxy } from "../../mocks/UninitializedERC1967Proxy.sol";
 
 /**
  * @title Test_FactoryDeploymentWiring

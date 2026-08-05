@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { ILPOracleBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleBase.sol";
 import { ILPOracleFactoryBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
 import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
-import { HooksConfig, TokenInfo, TokenType } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
+import { TokenInfo, TokenType } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { LPOracleBase } from "../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/LPOracleBase.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import {
@@ -17,9 +17,10 @@ import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { DeployScript } from "../../../script/Deploy.s.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
-import { DeploymentResult, MarketConfig } from "../../../script/config/DeploymentTypes.sol";
+import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
+import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
@@ -47,7 +48,6 @@ import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { IRoycoAccessManager } from "../../../src/interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
-import { RoycoDayKernel } from "../../../src/kernels/base/RoycoDayKernel.sol";
 import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../../src/libraries/Units.sol";
@@ -57,7 +57,7 @@ import { RoycoDayTestBase } from "../../utils/RoycoDayTestBase.sol";
 
 /**
  * @title Test_DayMarketDeployment
- * @notice End-to-end deployment test: runs the real `DeployScript` against a mainnet fork to deploy a full Day snUSD
+ * @notice End-to-end deployment test: runs the real deployment pipeline against a mainnet fork to deploy a full Day snUSD
  *         market on the real Balancer V3 + Gyro E-CLP infra, then rigorously asserts every parameter, linkage, and
  *         AccessManager auth wiring.
  * @dev Scope: deploy + static assertions (no deposits/syncs). The BPT oracle is deployed by the template through the
@@ -98,25 +98,21 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     }
 
     function setUp() public {
-        // Fork mainnet + create wallets + `new DeployScript()`.
+        // Fork mainnet + create wallets + stand up the pipeline components.
         _setUpRoyco();
+        // This suite deploys with the production ROOT_MULTISIG as the AccessManager admin (rather than the
+        // fixture's OWNER), so its auth assertions read the production admin topology
+        BOOTSTRAP.overrideFactoryAdminForTest(FACTORY_ADMIN);
 
         // Every market launches with genesis pool liquidity, pulled from the configured funder. In the script flow the
         // funder is the broadcasting deployer, which approves the template from inside the broadcast, so the suite only
         // has to make sure that deployer actually holds the quote.
-        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
-        deal(cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
+        DayMarketConfig memory cfg = MARKET_REGISTRY.getDayMarketConfig("snUSD");
+        deal(cfg.pool.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
 
-        // Deploy the Day-shaped SNUSD market end to end through the real script, sourcing the market config from the config
-        // file (single source of truth) — not an inline test fixture.
-        DeploymentResult memory result = DEPLOY_SCRIPT.deploy(
-            cfg,
-            FACTORY_ADMIN, // factory admin (holds AccessManager ADMIN_ROLE)
-            PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            0,
-            _generateRoleAssignments(),
-            DEPLOYER.privateKey
-        );
+        // Deploy the Day-shaped SNUSD market end to end through the real pipeline, sourcing the market config from
+        // the registry (single source of truth) — not an inline test fixture.
+        DeploymentResult memory result = _deployMarketThroughPipeline(cfg);
         _setDeployedMarket(result);
 
         // The periphery singletons the script deploys before the market and the template configures for it.
@@ -127,7 +123,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         LPT = IRoycoVaultTranche(KERNEL.liquidityProviderTranche());
         POOL = KERNEL.lptAsset();
         LPT_YDM = ACCOUNTANT.getState().lptYDM;
-        VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
+        (address gyroECLPPoolFactory,) = BOOTSTRAP.venueFactories(block.chainid);
+        VAULT = IVault(address(GyroECLPPoolFactory(gyroECLPPoolFactory).getVault()));
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -291,10 +288,10 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(ks.stSelfLiquidationBonusWAD, 0.005e18, "stSelfLiquidationBonus");
 
         // Tranche metadata is per-market config: assert against the config file itself so a rename never stales this
-        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
-        assertEq(ST.name(), cfg.seniorTrancheName, "ST name");
-        assertEq(ST.symbol(), cfg.seniorTrancheSymbol, "ST symbol");
-        assertEq(LPT.symbol(), cfg.liquidityProviderTrancheSymbol, "LPT symbol");
+        DayMarketConfig memory cfg = MARKET_REGISTRY.getDayMarketConfig("snUSD");
+        assertEq(ST.name(), cfg.stParams.name, "ST name");
+        assertEq(ST.symbol(), cfg.stParams.symbol, "ST symbol");
+        assertEq(LPT.symbol(), cfg.lptParams.symbol, "LPT symbol");
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -365,7 +362,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(ENTRY_POINT.ROYCO_FACTORY(), address(FACTORY), "entry point factory binding");
         assertEq(AccessManagedUpgradeable(address(ENTRY_POINT)).authority(), address(ACCESS_MANAGER), "entry point authority");
 
-        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+        DayMarketConfig memory cfg = MARKET_REGISTRY.getDayMarketConfig("snUSD");
         _assertEntryPointConfig(address(ST), cfg.stEntryPointConfig, "ST");
         _assertEntryPointConfig(address(JT), cfg.jtEntryPointConfig, "JT");
         _assertEntryPointConfig(address(LPT), cfg.lptEntryPointConfig, "LPT");
@@ -517,7 +514,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         address bptOracle = BalancerV3LiquidityVenue(address(KERNEL)).getBalancerV3LiquidityVenueState().bptOracle;
         assertTrue(bptOracle != address(0), "bptOracle unset");
         assertGt(bptOracle.code.length, 0, "bptOracle has no code");
-        address eclpOracleFactory = DEPLOY_SCRIPT.getChainConfig(block.chainid, false).eclpLPOracleFactory;
+        (, address eclpOracleFactory) = BOOTSTRAP.venueFactories(block.chainid);
         assertTrue(ILPOracleFactoryBase(eclpOracleFactory).isOracleFromFactory(ILPOracleBase(bptOracle)), "not from oracle factory");
 
         // The oracle prices THIS market's pool (the same identity the kernel's setBPTOracle guard enforces).
@@ -644,10 +641,10 @@ contract Test_DayMarketDeployment_GenesisSeedBoundary is RoycoDayTestBase {
     }
 
     /// @dev The snUSD market config repointed at the funded deployer with the specified quote-only genesis seed
-    function _seededConfig(uint256 _quoteAmount) internal returns (MarketConfig memory cfg) {
-        cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+    function _seededConfig(uint256 _quoteAmount) internal returns (DayMarketConfig memory cfg) {
+        cfg = MARKET_REGISTRY.getDayMarketConfig("snUSD");
         cfg.poolInitialization.quoteAmount = _quoteAmount;
-        deal(cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER.addr, _quoteAmount);
+        deal(cfg.pool.quoteAsset, DEPLOYER.addr, _quoteAmount);
     }
 
     /**
@@ -658,8 +655,9 @@ contract Test_DayMarketDeployment_GenesisSeedBoundary is RoycoDayTestBase {
      *      minimum-total-supply check passed, so the template's floor is the operative dust boundary
      */
     function test_RevertIf_DustGenesisSeedMintsFewerThanDeadShares() public {
-        MarketConfig memory cfg = _seededConfig(1);
-        try DEPLOY_SCRIPT.deploy(cfg, FACTORY_ADMIN, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0, _generateRoleAssignments(), DEPLOYER.privateKey) {
+        DayMarketConfig memory cfg = _seededConfig(1);
+        DeployMarketComponent market = _marketComponent();
+        try market.deployMarket(cfg, MARKET_REGISTRY.getMarketId("snUSD", CHAIN.factory), DEPLOYER.privateKey) {
             fail("a dust genesis seed minting fewer than DEAD_SHARES must revert the deployment");
         } catch (bytes memory err) {
             bytes4 sel;
@@ -688,9 +686,8 @@ contract Test_DayMarketDeployment_GenesisSeedBoundary is RoycoDayTestBase {
      *      1e12 for an integer q, so this pins the nearest constructible property instead (see the contract natspec)
      */
     function test_GenesisSeed_SmallSeedLocksDeadSharesAndFunderHoldsRemainder() public {
-        MarketConfig memory cfg = _seededConfig(2);
-        DeploymentResult memory result =
-            DEPLOY_SCRIPT.deploy(cfg, FACTORY_ADMIN, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0, _generateRoleAssignments(), DEPLOYER.privateKey);
+        DayMarketConfig memory cfg = _seededConfig(2);
+        DeploymentResult memory result = _deployMarketThroughPipeline(cfg);
 
         IERC20 lpt = IERC20(result.kernel.liquidityProviderTranche());
         uint256 minted = lpt.totalSupply();

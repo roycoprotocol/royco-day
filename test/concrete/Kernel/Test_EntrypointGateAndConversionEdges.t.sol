@@ -5,7 +5,6 @@ import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/c
 import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { MAX_MINT_DILUTION_WAD, VIRTUAL_SHARES, WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";

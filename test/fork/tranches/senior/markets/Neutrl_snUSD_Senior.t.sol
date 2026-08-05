@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { DeployScript } from "../../../../../script/Deploy.s.sol";
-import { DeploymentResult, MarketConfig } from "../../../../../script/config/DeploymentTypes.sol";
+import { DeploymentResult } from "../../../../../script/config/DeploymentTypes.sol";
+import { DayMarketConfig } from "../../../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../../../../src/libraries/Units.sol";
 import { Test_SeniorTrancheDepositWithdrawBase } from "../Test_SeniorTrancheDepositWithdrawBase.t.sol";
 
@@ -37,19 +37,12 @@ contract Neutrl_snUSD_Senior is Test_SeniorTrancheDepositWithdrawBase {
     function _deployKernelAndMarket() internal override returns (DeploymentResult memory) {
         // The template pulls the genesis pool seed from the configured funder. Repoint the funder at the broadcasting
         // deployer, which approves the template from inside the script's broadcast, and fund it with the seed legs
-        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
-        deal(cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
+        DayMarketConfig memory cfg = MARKET_REGISTRY.getDayMarketConfig("snUSD");
+        deal(cfg.pool.quoteAsset, DEPLOYER.addr, cfg.poolInitialization.quoteAmount);
         if (cfg.poolInitialization.collateralAmount != 0) {
             deal(cfg.collateralAsset, DEPLOYER.addr, cfg.poolInitialization.collateralAmount);
         }
-        return DEPLOY_SCRIPT.deploy(
-            cfg,
-            OWNER_ADDRESS,
-            PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            DEPLOY_SCRIPT.getChainConfig(block.chainid, false).scheduledOperationsExpirySeconds,
-            _generateRoleAssignments(),
-            DEPLOYER.privateKey
-        );
+        return _deployMarketThroughPipeline(cfg);
     }
 
     function maxTrancheUnitDelta() public pure override returns (TRANCHE_UNIT) {

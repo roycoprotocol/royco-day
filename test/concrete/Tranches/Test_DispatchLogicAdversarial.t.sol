@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { AssetClaims, DispatchMode } from "../../../src/libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 
 /// @title AdversarialTarget

@@ -5,7 +5,7 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { VIRTUAL_SHARES } from "../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
-import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";

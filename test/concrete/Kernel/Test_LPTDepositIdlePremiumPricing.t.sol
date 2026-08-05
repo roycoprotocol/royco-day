@@ -6,7 +6,7 @@ import { LPT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { MarketState, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";

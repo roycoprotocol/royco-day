@@ -8,10 +8,9 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, DispatchMode, MarketState, Operation } from "../../../src/libraries/Types.sol";
-import { NAV_UNIT, toUint256 } from "../../../src/libraries/Units.sol";
+import { toUint256 } from "../../../src/libraries/Units.sol";
 import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
 import { MockBalancerVault } from "../../mocks/MockBalancerVault.sol";

@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { EntryPointTestBase, IERC20Like } from "../../utils/EntryPointTestBase.sol";
+import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 

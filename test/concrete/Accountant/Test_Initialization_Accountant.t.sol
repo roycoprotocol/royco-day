@@ -8,7 +8,6 @@ import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant
 import { MAX_PROTOCOL_FEE_WAD, WAD } from "../../../src/libraries/Constants.sol";
 import { MarketState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { MockAccountantKernel } from "../../mocks/MockAccountantKernel.sol";
 import { MockRecordingYDM } from "../../mocks/MockRecordingYDM.sol";
 import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 

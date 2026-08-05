@@ -34,9 +34,6 @@ interface IRoycoFactoryGatekeeper {
     /// @notice Thrown when a kernel is already registered on the market syncer
     error KERNEL_ALREADY_REGISTERED(address kernel);
 
-    /// @notice Thrown when the pinned entry point's provenance registry is not the factory this gatekeeper serves
-    error ENTRY_POINT_BOUND_TO_DIFFERENT_FACTORY();
-
     /// @notice Thrown when a constructor argument that must name a live contract holds no code
     error CONSTRUCTION_PARAMETER_HAS_NO_CODE(address subject);
 

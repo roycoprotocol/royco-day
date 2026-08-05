@@ -2,14 +2,13 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { ADMIN_FACTORY_ROLE, ADMIN_ROLE, DEPLOYER_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_FACTORY_ROLE, DEPLOYER_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { MockDeploymentTemplate } from "../../mocks/MockDeploymentTemplate.sol";
-import { UninitializedERC1967Proxy } from "../../mocks/UninitializedERC1967Proxy.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 
 /// @title Test_FactoryTrancheRegistry

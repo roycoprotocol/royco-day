@@ -59,7 +59,7 @@ ignore = ["lib/**", "test/**"]
 sort_imports = true
 
 [lint]
-exclude_lints = ["mixed-case-function", "mixed-case-variable", "unsafe-typecast", "pascal-case-struct", "unwrapped-modifier-logic", "erc20-unchecked-transfer"]
+exclude_lints = ["mixed-case-function", "mixed-case-variable", "unsafe-typecast", "pascal-case-struct", "unwrapped-modifier-logic", "erc20-unchecked-transfer", "block-timestamp"]
 
 [fuzz]
 runs = 200

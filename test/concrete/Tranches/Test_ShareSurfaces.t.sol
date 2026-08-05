@@ -5,12 +5,11 @@ import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgrade
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
 import { LPT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
-import { AssetClaims, Operation } from "../../../src/libraries/Types.sol";
+import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";

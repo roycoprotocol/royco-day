@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";

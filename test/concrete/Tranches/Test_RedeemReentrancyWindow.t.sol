@@ -12,7 +12,6 @@ import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.s
 import { ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { RoycoDayBalancerV3Kernel } from "../../../src/kernels/RoycoDayBalancerV3Kernel.sol";
-import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../../src/tranches/RoycoJuniorTranche.sol";

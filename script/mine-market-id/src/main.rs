@@ -16,7 +16,7 @@
 //!     --quote   0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
 //!     --name    snUSD
 //!
-//! Paste the printed marketId into `script/config/MarketDeploymentConfig.sol` for the matching factory.
+//! Paste the printed marketId into `script/deploy/templates/royco-day-balancer-v3/DayMarketRegistryBase.sol` for the matching factory.
 
 use std::process::exit;
 use tiny_keccak::{Hasher, Keccak};

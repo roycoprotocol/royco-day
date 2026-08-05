@@ -13,10 +13,7 @@ import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/in
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { DeployScript } from "../../../script/Deploy.s.sol";
-import { MarketConfig } from "../../../script/config/DeploymentTypes.sol";
-import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE, ADMIN_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
@@ -30,7 +27,11 @@ import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoPr
 import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { NAV_UNIT } from "../../../src/libraries/Units.sol";
 import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
+import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
+import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
+import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 
 /// @title Test_IdleCDOMarketDeployment
 /// @notice Fork test for the single Day template (`RoycoDayBalancerV3MarketDeploymentTemplate`) deployed against a
@@ -71,7 +72,8 @@ contract Test_IdleCDOMarketDeployment is Test {
     RoycoAccessManager internal am;
     RoycoFactoryGatekeeper internal gatekeeper;
     RoycoFactory internal factory;
-    DeployScript internal deployScript;
+    DayMarketRegistry internal registry;
+    DeployMarketComponent internal marketBuilder;
     RoycoDayBalancerV3MarketDeploymentTemplate internal template;
     IRoycoDayEntryPoint internal entryPoint;
     RoycoMarketSyncer internal syncer;
@@ -117,20 +119,20 @@ contract Test_IdleCDOMarketDeployment is Test {
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
-        // The real Day template, bound to this factory. `deployScript` externally deploys each market's impls/YDMs/pool
+        // The real Day template, bound to this factory, stood up through the real per-component deploy scripts.
         // The template deploys every market contract itself, so the script only builds the params (`buildMarketParams`).
-        deployScript = new DeployScript();
-        am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
-        template = RoycoDayBalancerV3MarketDeploymentTemplate(
-            deployScript.deployTemplateForTest(IRoycoFactory(address(factory)), deployScript.getMarketConfig("snUSD"), roycoBlacklist)
-        );
+        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory, roycoBlacklist);
+        registry = scaffold.registry;
+        marketBuilder = scaffold.market;
+        template = scaffold.template;
 
         // The template resolves a market's yield distribution models out of its own registry, so bind its registration
         // surface and register the config's shapes, exactly as the scaffolding phase does.
         bytes4[] memory ydmSelectors = new bytes4[](1);
         ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
         am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
-        deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("snUSD"));
+        am.grantRole(DEPLOYER_ROLE, address(scaffold.ydms), 0);
+        scaffold.ydms.registerModels();
     }
 
     // ─── helpers ───
@@ -160,18 +162,18 @@ contract Test_IdleCDOMarketDeployment is Test {
 
     /// @dev Every market is deployed with genesis pool liquidity, so the configured funder must hold the quote and
     ///      have approved the template before `executeMarketDeployment`. Points the seed at a test-controlled funder
-    function _fundPoolSeed(MarketConfig memory _cfg) internal {
-        deal(_cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER, _cfg.poolInitialization.quoteAmount);
+    function _fundPoolSeed(DayMarketConfig memory _cfg) internal {
+        deal(_cfg.pool.quoteAsset, DEPLOYER, _cfg.poolInitialization.quoteAmount);
         vm.prank(DEPLOYER);
-        IERC20(_cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
+        IERC20(_cfg.pool.quoteAsset).approve(address(template), _cfg.poolInitialization.quoteAmount);
     }
 
     /// @dev Clones the snUSD market config in memory and swaps in the CDO AA tranche collateral + its proxied
     ///      virtual-price oracle. The direct-template path must supply the deployed oracle itself (the `deploy()` flow resolves it).
-    function _marketConfig() internal returns (MarketConfig memory cfg) {
-        cfg = deployScript.getMarketConfig("snUSD");
+    function _marketConfig() internal returns (DayMarketConfig memory cfg) {
+        cfg = registry.getDayMarketConfig("snUSD");
         cfg.collateralAsset = AA_TRANCHE_TOKEN;
-        cfg.collateralAssetOracle = _deployIdleOracle(AA_TRANCHE_TOKEN);
+        cfg.oracle.deployed = _deployIdleOracle(AA_TRANCHE_TOKEN);
         _fundPoolSeed(cfg);
     }
 
@@ -186,14 +188,14 @@ contract Test_IdleCDOMarketDeployment is Test {
     ///         priced via the kernel
     function test_ExecuteMarketDeployment_IdleCDOOracleKernelWiring() external {
         _register();
-        MarketConfig memory cfg = _marketConfig();
-        bytes memory p = abi.encode(deployScript.buildMarketParams(cfg, MARKET_ID, address(factory), DEPLOYER));
+        DayMarketConfig memory cfg = _marketConfig();
+        bytes memory p = abi.encode(marketBuilder.buildMarketParams(cfg, MARKET_ID, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
         // The kernel initialized with the configured immutable adapter, which pins the REAL CDO and prices its AA tranche.
-        assertEq(IRoycoDayKernel(r.kernel).getCollateralAssetOracle(), cfg.collateralAssetOracle, "kernel oracle != configured adapter");
-        IdleCDOTranchePriceOracle oracle = IdleCDOTranchePriceOracle(cfg.collateralAssetOracle);
+        assertEq(IRoycoDayKernel(r.kernel).getCollateralAssetOracle(), cfg.oracle.deployed, "kernel oracle != configured adapter");
+        IdleCDOTranchePriceOracle oracle = IdleCDOTranchePriceOracle(cfg.oracle.deployed);
         assertEq(oracle.IDLE_CDO(), PARETO_FALCONX_CDO, "adapter CDO != configured CDO");
         assertEq(oracle.COLLATERAL_ASSET(), AA_TRANCHE_TOKEN, "adapter collateral != AA tranche");
 

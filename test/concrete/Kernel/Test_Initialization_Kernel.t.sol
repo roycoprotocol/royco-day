@@ -10,7 +10,6 @@ import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { RoycoDayBalancerV3Kernel as DayKernel } from "../../../src/kernels/RoycoDayBalancerV3Kernel.sol";
 import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { RoycoLiquidityProviderTranche } from "../../../src/tranches/RoycoLiquidityProviderTranche.sol";
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";

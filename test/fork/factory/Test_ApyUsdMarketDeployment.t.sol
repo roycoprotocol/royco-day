@@ -10,8 +10,7 @@ import { IERC4626 } from "../../../lib/openzeppelin-contracts/contracts/interfac
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { DeployScript } from "../../../script/Deploy.s.sol";
-import { ERC4626SharePriceOracleParams, MarketConfig } from "../../../script/config/DeploymentTypes.sol";
+import { ERC4626SharePriceOracleParams } from "../../../script/config/DeploymentTypes.sol";
 import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, DEPLOYER_ROLE, JT_LP_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
@@ -27,7 +26,11 @@ import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../../src/libraries/Units.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
+import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
+import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
+import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
+import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 
 /// @title Test_ApyUsdMarketDeployment
 /// @notice Fork test for the APYX (apyUSD) market config: an 18-decimal apyUSD (ERC4626 over apxUSD) collateral
@@ -55,7 +58,8 @@ contract Test_ApyUsdMarketDeployment is Test {
     RoycoAccessManager internal am;
     RoycoFactoryGatekeeper internal gatekeeper;
     RoycoFactory internal factory;
-    DeployScript internal deployScript;
+    DayMarketRegistry internal registry;
+    DeployMarketComponent internal marketBuilder;
     RoycoDayBalancerV3MarketDeploymentTemplate internal template;
     IRoycoDayEntryPoint internal entryPoint;
     RoycoMarketSyncer internal syncer;
@@ -92,27 +96,27 @@ contract Test_ApyUsdMarketDeployment is Test {
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
-        deployScript = new DeployScript();
-        am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
-        template = RoycoDayBalancerV3MarketDeploymentTemplate(
-            deployScript.deployTemplateForTest(IRoycoFactory(address(factory)), deployScript.getMarketConfig("srRoyUSDC"), roycoBlacklist)
-        );
+        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory, roycoBlacklist);
+        registry = scaffold.registry;
+        marketBuilder = scaffold.market;
+        template = scaffold.template;
 
         bytes4[] memory ydmSelectors = new bytes4[](1);
         ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
         am.setTargetFunctionRole(address(template), ydmSelectors, DEPLOYER_ROLE);
         // Both markets run AdaptiveCurve_V2, so one registration serves the upstream and the apyUSD deployment
-        deployScript.registerYieldDistributionModelsForTest(address(template), deployScript.getMarketConfig("srRoyUSDC"));
+        am.grantRole(DEPLOYER_ROLE, address(scaffold.ydms), 0);
+        scaffold.ydms.registerModels();
 
         vm.prank(FACTORY_ADMIN);
         factory.registerTemplate(address(template));
 
         // Pin the APYX config's external addresses against the live chain, so an address typo in the config file
         // fails here with a named reason instead of deep inside a deployment
-        MarketConfig memory cfg = deployScript.getMarketConfig("APYX");
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("APYX");
         assertEq(cfg.collateralAsset, APYUSD_VAULT, "config collateral != apyUSD vault");
         assertGt(IERC4626(APYUSD_VAULT).convertToAssets(1e18), 0, "apyUSD share price must be live");
-        ERC4626SharePriceOracleParams memory p = abi.decode(cfg.collateralAssetOracleSpecificParams, (ERC4626SharePriceOracleParams));
+        ERC4626SharePriceOracleParams memory p = abi.decode(cfg.oracle.specificParams, (ERC4626SharePriceOracleParams));
         assertEq(p.baseAssetToNavAssetFeed, APXUSD_USD_FEED, "config feed != Chainlink apxUSD/USD");
         assertEq(AggregatorV3Interface(APXUSD_USD_FEED).decimals(), 18, "the apxUSD/USD feed is expected to be 18 decimals");
 
@@ -126,15 +130,15 @@ contract Test_ApyUsdMarketDeployment is Test {
     /// @dev Deploys the srRoyUSDC market from its own config, exactly as Test_SrRoyUsdcMarketDeployment does: the
     ///      ERC4626 share-price oracle is deployed directly and the 18-decimal sUSDe genesis seed is dealt
     function _deployUpstreamSrRoyUsdc() internal {
-        MarketConfig memory cfg = deployScript.getMarketConfig("srRoyUSDC");
-        cfg.collateralAssetOracle = address(
-            _newErc4626Oracle(cfg.collateralAsset, cfg.collateralAssetOracleSpecificParams)
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
+        cfg.oracle.deployed = address(
+            _newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams)
         );
-        deal(cfg.gyroECLPPoolParams.quoteAsset, DEPLOYER, cfg.poolInitialization.quoteAmount);
+        deal(cfg.pool.quoteAsset, DEPLOYER, cfg.poolInitialization.quoteAmount);
         vm.prank(DEPLOYER);
-        IERC20(cfg.gyroECLPPoolParams.quoteAsset).approve(address(template), cfg.poolInitialization.quoteAmount);
+        IERC20(cfg.pool.quoteAsset).approve(address(template), cfg.poolInitialization.quoteAmount);
 
-        bytes memory params = abi.encode(deployScript.buildMarketParams(cfg, SRROYUSDC_MARKET_ID_SEED, address(factory), DEPLOYER));
+        bytes memory params = abi.encode(marketBuilder.buildMarketParams(cfg, SRROYUSDC_MARKET_ID_SEED, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), params);
         upstreamSt = r.seniorTranche;
@@ -167,26 +171,26 @@ contract Test_ApyUsdMarketDeployment is Test {
     /// @dev The APYX config with its deploy-time seams resolved for THIS scaffold: the quote leg re-pointed at the
     ///      upstream market just deployed (the config bakes live test-env addresses that don't exist at the fork
     ///      block), and the ERC4626 share-price oracle deployed directly, exactly as the script's oracle phase does
-    function _apyUsdConfig() internal returns (MarketConfig memory cfg) {
-        cfg = deployScript.getMarketConfig("APYX");
-        cfg.gyroECLPPoolParams.quoteAsset = upstreamSt;
-        cfg.gyroECLPPoolParams.quoteAssetRateProvider = upstreamKernel;
-        cfg.collateralAssetOracle = address(
-            _newErc4626Oracle(cfg.collateralAsset, cfg.collateralAssetOracleSpecificParams)
+    function _apyUsdConfig() internal returns (DayMarketConfig memory cfg) {
+        cfg = registry.getDayMarketConfig("APYX");
+        cfg.pool.quoteAsset = upstreamSt;
+        cfg.pool.quoteAssetRateProvider = upstreamKernel;
+        cfg.oracle.deployed = address(
+            _newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams)
         );
         _fundPoolSeed(cfg);
     }
 
     /// @dev The genesis seed is pulled from the deployment caller: the quote leg is upstream ST SHARES, minted for
     ///      real in setUp, so only the approval is granted here
-    function _fundPoolSeed(MarketConfig memory _cfg) internal {
+    function _fundPoolSeed(DayMarketConfig memory _cfg) internal {
         assertGe(IERC20(upstreamSt).balanceOf(DEPLOYER), _cfg.poolInitialization.quoteAmount, "deployer must hold the upstream ST seed");
         vm.prank(DEPLOYER);
         IERC20(upstreamSt).approve(address(template), _cfg.poolInitialization.quoteAmount);
     }
 
     function _deploy() internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
-        bytes memory p = abi.encode(deployScript.buildMarketParams(_apyUsdConfig(), APYUSD_MARKET_ID_SEED, address(factory), DEPLOYER));
+        bytes memory p = abi.encode(marketBuilder.buildMarketParams(_apyUsdConfig(), APYUSD_MARKET_ID_SEED, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
         return factory.executeMarketDeployment(address(template), p);
     }
@@ -249,14 +253,14 @@ contract Test_ApyUsdMarketDeployment is Test {
     /// @notice The APYX economics no other config carries land on-chain: the 30-day fixed term in the accountant and
     ///         a ZERO senior self-liquidation bonus in the kernel, alongside the liquidity premium configuration
     function test_ExecuteMarketDeployment_ApyxEconomicsConfigured() external {
-        MarketConfig memory cfg = deployScript.getMarketConfig("APYX");
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("APYX");
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
         assertEq(a.fixedTermDurationSeconds, 30 days, "fixed term != the sheet's 30-day observation period");
-        assertEq(a.minLiquidityWAD, cfg.minLiquidityWAD, "minLiquidityWAD");
-        assertEq(a.maxJTYieldShareWAD, cfg.maxJTYieldShareWAD, "maxJTYieldShareWAD");
-        assertEq(a.maxLPTYieldShareWAD, cfg.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
+        assertEq(a.minLiquidityWAD, cfg.accountant.minLiquidityWAD, "minLiquidityWAD");
+        assertEq(a.maxJTYieldShareWAD, cfg.accountant.maxJTYieldShareWAD, "maxJTYieldShareWAD");
+        assertEq(a.maxLPTYieldShareWAD, cfg.accountant.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
         assertLe(uint256(a.maxJTYieldShareWAD) + a.maxLPTYieldShareWAD, 1e18, "caps must sum within the senior gain");
         assertTrue(a.jtYDM != a.lptYDM, "JT and LPT must hold distinct model instances");
 
@@ -266,7 +270,7 @@ contract Test_ApyUsdMarketDeployment is Test {
     /// @notice The genesis seed lands in TRANCHE SHARES: the pool opens with quote-only depth paid in upstream ST,
     ///         the dead-share lock is parked, and the deployer's upstream ST balance funds exactly the seed
     function test_ExecuteMarketDeployment_GenesisSeedPaidInUpstreamSeniorShares() external {
-        MarketConfig memory cfg = deployScript.getMarketConfig("APYX");
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("APYX");
         uint256 stBalanceBefore = IERC20(upstreamSt).balanceOf(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
         address pool = IRoycoDayKernel(r.kernel).lptAsset();

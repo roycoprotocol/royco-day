@@ -6,7 +6,6 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
-import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";

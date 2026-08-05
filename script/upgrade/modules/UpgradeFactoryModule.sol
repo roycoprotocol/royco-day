@@ -20,7 +20,7 @@ import {
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
-import { RoleConfigUtils } from "../../config/RoleConfigUtils.sol";
+import { RoleConfigUtils } from "../base/RoleConfigUtils.sol";
 
 import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
 

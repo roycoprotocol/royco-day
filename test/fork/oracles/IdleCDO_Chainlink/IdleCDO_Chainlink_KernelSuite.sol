@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { IIdleCDO } from "../../../../src/interfaces/external/idle-finance/IIdleCDO.sol";
 import { IdleCDOTranchePriceOracle } from "../../../../src/oracle/IdleCDOTranchePriceOracle.sol";

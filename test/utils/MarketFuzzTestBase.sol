@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { toTrancheUnits } from "../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "./DayMarketTestBase.sol";
 import { defaultParams } from "./MarketParams.sol";
 import { cellA } from "./TokenConfigs.sol";

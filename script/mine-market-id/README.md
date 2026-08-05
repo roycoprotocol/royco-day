@@ -21,13 +21,13 @@ cargo run --release -- \
 ```
 
 - `--factory` — the `RoycoFactory` proxy address the market deploys against (the CREATE3 deployer). Use the factory
-  address already recorded in `MarketDeploymentConfig` (`_initializeMinedMarketIds`), or a factory from a deployment.
+  address already recorded in the market-id registry in `script/deploy/templates/royco-day-balancer-v3/DayMarketRegistryBase.sol` (`_initializeMinedMarketIds`), or a factory from a deployment.
 - `--quote` — the pool's quote asset (e.g. USDC), the address the senior tranche must sort below.
 - `--name` — the market name (default `snUSD`); used as the marketId derivation seed.
 - `--max-nonce` — search bound (default 10,000,000). Each nonce is a fair ~50/50 coin flip, so a hit is near-immediate.
 
 It prints the `marketId` (and the nonce and predicted senior-tranche address). Paste the `marketId` into
-`script/config/MarketDeploymentConfig.sol` for the matching factory.
+the market-id registry in `script/deploy/templates/royco-day-balancer-v3/DayMarketRegistryBase.sol` for the matching factory.
 
 ## Derivation (kept identical to the on-chain miners)
 
@@ -37,5 +37,5 @@ It prints the `marketId` (and the nonce and predicted senior-tranche address). P
 - accept when `uint160(seniorTranche) < uint160(quoteAsset)`
 
 The Solidity mirror is `test/concrete/Factory/Test_MineMarketId.t.sol`, which *guards* that the ids baked into
-`MarketDeploymentConfig` still place the senior tranche as pool token0. A value produced here is cross-checkable
+the registry still place the senior tranche as pool token0. A value produced here is cross-checkable
 on-chain — e.g. verified against `cast`-computed CREATE3 for the snUSD mainnet factory.

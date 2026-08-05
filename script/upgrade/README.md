@@ -64,7 +64,7 @@ Per-kind payload formats (decoded by the matching module):
 
 ## CREATE2 salt convention
 
-The user owns the salt — they set `saltVersion` per upgrade entry (typically bumped each time, e.g. `V2 → V3`). Modules combine it with a per-kind prefix matching `script/Deploy.s.sol`'s convention:
+The user owns the salt — they set `saltVersion` per upgrade entry (typically bumped each time, e.g. `V2 → V3`). Modules combine it with a per-kind prefix matching the deploy pipeline's convention (`script/deploy/utils/RoycoDeterministic.sol`):
 
 | Kind                | Salt formula                                                                                  |
 | ------------------- | --------------------------------------------------------------------------------------------- |

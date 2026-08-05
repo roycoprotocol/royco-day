@@ -2,11 +2,10 @@
 pragma solidity ^0.8.28;
 
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";

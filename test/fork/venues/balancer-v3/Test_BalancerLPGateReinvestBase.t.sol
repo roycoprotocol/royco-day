@@ -530,7 +530,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     function test_Reinvest_shippedSlippageDefault_passesOnNearPegPool() public {
         _arrangeReinvestableIdleLiquidityPremium();
         (uint256 haircut,) = _probeReinvestHaircutWAD();
-        uint64 shippedSlippageWAD = 0.001e18; // MarketDeploymentConfig's maxReinvestmentSlippageWAD (10bp)
+        uint64 shippedSlippageWAD = 0.001e18; // the market configs' maxReinvestmentSlippageWAD (10bp)
         assertLt(haircut, shippedSlippageWAD, "the near-peg realized haircut must sit under the shipped 10bp gate");
 
         assertTrue(_trySetReinvestmentSlippage(shippedSlippageWAD), "arrange: restore the shipped gate");

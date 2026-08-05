@@ -52,7 +52,8 @@ contract SetYDM is ParameterUpdateBase {
 
     /**
      * @notice Configure YDM re-initialization here
-     * @dev Values mirror the AdaptiveCurveYDM_V2 params from script/config/MarketDeploymentConfig.sol,
+     * @dev Values mirror the AdaptiveCurveYDM_V2 params from the market configs in
+     *      script/deploy/templates/royco-day-balancer-v3/markets/,
      */
     function _initializeConfigs() internal {
         // Populate with Day markets as they ship. Empty by default.

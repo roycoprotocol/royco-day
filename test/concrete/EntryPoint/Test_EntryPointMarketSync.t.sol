@@ -2,9 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
-import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
-import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
