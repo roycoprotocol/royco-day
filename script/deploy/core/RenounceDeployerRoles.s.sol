@@ -54,7 +54,7 @@ contract RenounceDeployerRoles is RenounceDeployerRolesComponent {
         enableLogging();
         bool isTest = vm.envOr("IS_TEST_DEPLOYMENT", false);
         testDeploymentAdmin = vm.envOr("TEST_ADMIN", testDeploymentAdmin);
-        address admin = isTest ? testDeploymentAdmin : ROOT_MULTISIG;
+        address admin = isTest ? testDeploymentAdmin : FNDN;
         execute(admin, true, vm.envUint("DEPLOYER_PRIVATE_KEY"));
     }
 }

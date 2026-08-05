@@ -48,6 +48,21 @@ public and the oracle deployment is unpermissioned):
 forge script script/deploy/core/RenounceDeployerRoles.s.sol --rpc-url $RPC_URL --broadcast
 ```
 
+## Role distribution
+
+The role graph mirrors the kerchkoffs four-multisig model (canonical spec: the kerchkoffs repo's
+`docs/roles/assignments.md`); `script/deploy/config/RoleGraphConfig.sol` is the machine-readable form.
+
+| Multisig | Duty |
+|---|---|
+| `FNDN` | Super-admin (ADMIN_ROLE at 72h, rarely transacts), unpauser, entry-point fee collection, guardian co-hold, emergency oracle co-hold (immediate) |
+| `WAY` | Every parameter-update role, delayed (72h; entry-point config 24h); schedules all delayed ops; holds neither pauser nor guardian |
+| `WAY_PAUSE` | Sole pauser, immediate (1-of-4 fast response) |
+| `FNDN_VETO` | Guardian co-hold, immediate (1-of-4 fast response) — cancels any WAY-scheduled op |
+| `AUTO` | LP-role admin co-hold, immediate (service provider granting LP roles) |
+
+No party can both schedule and cancel: WAY proposes, FNDN/FNDN_VETO veto, WAY_PAUSE pauses, only FNDN unpauses.
+
 ## Invariants
 
 - **Addresses are sacred.** Every salt preimage and prediction lives in `utils/RoycoDeterministic.sol` — the single

@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
+import { ChainDeployment, DeploymentResult, MarketUpstream, RoleAssignmentAddresses, TemplatePolicy } from "../../script/config/DeploymentTypes.sol";
 import { BootstrapChainComponent } from "../../script/deploy/BootstrapChain.s.sol";
 import { RenounceDeployerRolesComponent } from "../../script/deploy/core/RenounceDeployerRoles.s.sol";
 import { DayMarketRegistry } from "../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
 import { DayMarketConfig } from "../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { DeployMarketComponent } from "../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
-import {
-    ChainDeployment, DeploymentResult, MarketUpstream, RoleAssignmentAddresses, TemplatePolicy
-} from "../../script/config/DeploymentTypes.sol";
 import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, LP_ROLE_ADMIN_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
@@ -63,6 +61,12 @@ abstract contract RoycoDayTestBase is Test, Assertions {
 
     Vm.Wallet internal ORACLE_ADMIN;
     address internal ORACLE_ADMIN_ADDRESS;
+
+    /// @dev The FNDN-style emergency oracle seat: co-holds ADMIN_ORACLE_ROLE at delay 0 beside ORACLE_ADMIN's
+    ///      delayed parameter path. A DISTINCT wallet: granting both seats to one account would hit OZ AM's
+    ///      delay-decrease timelock and leave the second grant at the first grant's delay
+    Vm.Wallet internal ORACLE_EMERGENCY_ADMIN;
+    address internal ORACLE_EMERGENCY_ADMIN_ADDRESS;
 
     Vm.Wallet internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
     address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS;
@@ -195,12 +199,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
             lambda: 4_000_000_000_000_000_000_000
         });
         snUsd.pool.derivedEclpParams = IGyroECLPPool.DerivedEclpParams({
-            tauAlpha: IGyroECLPPool.Vector2({
-                x: -94_861_212_813_096_057_289_512_505_574_275_160_547, y: 31_644_119_574_235_279_926_451_292_677_567_331_630
-            }),
-            tauBeta: IGyroECLPPool.Vector2({
-                x: 37_142_269_533_113_549_537_591_131_345_643_981_951, y: 92_846_388_265_400_743_995_957_747_409_218_517_601
-            }),
+            tauAlpha: IGyroECLPPool.Vector2({ x: -94_861_212_813_096_057_289_512_505_574_275_160_547, y: 31_644_119_574_235_279_926_451_292_677_567_331_630 }),
+            tauBeta: IGyroECLPPool.Vector2({ x: 37_142_269_533_113_549_537_591_131_345_643_981_951, y: 92_846_388_265_400_743_995_957_747_409_218_517_601 }),
             u: 66_001_741_173_104_803_338_721_745_994_955_553_010,
             v: 62_245_253_919_818_011_890_633_399_060_291_020_887,
             w: 30_601_134_345_582_732_000_058_913_853_921_008_022,
@@ -274,6 +274,9 @@ abstract contract RoycoDayTestBase is Test, Assertions {
 
         ORACLE_ADMIN = _initWallet("ORACLE_ADMIN", 1000 ether);
         ORACLE_ADMIN_ADDRESS = ORACLE_ADMIN.addr;
+
+        ORACLE_EMERGENCY_ADMIN = _initWallet("ORACLE_EMERGENCY_ADMIN", 1000 ether);
+        ORACLE_EMERGENCY_ADMIN_ADDRESS = ORACLE_EMERGENCY_ADMIN.addr;
 
         MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = _initWallet("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN", 1000 ether);
         MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS = MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN.addr;
@@ -367,7 +370,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     /// @dev Wires roles that live in `ExtraRoles` and are intentionally NOT passed through
     ///      `factory.initialize` (canonical `Roles.getRoleConfig` doesn't know
     ///      them, so including them in the init array would revert). Pranks FNDN (the
-    ///      admin-role holder): `OWNER_ADDRESS` for a fresh in-memory deploy, `ROOT_MULTISIG`
+    ///      admin-role holder): `OWNER_ADDRESS` for a fresh in-memory deploy, the FNDN multisig
     ///      when the test forks a chain where the factory is already on-chain.
     function _wireExtraRoles() internal {
         // Live-chain fallback is the production root multisig, pinned in `_adminRoleHolder`. Hardcoded (rather than
@@ -456,8 +459,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
 
     /// @notice The fixture's role-holder wallets, in the shape the role-graph component assigns from
     function _fixtureRoleAssignmentAddresses() internal view returns (RoleAssignmentAddresses memory) {
-        return (
-            RoleAssignmentAddresses({
+        return (RoleAssignmentAddresses({
                 pauserAddress: PAUSER_ADDRESS,
                 unpauserAddress: UNPAUSER_ADDRESS,
                 upgraderAddress: UPGRADER_ADDRESS,
@@ -466,16 +468,18 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 adminAccountantAddress: ACCOUNTANT_ADMIN_ADDRESS,
                 adminProtocolFeeSetterAddress: PROTOCOL_FEE_SETTER_ADDRESS,
                 adminOracleAddress: ORACLE_ADMIN_ADDRESS,
+                adminOracleEmergencyAddress: ORACLE_EMERGENCY_ADMIN_ADDRESS,
                 lpRoleAdminAddress: LP_ROLE_ADMIN_ADDRESS,
+                lpRoleAdminOperatorAddress: LP_ROLE_ADMIN_ADDRESS,
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
+                guardianVetoAddress: ROLE_GUARDIAN_ADDRESS,
                 protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
                 balancerPoolManagerAddress: KERNEL_ADMIN_ADDRESS,
                 marketOpsAddress: KERNEL_ADMIN_ADDRESS,
                 marketReinvestLiquidityPremiumAddress: MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS,
                 adminEntryPointAddress: KERNEL_ADMIN_ADDRESS,
                 entryPointFeeCollectorAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
-            })
-        );
+            }));
     }
 
     // -----------------------------------------

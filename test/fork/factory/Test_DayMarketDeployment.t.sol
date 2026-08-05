@@ -17,7 +17,6 @@ import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
@@ -34,12 +33,15 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
+    GUARDIAN_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
+    LP_ROLE_ADMIN_ROLE,
     PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
+import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -485,6 +487,16 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertTrue(poolMgr, "balancer pool manager granted");
         (bool marketOps,) = ACCESS_MANAGER.hasRole(ADMIN_MARKET_OPS_ROLE, KERNEL_ADMIN_ADDRESS);
         assertTrue(marketOps, "market ops granted");
+
+        // The kerchkoffs co-holds: a second guardian (veto seat), an IMMEDIATE emergency oracle admin beside the
+        // delayed parameter path, and a second LP-role admin (the operator seat)
+        (bool veto,) = ACCESS_MANAGER.hasRole(GUARDIAN_ROLE, ROLE_GUARDIAN_ADDRESS);
+        assertTrue(veto, "guardian veto seat granted");
+        (bool emergencyOracle, uint32 emergencyDelay) = ACCESS_MANAGER.hasRole(ADMIN_ORACLE_ROLE, ORACLE_EMERGENCY_ADMIN_ADDRESS);
+        assertTrue(emergencyOracle, "emergency oracle seat granted");
+        assertEq(emergencyDelay, 0, "the emergency oracle seat must act immediately");
+        (bool lpOperator,) = ACCESS_MANAGER.hasRole(LP_ROLE_ADMIN_ROLE, LP_ROLE_ADMIN_ADDRESS);
+        assertTrue(lpOperator, "LP-role operator seat granted");
     }
 
     /// The pipeline renounces the hot deployer key's ENTIRE admin surface: market deployment is PUBLIC, so the
