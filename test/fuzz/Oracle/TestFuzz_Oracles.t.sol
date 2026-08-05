@@ -7,12 +7,16 @@ import { WAD } from "../../../src/libraries/Constants.sol";
 import { NAV_UNIT, toUint256 } from "../../../src/libraries/Units.sol";
 import { ChainlinkPriceOracle } from "../../../src/oracle/ChainlinkPriceOracle.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
+import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
+import { MakinaSharePriceOracle } from "../../../src/oracle/MakinaSharePriceOracle.sol";
 import { ChainlinkPriceOracleBase } from "../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
 import { ClockedChainlinkPriceOracleBase } from "../../../src/oracle/base/ClockedChainlinkPriceOracleBase.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockCheckpointClock } from "../../mocks/MockCheckpointClock.sol";
 import { MockERC20C } from "../../mocks/MockERC20C.sol";
 import { MockERC4626C } from "../../mocks/MockERC4626C.sol";
+import { MockIdleCDO } from "../../mocks/MockIdleCDO.sol";
+import { MockMakinaMachine } from "../../mocks/MockMakinaMachine.sol";
 import { MockValueSource } from "../../mocks/MockValueSource.sol";
 
 /**
@@ -26,6 +30,7 @@ contract TestFuzz_Oracles is Test {
     uint256 internal constant T0 = 1_700_000_000;
     uint32 internal constant FEED_STALENESS = 1 days;
     uint32 internal constant SHARE_PRICE_STALENESS = 3 days;
+    uint32 internal constant MAKINA_ACCOUNTING_STALENESS = 2 days;
 
     MockERC20C internal baseAsset;
     MockERC4626C internal vault;
@@ -134,5 +139,79 @@ contract TestFuzz_Oracles is Test {
             (, uint256 updatedAt) = oracle.getPrice();
             assertEq(updatedAt, T0, "a checkpoint inside the window prices and binds the report");
         }
+    }
+
+    /**
+     * The Makina report matches the oldest-hop mirror for any accounting and feed ages, including the gate
+     * precedence: the feed gate (checked first) fires past its boundary, then the accounting gate, and inside
+     * both windows getPrice, poke, and previewPoke agree on the older hop
+     */
+    function testFuzz_MakinaReport_MatchesOldestHopMirror(uint256 _accountingAge, uint256 _feedAge) public {
+        uint256 accountingAge = bound(_accountingAge, 0, 2 * uint256(MAKINA_ACCOUNTING_STALENESS));
+        uint256 feedAge = bound(_feedAge, 0, 2 * uint256(FEED_STALENESS));
+
+        MockERC20C share = new MockERC20C("DUSD", "DUSD", 18);
+        MockERC20C accounting = new MockERC20C("USDC", "USDC", 6);
+        MockMakinaMachine machine = new MockMakinaMachine(address(share), address(accounting), 1e18);
+        MakinaSharePriceOracle oracle = new MakinaSharePriceOracle(address(machine), address(feed), FEED_STALENESS, MAKINA_ACCOUNTING_STALENESS);
+
+        machine.setLastGlobalAccountingTime(T0 - accountingAge);
+        feed.setUpdatedAt(T0 - feedAge);
+
+        if (feedAge > FEED_STALENESS) {
+            // The feed gate runs first inside getPrice, so it takes precedence whenever both hops are stale
+            vm.expectRevert(ChainlinkPriceOracleBase.STALE_FEED_PRICE.selector);
+            oracle.getPrice();
+        } else if (accountingAge > MAKINA_ACCOUNTING_STALENESS) {
+            vm.expectRevert(MakinaSharePriceOracle.STALE_MAKINA_ACCOUNTING.selector);
+            oracle.getPrice();
+        } else {
+            uint256 expected = Math.min(T0 - feedAge, T0 - accountingAge);
+            (, uint256 updatedAt) = oracle.getPrice();
+            assertEq(updatedAt, expected, "getPrice must report the older hop");
+            assertEq(oracle.previewPoke(), expected, "previewPoke must agree with getPrice");
+            assertEq(oracle.poke(), expected, "poke must agree with getPrice");
+        }
+    }
+
+    /**
+     * The CDO composition matches the lifted mirror for any virtual price and answer:
+     * price = floor(virtualPrice x 10^(18 - underlyingDecimals) x answer / feedPrecision)
+     */
+    function testFuzz_CDOComposition_MatchesLiftedMirror(uint256 _virtualPrice, uint256 _answer) public {
+        uint256 virtualPrice = bound(_virtualPrice, 1, 1e15);
+        uint256 answer = bound(_answer, 1, 1e12);
+
+        MockERC20C aaTranche = new MockERC20C("AA", "AA", 18);
+        MockERC20C underlying = new MockERC20C("USDC", "USDC", 6);
+        MockIdleCDO cdo = new MockIdleCDO(address(aaTranche), address(underlying), virtualPrice);
+        feed.setAnswer(int256(answer));
+        IdleCDOTranchePriceOracle oracle =
+            new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0, uint32(T0), FEED_STALENESS, SHARE_PRICE_STALENESS);
+
+        (NAV_UNIT price,) = oracle.getPrice();
+        assertEq(toUint256(price), Math.mulDiv(virtualPrice * 1e12, answer, 1e8), "composed price must equal the mirror's lifted floored product");
+    }
+
+    /**
+     * The probe-amount algebra makes the composition decimals-invariant: for ANY share/asset decimal pair the
+     * probe 10^(18 + shareDecimals - assetDecimals) converts to the WAD share rate verbatim, so the composed
+     * price equals floor(rate x answer / feedPrecision) regardless of the shape
+     */
+    function testFuzz_ProbeDecimalsAlgebra_IsShapeInvariant(uint8 _shareDecimals, uint8 _assetDecimals, uint256 _rate, uint256 _answer) public {
+        uint8 shareDecimals = uint8(bound(_shareDecimals, 0, 18));
+        uint8 assetDecimals = uint8(bound(_assetDecimals, 0, 18));
+        uint256 rate = bound(_rate, 1e9, 1e27);
+        uint256 answer = bound(_answer, 1, 1e12);
+
+        MockERC20C shapedAsset = new MockERC20C("A", "A", assetDecimals);
+        MockERC4626C shapedVault = new MockERC4626C(address(shapedAsset), "S", "S", shareDecimals);
+        shapedVault.setRate(rate);
+        feed.setAnswer(int256(answer));
+        ERC4626SharePriceOracle oracle =
+            new ERC4626SharePriceOracle(address(shapedVault), address(feed), 0, uint32(T0), FEED_STALENESS, SHARE_PRICE_STALENESS);
+
+        (NAV_UNIT price,) = oracle.getPrice();
+        assertEq(toUint256(price), Math.mulDiv(rate, answer, 1e8), "the composition must be invariant to the vault's decimal shape");
     }
 }

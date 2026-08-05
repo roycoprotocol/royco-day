@@ -484,6 +484,15 @@ contract Test_CollateralOracles is Test {
         new IdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), 0, 0, FEED_STALENESS, 0);
     }
 
+    /// A composition that floors to zero is REPORTED, not reverted: rejecting a zero price is the kernel's own
+    /// guard (INVALID_PRICE at the price-cache fill), so the oracle stays an honest reporter of the composed value
+    function test_ERC4626_composedZeroPriceReportsRatherThanReverts() public {
+        vault.setRate(1);
+        feed.setAnswer(1);
+        (NAV_UNIT price,) = erc4626Oracle.getPrice();
+        assertEq(toUint256(price), 0, "floor(1 x 1 / 1e8) composes to zero and is reported as such");
+    }
+
     /// Every adapter in the family is a plain immutable contract: no initializer, no tick, no setter, no fallback
     function test_OracleFamily_hasNoAdminSurface() public {
         address[2] memory oracles = [address(erc4626Oracle), address(makinaOracle)];
