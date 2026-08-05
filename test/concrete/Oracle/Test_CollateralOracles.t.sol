@@ -175,6 +175,42 @@ contract Test_CollateralOracles is Test {
         assertEq(toUint256(price), 0.980049e18, "the drawdown composes through the same floored product");
     }
 
+    /**
+     * The report's clock is the older of the two hops: a stale machine AUM report gates a fresher feed and a
+     * stale feed gates a fresher AUM report, so updatedAt never advances on one leg alone
+     */
+    function test_Makina_updatedAtIsTheOlderOfFeedAndAccounting() public {
+        // A stale AUM report gates the fresher feed
+        machine.setLastGlobalAccountingTime(T0 - 30);
+        feed.setUpdatedAt(T0 - 10);
+        (, uint256 updatedAt) = makinaOracle.getPrice();
+        assertEq(updatedAt, T0 - 30, "a stale AUM report must gate the fresher feed");
+
+        // A fresh AUM report hands the clock to the now-older feed leg
+        machine.setLastGlobalAccountingTime(T0 - 5);
+        (, updatedAt) = makinaOracle.getPrice();
+        assertEq(updatedAt, T0 - 10, "a stale feed must gate the fresher AUM report");
+    }
+
+    /**
+     * A feed heartbeat alone never advances the clock while the machine's AUM report stays stale, and poke and
+     * previewPoke re-source through the same older-hop clock as getPrice
+     */
+    function test_Makina_feedHeartbeatAloneNeverAdvancesTheClock() public {
+        machine.setLastGlobalAccountingTime(T0 - 30);
+        feed.setUpdatedAt(T0 - 10);
+        assertEq(makinaOracle.previewPoke(), T0 - 30, "previewPoke must report the older hop");
+
+        // A fresh feed heartbeat leaves the clock pinned at the stale accounting time
+        vm.warp(T0 + 100);
+        feed.setUpdatedAt(T0 + 100);
+        assertEq(makinaOracle.poke(), T0 - 30, "a feed heartbeat alone must never advance the clock");
+
+        // The clock only advances once the machine's next global accounting lands
+        machine.setLastGlobalAccountingTime(T0 + 100);
+        assertEq(makinaOracle.poke(), T0 + 100, "the clock advances once the AUM report lands");
+    }
+
     /*----------------------------------------------------------------------
                         IdleCDOTranchePriceOracle
     ----------------------------------------------------------------------*/

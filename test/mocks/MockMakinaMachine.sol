@@ -27,6 +27,9 @@ contract MockMakinaMachine is IMachine {
     /// @notice The value of one whole share in whole accounting tokens, scaled to WAD precision
     uint256 public sharePriceWAD;
 
+    /// @dev The timestamp of the machine's last global accounting update
+    uint256 private _lastGlobalAccountingTime;
+
     /**
      * @notice Deploys the mock machine over the two provided tokens
      * @param _shareToken The machine's share token
@@ -39,12 +42,20 @@ contract MockMakinaMachine is IMachine {
         SHARE_SCALE = 10 ** IERC20Metadata(_shareToken).decimals();
         ACCOUNTING_SCALE = 10 ** IERC20Metadata(_accountingToken).decimals();
         sharePriceWAD = _initialSharePriceWAD;
+        // A fresh machine has just accounted, tests move the clock explicitly from here
+        _lastGlobalAccountingTime = block.timestamp;
     }
 
     /// @notice Sets the share price, the mock's stand-in for machine yield or loss
     /// @param _sharePriceWAD The new share price, scaled to WAD precision
     function setSharePriceWAD(uint256 _sharePriceWAD) external {
         sharePriceWAD = _sharePriceWAD;
+    }
+
+    /// @notice Sets the last global accounting time, the mock's stand-in for an AUM report landing
+    /// @param _timestamp The timestamp of the machine's last global accounting update
+    function setLastGlobalAccountingTime(uint256 _timestamp) external {
+        _lastGlobalAccountingTime = _timestamp;
     }
 
     /// @inheritdoc IMachine
@@ -55,6 +66,11 @@ contract MockMakinaMachine is IMachine {
     /// @inheritdoc IMachine
     function accountingToken() external view override(IMachine) returns (address) {
         return ACCOUNTING_TOKEN;
+    }
+
+    /// @inheritdoc IMachine
+    function lastGlobalAccountingTime() external view override(IMachine) returns (uint256) {
+        return _lastGlobalAccountingTime;
     }
 
     /// @inheritdoc IMachine
