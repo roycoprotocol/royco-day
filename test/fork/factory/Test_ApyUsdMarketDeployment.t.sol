@@ -261,7 +261,7 @@ contract Test_ApyUsdMarketDeployment is Test {
         assertEq(a.maxJTYieldShareWAD, cfg.accountant.maxJTYieldShareWAD, "maxJTYieldShareWAD");
         assertEq(a.maxLPTYieldShareWAD, cfg.accountant.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
         assertLe(uint256(a.maxJTYieldShareWAD) + a.maxLPTYieldShareWAD, 1e18, "caps must sum within the senior gain");
-        assertTrue(a.jtYDM != a.lptYDM, "JT and LPT must hold distinct model instances");
+        assertEq(a.jtYDM, a.lptYDM, "same shape resolves both slots to the shared chain-wide instance");
 
         assertEq(IRoycoDayKernel(r.kernel).getState().stSelfLiquidationBonusWAD, 0, "the sheet grants APYX no self-liquidation bonus");
     }

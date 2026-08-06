@@ -240,17 +240,18 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     // 5. YDM + LDM (both initialized — locks in the LDM-init fix)
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    /// @notice The accountant wires two DISTINCT yield models: the JT YDM and the LPT LDM must never be the same contract
-    function test_YDM_DistinctJTAndLPTModelsWired() public view {
+    /// @notice The accountant records ONE shared V2 instance in both slots: the pipeline resolves the same shape to
+    ///         the chain-wide instance, legal because curves are keyed per accountant and tranche type
+    function test_YDM_SharedInstanceWiredInBothSlots() public view {
         assertEq(ACCOUNTANT.getState().jtYDM, address(YDM), "accountant jtYDM");
         assertEq(ACCOUNTANT.getState().lptYDM, LPT_YDM, "accountant lptYDM");
-        assertTrue(address(YDM) != LPT_YDM, "YDM == LDM");
+        assertEq(address(YDM), LPT_YDM, "both slots must share the chain-wide V2 instance");
     }
 
-    /// @notice Both yield models carry an initialized curve keyed to this accountant (pins the LDM-init fix)
+    /// @notice Both tranche types carry an initialized curve keyed to this accountant (pins the LDM-init fix)
     function test_YDM_BothInitializedForThisAccountant() public view {
-        (uint64 jtTarget,,,) = AdaptiveCurveYDM_V2(address(YDM)).accountantToCurve(address(ACCOUNTANT));
-        (uint64 lptTarget,,,) = AdaptiveCurveYDM_V2(LPT_YDM).accountantToCurve(address(ACCOUNTANT));
+        (uint64 jtTarget,,,) = AdaptiveCurveYDM_V2(address(YDM)).accountantToCurve(address(ACCOUNTANT), TrancheType.JUNIOR);
+        (uint64 lptTarget,,,) = AdaptiveCurveYDM_V2(LPT_YDM).accountantToCurve(address(ACCOUNTANT), TrancheType.LIQUIDITY_PROVIDER);
         assertEq(jtTarget, 0.11e18, "JT YDM curve uninitialized");
         assertEq(lptTarget, 0.11e18, "LDM curve uninitialized");
     }
