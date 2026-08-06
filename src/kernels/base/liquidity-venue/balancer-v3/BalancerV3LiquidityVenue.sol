@@ -24,7 +24,7 @@ import { RoycoDayKernel, SyncedAccountingState } from "../../RoycoDayKernel.sol"
 
 /**
  * @title BalancerV3LiquidityVenue
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice The liquidity venue for liquidity provider tranches using Balancer V3 pools (ST share <> Quote asset) as their secondary liquidity venue
  * @notice The liquidity provider tranche (LPT) asset is a Balancer Pool Token (BPT) between this kernel's senior tranche share and a quote asset
  */

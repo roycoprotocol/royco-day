@@ -6,7 +6,7 @@ import { IRoycoProtocolTemplate } from "./IRoycoProtocolTemplate.sol";
 
 /**
  * @title IRoycoFactory
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Interface for the template-driven Royco market factory
  */
 interface IRoycoFactory {

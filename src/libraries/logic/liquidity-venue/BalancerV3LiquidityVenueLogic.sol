@@ -19,7 +19,7 @@ import { DispatchLogic } from "../DispatchLogic.sol";
 
 /**
  * @title BalancerV3LiquidityVenueLogic
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Externalized Balancer V3 liquidity provider tranche venue logic delegatecalled by the kernel's BalancerV3LiquidityVenue mixin
  */
 library BalancerV3LiquidityVenueLogic {

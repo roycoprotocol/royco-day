@@ -5,7 +5,7 @@ import { NAV_UNIT } from "../libraries/Units.sol";
 
 /**
  * @title IRoycoPriceOracle
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Oracle exposing the price of 1 whole collateral asset in NAV units (USD, BTC, ETH, etc.)
  * @dev Also serves as the update clock for the entry point's execution gate, so the kernel prices with and the entry point gates on the same source
  * @dev getPrice gates pricing (is the report current) and poke gates queue execution (has new pricing information arrived): both report the composed report's timestamp, the oldest hop's last update, with poke first committing any observed source deviation

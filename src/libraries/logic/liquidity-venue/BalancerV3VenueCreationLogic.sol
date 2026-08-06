@@ -35,7 +35,7 @@ struct BalancerV3PoolCreationParams {
 
 /**
  * @title BalancerV3VenueCreationLogic
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Creation of a Royco Day market's Balancer V3 Gyro E-CLP liquidity venue: the Gyro E-CLP `{ST share, quote}` pool and its manipulation-resistant BPT TVL oracle
  */
 library BalancerV3VenueCreationLogic {

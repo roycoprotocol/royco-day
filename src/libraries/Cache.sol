@@ -24,7 +24,7 @@ enum CacheKey {
 
 /**
  * @title Cache
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice A unified keyed transient cache usable by any contract: one transient slot per CacheKey derived from a single ERC-7201 base slot, with a top-bit populated marker so a cached zero is distinguishable from an unset slot
  */
 library Cache {

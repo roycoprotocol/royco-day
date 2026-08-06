@@ -11,7 +11,7 @@ import { NAV_UNIT, toNAVUnits } from "../../libraries/Units.sol";
 
 /**
  * @title ChainlinkPriceOracleBase
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Abstract oracle to price a collateral asset in NAV units by converting it to its reference asset at a live rate and pricing the reference asset using a Chainlink (compatible) oracle
  * @dev The conversion rate is read live from its source, so the report is exactly as fresh as the Chainlink (compatible) oracle and its update timestamp passes through unchanged
  * @dev The oracle network timestamps its own updates, so poke passes the feed's latest update timestamp

@@ -5,7 +5,7 @@ import { DispatchMode } from "../Types.sol";
 
 /**
  * @title DispatchLogic
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Dispatches operations for execution or simulation: an execution persists and returns its result, a simulation
  *         runs the same operation and unwinds every state change by reverting with SIMULATION_RESULT
  * @dev Either mode delivers the operation's result byte for byte, so callers decode without mode awareness:

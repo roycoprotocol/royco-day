@@ -6,7 +6,7 @@ import { IRoycoAccessManager } from "../interfaces/factory/IRoycoAccessManager.s
 
 /**
  * @title RoycoAccessManager
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice The protocol's access manager: an OpenZeppelin AccessManager that additionally records, permanently, every
  *         target it has ever configured
  */

@@ -8,7 +8,7 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
 /**
  * @title RoycoSeniorTranche
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Senior tranche implementation for Royco markets
  */
 contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {

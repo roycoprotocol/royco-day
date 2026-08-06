@@ -15,7 +15,7 @@ import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
  * @title AccountingSyncLogic
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Tranche-accounting synchronization for a Royco market: the pre-op and post-op sync, protocol fee and liquidity-premium processing, the idle liquidity-premium reinvestment, and the sync preview
  */
 library AccountingSyncLogic {

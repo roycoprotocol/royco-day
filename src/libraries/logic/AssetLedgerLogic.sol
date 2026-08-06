@@ -12,7 +12,7 @@ import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
  * @title AssetLedgerLogic
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Tranche asset-ledger accounting for a Royco market: claim derivation, proportional scaling, ledger credits and debits, and remittance
  */
 library AssetLedgerLogic {

@@ -8,7 +8,7 @@ import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT } from "../Units.sol";
 
 /**
  * @title SelfLiquidationLogic
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice The senior-tranche self-liquidation bonus computation for a Royco market
  */
 library SelfLiquidationLogic {

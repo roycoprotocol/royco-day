@@ -13,7 +13,7 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
 /**
  * @title RoycoLiquidityProviderTranche
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Liquidity provider tranche implementation for Royco markets
  * @dev In addition to the standard LPT asset deposit/redeem flows, it exposes multi-asset entrypoints that let an LP enter/exit with collateral and quote assets directly (the collateral leg mints/redeems senior shares)
  */

@@ -6,7 +6,7 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title BlacklistLogic
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Blacklist screening for a Royco market
  */
 library BlacklistLogic {

@@ -13,7 +13,7 @@ import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
  * @title FeeAndLiquidityPremiumLogic
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice The post-sync protocol fee and liquidity-premium share mint for a Royco market: the premium/fee split and the mint orchestration
  */
 library FeeAndLiquidityPremiumLogic {

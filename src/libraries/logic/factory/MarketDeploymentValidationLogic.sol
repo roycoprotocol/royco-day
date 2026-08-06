@@ -16,7 +16,7 @@ import { BalancerV3PoolCreationParams } from "../liquidity-venue/BalancerV3Venue
 
 /**
  * @title MarketDeploymentValidationLogic
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Validation of a Royco Day market deployment
  */
 library MarketDeploymentValidationLogic {

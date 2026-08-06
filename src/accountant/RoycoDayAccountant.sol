@@ -13,7 +13,7 @@ import { UtilizationLogic } from "../libraries/logic/UtilizationLogic.sol";
 
 /**
  * @title RoycoDayAccountant
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Performs and tracks the accounting, coverage, and liquidity operations and requirements for a Royco market
  * @notice Responsible for marking tranche NAVs to market, tracking the JT impermanent loss, distributing yield via the JT and LPT YDM, and computing protocol fees
  */

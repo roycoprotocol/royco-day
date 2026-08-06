@@ -7,7 +7,7 @@ import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../Unit
 
 /**
  * @title ValuationLogic
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Tranche NAV valuation for a Royco market: the collateral and LPT raw NAV reads, the LPT effective NAV, and NAV-to-shares conversion
  * @dev Invoked by the kernel via delegatecall
  */

@@ -20,7 +20,7 @@ import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
 
 /**
  * @title RoycoDayEntryPoint
- * @author Shivaansh Kapoor, Ankur Dubey, Aman Raj
+ * @author Shivaansh Kapoor, Ankur Dubey, Aman Raj, Tomer Ganor
  * @notice Periphery contract enabling asynchronous deposit and redemption flows on Royco Tranches
  * @dev Enforces configurable delays between request and execution to prevent oracle front-running attacks
  * @dev Tranches configured with an oracle clock additionally gate execution on at least one observed oracle update after the request, so any information known at request time is priced into the mark before execution

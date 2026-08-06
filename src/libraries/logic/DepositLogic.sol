@@ -17,7 +17,7 @@ import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
  * @title DepositLogic
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice The in-kind and multi-asset tranche deposit flows and max-deposit reads for a Royco market
  * @dev Invoked by the kernel via delegatecall
  */

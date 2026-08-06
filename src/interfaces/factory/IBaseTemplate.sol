@@ -7,7 +7,7 @@ import { IRoycoProtocolTemplate } from "./IRoycoProtocolTemplate.sol";
 
 /**
  * @title IBaseTemplate
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Common surface shared by every concrete Royco deployment template, on top of `IRoycoProtocolTemplate`
  */
 interface IBaseTemplate is IRoycoProtocolTemplate {

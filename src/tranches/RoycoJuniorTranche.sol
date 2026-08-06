@@ -6,7 +6,7 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
 /**
  * @title RoycoJuniorTranche
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Junior tranche implementation for Royco markets
  */
 contract RoycoJuniorTranche is RoycoVaultTranche {

@@ -7,7 +7,7 @@ import { ChainlinkPriceOracleBase } from "./base/ChainlinkPriceOracleBase.sol";
 
 /**
  * @title ChainlinkPriceOracle
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Oracle to price a collateral asset in NAV units using a Chainlink (compatible) oracle that quotes it directly
  * @dev The collateral asset is its own reference asset, so the conversion rate is the identity and the answer is the feed's price rescaled to WAD
  * @dev Use case: price ACRED (collateral asset) in USD (NAV unit) using its Chainlink (compatible) price feed

@@ -15,7 +15,7 @@ import { _resolveMarketAuthority } from "./Utils.sol";
 
 /**
  * @title BaseDeploymentTemplate
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Abstract base every Royco protocol template inherits from, standardizing:
  *           - Component param shapes (ST / JT / Accountant / YDM) so concrete templates
  *             share a vocabulary for the bits that don't vary across recipes

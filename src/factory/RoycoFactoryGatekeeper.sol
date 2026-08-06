@@ -10,7 +10,7 @@ import { ADMIN_ROLE, PUBLIC_ROLE } from "./Roles.sol";
 
 /**
  * @title RoycoFactoryGatekeeper
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Holds `ADMIN_ROLE` on the Royco access manager so the factory does not have to, and lets a market deployment
  *         configure only contracts that have never been configured before
  */

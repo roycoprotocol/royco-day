@@ -6,7 +6,7 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
 
 /**
  * @title IBalancerV3LiquidityVenue
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Declares the Balancer V3 Vault callbacks the liquidity provider tranche venue logic library encodes and dispatches into
  */
 interface IBalancerV3LiquidityVenue {

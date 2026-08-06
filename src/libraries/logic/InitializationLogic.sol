@@ -8,7 +8,7 @@ import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { WAD, WAD_DECIMALS } from "../Constants.sol";
 
 /// @title InitializationLogic
-/// @author Waymont
+/// @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
 library InitializationLogic {
     /**
      * @notice Validates and persists the market's wiring and configuration into the kernel's state

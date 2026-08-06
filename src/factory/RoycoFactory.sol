@@ -16,7 +16,7 @@ import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
 
 /**
  * @title RoycoFactory
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Extensible template-driven factory for Royco markets
  */
 contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory {

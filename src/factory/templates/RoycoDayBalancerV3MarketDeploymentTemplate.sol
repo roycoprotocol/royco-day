@@ -55,7 +55,7 @@ interface IWithdrawPoolCreatorFeesTwoArgOverload {
 
 /**
  * @title RoycoDayBalancerV3MarketDeploymentTemplate
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Abstract base for every Royco Day market that has their LPT deployed into a Balancer V3 Gyroscope ECLP pool
  */
 contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {

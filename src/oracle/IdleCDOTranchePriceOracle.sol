@@ -11,7 +11,7 @@ import { OracleClockBase } from "./base/clock/OracleClockBase.sol";
 
 /**
  * @title IdleCDOTranchePriceOracle
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Oracle to price Idle CDO tranche tokens (AA or BB) in NAV units by converting the tranche to the CDO's underlying token at the virtual price and pricing the underlying token using a Chainlink (compatible) oracle
  * @dev Use case: price AA_FalconXUSDC (collateral asset) in USDC (reference asset) using the Pareto CDO's virtualPrice and price USDC in USD (NAV unit) using its Chainlink (compatible) fundamental price feed
  * @dev The CDO reprices through discrete accounting and exposes no update timestamp, so the clocked base checkpoints observed virtual-price deviations and reports the older of that clock and the feed's update timestamp

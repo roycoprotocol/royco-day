@@ -5,7 +5,7 @@ import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
 
 /**
  * @title RoycoCreate3Deployer
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice A minimal CREATE3 deployer, itself deployed deterministically via CREATE2, so the addresses it hands out
  *         depend on a salt alone and NOT on the deployed contract's creation code
  */

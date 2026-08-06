@@ -18,7 +18,7 @@ import { ValuationLogic } from "../../libraries/logic/ValuationLogic.sol";
 
 /**
  * @title RoycoVaultTranche
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Abstract base contract implementing core vault functionality for Royco tranches (ST, JT, and LPT)
  * @dev Tranches interact with the kernel to execute all operations based on the current holistic state of the Royco market
  */

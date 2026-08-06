@@ -6,7 +6,7 @@ import { WAD } from "../libraries/Constants.sol";
 
 /**
  * @title FixedYDM
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Royco's fixed yield distribution model (YDM): a constant yield share independent of utilization
  * @dev A general-purpose model for paying a tranche's yield as a flat premium to a capital pool, including a fixed zero
  * @dev The model has no concept of a target utilization and ignores the utilization input completely, so it implements

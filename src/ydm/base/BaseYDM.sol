@@ -6,7 +6,7 @@ import { WAD } from "../../libraries/Constants.sol";
 
 /**
  * @title BaseYDM
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Shared base for Royco yield distribution models (YDMs)
  * @dev A YDM is a general-purpose premium model: it maps a single utilization input to the share of a tranche's yield paid out to a capital pool as a premium for a service the pool provides to that tranche
  * @dev Utilization is the fraction of a capital pool's service capacity that is currently in use: the ratio of demand for the service the pool provides to the pool's capacity to supply it, scaled to WAD precision

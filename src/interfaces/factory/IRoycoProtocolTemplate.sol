@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 /**
  * @title IRoycoProtocolTemplate
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Interface every Royco market deployment template implements
  */
 interface IRoycoProtocolTemplate {

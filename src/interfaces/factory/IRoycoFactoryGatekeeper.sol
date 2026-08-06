@@ -5,7 +5,7 @@ import { IRoycoDayEntryPoint } from "../IRoycoDayEntryPoint.sol";
 
 /**
  * @title IRoycoFactoryGatekeeper
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Interface for the contract that holds `ADMIN_ROLE` on the Royco access manager on the factory's behalf and
  *         permits market deployments to configure only contracts that have never been configured before
  */

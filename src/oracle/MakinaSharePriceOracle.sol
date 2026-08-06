@@ -10,7 +10,7 @@ import { ChainlinkPriceOracleBase } from "./base/ChainlinkPriceOracleBase.sol";
 
 /**
  * @title MakinaSharePriceOracle
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Oracle to price Makina machine shares in NAV units by converting the shares to accounting assets and pricing accounting assets using a Chainlink (compatible) oracle
  * @dev The collateral asset is the machine's share token, resolved from the machine at construction
  * @dev Use case: price DUSD (collateral asset) in USDC (accounting assets) using the machine's convertToAssets and price USDC in USD (NAV unit) using its Chainlink (compatible) fundamental price feed

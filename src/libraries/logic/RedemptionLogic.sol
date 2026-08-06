@@ -20,7 +20,7 @@ import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
  * @title RedemptionLogic
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice The in-kind and multi-asset tranche redemption flows and max-withdrawable reads for a Royco market
  * @dev Invoked by the kernel via delegatecall
  */

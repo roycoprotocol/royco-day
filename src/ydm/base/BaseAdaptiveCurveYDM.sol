@@ -8,7 +8,7 @@ import { BaseYDM } from "./BaseYDM.sol";
 
 /**
  * @title BaseAdaptiveCurveYDM
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Shared engine for Royco's adaptive curve yield distribution models (YDMs)
  * @dev A general-purpose model for paying a tranche's yield as a premium to a capital pool that provides a service to that tranche
  * @dev It is parameterized purely by the utilization of that service, so the same contract prices any tranche-yield premium

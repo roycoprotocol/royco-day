@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 /**
  * @title IRoycoAccessManager
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice The Royco access manager's one addition over the OpenZeppelin `AccessManager`: a monotonic record of every
  *         target that has ever received configuration
  */

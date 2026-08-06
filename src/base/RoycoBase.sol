@@ -5,7 +5,7 @@ import { RoycoAuth } from "../auth/RoycoAuth.sol";
 
 /**
  * @title RoycoBase
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Abstract base contract for upgradeable Royco protocol contracts
  */
 abstract contract RoycoBase is RoycoAuth {

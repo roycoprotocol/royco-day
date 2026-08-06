@@ -7,7 +7,7 @@ import { BalancerV3LiquidityVenue } from "./base/liquidity-venue/balancer-v3/Bal
 
 /**
  * @title RoycoDayBalancerV3Kernel
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice The senior and junior tranches coinvest the same collateral asset, and the liquidity provider tranche provides secondary liquidity via a Balancer V3 pool pairing the senior tranche share against a quote asset
  * @dev ST/JT NAV computations price the collateral asset in NAV units through the market's collateral asset oracle, so one kernel serves every collateral integration
  * @dev LPT NAV computations value the pool position (BPT) using a manipulation-resistant Balancer V3 oracle, and the pool prices the senior share leg via this kernel's senior share rate provider

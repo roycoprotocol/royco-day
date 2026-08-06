@@ -7,7 +7,7 @@ import { ISanctionsList } from "../interfaces/external/chainalysis/ISanctionsLis
 
 /**
  * @title RoycoBlacklist
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Manages account blacklisting and Chainalysis sanctions screening for a Royco market
  * @notice Queried by kernels for any operations involving preview or state mutating asset transfers between accounts
  */

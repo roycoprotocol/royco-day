@@ -6,7 +6,7 @@ import { Math, NAV_UNIT, RoycoUnitsMath } from "../Units.sol";
 
 /**
  * @title UtilizationLogic
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Coverage and liquidity utilization math for a Royco market
  */
 library UtilizationLogic {

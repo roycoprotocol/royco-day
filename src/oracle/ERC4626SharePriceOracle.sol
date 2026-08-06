@@ -9,7 +9,7 @@ import { OracleClockBase } from "./base/clock/OracleClockBase.sol";
 
 /**
  * @title ERC4626SharePriceOracle
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Oracle to price ERC4626 vault shares in NAV units by converting the shares to base assets and pricing base assets using a Chainlink (compatible) oracle, deriving the share hop's update clock from observed share-price deviations
  * @dev The collateral asset must be an ERC4626 vault share
  * @dev Use case: price sUSDe (collateral asset) in USDe (base assets) using ERC4626's convertToAssets and price USDe in USD (NAV unit) using its fundamental (solvency-based) price feed

@@ -7,7 +7,7 @@ import { WAD } from "../../../libraries/Constants.sol";
 
 /**
  * @title OracleClockBase
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Abstract oracle clock for pull-based pricing sources that expose only a current price with no update timestamp
  * @dev Each poke reads the source and checkpoints a new update timestamp when the price has deviated beyond the immutable threshold since the last checkpoint, deriving conservative update times for the source
  * @dev Fully permissionless and admin-free: the only mutable state is the checkpoint pair poke advances mechanically, so the clock has no authority, no upgrade path, and no configuration surface

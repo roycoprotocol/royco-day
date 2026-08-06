@@ -6,7 +6,7 @@ import { RoycoBase } from "./RoycoBase.sol";
 
 /**
  * @title RoycoUUPSBase
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Abstract base for the Royco contracts that carry their own upgrade mechanism
  */
 abstract contract RoycoUUPSBase is UUPSUpgradeable, RoycoBase {
