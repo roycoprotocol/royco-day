@@ -10,7 +10,6 @@ import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
-import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
 import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
@@ -106,14 +105,6 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
         registry = scaffold.registry;
         marketBuilder = scaffold.market;
         template = scaffold.template;
-
-        // The template resolves a market's yield distribution models out of its own registry, so bind its registration
-        // surface and register the config's shapes, exactly as the scaffolding phase does.
-        bytes4[] memory ydmSelectors = new bytes4[](1);
-        ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        am.setTargetFunctionRole(address(template), ydmSelectors, ADMIN_FACTORY_ROLE);
-        am.grantRole(ADMIN_FACTORY_ROLE, address(scaffold.ydms), 0);
-        scaffold.ydms.registerModels();
     }
 
     // ─── helpers ───
@@ -129,7 +120,14 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
     function _marketConfig(address _oracleCollateralAsset) internal returns (DayMarketConfig memory cfg) {
         cfg = registry.getDayMarketConfig("snUSD");
         cfg.oracle.deployed = address(new ChainlinkPriceOracle(_oracleCollateralAsset, NUSD_REDSTONE_ORACLE, 48 hours));
-            _fundPoolSeed(cfg);
+        _resolveYdms(cfg);
+        _fundPoolSeed(cfg);
+    }
+
+    /// @dev Resolves (or deploys) the market's yield distribution model instances, mirroring the pipeline
+    function _resolveYdms(DayMarketConfig memory _cfg) internal {
+        if (_cfg.accountant.jtYdm.deployed == address(0)) _cfg.accountant.jtYdm.deployed = marketBuilder.deployYDM("JT model  ", _cfg.accountant.jtYdm);
+        if (_cfg.accountant.lptYdm.deployed == address(0)) _cfg.accountant.lptYdm.deployed = marketBuilder.deployYDM("LPT model ", _cfg.accountant.lptYdm);
     }
 
     /// @dev Every market is deployed with genesis pool liquidity pulled from the deployment caller (the pranked

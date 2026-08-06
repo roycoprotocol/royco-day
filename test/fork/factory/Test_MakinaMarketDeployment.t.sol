@@ -20,7 +20,6 @@ import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol"
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
-import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { TAG_KERNEL_PROXY } from "../../../src/factory/templates/base/Constants.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
@@ -117,14 +116,6 @@ contract Test_MakinaMarketDeployment is Test {
         registry = scaffold.registry;
         marketBuilder = scaffold.market;
         template = scaffold.template;
-
-        // The template resolves a market's yield distribution models out of its own registry, so bind its registration
-        // surface and register the config's shapes, exactly as the scaffolding phase does.
-        bytes4[] memory ydmSelectors = new bytes4[](1);
-        ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        am.setTargetFunctionRole(address(template), ydmSelectors, ADMIN_FACTORY_ROLE);
-        am.grantRole(ADMIN_FACTORY_ROLE, address(scaffold.ydms), 0);
-        scaffold.ydms.registerModels();
     }
 
     // ─── helpers ───
@@ -148,7 +139,14 @@ contract Test_MakinaMarketDeployment is Test {
         cfg = registry.getDayMarketConfig("snUSD");
         cfg.collateralAsset = _collateralAsset;
         cfg.oracle.deployed = address(new MakinaSharePriceOracle(_machine, USDC_USD_FEED, 48 hours, 24 hours));
+        _resolveYdms(cfg);
         _fundPoolSeed(cfg);
+    }
+
+    /// @dev Resolves (or deploys) the market's yield distribution model instances, mirroring the pipeline
+    function _resolveYdms(DayMarketConfig memory _cfg) internal {
+        if (_cfg.accountant.jtYdm.deployed == address(0)) _cfg.accountant.jtYdm.deployed = marketBuilder.deployYDM("JT model  ", _cfg.accountant.jtYdm);
+        if (_cfg.accountant.lptYdm.deployed == address(0)) _cfg.accountant.lptYdm.deployed = marketBuilder.deployYDM("LPT model ", _cfg.accountant.lptYdm);
     }
 
     function _encodedParams(bytes32 _marketId, address _machine, address _collateralAsset) internal returns (bytes memory) {

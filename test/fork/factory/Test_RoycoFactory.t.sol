@@ -665,6 +665,7 @@ contract Test_RoycoFactory is Test {
 
         DayMarketConfig memory cfg = registry.getDayMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
+        _resolveYdms(cfg);
         _fundPoolSeedFor(cfg, STRANGER);
         bytes memory p = abi.encode(marketBuilder.buildMarketParams(cfg, MARKET_ID_A, address(factory), STRANGER));
 
@@ -809,7 +810,7 @@ contract Test_RoycoFactory is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // MARKET-ID COLLISION + YDM-TYPE WIRING
+    // MARKET-ID COLLISION + YDM WIRING
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice The deployer is mixed into the base salt, so two deployers submitting IDENTICAL params land on
@@ -821,6 +822,7 @@ contract Test_RoycoFactory is Test {
 
         DayMarketConfig memory cfg = registry.getDayMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
+        _resolveYdms(cfg);
 
         // The same seed and the same config, mined for each deployer in turn
         _fundPoolSeedFor(cfg, DEPLOYER);
@@ -929,10 +931,10 @@ contract Test_RoycoFactory is Test {
         assertEq(r.ydm, r.lptYdm, "both slots must share the chain-wide V1 instance");
     }
 
-    /// @notice A Fixed ydmType config deploys the FixedYDM model for both tranche slots and the accountant's init
+    /// @notice A Fixed ydmType config resolves the FixedYDM model for both tranche slots and the accountant's init
     ///         call binds the configured fixed share, including through the real template deployment path
-    /// @dev The fixed model takes no constructor args, so one reference codehash covers both slots, and the two
-    ///      deployed instances must still be distinct addresses because the accountant rejects identical YDMs
+    /// @dev The fixed model takes no constructor args, so one reference codehash covers both slots. Both slots
+    ///      resolve to ONE shared instance, legal because shares are keyed per accountant and tranche type
     function test_FixedYdmConfig_DeploysFixedModel() external {
         _register();
 
@@ -941,7 +943,10 @@ contract Test_RoycoFactory is Test {
         _fundPoolSeed(cfg);
         cfg.accountant.jtYdm.ydmType = YDMType.Fixed;
         cfg.accountant.lptYdm.ydmType = YDMType.Fixed;
-        // The fixed model takes only the constant share, so re-encode both curves as Fixed params — a one-word init blob that binds on the fixed model
+        cfg.accountant.jtYdm.deployed = address(0);
+        cfg.accountant.lptYdm.deployed = address(0);
+        _resolveYdms(cfg);
+        // The fixed model takes only the constant share, so re-encode both curves as Fixed params, a one-word init blob that binds on the fixed model
         cfg.accountant.jtYdm.curveParams = abi.encode(FixedYDMParams({ fixedYieldShareWAD: 0.11e18 }));
         cfg.accountant.lptYdm.curveParams = abi.encode(FixedYDMParams({ fixedYieldShareWAD: 0 }));
         bytes32 marketId = MARKET_ID_A;
@@ -950,16 +955,16 @@ contract Test_RoycoFactory is Test {
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
-        // The deployed model is the configured FixedYDM on both slots, at distinct instance addresses
+        // The resolved model is the configured FixedYDM, one shared instance recorded in both slots
         FixedYDM refFixed = new FixedYDM();
         assertEq(r.ydm.codehash, address(refFixed).codehash, "configured Fixed, ydm must be FixedYDM");
         assertEq(r.lptYdm.codehash, address(refFixed).codehash, "configured Fixed, lptYdm must be FixedYDM");
-        assertTrue(r.ydm != r.lptYdm, "the two tranche slots must hold distinct instances");
+        assertEq(r.ydm, r.lptYdm, "both slots must share the chain-wide Fixed instance");
 
-        // The accountant's init bound the configured shares, zero included: the flag marks both initialized
-        (bool jtInitialized, uint64 jtShareWAD) = FixedYDM(r.ydm).accountantToFixedYieldShare(r.accountant);
-        (bool lptInitialized, uint64 lptShareWAD) = FixedYDM(r.lptYdm).accountantToFixedYieldShare(r.accountant);
-        assertTrue(jtInitialized && lptInitialized, "both slots must be initialized for the market's accountant");
+        // The accountant's init bound the configured shares per tranche type on the shared instance, zero included
+        (bool jtInitialized, uint64 jtShareWAD) = FixedYDM(r.ydm).accountantToFixedYieldShare(r.accountant, TrancheType.JUNIOR);
+        (bool lptInitialized, uint64 lptShareWAD) = FixedYDM(r.ydm).accountantToFixedYieldShare(r.accountant, TrancheType.LIQUIDITY_PROVIDER);
+        assertTrue(jtInitialized && lptInitialized, "both tranche types must be initialized for the market's accountant");
         assertEq(jtShareWAD, 0.11e18, "the JT slot holds the configured fixed share");
         assertEq(lptShareWAD, 0, "the LPT slot holds the configured zero share");
     }
@@ -968,10 +973,11 @@ contract Test_RoycoFactory is Test {
     // MARKET PARAM VALIDATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev A funded, oracle-resolved param set for MARKET_ID_A, ready for a test to corrupt one field of
+    /// @dev A funded, oracle-resolved and YDM-resolved param set for MARKET_ID_A, ready for a test to corrupt one field of
     function _validParams() internal returns (RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory) {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
+        _resolveYdms(cfg);
         _fundPoolSeed(cfg);
         return marketBuilder.buildMarketParams(cfg, MARKET_ID_A, address(factory), DEPLOYER);
     }
@@ -1040,11 +1046,18 @@ contract Test_RoycoFactory is Test {
         _expectParamsRevert(p, MarketDeploymentValidationLogic.POOL_SEED_REQUIRED.selector);
     }
 
-    /// Each tranche selects its model shape by name, and the empty name is never a registered shape
-    function test_RevertIf_YdmTypeIsEmpty() external {
+    /// The YDMs are mandatory deployer-supplied instances, so a null one can never deploy a market
+    function test_RevertIf_LptYdmIsNull() external {
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
-        p.lptYdmType = "";
-        _expectParamsRevert(p, MarketDeploymentValidationLogic.EMPTY_YDM_TYPE.selector);
+        p.lptYdm = address(0);
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.NULL_MARKET_PARAMETER.selector);
+    }
+
+    /// An EOA passes the non-null check but could never price a premium, so it is rejected separately
+    function test_RevertIf_JtYdmHasNoCode() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.jtYdm = makeAddr("NOT_A_YDM");
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.MARKET_PARAMETER_HAS_NO_CODE.selector);
     }
 
     /// Each model instance decodes its own initialization blob, so an empty one can never initialize it

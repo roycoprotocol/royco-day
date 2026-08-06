@@ -16,7 +16,6 @@ import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol"
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
-import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
@@ -100,13 +99,6 @@ contract Test_ApyUsdMarketDeployment is Test {
         marketBuilder = scaffold.market;
         template = scaffold.template;
 
-        bytes4[] memory ydmSelectors = new bytes4[](1);
-        ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        am.setTargetFunctionRole(address(template), ydmSelectors, ADMIN_FACTORY_ROLE);
-        // Both markets run AdaptiveCurve_V2, so one registration serves the upstream and the apyUSD deployment
-        am.grantRole(ADMIN_FACTORY_ROLE, address(scaffold.ydms), 0);
-        scaffold.ydms.registerModels();
-
         vm.prank(FACTORY_ADMIN);
         factory.registerTemplate(address(template));
 
@@ -133,6 +125,7 @@ contract Test_ApyUsdMarketDeployment is Test {
         cfg.oracle.deployed = address(
             _newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams)
         );
+        _resolveYdms(cfg);
         deal(cfg.pool.quoteAsset, DEPLOYER, cfg.poolInitialization.quoteAmount);
         vm.prank(DEPLOYER);
         IERC20(cfg.pool.quoteAsset).approve(address(template), cfg.poolInitialization.quoteAmount);
@@ -177,7 +170,14 @@ contract Test_ApyUsdMarketDeployment is Test {
         cfg.oracle.deployed = address(
             _newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams)
         );
+        _resolveYdms(cfg);
         _fundPoolSeed(cfg);
+    }
+
+    /// @dev Resolves (or deploys) the market's yield distribution model instances, mirroring the pipeline
+    function _resolveYdms(DayMarketConfig memory _cfg) internal {
+        if (_cfg.accountant.jtYdm.deployed == address(0)) _cfg.accountant.jtYdm.deployed = marketBuilder.deployYDM("JT model  ", _cfg.accountant.jtYdm);
+        if (_cfg.accountant.lptYdm.deployed == address(0)) _cfg.accountant.lptYdm.deployed = marketBuilder.deployYDM("LPT model ", _cfg.accountant.lptYdm);
     }
 
     /// @dev The genesis seed is pulled from the deployment caller: the quote leg is upstream ST SHARES, minted for

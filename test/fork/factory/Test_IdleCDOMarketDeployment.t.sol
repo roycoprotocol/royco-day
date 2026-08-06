@@ -20,7 +20,6 @@ import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol"
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
-import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AggregatorV3Interface } from "../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
@@ -124,14 +123,6 @@ contract Test_IdleCDOMarketDeployment is Test {
         registry = scaffold.registry;
         marketBuilder = scaffold.market;
         template = scaffold.template;
-
-        // The template resolves a market's yield distribution models out of its own registry, so bind its registration
-        // surface and register the config's shapes, exactly as the scaffolding phase does.
-        bytes4[] memory ydmSelectors = new bytes4[](1);
-        ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        am.setTargetFunctionRole(address(template), ydmSelectors, ADMIN_FACTORY_ROLE);
-        am.grantRole(ADMIN_FACTORY_ROLE, address(scaffold.ydms), 0);
-        scaffold.ydms.registerModels();
     }
 
     // ─── helpers ───
@@ -173,7 +164,14 @@ contract Test_IdleCDOMarketDeployment is Test {
         cfg = registry.getDayMarketConfig("snUSD");
         cfg.collateralAsset = AA_TRANCHE_TOKEN;
         cfg.oracle.deployed = _deployIdleOracle(AA_TRANCHE_TOKEN);
+        _resolveYdms(cfg);
         _fundPoolSeed(cfg);
+    }
+
+    /// @dev Resolves (or deploys) the market's yield distribution model instances, mirroring the pipeline
+    function _resolveYdms(DayMarketConfig memory _cfg) internal {
+        if (_cfg.accountant.jtYdm.deployed == address(0)) _cfg.accountant.jtYdm.deployed = marketBuilder.deployYDM("JT model  ", _cfg.accountant.jtYdm);
+        if (_cfg.accountant.lptYdm.deployed == address(0)) _cfg.accountant.lptYdm.deployed = marketBuilder.deployYDM("LPT model ", _cfg.accountant.lptYdm);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

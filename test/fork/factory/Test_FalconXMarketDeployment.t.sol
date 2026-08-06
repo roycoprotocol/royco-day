@@ -19,7 +19,6 @@ import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol"
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
-import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
@@ -29,10 +28,12 @@ import { IIdleCDO } from "../../../src/interfaces/external/idle-finance/IIdleCDO
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../../src/libraries/Units.sol";
+import { TrancheType } from "../../../src/libraries/Types.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
 import { ClockedChainlinkPriceOracleBase } from "../../../src/oracle/base/ClockedChainlinkPriceOracleBase.sol";
 import { ChainlinkPriceOracleBase } from "../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
+import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 
@@ -106,13 +107,6 @@ contract Test_FalconXMarketDeployment is Test {
         marketBuilder = scaffold.market;
         template = scaffold.template;
 
-        bytes4[] memory ydmSelectors = new bytes4[](1);
-        ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        am.setTargetFunctionRole(address(template), ydmSelectors, ADMIN_FACTORY_ROLE);
-        // Both markets run AdaptiveCurve_V2, so one registration serves the upstream and the FalconX deployment
-        am.grantRole(ADMIN_FACTORY_ROLE, address(scaffold.ydms), 0);
-        scaffold.ydms.registerModels();
-
         vm.prank(FACTORY_ADMIN);
         factory.registerTemplate(address(template));
 
@@ -138,6 +132,7 @@ contract Test_FalconXMarketDeployment is Test {
     function _deployUpstreamSrRoyUsdc() internal {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
         cfg.oracle.deployed = address(_newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams));
+        _resolveYdms(cfg);
         deal(cfg.pool.quoteAsset, DEPLOYER, cfg.poolInitialization.quoteAmount);
         vm.prank(DEPLOYER);
         IERC20(cfg.pool.quoteAsset).approve(address(template), cfg.poolInitialization.quoteAmount);
@@ -183,7 +178,14 @@ contract Test_FalconXMarketDeployment is Test {
         cfg.pool.quoteAsset = upstreamSt;
         cfg.pool.quoteAssetRateProvider = upstreamKernel;
         cfg.oracle.deployed = _deployCollateralOracle(cfg, uint32(block.timestamp));
+        _resolveYdms(cfg);
         _fundPoolSeed(cfg);
+    }
+
+    /// @dev Resolves (or deploys) the market's yield distribution model instances, mirroring the pipeline
+    function _resolveYdms(DayMarketConfig memory _cfg) internal {
+        if (_cfg.accountant.jtYdm.deployed == address(0)) _cfg.accountant.jtYdm.deployed = marketBuilder.deployYDM("JT model  ", _cfg.accountant.jtYdm);
+        if (_cfg.accountant.lptYdm.deployed == address(0)) _cfg.accountant.lptYdm.deployed = marketBuilder.deployYDM("LPT model ", _cfg.accountant.lptYdm);
     }
 
     function _deployCollateralOracle(DayMarketConfig memory _cfg, uint32 _attestedLastUpdate) internal returns (address) {
@@ -314,6 +316,7 @@ contract Test_FalconXMarketDeployment is Test {
         cfg.pool.quoteAsset = upstreamSt;
         cfg.pool.quoteAssetRateProvider = upstreamKernel;
         cfg.oracle.deployed = _deployCollateralOracle(cfg, 0); // unattested: pricing held shut
+        _resolveYdms(cfg);
         _fundPoolSeed(cfg);
 
         bytes memory params = abi.encode(marketBuilder.buildMarketParams(cfg, FALCONX_MARKET_ID_SEED, address(factory), DEPLOYER));
@@ -347,7 +350,8 @@ contract Test_FalconXMarketDeployment is Test {
     }
 
     /// @notice The sheet economics land in the accountant: the 10% market-making floor, the never-binding premium
-    ///         caps, and DISTINCT AdaptiveCurve_V2 instances for the JT risk premium and the LPT liquidity premium
+    ///         caps, and ONE shared AdaptiveCurve_V2 instance recorded in both slots with the JT risk premium and
+    ///         LPT liquidity premium curves initialized on it per tranche type
     function test_ExecuteMarketDeployment_FalconXEconomicsConfigured() external {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("FalconX");
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
@@ -357,9 +361,20 @@ contract Test_FalconXMarketDeployment is Test {
         assertEq(a.maxJTYieldShareWAD, cfg.accountant.maxJTYieldShareWAD, "maxJTYieldShareWAD");
         assertEq(a.maxLPTYieldShareWAD, cfg.accountant.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
         assertLe(uint256(a.maxJTYieldShareWAD) + a.maxLPTYieldShareWAD, 1e18, "caps must sum within the senior gain");
-        assertTrue(a.jtYDM != a.lptYDM, "JT and LPT must hold distinct model instances");
-        assertEq(a.jtYDM, r.ydm, "accountant JT model != registry instance");
-        assertEq(a.lptYDM, r.lptYdm, "accountant LPT model != registry instance");
+        assertEq(a.jtYDM, a.lptYDM, "both slots must share the chain-wide V2 instance");
+        assertEq(a.jtYDM, r.ydm, "accountant JT model != resolved instance");
+        assertEq(a.lptYDM, r.lptYdm, "accountant LPT model != resolved instance");
+
+        // The shared instance carries a curve per tranche type: the config's JT (0.005, 0.045, 0.31) and LPT
+        // (0.051, 0.091, 0.31) curves decompose to (target, discount-at-zero, premium-at-full)
+        (uint64 jtTarget,, uint64 jtDiscount, uint64 jtPremium) = AdaptiveCurveYDM_V2(r.ydm).accountantToCurve(r.accountant, TrancheType.JUNIOR);
+        assertEq(jtTarget, 0.045e18, "JT curve target");
+        assertEq(jtDiscount, 0.04e18, "JT curve discount at zero util");
+        assertEq(jtPremium, 0.265e18, "JT curve premium at full util");
+        (uint64 lptTarget,, uint64 lptDiscount, uint64 lptPremium) = AdaptiveCurveYDM_V2(r.ydm).accountantToCurve(r.accountant, TrancheType.LIQUIDITY_PROVIDER);
+        assertEq(lptTarget, 0.091e18, "LPT curve target");
+        assertEq(lptDiscount, 0.04e18, "LPT curve discount at zero util");
+        assertEq(lptPremium, 0.219e18, "LPT curve premium at full util");
     }
 
     /// @dev Deploys the config's ERC4626 share-price adapter with its per-hop staleness immutable, as the script does

@@ -13,7 +13,6 @@ import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol"
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
-import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -21,7 +20,9 @@ import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { NAV_UNIT } from "../../../src/libraries/Units.sol";
+import { TrancheType } from "../../../src/libraries/Types.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
+import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
 import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
@@ -33,7 +34,7 @@ import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 ///         pool quotes in sUSDe — the only market whose quote leg is a rate-bearing token. Covers the deltas no other
 ///         suite reaches: the quote leg registered WITH_RATE against the configured sUSDe rate provider, an 18-decimal
 ///         quote seeding the genesis pool, and the LPT liquidity premium switched ON (nonzero minLiquidityWAD and
-///         maxLPTYieldShareWAD, distinct V2 curves for JT and LPT).
+///         maxLPTYieldShareWAD, distinct JT and LPT curves on the shared V2 instance).
 /// @dev Modeled on Test_ChainlinkOracleMarketDeployment's direct-template pattern. Requires a mainnet fork. FAILS
 ///      (env not found) when `MAINNET_RPC_URL` is unset, instead of silently passing.
 contract Test_SrRoyUsdcMarketDeployment is Test {
@@ -85,12 +86,6 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         marketBuilder = scaffold.market;
         template = scaffold.template;
 
-        bytes4[] memory ydmSelectors = new bytes4[](1);
-        ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        am.setTargetFunctionRole(address(template), ydmSelectors, ADMIN_FACTORY_ROLE);
-        am.grantRole(ADMIN_FACTORY_ROLE, address(scaffold.ydms), 0);
-        scaffold.ydms.registerModels();
-
         // Pin the config's external addresses against the live chain, so an address typo in the config file fails
         // here with a named reason instead of deep inside a deployment
         DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
@@ -114,7 +109,14 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         cfg.oracle.deployed = address(
             _newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams)
         );
+        _resolveYdms(cfg);
         _fundPoolSeed(cfg);
+    }
+
+    /// @dev Resolves (or deploys) the market's yield distribution model instances, mirroring the pipeline
+    function _resolveYdms(DayMarketConfig memory _cfg) internal {
+        if (_cfg.accountant.jtYdm.deployed == address(0)) _cfg.accountant.jtYdm.deployed = marketBuilder.deployYDM("JT model  ", _cfg.accountant.jtYdm);
+        if (_cfg.accountant.lptYdm.deployed == address(0)) _cfg.accountant.lptYdm.deployed = marketBuilder.deployYDM("LPT model ", _cfg.accountant.lptYdm);
     }
 
     /// @dev The genesis seed is pulled from the deployment caller: fund and approve the 18-decimal sUSDe quote leg
@@ -177,7 +179,8 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
     }
 
     /// @notice The LPT liquidity premium is ON for this market: nonzero market-making floor and premium cap, and the
-    ///         accountant carries two DISTINCT AdaptiveCurve_V2 instances for the JT and LPT
+    ///         accountant records ONE shared AdaptiveCurve_V2 instance in both slots, with the JT and LPT curves
+    ///         initialized on it per tranche type
     function test_ExecuteMarketDeployment_LiquidityPremiumConfigured() external {
         _register();
         DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
@@ -188,9 +191,20 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         assertEq(a.maxJTYieldShareWAD, cfg.accountant.maxJTYieldShareWAD, "maxJTYieldShareWAD");
         assertEq(a.maxLPTYieldShareWAD, cfg.accountant.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
         assertLe(uint256(a.maxJTYieldShareWAD) + a.maxLPTYieldShareWAD, 1e18, "caps must sum within the senior gain");
-        assertTrue(a.jtYDM != a.lptYDM, "JT and LPT must hold distinct model instances");
-        assertEq(a.jtYDM, r.ydm, "accountant JT model != registry instance");
-        assertEq(a.lptYDM, r.lptYdm, "accountant LPT model != registry instance");
+        assertEq(a.jtYDM, a.lptYDM, "both slots must share the chain-wide V2 instance");
+        assertEq(a.jtYDM, r.ydm, "accountant JT model != resolved instance");
+        assertEq(a.lptYDM, r.lptYdm, "accountant LPT model != resolved instance");
+
+        // The shared instance carries a curve per tranche type: the config's JT (0.1, 0.14, 0.31) and LPT
+        // (0.18, 0.22, 0.31) curves decompose to (target, discount-at-zero, premium-at-full)
+        (uint64 jtTarget,, uint64 jtDiscount, uint64 jtPremium) = AdaptiveCurveYDM_V2(r.ydm).accountantToCurve(r.accountant, TrancheType.JUNIOR);
+        assertEq(jtTarget, 0.14e18, "JT curve target");
+        assertEq(jtDiscount, 0.04e18, "JT curve discount at zero util");
+        assertEq(jtPremium, 0.17e18, "JT curve premium at full util");
+        (uint64 lptTarget,, uint64 lptDiscount, uint64 lptPremium) = AdaptiveCurveYDM_V2(r.ydm).accountantToCurve(r.accountant, TrancheType.LIQUIDITY_PROVIDER);
+        assertEq(lptTarget, 0.22e18, "LPT curve target");
+        assertEq(lptDiscount, 0.04e18, "LPT curve discount at zero util");
+        assertEq(lptPremium, 0.09e18, "LPT curve premium at full util");
     }
 
     /// @notice The 18-decimal sUSDe genesis seed lands: the pool opens with quote-only depth, the dead-share lock is
