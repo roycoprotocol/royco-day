@@ -147,7 +147,9 @@ contract DeployMarketComponent is CollateralOracleDeployer, YDMDeployer {
             minCoverageWAD: _config.accountant.minCoverageWAD,
             coverageLiquidationUtilizationWAD: _config.accountant.coverageLiquidationUtilizationWAD,
             minLiquidityWAD: _config.accountant.minLiquidityWAD,
-            jtYDMInitializationData: YDMLib.buildYDMInitializationData(TrancheType.JUNIOR, _config.accountant.jtYdm.ydmType, _config.accountant.jtYdm.curveParams),
+            jtYDMInitializationData: YDMLib.buildYDMInitializationData(
+                TrancheType.JUNIOR, _config.accountant.jtYdm.ydmType, _config.accountant.jtYdm.curveParams
+            ),
             lptYDMInitializationData: YDMLib.buildYDMInitializationData(
                 TrancheType.LIQUIDITY_PROVIDER, _config.accountant.lptYdm.ydmType, _config.accountant.lptYdm.curveParams
             ),

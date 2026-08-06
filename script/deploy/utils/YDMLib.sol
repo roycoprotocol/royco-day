@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { TrancheType } from "../../../src/libraries/Types.sol";
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { FixedYDM } from "../../../src/ydm/FixedYDM.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
-import { TrancheType } from "../../../src/libraries/Types.sol";
 import { AdaptiveCurveYDM_V1_Params, AdaptiveCurveYDM_V2_Params, FixedYDMParams, StaticCurveYDMParams, YDMType } from "../../config/DeploymentTypes.sol";
 
 /**
