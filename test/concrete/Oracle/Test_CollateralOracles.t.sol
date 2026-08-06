@@ -55,7 +55,15 @@ contract Test_CollateralOracles is Test {
         referenceAsset = new MockERC20C("NUSD", "NUSD", 6);
         vault = new MockERC4626C(address(referenceAsset), "Staked NUSD", "sNUSD", 18);
         feed = new MockAggregatorV3(8, 1e8);
-        erc4626Oracle = new ERC4626SharePriceOracle(address(vault), address(feed), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS);
+        erc4626Oracle = new ERC4626SharePriceOracle(
+            address(vault),
+            ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS,
+            address(feed),
+            0,
+            uint32(T0),
+            FEED_STALENESS,
+            VAULT_SHARE_PRICE_STALENESS
+        );
 
         // Makina: an 18-decimal share over a 6-decimal accounting asset, sharing the same feed shape
         machineShare = new MockERC20C("DUSD", "DUSD", 18);
@@ -97,6 +105,75 @@ contract Test_CollateralOracles is Test {
         (NAV_UNIT price,) = erc4626Oracle.getPrice();
         assertEq(toUint256(price), 1.0395e18, "composed price must be the share rate times the feed price");
         assertEq(erc4626Oracle.decimals(), 18, "prices are reported at WAD precision");
+    }
+
+    /**
+     * PREVIEW_REDEEM mode prices shares at their realizable redemption value, not the nominal exchange rate
+     * Derivation: share rate 1.05e18 with a 2% redemption haircut and feed 1e8: previewRedeem quotes
+     * 1.05e18 - floor(1.05e18 * 0.02e18 / 1e18) = 1.029e18, so price = floor(1.029e18 * 1e8 / 1e8) = 1.029e18,
+     * while a CONVERT_TO_ASSETS oracle over the same vault ignores the haircut and prices the nominal 1.05e18
+     */
+    function test_ERC4626_previewRedeemModePricesRealizableValue() public {
+        vault.setRate(1.05e18);
+        vault.setRedemptionHaircut(0.02e18);
+        feed.setAnswer(1e8);
+        ERC4626SharePriceOracle redeemOracle = new ERC4626SharePriceOracle(
+            address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.PREVIEW_REDEEM, address(feed), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS
+        );
+        assertEq(uint8(redeemOracle.ERC4626_QUERY_MODE()), uint8(ERC4626SharePriceOracle.ERC4626QueryMode.PREVIEW_REDEEM), "the query mode is stored immutably");
+        (NAV_UNIT redeemPrice,) = redeemOracle.getPrice();
+        assertEq(toUint256(redeemPrice), 1.029e18, "PREVIEW_REDEEM must price the haircut redemption value");
+        (NAV_UNIT convertPrice,) = erc4626Oracle.getPrice();
+        assertEq(toUint256(convertPrice), 1.05e18, "CONVERT_TO_ASSETS must price the nominal exchange rate, blind to the haircut");
+    }
+
+    /**
+     * The two query modes agree exactly on a vault with no redemption haircut, so mode selection alone never
+     * moves the price: both getPrice reports and both construction baselines match on the same vault state
+     */
+    function test_ERC4626_queryModesAgreeWithoutHaircut() public {
+        vault.setRate(1.317e18);
+        feed.setAnswer(0.98e8);
+        ERC4626SharePriceOracle redeemOracle = new ERC4626SharePriceOracle(
+            address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.PREVIEW_REDEEM, address(feed), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS
+        );
+        ERC4626SharePriceOracle convertOracle = new ERC4626SharePriceOracle(
+            address(vault),
+            ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS,
+            address(feed),
+            0,
+            uint32(T0),
+            FEED_STALENESS,
+            VAULT_SHARE_PRICE_STALENESS
+        );
+        (NAV_UNIT redeemPrice,) = redeemOracle.getPrice();
+        (NAV_UNIT convertPrice,) = convertOracle.getPrice();
+        assertEq(toUint256(redeemPrice), toUint256(convertPrice), "a haircut-free vault must price identically under both query modes");
+        (uint160 redeemBaseline,) = redeemOracle.getOracleClockState();
+        (uint160 convertBaseline,) = convertOracle.getOracleClockState();
+        assertEq(uint256(redeemBaseline), uint256(convertBaseline), "both modes must checkpoint the same construction baseline on a haircut-free vault");
+    }
+
+    /**
+     * The deviation clock in PREVIEW_REDEEM mode runs on the redemption value, so a haircut change alone is an
+     * observable share-price update: the redeem clock advances to now while the nominal-rate clock holds its
+     * attested checkpoint, and the committed checkpoint is the haircut redemption value
+     */
+    function test_ERC4626_previewRedeemModeClocksTheRedemptionValue() public {
+        vault.setRate(1e18);
+        feed.setAnswer(1e8);
+        ERC4626SharePriceOracle redeemOracle = new ERC4626SharePriceOracle(
+            address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.PREVIEW_REDEEM, address(feed), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS
+        );
+        vm.warp(T0 + 1 days);
+        // Keep the feed hop current so the oldest-hop report isolates the source clock under test
+        feed.setUpdatedAt(T0 + 1 days);
+        vault.setRedemptionHaircut(0.01e18);
+        assertEq(redeemOracle.previewPoke(), T0 + 1 days, "a haircut change must read as a share-price deviation in PREVIEW_REDEEM mode");
+        assertEq(erc4626Oracle.previewPoke(), T0, "the nominal exchange rate never moved, so CONVERT_TO_ASSETS holds its attested checkpoint");
+        redeemOracle.poke();
+        (uint160 checkpointedPrice,) = redeemOracle.getOracleClockState();
+        assertEq(uint256(checkpointedPrice), 0.99e18, "the committed checkpoint must be the haircut redemption value");
     }
 
     /**
@@ -170,7 +247,9 @@ contract Test_CollateralOracles is Test {
 
     /// An unattested zero checkpoint holds pricing shut under the share-price staleness gate until the first deviation
     function test_ERC4626_unattestedCheckpointHoldsPricingShut() public {
-        ERC4626SharePriceOracle unattested = new ERC4626SharePriceOracle(address(vault), address(feed), 0, 0, FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS);
+        ERC4626SharePriceOracle unattested = new ERC4626SharePriceOracle(
+            address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS, address(feed), 0, 0, FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS
+        );
         vm.warp(T0 + VAULT_SHARE_PRICE_STALENESS + 1);
         feed.setUpdatedAt(block.timestamp);
         vm.expectRevert(ClockedChainlinkPriceOracleBase.STALE_SOURCE_PRICE.selector);
@@ -203,9 +282,13 @@ contract Test_CollateralOracles is Test {
             erc4626Oracle.description(), string.concat("sNUSD / ", feed.description()), "the description reads as the triangulated pair chain through the feed"
         );
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new ERC4626SharePriceOracle(address(0), address(feed), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS);
+        new ERC4626SharePriceOracle(
+            address(0), ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS, address(feed), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS
+        );
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new ERC4626SharePriceOracle(address(vault), address(0), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS);
+        new ERC4626SharePriceOracle(
+            address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS, address(0), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS
+        );
     }
 
     /*----------------------------------------------------------------------
@@ -471,9 +554,11 @@ contract Test_CollateralOracles is Test {
     /// Both thresholds are construction immutables and a zero threshold is rejected at construction, per hop
     function test_RevertIf_StalenessThresholdConstructedZero() public {
         vm.expectRevert(ChainlinkPriceOracleBase.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
-        new ERC4626SharePriceOracle(address(vault), address(feed), 0, 0, 0, VAULT_SHARE_PRICE_STALENESS);
+        new ERC4626SharePriceOracle(
+            address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS, address(feed), 0, 0, 0, VAULT_SHARE_PRICE_STALENESS
+        );
         vm.expectRevert(ChainlinkPriceOracleBase.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
-        new ERC4626SharePriceOracle(address(vault), address(feed), 0, 0, FEED_STALENESS, 0);
+        new ERC4626SharePriceOracle(address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS, address(feed), 0, 0, FEED_STALENESS, 0);
         vm.expectRevert(ChainlinkPriceOracleBase.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
         new MakinaSharePriceOracle(address(machine), address(feed), 0, MAKINA_ACCOUNTING_STALENESS);
         vm.expectRevert(ChainlinkPriceOracleBase.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
@@ -516,8 +601,15 @@ contract Test_CollateralOracles is Test {
         MockERC4626C narrowVault = new MockERC4626C(address(wideAsset), "Narrow Share", "nSHARE", 6);
         narrowVault.setRate(1.02e18);
         feed.setAnswer(1.00005e8);
-        ERC4626SharePriceOracle narrow =
-            new ERC4626SharePriceOracle(address(narrowVault), address(feed), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS);
+        ERC4626SharePriceOracle narrow = new ERC4626SharePriceOracle(
+            address(narrowVault),
+            ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS,
+            address(feed),
+            0,
+            uint32(T0),
+            FEED_STALENESS,
+            VAULT_SHARE_PRICE_STALENESS
+        );
         (NAV_UNIT price,) = narrow.getPrice();
         assertEq(toUint256(price), 1.020051e18, "the inverted shape composes through the same probe algebra");
     }

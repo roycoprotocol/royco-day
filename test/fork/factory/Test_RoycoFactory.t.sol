@@ -1291,6 +1291,7 @@ contract Test_RoycoFactory is Test {
         ERC4626SharePriceOracleParams memory op = abi.decode(_oracleParams, (ERC4626SharePriceOracleParams));
         return new ERC4626SharePriceOracle(
             _collateral,
+            op.queryMode,
             op.baseAssetToNavAssetFeed,
             op.minDeviationWAD,
             op.lastUpdate,

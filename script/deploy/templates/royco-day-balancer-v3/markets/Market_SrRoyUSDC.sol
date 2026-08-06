@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IBaseTemplate } from "../../../../../src/interfaces/factory/IBaseTemplate.sol";
+import { ERC4626SharePriceOracle } from "../../../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { AdaptiveCurveYDM_V2_Params, ERC4626SharePriceOracleParams, GyroECLPPoolParams, OracleType, YDMType } from "../../../../config/DeploymentTypes.sol";
 import { AccountantEconomics, CollateralOracleConfig, DayMarketConfig, KernelSettings, YDMSelection } from "../DayMarketTypes.sol";
 import { DayMarketRegistryBase } from "./DayMarketRegistryBase.sol";
@@ -25,6 +26,7 @@ abstract contract Market_SrRoyUSDC is DayMarketRegistryBase {
                 oracleType: OracleType.ERC4626SharePrice,
                 specificParams: abi.encode(
                     ERC4626SharePriceOracleParams({
+                        queryMode: ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS,
                         baseAssetToNavAssetFeed: 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6,
                         // The vault accrues continuously, so any observed share-price change counts as an update
                         minDeviationWAD: 0,

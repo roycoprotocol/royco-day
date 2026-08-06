@@ -8,6 +8,7 @@ import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.so
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
+import { ERC4626SharePriceOracle } from "../../src/oracle/ERC4626SharePriceOracle.sol";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ENUMS
@@ -120,6 +121,8 @@ struct ChainlinkPriceOracleParams {
 /// @notice Params for `OracleType.ERC4626SharePrice`: share price via `convertToAssets` x the base-asset-to-NAV feed.
 /// @dev The vault is the market's collateral asset itself.
 struct ERC4626SharePriceOracleParams {
+    // The ERC4626 query used to read the vault's share price (previewRedeem prices shares at their realizable redemption value)
+    ERC4626SharePriceOracle.ERC4626QueryMode queryMode;
     address baseAssetToNavAssetFeed;
     // The minimum relative deviation from the checkpointed share price that counts as an update (zero counts any change)
     uint256 minDeviationWAD;

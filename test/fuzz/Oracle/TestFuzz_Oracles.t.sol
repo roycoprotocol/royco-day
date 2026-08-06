@@ -56,9 +56,42 @@ contract TestFuzz_Oracles is Test {
         vault.setRate(rate);
         feed.setAnswer(int256(answer));
 
-        ERC4626SharePriceOracle oracle = new ERC4626SharePriceOracle(address(vault), address(feed), 0, uint32(T0), FEED_STALENESS, SHARE_PRICE_STALENESS);
+        ERC4626SharePriceOracle oracle = new ERC4626SharePriceOracle(
+            address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS, address(feed), 0, uint32(T0), FEED_STALENESS, SHARE_PRICE_STALENESS
+        );
         (NAV_UNIT price,) = oracle.getPrice();
         assertEq(toUint256(price), Math.mulDiv(rate, answer, 1e8), "composed price must equal the mirror's single-floored product");
+    }
+
+    /**
+     * Query-mode selection matches the vault mirror for any rate, haircut, and answer: the PREVIEW_REDEEM
+     * composition prices floor(previewRedeem x answer / feedPrecision) while CONVERT_TO_ASSETS prices the
+     * nominal floor(rate x answer / feedPrecision), and the two agree exactly iff the haircut is zero
+     */
+    function testFuzz_ERC4626QueryMode_SelectsTheMirroredSource(uint256 _rate, uint256 _haircut, uint256 _answer) public {
+        uint256 rate = bound(_rate, 1e9, 1e27);
+        uint256 haircut = bound(_haircut, 0, 1e18 - 1);
+        uint256 answer = bound(_answer, 1, 1e12);
+        vault.setRate(rate);
+        vault.setRedemptionHaircut(haircut);
+        feed.setAnswer(int256(answer));
+
+        ERC4626SharePriceOracle convertOracle = new ERC4626SharePriceOracle(
+            address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS, address(feed), 0, uint32(T0), FEED_STALENESS, SHARE_PRICE_STALENESS
+        );
+        ERC4626SharePriceOracle redeemOracle = new ERC4626SharePriceOracle(
+            address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.PREVIEW_REDEEM, address(feed), 0, uint32(T0), FEED_STALENESS, SHARE_PRICE_STALENESS
+        );
+
+        // Mirror the mock vault's quotes: the nominal conversion and the haircut redemption value
+        uint256 redeemSource = rate - Math.mulDiv(rate, haircut, 1e18);
+        (NAV_UNIT convertPrice,) = convertOracle.getPrice();
+        (NAV_UNIT redeemPrice,) = redeemOracle.getPrice();
+        assertEq(toUint256(convertPrice), Math.mulDiv(rate, answer, 1e8), "CONVERT_TO_ASSETS must compose the nominal rate");
+        assertEq(toUint256(redeemPrice), Math.mulDiv(redeemSource, answer, 1e8), "PREVIEW_REDEEM must compose the redemption value");
+        if (haircut == 0) {
+            assertEq(toUint256(convertPrice), toUint256(redeemPrice), "the modes must agree exactly on a haircut-free vault");
+        }
     }
 
     /**
@@ -78,9 +111,11 @@ contract TestFuzz_Oracles is Test {
 
         // The independent mirror of the deviation definition
         bool expectDeviated;
-        if (next == baseline) expectDeviated = false;
-        else if (thresholdWAD == 0 || baseline == 0) expectDeviated = true;
-        else {
+        if (next == baseline) {
+            expectDeviated = false;
+        } else if (thresholdWAD == 0 || baseline == 0) {
+            expectDeviated = true;
+        } else {
             uint256 delta = next > baseline ? next - baseline : baseline - next;
             expectDeviated = Math.mulDiv(WAD, delta, baseline) >= thresholdWAD;
         }
@@ -98,8 +133,15 @@ contract TestFuzz_Oracles is Test {
         uint256 feedAge = bound(_feedAge, 0, FEED_STALENESS - 1);
         feed.setUpdatedAt(T0 - feedAge);
 
-        ERC4626SharePriceOracle oracle =
-            new ERC4626SharePriceOracle(address(vault), address(feed), 0, uint32(T0 - clockAge), FEED_STALENESS, SHARE_PRICE_STALENESS);
+        ERC4626SharePriceOracle oracle = new ERC4626SharePriceOracle(
+            address(vault),
+            ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS,
+            address(feed),
+            0,
+            uint32(T0 - clockAge),
+            FEED_STALENESS,
+            SHARE_PRICE_STALENESS
+        );
         uint256 expected = Math.min(T0 - feedAge, T0 - clockAge);
 
         (, uint256 updatedAt) = oracle.getPrice();
@@ -128,7 +170,9 @@ contract TestFuzz_Oracles is Test {
     /// The source-price staleness gate fires exactly past its boundary for any checkpoint age, with the feed held fresh
     function testFuzz_SourceStalenessBoundary_FiresExactly(uint256 _age) public {
         uint256 age = bound(_age, 0, 2 * uint256(SHARE_PRICE_STALENESS));
-        ERC4626SharePriceOracle oracle = new ERC4626SharePriceOracle(address(vault), address(feed), 0, uint32(T0), FEED_STALENESS, SHARE_PRICE_STALENESS);
+        ERC4626SharePriceOracle oracle = new ERC4626SharePriceOracle(
+            address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS, address(feed), 0, uint32(T0), FEED_STALENESS, SHARE_PRICE_STALENESS
+        );
 
         vm.warp(T0 + age);
         feed.setUpdatedAt(block.timestamp);
@@ -208,8 +252,15 @@ contract TestFuzz_Oracles is Test {
         MockERC4626C shapedVault = new MockERC4626C(address(shapedAsset), "S", "S", shareDecimals);
         shapedVault.setRate(rate);
         feed.setAnswer(int256(answer));
-        ERC4626SharePriceOracle oracle =
-            new ERC4626SharePriceOracle(address(shapedVault), address(feed), 0, uint32(T0), FEED_STALENESS, SHARE_PRICE_STALENESS);
+        ERC4626SharePriceOracle oracle = new ERC4626SharePriceOracle(
+            address(shapedVault),
+            ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS,
+            address(feed),
+            0,
+            uint32(T0),
+            FEED_STALENESS,
+            SHARE_PRICE_STALENESS
+        );
 
         (NAV_UNIT price,) = oracle.getPrice();
         assertEq(toUint256(price), Math.mulDiv(rate, answer, 1e8), "the composition must be invariant to the vault's decimal shape");

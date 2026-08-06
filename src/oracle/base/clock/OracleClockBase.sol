@@ -122,6 +122,7 @@ abstract contract OracleClockBase {
     }
 
     /// @notice Returns the source's current price, implemented by the concrete clock
+    /// @dev The clock only measures relative deviation, so any unit works as long as it is consistent across observations, a composing base may impose a concrete unit
     /// @return price The source's current price
     function _getSourcePrice() internal view virtual returns (uint256 price);
 }

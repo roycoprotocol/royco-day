@@ -11,6 +11,7 @@ import { OracleClockBase } from "./clock/OracleClockBase.sol";
  * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Abstract composed oracle whose conversion source exposes no update timestamp: the deviation clock derives the source hop's update times and the report's timestamp is the older of that clock and the Chainlink leg
  * @dev The concrete oracle supplies the source read (_getSourcePrice), which doubles as the conversion hop and the clock's observation
+ * @dev The source read MUST be scaled to WAD precision: it is composed verbatim as the collateral to reference asset conversion rate
  * @dev Neither a feed update nor a source-price move alone advances the reported timestamp, so the entry point's execution gate opens only once BOTH hops have updated
  */
 abstract contract ClockedChainlinkPriceOracleBase is OracleClockBase, ChainlinkPriceOracleBase {

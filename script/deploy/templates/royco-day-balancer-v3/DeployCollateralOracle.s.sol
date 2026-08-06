@@ -51,6 +51,7 @@ abstract contract CollateralOracleDeployer is DeployScriptBase {
             creationCode = type(ERC4626SharePriceOracle).creationCode;
             ctorArgs = abi.encode(
                 _config.collateralAsset,
+                p.queryMode,
                 p.baseAssetToNavAssetFeed,
                 p.minDeviationWAD,
                 p.lastUpdate,
