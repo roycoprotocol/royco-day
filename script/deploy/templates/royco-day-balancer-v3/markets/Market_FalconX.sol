@@ -48,12 +48,14 @@ abstract contract Market_FalconX is DayMarketRegistryBase {
                 coverageLiquidationUtilizationWAD: calculateCoverageLiquidationUtilizationWAD(0.03e18, 0.0299e18),
                 minLiquidityWAD: 0.1e18,
                 jtYdm: YDMSelection({
+                    deployed: address(0),
                     ydmType: YDMType.AdaptiveCurve_V2,
                     curveParams: abi.encode(
                         AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.005e18, yieldShareAtTargetUtilWAD: 0.045e18, yieldShareAtFullUtilWAD: 0.31e18 })
                     )
                 }),
                 lptYdm: YDMSelection({
+                    deployed: address(0),
                     ydmType: YDMType.AdaptiveCurve_V2,
                     curveParams: abi.encode(
                         AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.051e18, yieldShareAtTargetUtilWAD: 0.091e18, yieldShareAtFullUtilWAD: 0.31e18 })

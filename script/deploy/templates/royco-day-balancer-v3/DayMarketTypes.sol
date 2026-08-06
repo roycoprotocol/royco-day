@@ -28,10 +28,12 @@ struct CollateralOracleConfig {
     bytes specificParams;
 }
 
-/// @notice A market's yield-distribution-model selection: the registered shape plus its curve parameters
-/// @custom:field ydmType - The model shape, resolved against the template's registry by canonical name
+/// @notice A market's yield-distribution-model selection: a pre-deployed instance, or the shape to deploy, plus its curve parameters
+/// @custom:field deployed - The pre-deployed model instance (the null address has the pipeline deploy or reuse the shape's chain-wide instance)
+/// @custom:field ydmType - The model shape to deploy when unset (one per `src/ydm/` model)
 /// @custom:field curveParams - The ABI-encoded curve params struct for the shape (encoded into the accountant's init data)
 struct YDMSelection {
+    address deployed;
     YDMType ydmType;
     bytes curveParams;
 }

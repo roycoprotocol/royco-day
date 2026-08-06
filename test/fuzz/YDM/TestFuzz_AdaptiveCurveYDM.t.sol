@@ -5,7 +5,7 @@ import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { FixedPointMathLib } from "../../../lib/solady/src/utils/FixedPointMathLib.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
-import { MarketState } from "../../../src/libraries/Types.sol";
+import { MarketState, TrancheType } from "../../../src/libraries/Types.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
@@ -35,6 +35,7 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
     /// @dev Bundle of one bounded curve deployment so the tests stay within stack limits
     struct Curve {
         AdaptiveCurveYDM_V2 ydm;
+        TrancheType trancheType;
         uint256 targetU;
         uint256 y0;
         uint256 yT;
@@ -47,14 +48,24 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
      *      y0 <= yT <= yFull <= WAD, and a kink in (0, WAD]. The spreads yT - y0 and yFull - yT are stored as
      *      the fixed discount/premium, both at most WAD so the uint64 fields cannot overflow
      */
-    function _deployBoundedCurve(uint256 _targetU, uint256 _yT, uint256 _spreadDown, uint256 _spreadUp) internal returns (Curve memory c) {
+    function _deployBoundedCurve(
+        TrancheType _trancheType,
+        uint256 _targetU,
+        uint256 _yT,
+        uint256 _spreadDown,
+        uint256 _spreadUp
+    )
+        internal
+        returns (Curve memory c)
+    {
+        c.trancheType = _trancheType;
         c.targetU = bound(_targetU, 1, WAD); // uniform over the whole constructible kink range incl. the 100% edge
         c.yT = bound(_yT, MIN_YT, WAD); // uniform over every share at target the deployment clamps allow
         c.y0 = c.yT - bound(_spreadDown, 0, c.yT); // uniform over the feasible zero-utilization discounts incl. flat
         c.yFull = c.yT + bound(_spreadUp, 0, WAD - c.yT); // uniform over the feasible full-utilization premiums incl. flat
 
         c.ydm = new AdaptiveCurveYDM_V2(c.targetU, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
-        c.ydm.initializeYDMForMarket(uint64(c.y0), uint64(c.yT), uint64(c.yFull));
+        c.ydm.initializeYDMForMarket(_trancheType, uint64(c.y0), uint64(c.yT), uint64(c.yFull));
 
         // The deployment constants the envelope below is derived from, pinned against the live instance
         assertEq(c.ydm.MIN_YIELD_SHARE_AT_TARGET_WAD(), MIN_YT, "deployed floor on the share at target must be 0.0001e18");
@@ -69,8 +80,8 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
      *      timestamp changes. Verified here so every test's drift window provably starts at the initial share
      */
     function _stampAdaptationClock(Curve memory c, uint256 _u) internal {
-        c.ydm.yieldShare(MarketState.PERPETUAL, _u);
-        (uint64 storedYT, uint32 lastTs,,) = c.ydm.accountantToCurve(address(this));
+        c.ydm.yieldShare(c.trancheType, MarketState.PERPETUAL, _u);
+        (uint64 storedYT, uint32 lastTs,,) = c.ydm.accountantToCurve(address(this), c.trancheType);
         assertEq(storedYT, c.yT, "the first mutating call must not move the stored share at target");
         assertEq(lastTs, uint32(block.timestamp), "the first mutating call must stamp the adaptation clock");
     }
@@ -107,15 +118,15 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
     )
         public
     {
-        Curve memory c = _deployBoundedCurve(_targetU, _yT, _spreadDown, _spreadUp);
+        Curve memory c = _deployBoundedCurve(TrancheType.JUNIOR, _targetU, _yT, _spreadDown, _spreadUp);
         uint256 u = bound(_u, 0, 2 * WAD); // half the mass below 100% (spanning the kink), half over-capacity
         uint256 elapsed = bound(_elapsed, 0, 10 * 365 days); // zero to a decade between adaptations
 
         _stampAdaptationClock(c, u);
         vm.warp(block.timestamp + elapsed);
 
-        uint256 preview = c.ydm.previewYieldShare(MarketState.PERPETUAL, u);
-        uint256 output = c.ydm.yieldShare(MarketState.PERPETUAL, u);
+        uint256 preview = c.ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u);
+        uint256 output = c.ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u);
         assertEq(output, preview, "preview must equal the mutating return");
 
         // Exact agreement with the independent mirror on both the output and the persisted curve position
@@ -134,7 +145,7 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
             })
         );
         assertEq(output, expected.yieldShareWAD, "adaptive output must equal the independent mirror exactly");
-        (uint64 storedYT,,,) = c.ydm.accountantToCurve(address(this));
+        (uint64 storedYT,,,) = c.ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(storedYT, expected.endYieldShareAtTargetWAD, "persisted share at target must equal the independent mirror exactly");
 
         // Drift envelope: |linear adaptation| <= BOUNDARY_SPEED * elapsed, so the persisted share is pinned between
@@ -178,7 +189,7 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
     )
         public
     {
-        Curve memory c = _deployBoundedCurve(_targetU, _yT, _spreadDown, _spreadUp);
+        Curve memory c = _deployBoundedCurve(TrancheType.JUNIOR, _targetU, _yT, _spreadDown, _spreadUp);
         uint256 u = bound(_u, 0, 2 * WAD); // half the mass below 100% (spanning the kink), half over-capacity
         uint256 elapsed = bound(_elapsed, 0, 10 * 365 days); // zero to a decade of frozen time before the call
         uint256 elapsedAfter = bound(_elapsedAfter, 0, 10 * 365 days); // and another zero to a decade after it
@@ -186,8 +197,8 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
         _stampAdaptationClock(c, u);
         vm.warp(block.timestamp + elapsed);
 
-        uint256 preview = c.ydm.previewYieldShare(MarketState.FIXED_TERM, u);
-        uint256 output = c.ydm.yieldShare(MarketState.FIXED_TERM, u);
+        uint256 preview = c.ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, u);
+        uint256 output = c.ydm.yieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, u);
         assertEq(output, preview, "preview must equal the mutating return");
 
         // Hand-derived expectation with zero time term: normalize the distance from the kink over its region,
@@ -201,13 +212,13 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
         assertEq(output, expected, "fixed-term output must be the pure spread formula at the unadapted share");
 
         // The stored share is untouched, the clock is restamped at the fixed-term call
-        (uint64 storedYT, uint32 lastTs,,) = c.ydm.accountantToCurve(address(this));
+        (uint64 storedYT, uint32 lastTs,,) = c.ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(storedYT, c.yT, "fixed term must not move the stored share at target");
         assertEq(lastTs, uint32(block.timestamp), "the fixed-term mutating call restamps the adaptation clock");
 
         // Time invariance: any later fixed-term read returns the identical output
         vm.warp(block.timestamp + elapsedAfter);
-        assertEq(c.ydm.previewYieldShare(MarketState.FIXED_TERM, u), output, "fixed-term output must be identical at any later time");
+        assertEq(c.ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, u), output, "fixed-term output must be identical at any later time");
     }
 
     /**
@@ -226,21 +237,62 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
     )
         public
     {
-        Curve memory c = _deployBoundedCurve(_targetU, _yT, _spreadDown, _spreadUp);
+        Curve memory c = _deployBoundedCurve(TrancheType.JUNIOR, _targetU, _yT, _spreadDown, _spreadUp);
         uint256 u = bound(_u, 0, 2 * WAD); // half the mass below 100% (spanning the kink), half over-capacity
         uint256 elapsed = bound(_elapsed, 0, 100 * 365 days); // zero to a full century between adaptations
 
         _stampAdaptationClock(c, u);
         vm.warp(block.timestamp + elapsed);
 
-        uint256 preview = c.ydm.previewYieldShare(MarketState.PERPETUAL, u);
-        uint256 output = c.ydm.yieldShare(MarketState.PERPETUAL, u);
+        uint256 preview = c.ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u);
+        uint256 output = c.ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u);
         assertEq(output, preview, "preview must equal the mutating return");
         assertLe(output, WAD, "yield share must never exceed 100%");
 
         // The persisted share must still respect the deployment band even at the century extreme
-        (uint64 storedYT,,,) = c.ydm.accountantToCurve(address(this));
+        (uint64 storedYT,,,) = c.ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertGe(uint256(storedYT), MIN_YT, "persisted share cannot decay below the deployment floor");
         assertLe(uint256(storedYT), MAX_YT, "persisted share cannot grow above the deployment ceiling");
+    }
+
+    /**
+     * Property: one instance serves the junior and LP curves side by side without cross-talk. Each tranche
+     * type's curve is initialized with its own independently fuzzed parameters on a single shared instance,
+     * and each preview must equal the output of a reference instance holding only that curve (the reference
+     * deployments double as the single-curve baselines), so per-type keying isolates the curves exactly
+     */
+    function testFuzz_AdaptiveCurve_SharedInstanceServesJuniorAndLpCurvesInIsolation(
+        uint256 _targetU,
+        uint256 _yTJunior,
+        uint256 _spreadDownJunior,
+        uint256 _spreadUpJunior,
+        uint256 _yTLp,
+        uint256 _spreadDownLp,
+        uint256 _spreadUpLp,
+        uint256 _u
+    )
+        public
+    {
+        // Both curves share the instance's kink (a constructor immutable), so bound each tuple around the same
+        // target seed (bound is deterministic, both reference deployments land on the identical kink)
+        Curve memory j = _deployBoundedCurve(TrancheType.JUNIOR, _targetU, _yTJunior, _spreadDownJunior, _spreadUpJunior);
+        Curve memory l = _deployBoundedCurve(TrancheType.LIQUIDITY_PROVIDER, _targetU, _yTLp, _spreadDownLp, _spreadUpLp);
+        uint256 u = bound(_u, 0, 2 * WAD); // half the mass below 100% (spanning the kink), half over-capacity
+
+        // One shared instance holding both freshly initialized curves (elapsed reads zero, so previews are pure curve reads)
+        AdaptiveCurveYDM_V2 shared = new AdaptiveCurveYDM_V2(j.targetU, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
+        shared.initializeYDMForMarket(TrancheType.JUNIOR, uint64(j.y0), uint64(j.yT), uint64(j.yFull));
+        shared.initializeYDMForMarket(TrancheType.LIQUIDITY_PROVIDER, uint64(l.y0), uint64(l.yT), uint64(l.yFull));
+
+        assertEq(
+            shared.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u),
+            j.ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u),
+            "the junior curve on the shared instance must read exactly as if it were the only curve"
+        );
+        assertEq(
+            shared.previewYieldShare(TrancheType.LIQUIDITY_PROVIDER, MarketState.PERPETUAL, u),
+            l.ydm.previewYieldShare(TrancheType.LIQUIDITY_PROVIDER, MarketState.PERPETUAL, u),
+            "the LP curve on the shared instance must read exactly as if it were the only curve"
+        );
     }
 }

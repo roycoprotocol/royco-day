@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { FixedPointMathLib } from "../../../lib/solady/src/utils/FixedPointMathLib.sol";
-import { IYDM, MarketState } from "../../interfaces/IYDM.sol";
+import { IYDM, MarketState, TrancheType } from "../../interfaces/IYDM.sol";
 import { WAD, WAD_INT } from "../../libraries/Constants.sol";
 import { BaseYDM } from "./BaseYDM.sol";
 
@@ -68,31 +68,49 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
     }
 
     /// @inheritdoc IYDM
-    function previewYieldShare(MarketState _marketState, uint256 _utilizationWAD) external view override(IYDM) returns (uint256 yieldShareWAD) {
+    function previewYieldShare(
+        TrancheType _trancheType,
+        MarketState _marketState,
+        uint256 _utilizationWAD
+    )
+        external
+        view
+        override(IYDM)
+        returns (uint256 yieldShareWAD)
+    {
         // Compute and return the current yield share post-adaptation
-        (yieldShareWAD,) = _yieldShare(_marketState, _utilizationWAD);
+        (yieldShareWAD,) = _yieldShare(_trancheType, _marketState, _utilizationWAD);
     }
 
     /// @inheritdoc IYDM
-    function yieldShare(MarketState _marketState, uint256 _utilizationWAD) external override(IYDM) returns (uint256 yieldShareWAD) {
+    function yieldShare(TrancheType _trancheType, MarketState _marketState, uint256 _utilizationWAD) external override(IYDM) returns (uint256 yieldShareWAD) {
         // Compute the current yield share and the new position of the curve post-adaptation
         uint256 newYieldShareAtTargetWAD;
-        (yieldShareWAD, newYieldShareAtTargetWAD) = _yieldShare(_marketState, _utilizationWAD);
+        (yieldShareWAD, newYieldShareAtTargetWAD) = _yieldShare(_trancheType, _marketState, _utilizationWAD);
 
         // Persist the adapted curve position and emit the concrete model's adaptation event
-        _writeAdaptiveCurve(newYieldShareAtTargetWAD, yieldShareWAD);
+        _writeAdaptiveCurve(_trancheType, newYieldShareAtTargetWAD, yieldShareWAD);
     }
 
     /**
      * @notice Computes the yield share for a market at the given utilization, applying any pending adaptation
      * @dev Uses trapezoidal approximation to compute the average continuously adapting yield share for more accurate time-weighted results
+     * @param _trancheType The tranche type receiving the premium, keying the market's curve alongside the calling accountant
      * @param _marketState The state of this Royco market (perpetual or fixed term), the curve only adapts in PERPETUAL
      * @param _utilizationWAD The utilization of the service the capital pool provides, scaled to WAD precision, bounded to WAD here
      * @return yieldShareWAD The share of the tranche's yield paid to the capital pool as a premium, scaled to WAD precision
      *                       It is implied that (WAD - yieldShareWAD) is retained by the paying tranche, excluding any protocol fees
      * @return newYieldShareAtTargetWAD The updated yield share at target utilization after adaptation, scaled to WAD precision
      */
-    function _yieldShare(MarketState _marketState, uint256 _utilizationWAD) internal view returns (uint256 yieldShareWAD, uint256 newYieldShareAtTargetWAD) {
+    function _yieldShare(
+        TrancheType _trancheType,
+        MarketState _marketState,
+        uint256 _utilizationWAD
+    )
+        internal
+        view
+        returns (uint256 yieldShareWAD, uint256 newYieldShareAtTargetWAD)
+    {
         // Bound the supplied utilization to 100%
         _utilizationWAD = ((_utilizationWAD > WAD) ? WAD : _utilizationWAD);
 
@@ -101,8 +119,8 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
         // Normalize the actual delta from the target utilization relative to the max delta in the current region
         int256 normalizedDeltaFromTargetWAD = ((int256(_utilizationWAD) - int256(TARGET_UTILIZATION_WAD)) * WAD_INT) / int256(maxDeltaFromTargetInRegionWAD);
 
-        // Retrieve the concrete model's yield share at target and last adaptation timestamp for the market
-        (uint256 initialYieldShareAtTargetWAD, uint256 lastAdaptationTimestamp) = _readAdaptiveCurve();
+        // Retrieve the concrete model's yield share at target and last adaptation timestamp for the market and tranche type
+        (uint256 initialYieldShareAtTargetWAD, uint256 lastAdaptationTimestamp) = _readAdaptiveCurve(_trancheType);
         require(initialYieldShareAtTargetWAD != 0, UNINITIALIZED_YDM());
         // Only adapt the curve if the market is in a perpetual state, where market forces can affect utilization
         uint256 avgYieldShareAtTargetWAD;
@@ -124,7 +142,7 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
         }
 
         // Compute the concrete model's curve output with the continuously adapting yield share since the last adaptation
-        yieldShareWAD = _computeYieldShare(normalizedDeltaFromTargetWAD, avgYieldShareAtTargetWAD);
+        yieldShareWAD = _computeYieldShare(_trancheType, normalizedDeltaFromTargetWAD, avgYieldShareAtTargetWAD);
     }
 
     /**
@@ -163,23 +181,34 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
 
     /**
      * @notice Computes the concrete model's curve output at the current utilization
+     * @param _trancheType The tranche type receiving the premium, keying the market's curve alongside the calling accountant
      * @param _normalizedDeltaFromTargetWAD The normalized signed distance of the current utilization from the target, in [-WAD, WAD]
      * @param _avgYieldShareAtTargetWAD The time-averaged yield share at target over the elapsed period, scaled to WAD precision
      * @return yieldShareWAD The curve's yield share output at the current utilization, scaled to WAD precision and bounded to WAD
      */
-    function _computeYieldShare(int256 _normalizedDeltaFromTargetWAD, uint256 _avgYieldShareAtTargetWAD) internal view virtual returns (uint256 yieldShareWAD);
+    function _computeYieldShare(
+        TrancheType _trancheType,
+        int256 _normalizedDeltaFromTargetWAD,
+        uint256 _avgYieldShareAtTargetWAD
+    )
+        internal
+        view
+        virtual
+        returns (uint256 yieldShareWAD);
 
     /**
-     * @notice Reads the concrete model's yield share at target and last adaptation timestamp for a market
+     * @notice Reads the concrete model's yield share at target and last adaptation timestamp for a market and tranche type
+     * @param _trancheType The tranche type receiving the premium, keying the market's curve alongside the calling accountant
      * @return yieldShareAtTargetWAD The current yield share at target utilization (zero iff the market's curve is uninitialized), scaled to WAD precision
      * @return lastAdaptationTimestamp The timestamp of the last adaptation (zero iff the curve has never been adapted)
      */
-    function _readAdaptiveCurve() internal view virtual returns (uint256 yieldShareAtTargetWAD, uint256 lastAdaptationTimestamp);
+    function _readAdaptiveCurve(TrancheType _trancheType) internal view virtual returns (uint256 yieldShareAtTargetWAD, uint256 lastAdaptationTimestamp);
 
     /**
      * @notice Persists the adapted curve position and emits the concrete model's adaptation event
+     * @param _trancheType The tranche type receiving the premium, keying the market's curve alongside the calling accountant
      * @param _newYieldShareAtTargetWAD The adapted yield share at target utilization to store, scaled to WAD precision
      * @param _yieldShareWAD The yield share output returned to the accountant this call, scaled to WAD precision
      */
-    function _writeAdaptiveCurve(uint256 _newYieldShareAtTargetWAD, uint256 _yieldShareWAD) internal virtual;
+    function _writeAdaptiveCurve(TrancheType _trancheType, uint256 _newYieldShareAtTargetWAD, uint256 _yieldShareWAD) internal virtual;
 }

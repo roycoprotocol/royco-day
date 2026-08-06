@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { SafeCast } from "../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
-import { IYDM, MarketState } from "../interfaces/IYDM.sol";
+import { IYDM, MarketState, TrancheType } from "../interfaces/IYDM.sol";
 import { WAD } from "../libraries/Constants.sol";
 import { BaseYDM } from "./base/BaseYDM.sol";
 
@@ -36,25 +36,33 @@ contract StaticCurveYDM is BaseYDM {
         uint64 slopeGteTargetUtilWAD;
     }
 
-    /// @dev A mapping from market accountants to its market's current YDM curve
-    /// @dev The curve is static
-    mapping(address accountant => StaticYieldCurve curve) public accountantToCurve;
+    /// @dev A mapping from market accountants and the tranche types receiving the premium to the market's current YDM curves
+    /// @dev The curves are static
+    mapping(address accountant => mapping(TrancheType trancheType => StaticYieldCurve curve)) public accountantToCurve;
 
     /**
      * @notice Emitted when the static curve YDM is initialized for a market
      * @param accountant The accountant for the market that the YDM was initialized for
+     * @param trancheType The tranche type receiving the premium priced by this curve
      * @param yieldShareAtZeroUtilWAD The yield share at zero utilization, scaled to WAD precision
      * @param slopeLtTargetUtilWAD The slope when the market's utilization is less than the target utilization, scaled to WAD precision
      * @param slopeGteTargetUtilWAD The slope when the market's utilization is greater than or equal to the target utilization, scaled to WAD precision
      */
-    event StaticCurveYdmInitialized(address indexed accountant, uint256 yieldShareAtZeroUtilWAD, uint256 slopeLtTargetUtilWAD, uint256 slopeGteTargetUtilWAD);
+    event StaticCurveYdmInitialized(
+        address indexed accountant,
+        TrancheType indexed trancheType,
+        uint256 yieldShareAtZeroUtilWAD,
+        uint256 slopeLtTargetUtilWAD,
+        uint256 slopeGteTargetUtilWAD
+    );
 
     /**
      * @notice Emitted when the yield share is updated
      * @param accountant The accountant for the market that the yield share was updated for
+     * @param trancheType The tranche type receiving the premium priced by this curve
      * @param yieldShareWAD The yield share output (returned to the accountant)
      */
-    event YdmOutput(address indexed accountant, uint256 yieldShareWAD);
+    event YdmOutput(address indexed accountant, TrancheType indexed trancheType, uint256 yieldShareWAD);
 
     /**
      * @notice Sets the per-instance target utilization (the kink) shared by every market this YDM serves
@@ -64,14 +72,25 @@ contract StaticCurveYDM is BaseYDM {
     constructor(uint256 _targetUtilizationWAD) BaseYDM(_targetUtilizationWAD) { }
 
     /**
-     * @notice Initializes the YDM curve for a particular Royco market
+     * @notice Initializes the YDM curve for a particular Royco market and tranche type
      * @dev Must be called during the initialization of the accountant for the Royco market
      * @dev Setting all three initialization parameters to the same value emulates a fixed yield share YDM
+     * @param _trancheType The tranche type receiving the premium priced by this curve, cannot be the senior tranche
      * @param _yieldShareAtZeroUtilWAD The yield share at 0% utilization, scaled to WAD precision
      * @param _yieldShareAtTargetWAD The yield share at target utilization, scaled to WAD precision
      * @param _yieldShareAtFullUtilWAD The yield share at 100% utilization, scaled to WAD precision
      */
-    function initializeYDMForMarket(uint64 _yieldShareAtZeroUtilWAD, uint64 _yieldShareAtTargetWAD, uint64 _yieldShareAtFullUtilWAD) external {
+    function initializeYDMForMarket(
+        TrancheType _trancheType,
+        uint64 _yieldShareAtZeroUtilWAD,
+        uint64 _yieldShareAtTargetWAD,
+        uint64 _yieldShareAtFullUtilWAD
+    )
+        external
+    {
+        // The senior tranche pays the premiums and never receives one
+        require(_trancheType != TrancheType.SENIOR, INVALID_YDM_INITIALIZATION());
+
         // Ensure that the static YDM curve is valid
         require(
             _yieldShareAtZeroUtilWAD <= _yieldShareAtTargetWAD && _yieldShareAtTargetWAD <= _yieldShareAtFullUtilWAD && _yieldShareAtFullUtilWAD <= WAD
@@ -79,29 +98,29 @@ contract StaticCurveYDM is BaseYDM {
             INVALID_YDM_INITIALIZATION()
         );
 
-        // Initialize the YDM curve for this market (all four fields pack into one storage slot)
-        StaticYieldCurve storage curve = accountantToCurve[msg.sender];
+        // Initialize the YDM curve for this market and tranche type (all four fields pack into one storage slot)
+        StaticYieldCurve storage curve = accountantToCurve[msg.sender][_trancheType];
         curve.yieldShareAtZeroUtilWAD = _yieldShareAtZeroUtilWAD;
         curve.slopeLtTargetUtilWAD = _computeSlope(_yieldShareAtZeroUtilWAD, _yieldShareAtTargetWAD, 0, TARGET_UTILIZATION_WAD);
         curve.yieldShareAtTargetWAD = _yieldShareAtTargetWAD;
         curve.slopeGteTargetUtilWAD = _computeSlope(_yieldShareAtTargetWAD, _yieldShareAtFullUtilWAD, TARGET_UTILIZATION_WAD, WAD);
 
-        emit StaticCurveYdmInitialized(msg.sender, _yieldShareAtZeroUtilWAD, curve.slopeLtTargetUtilWAD, curve.slopeGteTargetUtilWAD);
+        emit StaticCurveYdmInitialized(msg.sender, _trancheType, _yieldShareAtZeroUtilWAD, curve.slopeLtTargetUtilWAD, curve.slopeGteTargetUtilWAD);
     }
 
     /// @inheritdoc IYDM
-    function previewYieldShare(MarketState, uint256 _utilizationWAD) external view override(IYDM) returns (uint256) {
-        return _yieldShare(_utilizationWAD);
+    function previewYieldShare(TrancheType _trancheType, MarketState, uint256 _utilizationWAD) external view override(IYDM) returns (uint256) {
+        return _yieldShare(_trancheType, _utilizationWAD);
     }
 
     /// @inheritdoc IYDM
-    function yieldShare(MarketState, uint256 _utilizationWAD) external override(IYDM) returns (uint256 yieldShareWAD) {
-        yieldShareWAD = _yieldShare(_utilizationWAD);
-        emit YdmOutput(msg.sender, yieldShareWAD);
+    function yieldShare(TrancheType _trancheType, MarketState, uint256 _utilizationWAD) external override(IYDM) returns (uint256 yieldShareWAD) {
+        yieldShareWAD = _yieldShare(_trancheType, _utilizationWAD);
+        emit YdmOutput(msg.sender, _trancheType, yieldShareWAD);
     }
 
-    /// @dev View helper to compute the instantaneous yield share at the given utilization based on the defined static curve
-    function _yieldShare(uint256 _utilizationWAD) internal view returns (uint256) {
+    /// @dev View helper to compute the instantaneous yield share at the given utilization based on the tranche type's static curve
+    function _yieldShare(TrancheType _trancheType, uint256 _utilizationWAD) internal view returns (uint256) {
         /**
          * Yield Distribution Model (piecewise curve):
          *
@@ -126,8 +145,8 @@ contract StaticCurveYDM is BaseYDM {
         uint256 utilizationWAD = _utilizationWAD;
         if (utilizationWAD > WAD) utilizationWAD = WAD;
 
-        // Retrieve the static curve for this market
-        StaticYieldCurve storage curve = accountantToCurve[msg.sender];
+        // Retrieve the static curve for this market and tranche type
+        StaticYieldCurve storage curve = accountantToCurve[msg.sender][_trancheType];
         uint256 yieldShareAtTargetWAD = curve.yieldShareAtTargetWAD;
         require(yieldShareAtTargetWAD != 0, UNINITIALIZED_YDM());
         // Compute Y(U), rounding down in favor of the paying tranche

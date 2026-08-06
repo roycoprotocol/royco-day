@@ -12,7 +12,7 @@ import { DeployScriptBase } from "./DeployScriptBase.sol";
  * @title RenounceDeployerRolesComponent
  * @notice The pipeline's EXPLICIT FINALIZE step: the deployer renounces the admin roles the bootstrap granted it.
  * @dev MUST be the LAST admin-gated call of the whole runbook — template registration, template configuration-surface
- *      bindings, YDM registration, and beacon bindings all require the roles renounced here. Markets can still be
+ *      bindings and beacon bindings all require the roles renounced here. Markets can still be
  *      deployed afterwards: `executeMarketDeployment` is PUBLIC and the collateral-oracle deployment is
  *      unpermissioned. Only the fresh-AccessManager path grants the deployer these roles, so the caller supplies
  *      that flag; the ADMIN_ROLE renounce is skipped when the deployer IS the factory admin, otherwise the

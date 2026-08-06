@@ -470,6 +470,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     function _previewYieldShareAsAccountant(
         address _ydm,
+        TrancheType _trancheType,
         MarketState _marketState,
         uint256 _utilizationWAD,
         uint64 _maxYieldShareWAD
@@ -478,7 +479,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         returns (uint256 yieldShareWAD)
     {
         vm.prank(address(ACCOUNTANT));
-        yieldShareWAD = Math.min(IYDM(_ydm).previewYieldShare(_marketState, _utilizationWAD), _maxYieldShareWAD);
+        yieldShareWAD = Math.min(IYDM(_ydm).previewYieldShare(_trancheType, _marketState, _utilizationWAD), _maxYieldShareWAD);
     }
 
     /**
@@ -2847,12 +2848,20 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         e.premiumElapsed = block.timestamp - a.lastPremiumPaymentTimestamp;
 
         e.jtYieldShareWAD = _previewYieldShareAsAccountant(
-            a.jtYDM, a.lastMarketState, _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV), a.maxJTYieldShareWAD
+            a.jtYDM,
+            TrancheType.JUNIOR,
+            a.lastMarketState,
+            _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV),
+            a.maxJTYieldShareWAD
         );
         e.lptYieldShareWAD = a.maxLPTYieldShareWAD == 0
             ? 0
             : _previewYieldShareAsAccountant(
-                a.lptYDM, a.lastMarketState, _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLPTRawNAV), a.maxLPTYieldShareWAD
+                a.lptYDM,
+                TrancheType.LIQUIDITY_PROVIDER,
+                a.lastMarketState,
+                _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLPTRawNAV),
+                a.maxLPTYieldShareWAD
             );
         e.elapsed = block.timestamp - a.lastYieldShareAccrualTimestamp;
         (e.collateralNAVNew,) = _measureFreshSyncInputs(ZERO_TRANCHE_UNITS);
@@ -3802,9 +3811,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
         uint256 liquidityUtilizationWAD = _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLPTRawNAV);
         vm.prank(address(ACCOUNTANT));
-        uint256 rawJTYieldShareWAD = IYDM(a.jtYDM).previewYieldShare(a.lastMarketState, coverageUtilizationWAD);
+        uint256 rawJTYieldShareWAD = IYDM(a.jtYDM).previewYieldShare(TrancheType.JUNIOR, a.lastMarketState, coverageUtilizationWAD);
         vm.prank(address(ACCOUNTANT));
-        uint256 rawLPTYieldShareWAD = IYDM(a.lptYDM).previewYieldShare(a.lastMarketState, liquidityUtilizationWAD);
+        uint256 rawLPTYieldShareWAD = IYDM(a.lptYDM).previewYieldShare(TrancheType.LIQUIDITY_PROVIDER, a.lastMarketState, liquidityUtilizationWAD);
         assertGt(rawJTYieldShareWAD, capJTWAD, "arrange: the JT curve must price above its cap");
         assertGt(rawLPTYieldShareWAD, capLPTWAD, "arrange: the LPT curve must price above its cap");
 

@@ -48,12 +48,14 @@ abstract contract Market_SnUSD is DayMarketRegistryBase {
                 coverageLiquidationUtilizationWAD: 1.0009009e18,
                 minLiquidityWAD: 0, // no market-making depth requirement in the baseline
                 jtYdm: YDMSelection({
+                    deployed: address(0),
                     ydmType: YDMType.AdaptiveCurve_V2,
                     curveParams: abi.encode(
                         AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })
                     )
                 }),
                 lptYdm: YDMSelection({
+                    deployed: address(0),
                     ydmType: YDMType.AdaptiveCurve_V2,
                     curveParams: abi.encode(
                         AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })

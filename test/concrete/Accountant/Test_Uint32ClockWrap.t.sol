@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
-import { MarketState } from "../../../src/libraries/Types.sol";
+import { MarketState, TrancheType } from "../../../src/libraries/Types.sol";
 import { toNAVUnits } from "../../../src/libraries/Units.sol";
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
@@ -42,17 +42,17 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // Standalone V2 curve with this test as its market accountant: kink at 50% utilization,
         // yield shares 0.05e18 at zero utilization / 0.1e18 at target / 0.2e18 at full utilization
         AdaptiveCurveYDM_V2 ydm = new AdaptiveCurveYDM_V2(0.5e18, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
-        ydm.initializeYDMForMarket(0.05e18, 0.1e18, 0.2e18);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0.05e18, 0.1e18, 0.2e18);
         assertEq(ydm.MIN_YIELD_SHARE_AT_TARGET_WAD(), 0.0001e18, "the V2 floor on the yield share at target is 0.0001e18 by construction");
 
         // Warp one step past the uint32 horizon and adapt once. A never-stamped curve treats elapsed as zero
         // (no adaptation), but the write-back stamps lastAdaptationTimestamp = uint32(2^32 + 1000) = 1000,
         // silently dropping the 2^32 bit that block.timestamp keeps
         vm.warp(TWO_POW_32 + 1000);
-        uint256 out0 = ydm.yieldShare(MarketState.PERPETUAL, 0);
+        uint256 out0 = ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0);
         // At zero utilization the additive curve subtracts the full 0.05e18 discount from the 0.1e18 target share
         assertEq(out0, 0.05e18, "first call prices the un-adapted curve at its zero-utilization anchor");
-        (uint64 yT0, uint32 ts0,,) = ydm.accountantToCurve(address(this));
+        (uint64 yT0, uint32 ts0,,) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(yT0, 0.1e18, "first call adapts nothing because the curve had never been stamped");
         assertEq(ts0, 1000, "the stored adaptation stamp truncates 4294968296 to its low 32 bits");
 
@@ -62,9 +62,9 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // the new yield share at target computes to 0 and is clamped up to the floor. The curve's entire
         // adaptive memory — the market-force pricing of the premium — is destroyed by a single wrapped hour
         vm.warp(block.timestamp + 3600);
-        uint256 out1 = ydm.yieldShare(MarketState.PERPETUAL, 0);
+        uint256 out1 = ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0);
 
-        (uint64 yT1,,,) = ydm.accountantToCurve(address(this));
+        (uint64 yT1,,,) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(yT1, ydm.MIN_YIELD_SHARE_AT_TARGET_WAD(), "the wrapped elapsed slams the yield share at target to the configured floor");
         assertEq(yT1, 0.0001e18, "the slammed value is the 0.0001e18 floor, not a decayed curve position");
         // An honest hour of decay leaves at least 98858447488584640 (derivation above), so the slammed value
@@ -93,15 +93,15 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // Standalone V1 curve: kink at 50% utilization, yield shares 0.1e18 at target / 0.2e18 at full
         // utilization, giving a multiplicative steepness of 2e18
         AdaptiveCurveYDM_V1 ydm = new AdaptiveCurveYDM_V1(0.5e18, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
-        ydm.initializeYDMForMarket(0.1e18, 0.2e18);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0.1e18, 0.2e18);
         assertEq(ydm.MAX_YIELD_SHARE_AT_TARGET_WAD(), 1e18, "the V1 ceiling on the yield share at target is 100% by construction");
 
         // First adaptation past the uint32 horizon: elapsed treated as zero, stamp truncated to the low 32 bits
         vm.warp(TWO_POW_32 + 1000);
-        uint256 out0 = ydm.yieldShare(MarketState.PERPETUAL, 1e18);
+        uint256 out0 = ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 1e18);
         // At full utilization the multiplicative curve doubles the 0.1e18 target share (steepness 2e18)
         assertEq(out0, 0.2e18, "first call prices the un-adapted curve at its full-utilization anchor");
-        (uint64 yT0, uint32 ts0,) = ydm.accountantToCurve(address(this));
+        (uint64 yT0, uint32 ts0,) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(yT0, 0.1e18, "first call adapts nothing because the curve had never been stamped");
         assertEq(ts0, 1000, "the stored adaptation stamp truncates 4294968296 to its low 32 bits");
 
@@ -111,9 +111,9 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // share at target overshoots everything and is clamped to the ceiling: the market instantly prices
         // its premium as if utilization had been critical for 136 straight years
         vm.warp(block.timestamp + 3600);
-        uint256 out1 = ydm.yieldShare(MarketState.PERPETUAL, 1e18);
+        uint256 out1 = ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 1e18);
 
-        (uint64 yT1,,) = ydm.accountantToCurve(address(this));
+        (uint64 yT1,,) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(yT1, ydm.MAX_YIELD_SHARE_AT_TARGET_WAD(), "the wrapped elapsed slams the yield share at target to the configured ceiling");
         assertEq(yT1, 1e18, "the slammed value is the 100% ceiling, not a grown curve position");
         // An honest hour of growth stays below 100600000000000000 (derivation above), so the slammed value

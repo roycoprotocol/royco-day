@@ -3,7 +3,8 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { WAD, WAD_INT } from "../../../src/libraries/Constants.sol";
-import { MarketState } from "../../../src/libraries/Types.sol";
+import { MarketState, TrancheType } from "../../../src/libraries/Types.sol";
+import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { EchoAdaptiveCurveYDM } from "../../mocks/EchoAdaptiveCurveYDM.sol";
 
 /**
@@ -53,12 +54,56 @@ contract TestFuzz_AdaptiveTargetAtFullUtilization is Test {
         int256 expected = int256(clamped) - WAD_INT;
 
         // The frozen arm: no adaptation math at all, the delta is observed directly
-        uint256 echoedFrozen = echoTargetAtFull.previewYieldShare(MarketState.FIXED_TERM, _u);
+        uint256 echoedFrozen = echoTargetAtFull.previewYieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, _u);
         assertEq(int256(echoedFrozen) - WAD_INT, expected, "frozen-arm delta must be the clamped utilization shortfall");
         assertLe(int256(echoedFrozen) - WAD_INT, 0, "the empty above-target region admits no positive delta");
 
         // The perpetual arm at zero elapsed: the adaptation path runs and must be equally total
-        uint256 echoedLive = echoTargetAtFull.yieldShare(MarketState.PERPETUAL, _u);
+        uint256 echoedLive = echoTargetAtFull.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, _u);
         assertEq(int256(echoedLive) - WAD_INT, expected, "perpetual-arm delta must be the clamped utilization shortfall");
+    }
+
+    /**
+     * Property: with the kink at exactly 100% one instance still serves the junior and LP curves side by side
+     * without cross-talk. A production V2 model at the degenerate kink is initialized with independently fuzzed
+     * curves for both tranche types, and each preview must equal the output of a reference instance holding only
+     * that curve, so the per-type keying stays isolated even in the empty above-target region
+     */
+    /// forge-config: default.fuzz.runs = 512
+    function testFuzz_TargetAtFullUtilization_SharedInstanceServesJuniorAndLpCurvesInIsolation(
+        uint256 _yTJunior,
+        uint256 _spreadDownJunior,
+        uint256 _yTLp,
+        uint256 _spreadDownLp,
+        uint256 _u
+    )
+        public
+    {
+        // Bound both curves into the deployment band, only the zero-utilization discount matters at this kink
+        // because the above-target region is empty, so the full-utilization anchor is pinned flat at yT
+        uint256 yTJ = bound(_yTJunior, MIN_YT, MAX_YT);
+        uint256 y0J = yTJ - bound(_spreadDownJunior, 0, yTJ);
+        uint256 yTL = bound(_yTLp, MIN_YT, MAX_YT);
+        uint256 y0L = yTL - bound(_spreadDownLp, 0, yTL);
+
+        // One shared instance with both curves, plus a single-curve reference instance per tranche type
+        AdaptiveCurveYDM_V2 shared = new AdaptiveCurveYDM_V2(WAD, MIN_YT, MAX_YT, BOUNDARY_SPEED);
+        shared.initializeYDMForMarket(TrancheType.JUNIOR, uint64(y0J), uint64(yTJ), uint64(yTJ));
+        shared.initializeYDMForMarket(TrancheType.LIQUIDITY_PROVIDER, uint64(y0L), uint64(yTL), uint64(yTL));
+        AdaptiveCurveYDM_V2 refJunior = new AdaptiveCurveYDM_V2(WAD, MIN_YT, MAX_YT, BOUNDARY_SPEED);
+        refJunior.initializeYDMForMarket(TrancheType.JUNIOR, uint64(y0J), uint64(yTJ), uint64(yTJ));
+        AdaptiveCurveYDM_V2 refLp = new AdaptiveCurveYDM_V2(WAD, MIN_YT, MAX_YT, BOUNDARY_SPEED);
+        refLp.initializeYDMForMarket(TrancheType.LIQUIDITY_PROVIDER, uint64(y0L), uint64(yTL), uint64(yTL));
+
+        assertEq(
+            shared.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, _u),
+            refJunior.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, _u),
+            "the junior curve on the shared instance must read exactly as if it were the only curve"
+        );
+        assertEq(
+            shared.previewYieldShare(TrancheType.LIQUIDITY_PROVIDER, MarketState.PERPETUAL, _u),
+            refLp.previewYieldShare(TrancheType.LIQUIDITY_PROVIDER, MarketState.PERPETUAL, _u),
+            "the LP curve on the shared instance must read exactly as if it were the only curve"
+        );
     }
 }

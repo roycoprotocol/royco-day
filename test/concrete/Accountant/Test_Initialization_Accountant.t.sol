@@ -96,14 +96,16 @@ contract Test_Initialization_Accountant is AccountantTestBase {
         assertEq(s.lptYieldShareProtocolFeeWAD, uint64(MAX_PROTOCOL_FEE_WAD), "lt ys fee at max");
     }
 
-    /// identical JT and LPT YDMs revert
-    function test_RevertIf_InitializeIdenticalYDMs() public {
+    /// identical JT and LPT YDMs are allowed, curves are keyed per tranche type on the shared instance
+    function test_Initialize_allowsIdenticalYDMs() public {
         RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.lptYDM = p.jtYDM;
-        vm.expectRevert(IRoycoDayAccountant.YDMS_CANNOT_BE_IDENTICAL.selector);
         p.initialAuthority = address(authority);
         acct.initialize(p);
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = acct.getState();
+        assertEq(s.jtYDM, p.jtYDM, "jt slot holds the shared instance");
+        assertEq(s.lptYDM, p.jtYDM, "lpt slot holds the shared instance");
     }
 
     /// minCoverage == WAD reverts

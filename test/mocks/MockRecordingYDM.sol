@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IYDM } from "../../src/interfaces/IYDM.sol";
-import { MarketState } from "../../src/libraries/Types.sol";
+import { MarketState, TrancheType } from "../../src/libraries/Types.sol";
 
 /// @notice Recording YDM mock with independently settable mutating and preview outputs, mutating-call argument recording, and per-entrypoint revert modes
 /// @dev The preview path is a staticcall from the accountant so preview arguments are asserted via vm.expectCall in tests, not recorded here
@@ -17,6 +17,7 @@ contract MockRecordingYDM is IYDM {
     bool public revertOnInitialize;
 
     uint256 public yieldShareCallCount;
+    TrancheType public lastYieldShareTrancheType;
     MarketState public lastYieldShareMarketState;
     uint256 public lastYieldShareUtilizationWAD;
 
@@ -57,16 +58,17 @@ contract MockRecordingYDM is IYDM {
     }
 
     /// @inheritdoc IYDM
-    function yieldShare(MarketState _marketState, uint256 _utilizationWAD) external override(IYDM) returns (uint256) {
+    function yieldShare(TrancheType _trancheType, MarketState _marketState, uint256 _utilizationWAD) external override(IYDM) returns (uint256) {
         if (revertOnYieldShare) revert YDM_REVERTED();
         yieldShareCallCount++;
+        lastYieldShareTrancheType = _trancheType;
         lastYieldShareMarketState = _marketState;
         lastYieldShareUtilizationWAD = _utilizationWAD;
         return yieldShareReturn;
     }
 
     /// @inheritdoc IYDM
-    function previewYieldShare(MarketState, uint256) external view override(IYDM) returns (uint256) {
+    function previewYieldShare(TrancheType, MarketState, uint256) external view override(IYDM) returns (uint256) {
         if (revertOnPreviewYieldShare) revert YDM_REVERTED();
         return previewYieldShareReturn;
     }

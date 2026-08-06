@@ -14,8 +14,8 @@ interface IRoycoProtocolTemplate {
      * @custom:field liquidityProviderTranche - The liquidity provider tranche proxy (Royco Day markets only, zero otherwise)
      * @custom:field kernel - The kernel proxy
      * @custom:field accountant - The accountant proxy
-     * @custom:field ydm - The junior tranche's (possibly shared) YDM singleton
-     * @custom:field lptYdm - The liquidity provider tranche's (possibly shared) LDM singleton (zero for markets without a liquidity provider tranche)
+     * @custom:field ydm - The junior tranche's YDM, a deployer-supplied instance keying its curves per tranche type
+     * @custom:field lptYdm - The liquidity provider tranche's YDM, a deployer-supplied instance that can share the junior tranche's since curves are keyed per tranche type (zero for markets without a liquidity provider tranche)
      * @custom:field extras - ABI-encoded template-specific addenda consumed by downstream tooling
      */
     struct DeploymentResult {

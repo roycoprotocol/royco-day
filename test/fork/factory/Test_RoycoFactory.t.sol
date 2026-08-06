@@ -44,6 +44,7 @@ import { IRoycoAccessManager } from "../../../src/interfaces/factory/IRoycoAcces
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { MarketDeploymentValidationLogic } from "../../../src/libraries/logic/factory/MarketDeploymentValidationLogic.sol";
+import { TrancheType } from "../../../src/libraries/Types.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
@@ -87,7 +88,7 @@ contract Test_RoycoFactory is Test {
     address internal STRANGER = makeAddr("STRANGER");
     address internal PROTOCOL_FEE_RECIPIENT = makeAddr("PROTOCOL_FEE_RECIPIENT");
 
-    /// @dev Mirrors YDMLib.YDM_TARGET_UTILIZATION_WAD: the chain-wide kink every registered model is deployed with
+    /// @dev Mirrors YDMLib.YDM_TARGET_UTILIZATION_WAD: the chain-wide kink every model instance is deployed with
     uint256 internal constant YDM_TARGET_UTILIZATION_WAD = 0.9e18;
 
     bytes32 internal constant MARKET_ID_A = 0x81c1e5d2e327b2f16a45a4a7b25319edbfa61389ebe2f2d04e269fe48b4ebc7f;
@@ -141,15 +142,7 @@ contract Test_RoycoFactory is Test {
         implementationSet = scaffold.impls;
         template = scaffold.template;
 
-        // The template resolves a market's yield distribution models out of its own registry, so bind its registration
-        // surface and register the config's shapes, exactly as the scaffolding phase does.
-        bytes4[] memory ydmSelectors = new bytes4[](1);
-        ydmSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        am.setTargetFunctionRole(address(template), ydmSelectors, ADMIN_FACTORY_ROLE);
-        am.grantRole(ADMIN_FACTORY_ROLE, address(scaffold.ydms), 0);
-        scaffold.ydms.registerModels();
-
-        // The rest of the template's configuration surface, bound exactly as the scaffolding phase does: the pool
+        // The template's configuration surface, bound exactly as the scaffolding phase does: the pool
         // policy and the recipient answer to ADMIN_FACTORY_ROLE, the fee set to the same role as each market's own
         // protocol fee setters
         bytes4[] memory configSelectors = new bytes4[](2);
@@ -192,12 +185,13 @@ contract Test_RoycoFactory is Test {
         IERC20(_asset).approve(address(template), _amount);
     }
 
-    /// @dev Externally deploys the snUSD market's impls/YDMs/pool and pre-deploys its ST + hook proxies (as the
-    ///      the YDM component, which holds ADMIN_FACTORY_ROLE), then builds the encoded template params from the SAME config.
-    ///      `_marketId` must place the senior tranche as pool token0 for this suite's `factory` (see MARKET_ID_A/B).
+    /// @dev Resolves the snUSD config's oracle and YDM instances, funds the seed, and builds the encoded template
+    ///      params from the SAME config. `_marketId` must place the senior tranche as pool token0 for this suite's
+    ///      `factory` (see MARKET_ID_A/B).
     function _encodedParams(bytes32 _marketId) internal returns (bytes memory) {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
+        _resolveYdms(cfg);
         _fundPoolSeed(cfg);
         return abi.encode(marketBuilder.buildMarketParams(cfg, _marketId, address(factory), DEPLOYER));
     }
@@ -209,6 +203,12 @@ contract Test_RoycoFactory is Test {
         _cfg.oracle.deployed = address(
             _newErc4626Oracle(_cfg.collateralAsset, _cfg.oracle.specificParams)
         );
+    }
+
+    /// @dev Resolves (or deploys) the market's yield distribution model instances, mirroring the pipeline
+    function _resolveYdms(DayMarketConfig memory _cfg) internal {
+        if (_cfg.accountant.jtYdm.deployed == address(0)) _cfg.accountant.jtYdm.deployed = marketBuilder.deployYDM("JT model  ", _cfg.accountant.jtYdm);
+        if (_cfg.accountant.lptYdm.deployed == address(0)) _cfg.accountant.lptYdm.deployed = marketBuilder.deployYDM("LPT model ", _cfg.accountant.lptYdm);
     }
 
     function _deploy(bytes32 _marketId) internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
@@ -229,6 +229,7 @@ contract Test_RoycoFactory is Test {
 
         DayMarketConfig memory cfg = registry.getDayMarketConfig("snUSD");
         _resolveCollateralOracle(cfg);
+        _resolveYdms(cfg);
         cfg.accountant.minCoverageWAD = 0;
         cfg.poolInitialization.collateralAmount = 10_000e18;
         _fundPoolSeed(cfg);
@@ -452,7 +453,8 @@ contract Test_RoycoFactory is Test {
         assertGt(r.liquidityProviderTranche.code.length, 0, "liquidity live");
         assertGt(r.kernel.code.length, 0, "kernel live");
         assertGt(r.accountant.code.length, 0, "accountant live");
-        assertTrue(r.ydm != address(0) && r.lptYdm != address(0) && r.ydm != r.lptYdm, "distinct YDM + LDM");
+        // Both slots select the same V2 shape, which resolves to the one chain-wide instance
+        assertTrue(r.ydm != address(0) && r.ydm == r.lptYdm, "both slots must share the chain-wide V2 instance");
 
         // The registry resolves the WHOLE market from ANY of the three tranches.
         _assertGetMarketResolves(r, r.seniorTranche, "via senior");
@@ -558,11 +560,10 @@ contract Test_RoycoFactory is Test {
     }
 
     /**
-     * @notice The YDM salt is market-agnostic: two markets deployed with the same (role, model) pair share ONE JT
-     *         YDM instance and ONE LPT LDM instance, while each market's JT-vs-LPT pair stays distinct (the role tag
-     *         is part of the salt), and each market's accountant initializes its own curve on the shared instance.
-     *         A market configured with a DIFFERENT model resolves to a different instance (the component id is part
-     *         of the salt), so sharing never crosses model boundaries
+     * @notice The YDM salt is chain-wide per shape: two markets selecting the same model shape share ONE instance,
+     *         and within a market the JT and LPT slots share it too, since each accountant's curves are keyed per
+     *         accountant AND per tranche type on the instance. A market configured with a DIFFERENT model resolves
+     *         to a different instance (the shape is part of the salt), so sharing never crosses model boundaries
      */
     function test_ExecuteMarketDeployment_SharesYdmInstancesAcrossMarkets() external {
         _register();
@@ -571,25 +572,26 @@ contract Test_RoycoFactory is Test {
         IRoycoProtocolTemplate.DeploymentResult memory b = _deploy(MARKET_ID_B);
         assertTrue(a.kernel != b.kernel, "distinct markets");
 
-        // Both markets share one JT YDM and one LPT LDM singleton (market-agnostic salts) ...
+        // Both markets and both tranche slots share the one chain-wide V2 instance (shape-keyed salts)
         assertEq(a.ydm, b.ydm, "the JT YDM instance must be shared across markets");
         assertEq(a.lptYdm, b.lptYdm, "the LPT LDM instance must be shared across markets");
-        // ... while each market's JT YDM and LPT LDM remain distinct instances (the role tag stays in the salt)
-        assertTrue(a.ydm != a.lptYdm, "the JT YDM and LPT LDM must remain distinct instances within a market");
+        assertEq(a.ydm, a.lptYdm, "one shape must resolve to one shared instance for both tranche slots");
 
-        // Each market's accountant initialized its OWN curve on the shared instance (state keyed per accountant):
-        // the snUSD config's V2 curve (0.11e18 at zero, 0.11e18 at target, 0.31e18 at full) decomposes to
-        // yieldShareAtTarget = 0.11e18, discount-at-zero = 0, premium-at-full = 0.2e18 for both accountants
+        // Each market's accountant initialized its OWN curves on the shared instance (state keyed per accountant and
+        // tranche type): the snUSD config's V2 curve (0.11e18 at zero, 0.11e18 at target, 0.31e18 at full) decomposes
+        // to yieldShareAtTarget = 0.11e18, discount-at-zero = 0, premium-at-full = 0.2e18 for both accountants
         assertTrue(a.accountant != b.accountant, "distinct accountants");
-        _assertV2CurveInitialized(a.ydm, a.accountant, "market A on the shared JT YDM");
-        _assertV2CurveInitialized(a.ydm, b.accountant, "market B on the shared JT YDM");
+        _assertV2CurveInitialized(a.ydm, a.accountant, TrancheType.JUNIOR, "market A JT curve on the shared instance");
+        _assertV2CurveInitialized(a.ydm, a.accountant, TrancheType.LIQUIDITY_PROVIDER, "market A LPT curve on the shared instance");
+        _assertV2CurveInitialized(a.ydm, b.accountant, TrancheType.JUNIOR, "market B JT curve on the shared instance");
 
-        // A different-model market resolves to different instances: the YDM model is part of the deployed contract type
+        // A different-model market resolves to a different instance: the YDM shape is part of the deployed contract type
         DayMarketConfig memory staticCfg = registry.getDayMarketConfig("snUSD");
         _resolveCollateralOracle(staticCfg);
         _fundPoolSeed(staticCfg);
         staticCfg.accountant.jtYdm.ydmType = YDMType.StaticCurve;
         staticCfg.accountant.lptYdm.ydmType = YDMType.StaticCurve;
+        _resolveYdms(staticCfg);
         bytes32 staticId = MARKET_ID_C;
         bytes memory p = abi.encode(marketBuilder.buildMarketParams(staticCfg, staticId, address(factory), DEPLOYER));
         vm.prank(DEPLOYER);
@@ -598,10 +600,10 @@ contract Test_RoycoFactory is Test {
         assertTrue(s.lptYdm != a.lptYdm, "a different YDM model must not share the adaptive markets' LPT LDM instance");
     }
 
-    /// @dev Asserts the shared V2 YDM instance holds the snUSD config's initialized curve for the given accountant
-    function _assertV2CurveInitialized(address _ydm, address _accountant, string memory _ctx) internal view {
+    /// @dev Asserts the shared V2 YDM instance holds the snUSD config's initialized curve for the given accountant and tranche type
+    function _assertV2CurveInitialized(address _ydm, address _accountant, TrancheType _trancheType, string memory _ctx) internal view {
         (uint64 yieldShareAtTargetWAD, uint32 lastAdaptationTimestamp, uint64 discountToTargetAtZeroUtilWAD, uint64 premiumToTargetAtFullUtilWAD) =
-            AdaptiveCurveYDM_V2(_ydm).accountantToCurve(_accountant);
+            AdaptiveCurveYDM_V2(_ydm).accountantToCurve(_accountant, _trancheType);
         assertEq(yieldShareAtTargetWAD, 0.11e18, string.concat(_ctx, ": yield share at target"));
         assertEq(discountToTargetAtZeroUtilWAD, 0, string.concat(_ctx, ": discount at zero util"));
         assertEq(premiumToTargetAtFullUtilWAD, 0.2e18, string.concat(_ctx, ": premium at full util"));
@@ -859,11 +861,11 @@ contract Test_RoycoFactory is Test {
         _assertGetMarketResolves(first, first.seniorTranche, "first market intact after failed redeploy");
     }
 
-    /// @notice A StaticCurve YDM config deploys an actual StaticCurveYDM model for both the JT YDM and the LPT LDM
-    /// @dev The template registers every YDM model's bytecode and selects the configured type by component id, so the
-    ///      deployed contract matches the config even though StaticCurveYDM.initializeYDMForMarket(uint64,uint64,uint64)
-    ///      shares its 4-byte selector with the V2 initializer. The reused snUSD params (0.11e18, 0.11e18, 0.31e18) are
-    ///      ABI-identical to StaticCurveYDMParams, so the static init calldata decodes and binds on the StaticCurve model
+    /// @notice A StaticCurve YDM config resolves an actual StaticCurveYDM instance for both the JT YDM and the LPT LDM
+    /// @dev The pipeline deploys (or reuses) the selected shape's chain-wide instance and passes it by address, so the
+    ///      deployed contract matches the config even though StaticCurveYDM.initializeYDMForMarket shares its 4-byte
+    ///      selector with the V2 initializer. The reused snUSD params (0.11e18, 0.11e18, 0.31e18) are ABI-identical to
+    ///      StaticCurveYDMParams, so the static init calldata decodes and binds on the StaticCurve model
     function test_StaticCurveYdmConfig_DeploysStaticCurveModel() external {
         _register();
 
@@ -872,27 +874,31 @@ contract Test_RoycoFactory is Test {
         _fundPoolSeed(cfg);
         cfg.accountant.jtYdm.ydmType = YDMType.StaticCurve;
         cfg.accountant.lptYdm.ydmType = YDMType.StaticCurve;
+        cfg.accountant.jtYdm.deployed = address(0);
+        cfg.accountant.lptYdm.deployed = address(0);
+        _resolveYdms(cfg);
         bytes32 marketId = MARKET_ID_A;
         bytes memory p = abi.encode(marketBuilder.buildMarketParams(cfg, marketId, address(factory), DEPLOYER));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
-        // The deployed model is the configured StaticCurveYDM. The YDMs embed their target utilization as an immutable,
-        // so runtime code is target-dependent — compare against reference instances built with the SAME targets the
-        // config carries, which isolates the model type as the only difference that matters.
-        StaticCurveYDM refJtStatic = new StaticCurveYDM(YDM_TARGET_UTILIZATION_WAD);
-        StaticCurveYDM refLptStatic = new StaticCurveYDM(YDM_TARGET_UTILIZATION_WAD);
+        // The resolved model is the configured StaticCurveYDM. The YDMs embed their target utilization as an
+        // immutable, so runtime code is target-dependent. Compare against a reference instance built with the SAME
+        // target the config carries, which isolates the model type as the only difference that matters.
+        StaticCurveYDM refStatic = new StaticCurveYDM(YDM_TARGET_UTILIZATION_WAD);
         AdaptiveCurveYDM_V2 refV2 = new AdaptiveCurveYDM_V2(YDM_TARGET_UTILIZATION_WAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
-        assertEq(r.ydm.codehash, address(refJtStatic).codehash, "configured StaticCurve, ydm must be StaticCurveYDM");
-        assertEq(r.lptYdm.codehash, address(refLptStatic).codehash, "configured StaticCurve, lptYdm must be StaticCurveYDM");
+        assertEq(r.ydm.codehash, address(refStatic).codehash, "configured StaticCurve, ydm must be StaticCurveYDM");
+        assertEq(r.lptYdm.codehash, address(refStatic).codehash, "configured StaticCurve, lptYdm must be StaticCurveYDM");
+        // One shape resolves to one chain-wide instance, shared by both tranche slots
+        assertEq(r.ydm, r.lptYdm, "both slots must share the chain-wide StaticCurve instance");
         // And it is NOT the adaptive model that used to stand in for it under a static config.
         assertTrue(r.ydm.codehash != address(refV2).codehash, "ydm must not be the adaptive V2 code");
     }
 
-    /// @notice An AdaptiveCurve_V1 YDM config deploys an actual AdaptiveCurveYDM_V1 model for both the JT YDM and the LPT LDM
-    /// @dev With every YDM model's bytecode registered and selected by component id, a V1 config deploys the V1 contract
-    ///      and its two-argument initializeYDMForMarket(uint64,uint64) binds on it, so the deployment succeeds rather than
+    /// @notice An AdaptiveCurve_V1 YDM config resolves an actual AdaptiveCurveYDM_V1 instance for both the JT YDM and the LPT LDM
+    /// @dev With the shape instance resolved from the config selection, a V1 config resolves the V1 contract and its
+    ///      TrancheType + two-share initializeYDMForMarket binds on it, so the deployment succeeds rather than
     ///      reverting against a stand-in V2 instance whose selector the V1 calldata could not match
     function test_AdaptiveV1YdmConfig_DeploysAdaptiveV1Model() external {
         _register();
@@ -902,7 +908,10 @@ contract Test_RoycoFactory is Test {
         _fundPoolSeed(cfg);
         cfg.accountant.jtYdm.ydmType = YDMType.AdaptiveCurve_V1;
         cfg.accountant.lptYdm.ydmType = YDMType.AdaptiveCurve_V1;
-        // V1 takes only (target, full), so re-encode both curves as V1 params — a two-word init blob that binds on the V1 model
+        cfg.accountant.jtYdm.deployed = address(0);
+        cfg.accountant.lptYdm.deployed = address(0);
+        _resolveYdms(cfg);
+        // V1 takes only (target, full), so re-encode both curves as V1 params, a two-word init blob that binds on the V1 model
         bytes memory v1Params = abi.encode(AdaptiveCurveYDM_V1_Params({ yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 }));
         cfg.accountant.jtYdm.curveParams = v1Params;
         cfg.accountant.lptYdm.curveParams = v1Params;
@@ -912,11 +921,12 @@ contract Test_RoycoFactory is Test {
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
-        // The deployed model is the configured AdaptiveCurveYDM_V1, compared against references built with the same targets
-        AdaptiveCurveYDM_V1 refJtV1 = new AdaptiveCurveYDM_V1(YDM_TARGET_UTILIZATION_WAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
-        AdaptiveCurveYDM_V1 refLptV1 = new AdaptiveCurveYDM_V1(YDM_TARGET_UTILIZATION_WAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
-        assertEq(r.ydm.codehash, address(refJtV1).codehash, "configured AdaptiveCurve_V1, ydm must be AdaptiveCurveYDM_V1");
-        assertEq(r.lptYdm.codehash, address(refLptV1).codehash, "configured AdaptiveCurve_V1, lptYdm must be AdaptiveCurveYDM_V1");
+        // The resolved model is the configured AdaptiveCurveYDM_V1, compared against a reference built with the same target
+        AdaptiveCurveYDM_V1 refV1 = new AdaptiveCurveYDM_V1(YDM_TARGET_UTILIZATION_WAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
+        assertEq(r.ydm.codehash, address(refV1).codehash, "configured AdaptiveCurve_V1, ydm must be AdaptiveCurveYDM_V1");
+        assertEq(r.lptYdm.codehash, address(refV1).codehash, "configured AdaptiveCurve_V1, lptYdm must be AdaptiveCurveYDM_V1");
+        // One shape resolves to one chain-wide instance, shared by both tranche slots
+        assertEq(r.ydm, r.lptYdm, "both slots must share the chain-wide V1 instance");
     }
 
     /// @notice A Fixed ydmType config deploys the FixedYDM model for both tranche slots and the accountant's init

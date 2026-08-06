@@ -6,7 +6,7 @@ import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { SafeCast } from "../../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
 import { IYDM } from "../../../src/interfaces/IYDM.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
-import { MarketState } from "../../../src/libraries/Types.sol";
+import { MarketState, TrancheType } from "../../../src/libraries/Types.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
 
 /**
@@ -28,8 +28,14 @@ contract Test_StaticCurveYDM is Test {
     // Distinct non-test accountant address for per-sender keying tests.
     address constant ACCT_B = address(0xB0B);
 
-    event StaticCurveYdmInitialized(address indexed accountant, uint256 yieldShareAtZeroUtilWAD, uint256 slopeLptTargetUtilWAD, uint256 slopeGteTargetUtilWAD);
-    event YdmOutput(address indexed accountant, uint256 yieldShareWAD);
+    event StaticCurveYdmInitialized(
+        address indexed accountant,
+        TrancheType indexed trancheType,
+        uint256 yieldShareAtZeroUtilWAD,
+        uint256 slopeLptTargetUtilWAD,
+        uint256 slopeGteTargetUtilWAD
+    );
+    event YdmOutput(address indexed accountant, TrancheType indexed trancheType, uint256 yieldShareWAD);
 
     // ---------------------------------------------------------------------
     // helpers
@@ -42,7 +48,7 @@ contract Test_StaticCurveYDM is Test {
     /// The reference curve: target=8e17, init(1e17,5e17,9e17) => slopeLt=5e17, slopeGte=2e18.
     function _referenceCurve() internal returns (StaticCurveYDM ydm) {
         ydm = _deploy(8e17);
-        ydm.initializeYDMForMarket(1e17, 5e17, 9e17);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 5e17, 9e17);
     }
 
     // =====================================================================
@@ -99,35 +105,35 @@ contract Test_StaticCurveYDM is Test {
     function test_RevertIf_InitializeY0AboveYTarget() public {
         StaticCurveYDM ydm = _deploy(8e17);
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        ydm.initializeYDMForMarket(5e17, 4e17, 6e17); // y0 > yT
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 5e17, 4e17, 6e17); // y0 > yT
     }
 
     /// yT above yFull would give a downward upper segment and is rejected
     function test_RevertIf_InitializeYTargetAboveYFull() public {
         StaticCurveYDM ydm = _deploy(8e17);
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        ydm.initializeYDMForMarket(1e17, 6e17, 5e17); // yT > yFull
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 6e17, 5e17); // yT > yFull
     }
 
     /// yFull above WAD could pay more than the whole gain and is rejected
     function test_RevertIf_InitializeYFullAboveWad() public {
         StaticCurveYDM ydm = _deploy(8e17);
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        ydm.initializeYDMForMarket(1e17, 5e17, uint64(WAD + 1)); // yFull > WAD
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 5e17, uint64(WAD + 1)); // yFull > WAD
     }
 
     /// yT == 0 is rejected even when the orderings hold (all-zero curve)
     function test_RevertIf_InitializeYTargetZero_AllZero() public {
         StaticCurveYDM ydm = _deploy(8e17);
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        ydm.initializeYDMForMarket(0, 0, 0); // yT == 0
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 0, 0); // yT == 0
     }
 
     /// yT == 0 with a positive yFull is rejected: the yT > 0 gate is independent of the ordering checks
     function test_RevertIf_InitializeYTargetZero_PositiveYFull() public {
         StaticCurveYDM ydm = _deploy(8e17);
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        ydm.initializeYDMForMarket(0, 0, 5e17); // yT == 0 though ordering holds
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 0, 5e17); // yT == 0 though ordering holds
     }
 
     /// yT == 0 with a positive y0 is rejected (the ordering also fails, but yT == 0 is the pinned gate)
@@ -135,26 +141,33 @@ contract Test_StaticCurveYDM is Test {
         StaticCurveYDM ydm = _deploy(8e17);
         // y0=1 > yT=0 also fails ordering, but the point is yT==0 is rejected
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        ydm.initializeYDMForMarket(1, 0, 1);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1, 0, 1);
     }
 
     /// A flat curve parked above WAD is rejected by the yFull <= WAD gate
     function test_RevertIf_InitializeFlatCurveAboveWad() public {
         StaticCurveYDM ydm = _deploy(8e17);
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        ydm.initializeYDMForMarket(uint64(WAD + 1), uint64(WAD + 1), uint64(WAD + 1)); // yFull > WAD
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, uint64(WAD + 1), uint64(WAD + 1), uint64(WAD + 1)); // yFull > WAD
     }
 
-    /// Valid init emits StaticCurveYdmInitialized(accountant, y0, slopeLt, slopeGte).
+    /// The senior tranche pays the premiums and never receives one, so no curve can be initialized for it
+    function test_RevertIf_InitializeForSeniorTranche() public {
+        StaticCurveYDM ydm = _deploy(8e17);
+        vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
+        ydm.initializeYDMForMarket(TrancheType.SENIOR, 1e17, 5e17, 9e17);
+    }
+
+    /// Valid init emits StaticCurveYdmInitialized(accountant, trancheType, y0, slopeLt, slopeGte).
     /// The reference curve: slopeLt = (5e17-1e17)*1e18/8e17 = 4e35/8e17 = 5e17.
     ///          slopeGte = (9e17-5e17)*1e18/(2e17) = 4e35/2e17 = 2e18.
     function test_Initialize_ReferenceCurve_EmitsSlopes() public {
         StaticCurveYDM ydm = _deploy(8e17);
         vm.expectEmit(true, true, true, true, address(ydm));
-        emit StaticCurveYdmInitialized(address(this), 1e17, 5e17, 2e18);
-        ydm.initializeYDMForMarket(1e17, 5e17, 9e17);
+        emit StaticCurveYdmInitialized(address(this), TrancheType.JUNIOR, 1e17, 5e17, 2e18);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 5e17, 9e17);
 
-        (uint64 y0, uint64 sLt, uint64 yT, uint64 sGte) = ydm.accountantToCurve(address(this));
+        (uint64 y0, uint64 sLt, uint64 yT, uint64 sGte) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(y0, 1e17, "stored y0");
         assertEq(sLt, 5e17, "stored slopeLt");
         assertEq(yT, 5e17, "stored yT");
@@ -164,8 +177,8 @@ contract Test_StaticCurveYDM is Test {
     /// Minimal valid: yT = 1 > 0. slopeLt = floor((1-0)*1e18/8e17) = floor(1.25) = 1, slopeGte = 0.
     function test_Initialize_MinimalCurve_OneWeiYTarget() public {
         StaticCurveYDM ydm = _deploy(8e17);
-        ydm.initializeYDMForMarket(0, 1, 1);
-        (uint64 y0, uint64 sLt, uint64 yT, uint64 sGte) = ydm.accountantToCurve(address(this));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 1, 1);
+        (uint64 y0, uint64 sLt, uint64 yT, uint64 sGte) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(y0, 0);
         assertEq(sLt, 1, "floor(1e18/8e17)=1");
         assertEq(yT, 1);
@@ -175,21 +188,21 @@ contract Test_StaticCurveYDM is Test {
     /// Flat at ceiling: (WAD,WAD,WAD) valid. Y == WAD everywhere. slopes both 0.
     function test_Initialize_FlatCurveAtWadCeiling() public {
         StaticCurveYDM ydm = _deploy(8e17);
-        ydm.initializeYDMForMarket(uint64(WAD), uint64(WAD), uint64(WAD));
-        (uint64 y0, uint64 sLt, uint64 yT, uint64 sGte) = ydm.accountantToCurve(address(this));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, uint64(WAD), uint64(WAD), uint64(WAD));
+        (uint64 y0, uint64 sLt, uint64 yT, uint64 sGte) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(y0, WAD);
         assertEq(sLt, 0);
         assertEq(yT, WAD);
         assertEq(sGte, 0);
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), WAD, "flat ceiling Y==WAD @0");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, type(uint256).max), WAD, "flat ceiling Y==WAD @max");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), WAD, "flat ceiling Y==WAD @0");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, type(uint256).max), WAD, "flat ceiling Y==WAD @max");
     }
 
     /// yFull == WAD boundary allowed.
     function test_Initialize_YFullAtWadBoundary() public {
         StaticCurveYDM ydm = _deploy(5e17);
-        ydm.initializeYDMForMarket(0, 5e17, uint64(WAD));
-        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 5e17, uint64(WAD));
+        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         // slopeLt = 5e17*1e18/5e17 = 1e18 ; slopeGte = (WAD-5e17)*1e18/(WAD-5e17) = 1e18
         assertEq(sLt, 1e18, "slopeLt");
         assertEq(sGte, 1e18, "slopeGte");
@@ -203,14 +216,14 @@ contract Test_StaticCurveYDM is Test {
     function test_RevertIf_InitializeSlopeBelowTargetOverflowsUint64() public {
         StaticCurveYDM ydm = _deploy(5e16);
         vm.expectPartialRevert(SafeCast.SafeCastOverflowedUintDowncast.selector);
-        ydm.initializeYDMForMarket(0, uint64(WAD), uint64(WAD));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, uint64(WAD), uint64(WAD));
     }
 
     /// Safe neighbor: target=6e16, slopeLt = floor(1e36/6e16) = 16666666666666666666 < max.
     function test_Initialize_SlopeBelowTargetJustUnderUint64Max() public {
         StaticCurveYDM ydm = _deploy(6e16);
-        ydm.initializeYDMForMarket(0, uint64(WAD), uint64(WAD));
-        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, uint64(WAD), uint64(WAD));
+        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(sLt, 16_666_666_666_666_666_666, "floor(1e36/6e16)");
         assertEq(sGte, 0, "yT==yFull => slopeGte 0");
         assertLe(sLt, UINT64_MAX, "within uint64");
@@ -221,14 +234,14 @@ contract Test_StaticCurveYDM is Test {
     function test_RevertIf_InitializeSlopeAboveTargetOverflowsUint64() public {
         StaticCurveYDM ydm = _deploy(95e16);
         vm.expectPartialRevert(SafeCast.SafeCastOverflowedUintDowncast.selector);
-        ydm.initializeYDMForMarket(0, 1, uint64(WAD));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 1, uint64(WAD));
     }
 
     /// Safe neighbor: target=94e16, slopeGte = floor((1e36-1e18)/6e16) < max.
     function test_Initialize_SlopeAboveTargetJustUnderUint64Max() public {
         StaticCurveYDM ydm = _deploy(94e16);
-        ydm.initializeYDMForMarket(0, 1, uint64(WAD));
-        (,,, uint64 sGte) = ydm.accountantToCurve(address(this));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 1, uint64(WAD));
+        (,,, uint64 sGte) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertLe(sGte, UINT64_MAX, "within uint64");
         // slopeGte = floor((WAD-1)*WAD/(WAD-94e16)) = floor((1e36 - 1e18)/6e16) = floor((1e20 - 100)/6)
         //          = 99999999999999999900/6 = 16666666666666666650 exactly (the numerator divides by 6)
@@ -238,8 +251,8 @@ contract Test_StaticCurveYDM is Test {
     /// Overflow is gap-driven, not target-alone: extreme target=5e16 but tiny gap => tiny slope.
     function test_Initialize_TinyGapAtExtremeTarget_NoOverflow() public {
         StaticCurveYDM ydm = _deploy(5e16);
-        ydm.initializeYDMForMarket(0, 1, 1); // slopeLt = floor(1*1e18/5e16) = 20
-        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 1, 1); // slopeLt = floor(1*1e18/5e16) = 20
+        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(sLt, 20, "floor(1e18/5e16)");
         assertEq(sGte, 0);
     }
@@ -248,7 +261,7 @@ contract Test_StaticCurveYDM is Test {
     function test_RevertIf_InitializeOneWeiTargetWithPositiveLowerGap() public {
         StaticCurveYDM ydm = _deploy(1);
         vm.expectPartialRevert(SafeCast.SafeCastOverflowedUintDowncast.selector);
-        ydm.initializeYDMForMarket(1e17, 5e17, 9e17); // slopeLt = 4e17*1e18/1 = 4e35
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 5e17, 9e17); // slopeLt = 4e17*1e18/1 = 4e35
     }
 
     /// 1-wei target usable when y0==yT (flat lt leg): slopeLt = 0.
@@ -257,8 +270,8 @@ contract Test_StaticCurveYDM is Test {
         // slopeGte = floor(4e17*1e18/(1e18-1)) = floor(4e35/(1e18-1)). Since (1e18-1)*4e17 = 4e35 - 4e17,
         // the remainder is 4e17 < 1e18-1: the one-wei-shrunk denominator cannot lift the slope a whole wei,
         // so the floor is exactly 4e17 (safe, far under uint64.max)
-        ydm.initializeYDMForMarket(5e17, 5e17, 9e17);
-        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 5e17, 5e17, 9e17);
+        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(sLt, 0, "flat lt");
         assertEq(sGte, 400_000_000_000_000_000, "hand-derived slopeGte literal");
     }
@@ -266,8 +279,8 @@ contract Test_StaticCurveYDM is Test {
     /// Near-WAD target usable when yT==yFull (flat gte leg): slopeGte = 0.
     function test_Initialize_NearWadTargetWithFlatUpperLeg() public {
         StaticCurveYDM ydm = _deploy(WAD - 1);
-        ydm.initializeYDMForMarket(5e17, 9e17, 9e17);
-        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 5e17, 9e17, 9e17);
+        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(sGte, 0, "flat gte");
         // slopeLt = floor(4e17*1e18/(1e18-1)): (1e18-1)*4e17 = 4e35 - 4e17 leaves remainder 4e17 < 1e18-1,
         // so the floor is exactly 4e17
@@ -282,7 +295,7 @@ contract Test_StaticCurveYDM is Test {
     function test_RevertIf_InitializeAtWadTarget_NormalParams() public {
         StaticCurveYDM ydm = _deploy(WAD);
         vm.expectRevert(stdError.divisionError);
-        ydm.initializeYDMForMarket(1e17, 5e17, 9e17);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 5e17, 9e17);
     }
 
     /// Even a flat curve computes the upper slope with denominator zero at target == WAD, so it panics too
@@ -290,14 +303,14 @@ contract Test_StaticCurveYDM is Test {
         StaticCurveYDM ydm = _deploy(WAD);
         // even a flat curve computes slopeGte with denominator 0 => 0/0 => Panic 0x12
         vm.expectRevert(stdError.divisionError);
-        ydm.initializeYDMForMarket(5e17, 5e17, 5e17);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 5e17, 5e17, 5e17);
     }
 
     /// A full-span curve at target == WAD hits the same division panic
     function test_RevertIf_InitializeAtWadTarget_FullSpanParams() public {
         StaticCurveYDM ydm = _deploy(WAD);
         vm.expectRevert(stdError.divisionError);
-        ydm.initializeYDMForMarket(0, 1, uint64(WAD));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 1, uint64(WAD));
     }
 
     // =====================================================================
@@ -308,21 +321,21 @@ contract Test_StaticCurveYDM is Test {
     function test_RevertIf_PreviewYieldShareUninitialized() public {
         StaticCurveYDM ydm = _deploy(5e17);
         vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
-        ydm.previewYieldShare(MarketState.PERPETUAL, 0);
+        ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0);
     }
 
     /// yieldShare for a never-initialized accountant reverts instead of paying on a zero curve
     function test_RevertIf_YieldShareUninitialized() public {
         StaticCurveYDM ydm = _deploy(5e17);
         vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
-        ydm.yieldShare(MarketState.PERPETUAL, 5e17);
+        ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 5e17);
     }
 
     /// The uninitialized gate fires before any utilization handling, even at uint256 max
     function test_RevertIf_PreviewYieldShareUninitialized_MaxUtilization() public {
         StaticCurveYDM ydm = _deploy(5e17);
         vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
-        ydm.previewYieldShare(MarketState.FIXED_TERM, type(uint256).max);
+        ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, type(uint256).max);
     }
 
     /// mapping is keyed by msg.sender: A inits, B (pranked) is still uninitialized.
@@ -330,14 +343,14 @@ contract Test_StaticCurveYDM is Test {
         StaticCurveYDM ydm = _referenceCurve(); // address(this) initialized
         vm.prank(ACCT_B);
         vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
-        ydm.yieldShare(MarketState.PERPETUAL, 0);
+        ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0);
     }
 
     /// The initialized sender queries cleanly (the anti-vacuity control for the per-sender revert above)
     function test_YieldShare_InitializedSenderCanQuery() public {
         StaticCurveYDM ydm = _referenceCurve();
         // no revert, returns y0 at U=0
-        assertEq(ydm.yieldShare(MarketState.PERPETUAL, 0), 1e17, "reference curve Y(0) == y0");
+        assertEq(ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 1e17, "reference curve Y(0) == y0");
     }
 
     // =====================================================================
@@ -347,11 +360,11 @@ contract Test_StaticCurveYDM is Test {
 
     function _assertReferenceCurvePoint(StaticCurveYDM ydm, uint256 u, uint256 expected) internal {
         // state-independence
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, u), expected, "preview PERPETUAL");
-        assertEq(ydm.previewYieldShare(MarketState.FIXED_TERM, u), expected, "preview FIXED_TERM");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u), expected, "preview PERPETUAL");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, u), expected, "preview FIXED_TERM");
         // preview == yieldShare
-        assertEq(ydm.yieldShare(MarketState.PERPETUAL, u), expected, "yieldShare PERPETUAL");
-        assertEq(ydm.yieldShare(MarketState.FIXED_TERM, u), expected, "yieldShare FIXED_TERM");
+        assertEq(ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u), expected, "yieldShare PERPETUAL");
+        assertEq(ydm.yieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, u), expected, "yieldShare FIXED_TERM");
         assertLe(expected, WAD, "<= WAD invariant");
     }
 
@@ -379,7 +392,7 @@ contract Test_StaticCurveYDM is Test {
         uint256[10] memory us = [uint256(0), 1e17, 4e17, 8e17 - 1, 8e17, 8e17 + 1, 9e17, WAD - 1, WAD, WAD + 1];
         uint256 prev = 0;
         for (uint256 i = 0; i < us.length; i++) {
-            uint256 y = ydm.previewYieldShare(MarketState.PERPETUAL, us[i]);
+            uint256 y = ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, us[i]);
             assertGe(y, prev, "monotone non-decreasing");
             prev = y;
         }
@@ -392,32 +405,32 @@ contract Test_StaticCurveYDM is Test {
     /// target=5e17, init(0,1,1): slopeLt=2, slopeGte=0.
     function test_PreviewYieldShare_FloorRounding_SubUnitSlope() public {
         StaticCurveYDM ydm = _deploy(5e17);
-        ydm.initializeYDMForMarket(0, 1, 1);
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 1e17), 0, "floor(2*1e17/1e18) = 0");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 5e17 - 1), 0, "floor((1e18-2)/1e18) = 0");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 5e17), 1, "kink -> yT = 1");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, WAD), 1, "slopeGte 0 -> yFull = 1");
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 1, 1);
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 1e17), 0, "floor(2*1e17/1e18) = 0");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 5e17 - 1), 0, "floor((1e18-2)/1e18) = 0");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 5e17), 1, "kink -> yT = 1");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, WAD), 1, "slopeGte 0 -> yFull = 1");
     }
 
     /// target=7e17, init(0,3e17,4e17): slopeGte = floor(1e17*1e18/3e17) = 333333333333333333.
     /// Y(WAD) = floor(333333333333333333 * 3e17/1e18) + 3e17 = 99999999999999999 + 3e17 = 4e17 - 1.
     function test_PreviewYieldShare_FloorRounding_OneWeiUnderYFull() public {
         StaticCurveYDM ydm = _deploy(7e17);
-        ydm.initializeYDMForMarket(0, 3e17, 4e17);
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, WAD), 399_999_999_999_999_999, "4e17 - 1 (floor loss)");
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 3e17, 4e17);
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, WAD), 399_999_999_999_999_999, "4e17 - 1 (floor loss)");
     }
 
     /// A symmetric curve: target=5e17, init(2e17,5e17,8e17) => slopeLt=slopeGte=6e17.
     /// U=target+1: floor(6e17*1/1e18)=floor(0.6)=0 => equals yT despite U>target.
     function test_PreviewYieldShare_FloorRounding_JustPastKinkRoundsFlat() public {
         StaticCurveYDM ydm = _deploy(5e17);
-        ydm.initializeYDMForMarket(2e17, 5e17, 8e17);
-        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 2e17, 5e17, 8e17);
+        (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(sLt, 6e17, "slopeLt");
         assertEq(sGte, 6e17, "slopeGte");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 2e17, "Y(0)=y0");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 5e17 + 1), 5e17, "just past kink floors to yT");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, WAD), 8e17, "Y(WAD)=yFull");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 2e17, "Y(0)=y0");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 5e17 + 1), 5e17, "just past kink floors to yT");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, WAD), 8e17, "Y(WAD)=yFull");
     }
 
     // =====================================================================
@@ -427,10 +440,10 @@ contract Test_StaticCurveYDM is Test {
     /// (WAD,WAD,WAD): Y == WAD for every U including > WAD. Assert equal, never exceeds.
     function test_PreviewYieldShare_FlatCeilingNeverExceedsWad() public {
         StaticCurveYDM ydm = _deploy(5e17);
-        ydm.initializeYDMForMarket(uint64(WAD), uint64(WAD), uint64(WAD));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, uint64(WAD), uint64(WAD), uint64(WAD));
         uint256[4] memory us = [uint256(0), 5e17, WAD, 2 * WAD];
         for (uint256 i = 0; i < us.length; i++) {
-            uint256 y = ydm.previewYieldShare(MarketState.PERPETUAL, us[i]);
+            uint256 y = ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, us[i]);
             assertEq(y, WAD, "flat ceiling == WAD");
             assertLe(y, WAD, "never exceeds WAD");
         }
@@ -439,27 +452,27 @@ contract Test_StaticCurveYDM is Test {
     /// (1,1,1): Y == 1 everywhere (minimum nonzero constant).
     function test_PreviewYieldShare_FlatMinimalConstant() public {
         StaticCurveYDM ydm = _deploy(5e17);
-        ydm.initializeYDMForMarket(1, 1, 1);
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 1);
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, type(uint256).max), 1);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1, 1, 1);
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 1);
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, type(uint256).max), 1);
     }
 
     /// (0,5e17,WAD): reaches exactly WAD at full util and caps there. Zero at zero util.
     function test_PreviewYieldShare_ReachesWadExactlyAtFullUtilization() public {
         StaticCurveYDM ydm = _deploy(5e17);
-        ydm.initializeYDMForMarket(0, 5e17, uint64(WAD));
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 0, "y0=0 at U=0");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 25e16), 25e16, "linear mid");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 5e17), 5e17, "kink=yT");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, WAD), WAD, "hits WAD at full util");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 2 * WAD), WAD, "caps at WAD");
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 5e17, uint64(WAD));
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 0, "y0=0 at U=0");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 25e16), 25e16, "linear mid");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 5e17), 5e17, "kink=yT");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, WAD), WAD, "hits WAD at full util");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 2 * WAD), WAD, "caps at WAD");
     }
 
     /// zero yield share at zero utilization is valid.
     function test_PreviewYieldShare_ZeroAtZeroUtilization() public {
         StaticCurveYDM ydm = _deploy(5e17);
-        ydm.initializeYDMForMarket(0, 3e17, 5e17);
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 0, "Y(0)==0");
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 3e17, 5e17);
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 0, "Y(0)==0");
     }
 
     // =====================================================================
@@ -471,17 +484,25 @@ contract Test_StaticCurveYDM is Test {
         StaticCurveYDM ydm = _referenceCurve();
         uint256[6] memory us = [uint256(0), 25e16, 5e17, 75e16, WAD, 2 * WAD];
         for (uint256 i = 0; i < us.length; i++) {
-            assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, us[i]), ydm.previewYieldShare(MarketState.FIXED_TERM, us[i]), "state ignored (preview)");
-            assertEq(ydm.yieldShare(MarketState.PERPETUAL, us[i]), ydm.yieldShare(MarketState.FIXED_TERM, us[i]), "state ignored (yieldShare)");
+            assertEq(
+                ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, us[i]),
+                ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, us[i]),
+                "state ignored (preview)"
+            );
+            assertEq(
+                ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, us[i]),
+                ydm.yieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, us[i]),
+                "state ignored (yieldShare)"
+            );
         }
     }
 
     /// preview does not persist state (curve bytes unchanged before/after).
     function test_PreviewYieldShare_DoesNotMutateCurve() public {
         StaticCurveYDM ydm = _referenceCurve();
-        (uint64 a0, uint64 a1, uint64 a2, uint64 a3) = ydm.accountantToCurve(address(this));
-        ydm.previewYieldShare(MarketState.PERPETUAL, 7e17);
-        (uint64 b0, uint64 b1, uint64 b2, uint64 b3) = ydm.accountantToCurve(address(this));
+        (uint64 a0, uint64 a1, uint64 a2, uint64 a3) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
+        ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 7e17);
+        (uint64 b0, uint64 b1, uint64 b2, uint64 b3) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(a0, b0);
         assertEq(a1, b1);
         assertEq(a2, b2);
@@ -491,9 +512,9 @@ contract Test_StaticCurveYDM is Test {
     /// yieldShare does not mutate the curve either (Static is stateless).
     function test_YieldShare_DoesNotMutateCurve() public {
         StaticCurveYDM ydm = _referenceCurve();
-        (uint64 a0, uint64 a1, uint64 a2, uint64 a3) = ydm.accountantToCurve(address(this));
-        ydm.yieldShare(MarketState.PERPETUAL, 7e17);
-        (uint64 b0, uint64 b1, uint64 b2, uint64 b3) = ydm.accountantToCurve(address(this));
+        (uint64 a0, uint64 a1, uint64 a2, uint64 a3) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
+        ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 7e17);
+        (uint64 b0, uint64 b1, uint64 b2, uint64 b3) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
         assertEq(a0, b0);
         assertEq(a1, b1);
         assertEq(a2, b2);
@@ -503,18 +524,18 @@ contract Test_StaticCurveYDM is Test {
     /// idempotence: repeated calls return the identical value, no drift.
     function test_YieldShare_RepeatedCallsNoDrift() public {
         StaticCurveYDM ydm = _referenceCurve();
-        uint256 first = ydm.yieldShare(MarketState.PERPETUAL, 5e17);
+        uint256 first = ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 5e17);
         for (uint256 i = 0; i < 4; i++) {
-            assertEq(ydm.yieldShare(MarketState.PERPETUAL, 5e17), first, "no drift across calls");
+            assertEq(ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 5e17), first, "no drift across calls");
         }
     }
 
     /// Static does NOT drift with time (negative adaptation test).
     function test_PreviewYieldShare_NoTimeAdaptation() public {
         StaticCurveYDM ydm = _referenceCurve();
-        uint256 before = ydm.previewYieldShare(MarketState.PERPETUAL, 4e17);
+        uint256 before = ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 4e17);
         vm.warp(block.timestamp + 3650 days);
-        uint256 afterWarp = ydm.previewYieldShare(MarketState.PERPETUAL, 4e17);
+        uint256 afterWarp = ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 4e17);
         assertEq(before, afterWarp, "no time adaptation");
     }
 
@@ -525,12 +546,12 @@ contract Test_StaticCurveYDM is Test {
         // Y(7.5e17) on the reference curve = floor(2e18*(75e16-8e17)/1e18)? 75e16 < 8e17 -> lt leg.
         // floor(5e17 * 75e16 / 1e18) + 1e17 = floor(3.75e17)+1e17 = 375e15 + 1e17 = 475e15.
         vm.expectEmit(true, true, true, true, address(ydm));
-        emit YdmOutput(address(this), 475e15);
-        ydm.yieldShare(MarketState.PERPETUAL, 75e16);
+        emit YdmOutput(address(this), TrancheType.JUNIOR, 475e15);
+        ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 75e16);
 
         // preview emits no logs
         vm.recordLogs();
-        ydm.previewYieldShare(MarketState.PERPETUAL, 75e16);
+        ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 75e16);
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertEq(logs.length, 0, "preview emits nothing");
     }
@@ -542,33 +563,59 @@ contract Test_StaticCurveYDM is Test {
     /// Re-initialization overwrites the stored curve (there is no re-init guard, the accountant owns its curve)
     function test_Initialize_ReinitializeOverwritesCurve() public {
         StaticCurveYDM ydm = _deploy(5e17);
-        ydm.initializeYDMForMarket(1e17, 3e17, 5e17); // first curve -> Y(0)=1e17
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 1e17, "before re-init");
-        ydm.initializeYDMForMarket(0, 1e17, 2e17); // second curve -> Y(0)=0
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 0, "after re-init reflects new curve");
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 3e17, 5e17); // first curve -> Y(0)=1e17
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 1e17, "before re-init");
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 1e17, 2e17); // second curve -> Y(0)=0
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 0, "after re-init reflects new curve");
     }
 
     /// A failed re-initialization must leave the previous curve byte-identical
     function test_RevertIf_ReinitializeInvalid_PreservesCurve() public {
         StaticCurveYDM ydm = _deploy(5e17);
-        ydm.initializeYDMForMarket(1e17, 3e17, 5e17);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 3e17, 5e17);
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        ydm.initializeYDMForMarket(2e17, 1e17, 5e17); // invalid, must not touch storage
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 1e17, "the first curve must be intact after the failed re-init");
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 2e17, 1e17, 5e17); // invalid, must not touch storage
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 1e17, "the first curve must be intact after the failed re-init");
     }
 
     /// Curves are keyed by msg.sender: two accountants on one model never read each other's parameters
     function test_YieldShare_PerAccountantCurveIsolation() public {
         StaticCurveYDM ydm = _deploy(5e17);
         // this = curve X: y0=1e17
-        ydm.initializeYDMForMarket(1e17, 3e17, 5e17);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 3e17, 5e17);
         // B = curve Y: y0=0
         vm.prank(ACCT_B);
-        ydm.initializeYDMForMarket(0, 2e17, 4e17);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, 2e17, 4e17);
 
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 1e17, "this curve Y(0)=1e17");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 1e17, "this curve Y(0)=1e17");
         vm.prank(ACCT_B);
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 0, "B curve Y(0)=0");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 0, "B curve Y(0)=0");
+    }
+
+    /// Curves are keyed by tranche type too: one instance serves distinct JUNIOR and LP curves for the same caller
+    function test_YieldShare_PerTrancheTypeCurveIsolation() public {
+        StaticCurveYDM ydm = _deploy(5e17);
+        // JUNIOR curve: y0=1e17. LP curve: y0=0
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 3e17, 5e17);
+        ydm.initializeYDMForMarket(TrancheType.LIQUIDITY_PROVIDER, 0, 2e17, 4e17);
+
+        // Each tranche type's stored curve and query output reflect its own parameters
+        (uint64 jy0,, uint64 jyT,) = ydm.accountantToCurve(address(this), TrancheType.JUNIOR);
+        (uint64 ly0,, uint64 lyT,) = ydm.accountantToCurve(address(this), TrancheType.LIQUIDITY_PROVIDER);
+        assertEq(jy0, 1e17, "JUNIOR stored y0");
+        assertEq(jyT, 3e17, "JUNIOR stored yT");
+        assertEq(ly0, 0, "LP stored y0");
+        assertEq(lyT, 2e17, "LP stored yT");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 1e17, "JUNIOR curve Y(0)=1e17");
+        assertEq(ydm.previewYieldShare(TrancheType.LIQUIDITY_PROVIDER, MarketState.PERPETUAL, 0), 0, "LP curve Y(0)=0");
+
+        // Re-initializing the JUNIOR curve must not disturb the LP curve's stored state
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 2e17, 4e17, 6e17);
+        (uint64 ly0After,, uint64 lyTAfter,) = ydm.accountantToCurve(address(this), TrancheType.LIQUIDITY_PROVIDER);
+        assertEq(ly0After, 0, "LP y0 intact after JUNIOR re-init");
+        assertEq(lyTAfter, 2e17, "LP yT intact after JUNIOR re-init");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), 2e17, "JUNIOR reflects its re-init");
+        assertEq(ydm.previewYieldShare(TrancheType.LIQUIDITY_PROVIDER, MarketState.PERPETUAL, 0), 0, "LP output undisturbed");
     }
 
     // =====================================================================
@@ -611,14 +658,14 @@ contract Test_StaticCurveYDM is Test {
     function testFuzz_YieldShare_BoundedAndMatchesHandMath(uint256 t, uint256 a, uint256 b, uint256 c, uint256 u) public {
         Cfg memory cfg = _boundedConfig(t, a, b, c);
         StaticCurveYDM ydm = _deploy(cfg.target);
-        ydm.initializeYDMForMarket(cfg.y0, cfg.yT, cfg.yFull);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, cfg.y0, cfg.yT, cfg.yFull);
 
         uint256 expected = _expectedY(cfg, u);
 
-        uint256 p1 = ydm.previewYieldShare(MarketState.PERPETUAL, u);
-        uint256 p2 = ydm.previewYieldShare(MarketState.FIXED_TERM, u);
-        uint256 y1 = ydm.yieldShare(MarketState.PERPETUAL, u);
-        uint256 y2 = ydm.yieldShare(MarketState.FIXED_TERM, u);
+        uint256 p1 = ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u);
+        uint256 p2 = ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, u);
+        uint256 y1 = ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u);
+        uint256 y2 = ydm.yieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, u);
 
         assertEq(p1, expected, "preview matches hand math");
         assertEq(p1, p2, "state independence (preview)");
@@ -633,21 +680,21 @@ contract Test_StaticCurveYDM is Test {
     function testFuzz_PreviewYieldShare_AnchorsAtZeroAndTarget(uint256 t, uint256 a, uint256 b, uint256 c) public {
         Cfg memory cfg = _boundedConfig(t, a, b, c);
         StaticCurveYDM ydm = _deploy(cfg.target);
-        ydm.initializeYDMForMarket(cfg.y0, cfg.yT, cfg.yFull);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, cfg.y0, cfg.yT, cfg.yFull);
 
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), cfg.y0, "Y(0)==y0");
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, cfg.target), cfg.yT, "Y(target)==yT");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, 0), cfg.y0, "Y(0)==y0");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, cfg.target), cfg.yT, "Y(target)==yT");
     }
 
     /// Monotone non-decreasing in utilization for a fixed curve.
     function testFuzz_PreviewYieldShare_MonotoneNonDecreasing(uint256 t, uint256 a, uint256 b, uint256 c, uint256 u1, uint256 u2) public {
         Cfg memory cfg = _boundedConfig(t, a, b, c);
         StaticCurveYDM ydm = _deploy(cfg.target);
-        ydm.initializeYDMForMarket(cfg.y0, cfg.yT, cfg.yFull);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, cfg.y0, cfg.yT, cfg.yFull);
 
         if (u1 > u2) (u1, u2) = (u2, u1);
-        uint256 y1 = ydm.previewYieldShare(MarketState.PERPETUAL, u1);
-        uint256 y2 = ydm.previewYieldShare(MarketState.PERPETUAL, u2);
+        uint256 y1 = ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u1);
+        uint256 y2 = ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u2);
         assertLe(y1, y2, "U1 <= U2 => Y(U1) <= Y(U2)");
     }
 
@@ -655,26 +702,41 @@ contract Test_StaticCurveYDM is Test {
     function testFuzz_PreviewYieldShare_SaturatesAboveWad(uint256 t, uint256 a, uint256 b, uint256 c, uint256 uOver) public {
         Cfg memory cfg = _boundedConfig(t, a, b, c);
         StaticCurveYDM ydm = _deploy(cfg.target);
-        ydm.initializeYDMForMarket(cfg.y0, cfg.yT, cfg.yFull);
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, cfg.y0, cfg.yT, cfg.yFull);
 
         uOver = bound(uOver, WAD, type(uint256).max);
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, uOver), ydm.previewYieldShare(MarketState.PERPETUAL, WAD), "saturates at WAD");
+        assertEq(
+            ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, uOver),
+            ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, WAD),
+            "saturates at WAD"
+        );
     }
 
     /// Per-sender isolation under fuzzed distinct curves.
-    function testFuzz_YieldShare_PerAccountantCurveIsolation(uint256 t, uint256 a1, uint256 b1, uint256 c1, uint256 a2, uint256 b2, uint256 c2, uint256 u) public {
+    function testFuzz_YieldShare_PerAccountantCurveIsolation(
+        uint256 t,
+        uint256 a1,
+        uint256 b1,
+        uint256 c1,
+        uint256 a2,
+        uint256 b2,
+        uint256 c2,
+        uint256 u
+    )
+        public
+    {
         Cfg memory cfgA = _boundedConfig(t, a1, b1, c1);
         // second curve reuses same target (target is per-instance immutable)
         Cfg memory cfgB = _boundedConfig(t, a2, b2, c2);
         StaticCurveYDM ydm = _deploy(cfgA.target);
 
-        ydm.initializeYDMForMarket(cfgA.y0, cfgA.yT, cfgA.yFull); // this
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, cfgA.y0, cfgA.yT, cfgA.yFull); // this
         vm.prank(ACCT_B);
-        ydm.initializeYDMForMarket(cfgB.y0, cfgB.yT, cfgB.yFull); // B
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, cfgB.y0, cfgB.yT, cfgB.yFull); // B
 
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, u), _expectedY(cfgA, u), "this uses its own curve");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u), _expectedY(cfgA, u), "this uses its own curve");
         vm.prank(ACCT_B);
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, u), _expectedY(cfgB, u), "B uses its own curve");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u), _expectedY(cfgB, u), "B uses its own curve");
     }
 
     /// Init reverts on SafeCast overflow for a fuzzed small target with a full gap.
@@ -683,6 +745,6 @@ contract Test_StaticCurveYDM is Test {
         uint256 target = bound(t, 1, 5e16);
         StaticCurveYDM ydm = _deploy(target);
         vm.expectPartialRevert(SafeCast.SafeCastOverflowedUintDowncast.selector);
-        ydm.initializeYDMForMarket(0, uint64(WAD), uint64(WAD));
+        ydm.initializeYDMForMarket(TrancheType.JUNIOR, 0, uint64(WAD), uint64(WAD));
     }
 }

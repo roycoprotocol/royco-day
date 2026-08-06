@@ -18,7 +18,7 @@ defaults from `RoycoDeterministic` predictions, so every script is standalone-ru
 ## Runbook
 
 **1. Bootstrap the chain** (everything a chain needs before any market — core, periphery, roles, blacklist,
-implementations, template, YDMs; safe to re-run):
+implementations, template; safe to re-run):
 
 ```bash
 forge script script/deploy/BootstrapChain.s.sol --rpc-url $RPC_URL --broadcast
@@ -27,8 +27,9 @@ forge script script/deploy/BootstrapChain.s.sol --rpc-url $RPC_URL --broadcast
 Or run the components individually, in this order (the only two ordering constraints: periphery BEFORE the role
 graph, and renounce LAST):
 `core/DeployCore.s.sol` → `core/DeployPeriphery.s.sol` → `core/ApplyRoleGraph.s.sol` → `core/DeployBlacklist.s.sol`
-→ `templates/royco-day-balancer-v3/DeployImplementations.s.sol` → `.../DeployTemplate.s.sol` (via bootstrap) →
-`.../DeployYDMs.s.sol`.
+→ `templates/royco-day-balancer-v3/DeployImplementations.s.sol` → `.../DeployTemplate.s.sol` (via bootstrap).
+The yield distribution models are deployed (or reused) per market by `DeployMarket` from each market's config
+selections, or passed in pre-deployed by address.
 
 **2. Deploy markets** (repeatable; permissionless once bootstrapped — the deployer must hold + the script approves
 the genesis seed legs):

@@ -273,13 +273,15 @@ contract Test_Setters_Accountant is AccountantTestBase {
         assertEq(toUint256(s.lastJTImpermanentLoss), 0, "perpetual checkpoint carries no il (biconditional invariant)");
     }
 
-    /// setJuniorTrancheYDM rejects the current LPT YDM
-    function test_RevertIf_SetJuniorTrancheYDMEqualsLPTYDM() public {
-        vm.expectRevert(IRoycoDayAccountant.YDMS_CANNOT_BE_IDENTICAL.selector);
+    /// curves are keyed per tranche type, so pointing the JT slot at the current LPT YDM is allowed
+    function test_SetJuniorTrancheYDM_allowsCurrentLPTYDM() public {
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.JuniorTrancheYDMUpdated(address(lptYDM));
         accountant.setJuniorTrancheYDM(address(lptYDM), "");
+        assertEq(accountant.getState().jtYDM, address(lptYDM), "jt slot shares the lpt instance");
     }
 
-    /// only cross-identity is checked, so re-setting the current JT YDM is allowed
+    /// re-setting the current JT YDM is allowed
     function test_SetJuniorTrancheYDM_allowsCurrentJTYDM() public {
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.JuniorTrancheYDMUpdated(address(jtYDM));
@@ -313,10 +315,12 @@ contract Test_Setters_Accountant is AccountantTestBase {
         accountant.setJuniorTrancheYDM(address(reverting), abi.encodeCall(MockRecordingYDM.initializeModel, (hex"")));
     }
 
-    /// setLiquidityProviderTrancheYDM rejects the current JT YDM
-    function test_RevertIf_SetLiquidityProviderTrancheYDMEqualsJTYDM() public {
-        vm.expectRevert(IRoycoDayAccountant.YDMS_CANNOT_BE_IDENTICAL.selector);
+    /// curves are keyed per tranche type, so pointing the LPT slot at the current JT YDM is allowed
+    function test_SetLiquidityProviderTrancheYDM_allowsCurrentJTYDM() public {
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.LiquidityProviderTrancheYDMUpdated(address(jtYDM));
         accountant.setLiquidityProviderTrancheYDM(address(jtYDM), "");
+        assertEq(accountant.getState().lptYDM, address(jtYDM), "lpt slot shares the jt instance");
     }
 
     /// re-setting the current LPT YDM is allowed

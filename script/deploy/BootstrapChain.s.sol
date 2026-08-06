@@ -11,7 +11,6 @@ import { DeployPeripheryComponent } from "./core/DeployPeriphery.s.sol";
 import { DeployScriptBase } from "./core/DeployScriptBase.sol";
 import { DeployImplementationsComponent } from "./templates/royco-day-balancer-v3/DeployImplementations.s.sol";
 import { DeployTemplateComponent } from "./templates/royco-day-balancer-v3/DeployTemplate.s.sol";
-import { DeployYDMsComponent } from "./templates/royco-day-balancer-v3/DeployYDMs.s.sol";
 
 /**
  * @title BootstrapChainComponent
@@ -63,7 +62,7 @@ contract BootstrapChainComponent is DeployScriptBase, RoleGraphConfig, TemplateC
         blacklist.enableLogging();
         chain.roycoBlacklist = blacklist.execute(_deployerPrivateKey);
 
-        // 5. Royco Day Balancer V3 template family: implementation set -> template -> yield distribution models
+        // 5. Royco Day Balancer V3 template family: implementation set -> template
         DeployImplementationsComponent impls = new DeployImplementationsComponent(isTestEnv, c.accessManager);
         impls.enableLogging();
         chain.impls = impls.execute(_deployerPrivateKey);
@@ -76,10 +75,6 @@ contract BootstrapChainComponent is DeployScriptBase, RoleGraphConfig, TemplateC
         // can never disagree on the template's construction params — and therefore its address
         template.overrideTemplatePolicyForTest(templatePolicy(isTestEnv));
         chain.template = template.execute(_deployerPrivateKey);
-
-        DeployYDMsComponent ydms = new DeployYDMsComponent(chain.template);
-        ydms.enableLogging();
-        ydms.execute(_deployerPrivateKey);
     }
 }
 

@@ -6,7 +6,7 @@ import { IRoycoDayAccountant } from "../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
 import { MAX_NAV_UNITS, MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
-import { DispatchMode, MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
+import { DispatchMode, MarketState, NAV_UNIT, Operation, SyncedAccountingState, TrancheType } from "../libraries/Types.sol";
 import { Math, RoycoUnitsMath, toNAVUnits } from "../libraries/Units.sol";
 import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
 import { UtilizationLogic } from "../libraries/logic/UtilizationLogic.sol";
@@ -73,8 +73,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                 && _params.jtYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _params.lptYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD,
             MAX_PROTOCOL_FEE_EXCEEDED()
         );
-        // Ensure that the YDMs are not identical: each tranche requires its own YDM instance: the YDMs are initialized per market and the adaptive models keep per-market curve state, so sharing one instance would corrupt both premiums by interleaving coverage and liquidity driven updates
-        require(_params.jtYDM != _params.lptYDM, YDMS_CANNOT_BE_IDENTICAL());
         // Ensure that the coverage requirement must require less coverage than the entire senior exposure and the liquidation coverage utilization threshold can only be breached once the NAVs have experienced losses
         require(_params.minCoverageWAD < WAD && _params.coverageLiquidationUtilizationWAD > WAD, INVALID_COVERAGE_CONFIG());
         // Ensure that the liquidity requirement must require less market-making depth than the entire senior tranche claims
@@ -127,7 +125,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         emit LiquidationCoverageUtilizationUpdated(_params.coverageLiquidationUtilizationWAD);
         emit DustToleranceUpdated(_params.dustTolerance);
 
-        // Initialize the JT and LPT YDMs for this market
+        // Initialize the JT and LPT YDM curves for this market (the YDMs may share an instance since curves are keyed per tranche type)
         _initializeYDM(_params.jtYDM, _params.jtYDMInitializationData);
         _initializeYDM(_params.lptYDM, _params.lptYDMInitializationData);
     }
@@ -476,6 +474,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                         _twJTYieldShareAccruedWAD = Math.min(
                             IYDM($.jtYDM)
                                 .previewYieldShare(
+                                    TrancheType.JUNIOR,
                                     initialMarketState,
                                     UtilizationLogic._computeCoverageUtilization($.lastCollateralNAV, $.minCoverageWAD, $.lastJTEffectiveNAV)
                                 ),
@@ -485,7 +484,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                         _twLPTYieldShareAccruedWAD = Math.min(
                             IYDM($.lptYDM)
                                 .previewYieldShare(
-                                    initialMarketState, UtilizationLogic._computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLPTRawNAV)
+                                    TrancheType.LIQUIDITY_PROVIDER,
+                                    initialMarketState,
+                                    UtilizationLogic._computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLPTRawNAV)
                                 ),
                             $.maxLPTYieldShareWAD
                         );
@@ -609,8 +610,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
         // Advance the adaptive YDMs and read each instantaneous yield share, capped at its configured maximum
         (uint256 coverageUtilizationWAD, uint256 liquidityUtilizationWAD) = _computeUtilizations();
-        uint256 jtYieldShareWAD = Math.min(IYDM($.jtYDM).yieldShare($.lastMarketState, coverageUtilizationWAD), $.maxJTYieldShareWAD);
-        uint256 lptYieldShareWAD = Math.min(IYDM($.lptYDM).yieldShare($.lastMarketState, liquidityUtilizationWAD), $.maxLPTYieldShareWAD);
+        uint256 jtYieldShareWAD = Math.min(IYDM($.jtYDM).yieldShare(TrancheType.JUNIOR, $.lastMarketState, coverageUtilizationWAD), $.maxJTYieldShareWAD);
+        uint256 lptYieldShareWAD =
+            Math.min(IYDM($.lptYDM).yieldShare(TrancheType.LIQUIDITY_PROVIDER, $.lastMarketState, liquidityUtilizationWAD), $.maxLPTYieldShareWAD);
 
         // Accrue the time-weighted yield shares since the last tranche interaction
         twJTYieldShareAccruedWAD = ($.twJTYieldShareAccruedWAD += uint128(jtYieldShareWAD * elapsed));
@@ -641,8 +643,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
         // Read each instantaneous yield share, capped at its configured maximum
         (uint256 coverageUtilizationWAD, uint256 liquidityUtilizationWAD) = _computeUtilizations();
-        uint256 jtYieldShareWAD = Math.min(IYDM($.jtYDM).previewYieldShare($.lastMarketState, coverageUtilizationWAD), $.maxJTYieldShareWAD);
-        uint256 lptYieldShareWAD = Math.min(IYDM($.lptYDM).previewYieldShare($.lastMarketState, liquidityUtilizationWAD), $.maxLPTYieldShareWAD);
+        uint256 jtYieldShareWAD = Math.min(IYDM($.jtYDM).previewYieldShare(TrancheType.JUNIOR, $.lastMarketState, coverageUtilizationWAD), $.maxJTYieldShareWAD);
+        uint256 lptYieldShareWAD =
+            Math.min(IYDM($.lptYDM).previewYieldShare(TrancheType.LIQUIDITY_PROVIDER, $.lastMarketState, liquidityUtilizationWAD), $.maxLPTYieldShareWAD);
 
         // Apply the accrual of the yield shares to the accumulators, weighted by the time elapsed
         twJTYieldShareAccruedWAD = ($.twJTYieldShareAccruedWAD + uint128(jtYieldShareWAD * elapsed));
@@ -669,8 +672,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     /// @inheritdoc IRoycoDayAccountant
     function setJuniorTrancheYDM(address _jtYDM, bytes calldata _jtYDMInitializationData) external override(IRoycoDayAccountant) restricted {
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
-        // The junior and liquidity provider tranche YDMs must remain distinct: a shared instance would corrupt both premiums by interleaving coverage and liquidity driven updates
-        require(_jtYDM != $.lptYDM, YDMS_CANNOT_BE_IDENTICAL());
         // Best-effort sync to settle unrealized PNL under the outgoing JT YDM
         // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking JT YDM
         $.kernel._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccountingFromAccountant, ()));
@@ -683,8 +684,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     /// @inheritdoc IRoycoDayAccountant
     function setLiquidityProviderTrancheYDM(address _lptYDM, bytes calldata _lptYDMInitializationData) external override(IRoycoDayAccountant) restricted {
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
-        // The junior and liquidity provider tranche YDMs must remain distinct: a shared instance would corrupt both premiums by interleaving coverage and liquidity driven updates
-        require(_lptYDM != $.jtYDM, YDMS_CANNOT_BE_IDENTICAL());
         // Best-effort sync to settle unrealized PNL under the outgoing LPT YDM
         // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking LPT YDM
         $.kernel._tryExecute(abi.encodeCall(IRoycoDayKernel.syncTrancheAccountingFromAccountant, ()));
@@ -803,10 +802,10 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     /**
-     * @notice Initializes the YDM (Yield Distribution Model) if required for this market
+     * @notice Initializes a YDM's (Yield Distribution Model) curve if required for this market
      * @dev A failing initialization bubbles the YDM's revert verbatim through the shared dispatch primitive
-     * @param _ydm The new YDM address to set
-     * @param _ydmInitializationData The data used to initialize the new YDM for this market
+     * @param _ydm The YDM address holding the curve
+     * @param _ydmInitializationData The data used to initialize the YDM curve for this market
      */
     function _initializeYDM(address _ydm, bytes calldata _ydmInitializationData) internal {
         // Ensure that the YDM is not null

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
-import { IYDM, MarketState } from "../interfaces/IYDM.sol";
+import { IYDM, MarketState, TrancheType } from "../interfaces/IYDM.sol";
 import { WAD } from "../libraries/Constants.sol";
 
 /**
@@ -25,54 +25,60 @@ contract FixedYDM is IYDM {
         uint64 fixedYieldShareWAD;
     }
 
-    /// @dev A mapping from market accountants to its market's fixed yield share (both fields pack into one storage slot)
-    mapping(address accountant => FixedYieldShare share) public accountantToFixedYieldShare;
+    /// @dev A mapping from market accountants and the tranche types receiving the premium to the market's fixed yield shares (both fields pack into one storage slot)
+    mapping(address accountant => mapping(TrancheType trancheType => FixedYieldShare share)) public accountantToFixedYieldShare;
 
     /**
      * @notice Emitted when the fixed YDM is initialized for a market
      * @param accountant The accountant for the market that the YDM was initialized for
+     * @param trancheType The tranche type receiving the premium priced by this fixed share
      * @param fixedYieldShareWAD The fixed yield share paid at every utilization, scaled to WAD precision
      */
-    event FixedYdmInitialized(address indexed accountant, uint256 fixedYieldShareWAD);
+    event FixedYdmInitialized(address indexed accountant, TrancheType indexed trancheType, uint256 fixedYieldShareWAD);
 
     /**
      * @notice Emitted when the yield share is updated
      * @param accountant The accountant for the market that the yield share was updated for
+     * @param trancheType The tranche type receiving the premium priced by this fixed share
      * @param yieldShareWAD The yield share output (returned to the accountant)
      */
-    event YdmOutput(address indexed accountant, uint256 yieldShareWAD);
+    event YdmOutput(address indexed accountant, TrancheType indexed trancheType, uint256 yieldShareWAD);
 
     /**
-     * @notice Initializes the YDM's fixed yield share for a particular Royco market
+     * @notice Initializes the YDM's fixed yield share for a particular Royco market and tranche type
      * @dev Must be called during the initialization of the accountant for the Royco market
      * @dev A zero share is a valid configuration: the market pays no premium, and the initialized flag keeps it distinguishable from an uninitialized market
+     * @param _trancheType The tranche type receiving the premium priced by this fixed share, cannot be the senior tranche
      * @param _fixedYieldShareWAD The fixed yield share paid at every utilization, at most WAD, scaled to WAD precision
      */
-    function initializeYDMForMarket(uint64 _fixedYieldShareWAD) external {
+    function initializeYDMForMarket(TrancheType _trancheType, uint64 _fixedYieldShareWAD) external {
+        // The senior tranche pays the premiums and never receives one
+        require(_trancheType != TrancheType.SENIOR, INVALID_YDM_INITIALIZATION());
+
         // The share can never exceed the whole of the paying tranche's yield
         require(_fixedYieldShareWAD <= WAD, INVALID_YDM_INITIALIZATION());
 
-        // Initialize the YDM for the market
-        accountantToFixedYieldShare[msg.sender] = FixedYieldShare({ initialized: true, fixedYieldShareWAD: _fixedYieldShareWAD });
+        // Initialize the YDM for the market and tranche type
+        accountantToFixedYieldShare[msg.sender][_trancheType] = FixedYieldShare({ initialized: true, fixedYieldShareWAD: _fixedYieldShareWAD });
 
-        emit FixedYdmInitialized(msg.sender, _fixedYieldShareWAD);
+        emit FixedYdmInitialized(msg.sender, _trancheType, _fixedYieldShareWAD);
     }
 
     /// @inheritdoc IYDM
     /// @dev The fixed share is independent of the market state and the utilization, so both inputs are ignored
-    function previewYieldShare(MarketState, uint256) external view override(IYDM) returns (uint256 yieldShareWAD) {
-        return _yieldShare();
+    function previewYieldShare(TrancheType _trancheType, MarketState, uint256) external view override(IYDM) returns (uint256 yieldShareWAD) {
+        return _yieldShare(_trancheType);
     }
 
     /// @inheritdoc IYDM
     /// @dev The fixed share is independent of the market state and the utilization, so both inputs are ignored
-    function yieldShare(MarketState, uint256) external override(IYDM) returns (uint256 yieldShareWAD) {
-        emit YdmOutput(msg.sender, (yieldShareWAD = _yieldShare()));
+    function yieldShare(TrancheType _trancheType, MarketState, uint256) external override(IYDM) returns (uint256 yieldShareWAD) {
+        emit YdmOutput(msg.sender, _trancheType, (yieldShareWAD = _yieldShare(_trancheType)));
     }
 
-    /// @dev View helper returning the caller's fixed yield share, failing shut for an uninitialized market
-    function _yieldShare() internal view returns (uint256 yieldShareWAD) {
-        FixedYieldShare storage share = accountantToFixedYieldShare[msg.sender];
+    /// @dev View helper returning the caller's fixed yield share for the tranche type, failing shut for an uninitialized market
+    function _yieldShare(TrancheType _trancheType) internal view returns (uint256 yieldShareWAD) {
+        FixedYieldShare storage share = accountantToFixedYieldShare[msg.sender][_trancheType];
         require(share.initialized, UNINITIALIZED_YDM());
         return share.fixedYieldShareWAD;
     }

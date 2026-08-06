@@ -141,8 +141,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
      * @custom:field accountantParams - The accountant's deployer-supplied params (coverage, premiums, and state machine config)
      * @custom:field poolCreationParams - The Gyro E-CLP pool creation parameters, used to create the market's liquidity venue
      * @custom:field poolInitializationParams - The genesis liquidity the pool is seeded with once the market is wired
-     * @custom:field jtYdmType - The yield distribution model shape the junior tranche selects from the template's instances
-     * @custom:field lptYdmType - The yield distribution model shape the liquidity provider tranche selects from the template's instances
+     * @custom:field jtYdm - The junior tranche's yield distribution model, a deployer-supplied instance keying its curves per tranche type
+     * @custom:field lptYdm - The liquidity provider tranche's yield distribution model, a deployer-supplied instance that can share the junior tranche's since curves are keyed per tranche type
      * @custom:field stSelfLiquidationBonusWAD - The ST self-liquidation bonus remitted to redeeming ST LPs once the liquidation coverage threshold is breached, scaled to WAD
      * @custom:field collateralAssetOracle - The collateral asset oracle pricing one whole collateral asset in NAV units (staleness is enforced inside the oracle, per hop, via its construction immutables)
      * @custom:field sequencerUptimeFeed - The L2 sequencer uptime feed used to gate price queries (the null address when not applicable)
@@ -160,8 +160,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         AccountantDeploymentParams accountantParams;
         BalancerV3PoolCreationParams poolCreationParams;
         PoolInitializationParams poolInitializationParams;
-        string jtYdmType;
-        string lptYdmType;
+        address jtYdm;
+        address lptYdm;
         uint64 stSelfLiquidationBonusWAD;
         address collateralAssetOracle;
         address sequencerUptimeFeed;
@@ -379,9 +379,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         // Predict the kernel's proxy address.
         bytes32 kernelSalt = _marketComponentSalt(baseSalt, TAG_KERNEL_PROXY);
         address kernel = ROYCO_FACTORY.predictDeterministicAddress(kernelSalt);
-        result.ydm = jtYdmFor(params.jtYdmType);
-        result.lptYdm = lptYdmFor(params.lptYdmType);
-        require(result.ydm != result.lptYdm, YIELD_DISTRIBUTION_MODELS_NOT_DISTINCT());
+        result.ydm = params.jtYdm;
+        result.lptYdm = params.lptYdm;
 
         // Deploy the senior tranche.
         result.seniorTranche = _deployProxy(

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { TrancheType } from "../../src/interfaces/IYDM.sol";
 import { BaseAdaptiveCurveYDM } from "../../src/ydm/base/BaseAdaptiveCurveYDM.sol";
 
 /**
@@ -27,15 +28,15 @@ contract AdaptiveYieldShareAtTargetExposer is BaseAdaptiveCurveYDM {
     }
 
     /// @dev Inert curve hook, the exposer never computes a full yield share
-    function _computeYieldShare(int256, uint256 _avgYieldShareAtTargetWAD) internal view override returns (uint256) {
+    function _computeYieldShare(TrancheType, int256, uint256 _avgYieldShareAtTargetWAD) internal view override returns (uint256) {
         return _avgYieldShareAtTargetWAD;
     }
 
     /// @dev Inert read hook, the exposer holds no per-market curve state
-    function _readAdaptiveCurve() internal view override returns (uint256, uint256) {
+    function _readAdaptiveCurve(TrancheType) internal view override returns (uint256, uint256) {
         return (0, 0);
     }
 
     /// @dev Inert write hook, the exposer holds no per-market curve state
-    function _writeAdaptiveCurve(uint256, uint256) internal override { }
+    function _writeAdaptiveCurve(TrancheType, uint256, uint256) internal override { }
 }

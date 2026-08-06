@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IYDM } from "../../../src/interfaces/IYDM.sol";
 import { WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
-import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
+import { MarketState, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
@@ -1723,8 +1723,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
      */
     function test_Sync_ilRecoveryThenPremiumOnResidualWithExactYDMArgs() public {
         _seedLargeIL();
-        vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.FIXED_TERM, 0.6e18)));
-        vm.expectCall(address(lptYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.FIXED_TERM, 0.5e18)));
+        vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (TrancheType.JUNIOR, MarketState.FIXED_TERM, 0.6e18)));
+        vm.expectCall(address(lptYDM), abi.encodeCall(IYDM.previewYieldShare, (TrancheType.LIQUIDITY_PROVIDER, MarketState.FIXED_TERM, 0.5e18)));
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1350e18)));
         assertEq(toUint256(state.jtImpermanentLoss), 0, "il fully repaid first");
         assertEq(toUint256(state.jtEffectiveNAV), 315_384_615_384_615_384_615, "repayment plus the junior residual and risk premium");
@@ -1749,8 +1749,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _seedAndInitAccrual();
         jtYDM.setPreviewYieldShareReturn(0.07e18);
         lptYDM.setPreviewYieldShareReturn(0.03e18);
-        vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.PERPETUAL, 0.6e18)));
-        vm.expectCall(address(lptYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.PERPETUAL, 0.5e18)));
+        vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (TrancheType.JUNIOR, MarketState.PERPETUAL, 0.6e18)));
+        vm.expectCall(address(lptYDM), abi.encodeCall(IYDM.previewYieldShare, (TrancheType.LIQUIDITY_PROVIDER, MarketState.PERPETUAL, 0.5e18)));
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_COLLATERAL + 100e18));
         assertEq(toUint256(state.jtEffectiveNAV), 222.5e18, "jt residual plus instantaneous risk premium");
         assertEq(toUint256(state.lptLiquidityPremium), 2_499_999_999_999_999_999, "instantaneous lt liquidity premium");

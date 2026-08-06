@@ -5,16 +5,17 @@ import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { FixedYDM } from "../../../src/ydm/FixedYDM.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
+import { TrancheType } from "../../../src/libraries/Types.sol";
 import { AdaptiveCurveYDM_V1_Params, AdaptiveCurveYDM_V2_Params, FixedYDMParams, StaticCurveYDMParams, YDMType } from "../../config/DeploymentTypes.sol";
 
 /**
  * @title YDMLib
  * @notice The single home for everything that maps the script-side `YDMType` enum onto the deployed yield
- *         distribution models: the canonical registry names, the constructor args each model shape is deployed with,
- *         and the per-market initialization data encoding.
- * @dev Shared by the YDM deployment script (which instantiates the chain-wide model set) and the market deployment
- *      script (which encodes each market's curve into the accountant's initialization data) — keeping the two in one
- *      place is what guarantees a market can only reference a model shape the chain actually deploys.
+ *         distribution models: the creation code and constructor args each model shape is deployed with, and the
+ *         per-market initialization data encoding.
+ * @dev Used by the market deployment script, which deploys (or reuses) each market's model instances and encodes
+ *      each curve into the accountant's initialization data. Keeping deployment and encoding in one place is what
+ *      guarantees a market can only reference a model shape the pipeline actually deploys.
  */
 library YDMLib {
     /// @notice The protocol-wide target utilization every YDM instance is deployed at
@@ -31,13 +32,12 @@ library YDMLib {
     /// @notice Thrown when a YDM type has no deployment mapping
     error UnsupportedYDMType(YDMType ydmType);
 
-    /// @notice The canonical registry name for a model shape, shared by registration and market params
-    /// @dev The template keys its registry by name, so this is the single place the enum crosses into that namespace
-    function ydmTypeName(YDMType _ydmType) internal pure returns (string memory) {
-        if (_ydmType == YDMType.StaticCurve) return "STATIC_CURVE";
-        else if (_ydmType == YDMType.AdaptiveCurve_V1) return "ADAPTIVE_CURVE_V1";
-        else if (_ydmType == YDMType.AdaptiveCurve_V2) return "ADAPTIVE_CURVE_V2";
-        else if (_ydmType == YDMType.Fixed) return "FIXED";
+    /// @notice The creation code for a model shape
+    function ydmCreationCode(YDMType _ydmType) internal pure returns (bytes memory creationCode) {
+        if (_ydmType == YDMType.StaticCurve) return type(StaticCurveYDM).creationCode;
+        else if (_ydmType == YDMType.AdaptiveCurve_V1) return type(AdaptiveCurveYDM_V1).creationCode;
+        else if (_ydmType == YDMType.AdaptiveCurve_V2) return type(AdaptiveCurveYDM_V2).creationCode;
+        else if (_ydmType == YDMType.Fixed) return type(FixedYDM).creationCode;
         else revert UnsupportedYDMType(_ydmType);
     }
 
@@ -68,27 +68,36 @@ library YDMLib {
         }
     }
 
-    /// @notice Builds a market's YDM initialization data for its curve parameters
-    function buildYDMInitializationData(YDMType _ydmType, bytes memory _ydmSpecificParams) internal pure returns (bytes memory ydmInitializationData) {
+    /// @notice Builds a market's YDM initialization data for the curve of one premium-receiving tranche type
+    function buildYDMInitializationData(
+        TrancheType _trancheType,
+        YDMType _ydmType,
+        bytes memory _ydmSpecificParams
+    )
+        internal
+        pure
+        returns (bytes memory ydmInitializationData)
+    {
         if (_ydmType == YDMType.StaticCurve) {
             StaticCurveYDMParams memory ydmParams = abi.decode(_ydmSpecificParams, (StaticCurveYDMParams));
             ydmInitializationData = abi.encodeCall(
                 StaticCurveYDM.initializeYDMForMarket,
-                (ydmParams.yieldShareAtZeroUtilWAD, ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD)
+                (_trancheType, ydmParams.yieldShareAtZeroUtilWAD, ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD)
             );
         } else if (_ydmType == YDMType.AdaptiveCurve_V1) {
             AdaptiveCurveYDM_V1_Params memory ydmParams = abi.decode(_ydmSpecificParams, (AdaptiveCurveYDM_V1_Params));
-            ydmInitializationData =
-                abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD));
+            ydmInitializationData = abi.encodeCall(
+                AdaptiveCurveYDM_V1.initializeYDMForMarket, (_trancheType, ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD)
+            );
         } else if (_ydmType == YDMType.AdaptiveCurve_V2) {
             AdaptiveCurveYDM_V2_Params memory ydmParams = abi.decode(_ydmSpecificParams, (AdaptiveCurveYDM_V2_Params));
             ydmInitializationData = abi.encodeCall(
                 AdaptiveCurveYDM_V2.initializeYDMForMarket,
-                (ydmParams.yieldShareAtZeroUtilWAD, ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD)
+                (_trancheType, ydmParams.yieldShareAtZeroUtilWAD, ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD)
             );
         } else if (_ydmType == YDMType.Fixed) {
             FixedYDMParams memory ydmParams = abi.decode(_ydmSpecificParams, (FixedYDMParams));
-            ydmInitializationData = abi.encodeCall(FixedYDM.initializeYDMForMarket, (ydmParams.fixedYieldShareWAD));
+            ydmInitializationData = abi.encodeCall(FixedYDM.initializeYDMForMarket, (_trancheType, ydmParams.fixedYieldShareWAD));
         } else {
             revert UnsupportedYDMType(_ydmType);
         }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
-import { MarketState } from "../libraries/Types.sol";
+import { MarketState, TrancheType } from "../libraries/Types.sol";
 
 /**
  * @title IYDM - Yield Distribution Model Interface
@@ -12,6 +12,8 @@ import { MarketState } from "../libraries/Types.sol";
  * @dev At WAD utilization demand equals the pool's full capacity, demand beyond capacity is reported above WAD and capped to WAD by the model
  * @dev The premium rises with utilization so that scarcer service is paid more, pulling additional capital into the pool
  * @dev The caller computes the relevant utilization and passes it in directly, so the model is agnostic to what the utilization measures
+ * @dev Curves are keyed by the calling accountant and the tranche type receiving the premium, so one instance can serve both premium curves of a market side by side
+ * @dev The senior tranche pays the premiums and never receives one, so no curve can ever be initialized for it
  */
 interface IYDM {
     /// @dev Thrown when the initialization parameters of the YDM for a market are invalid
@@ -23,20 +25,22 @@ interface IYDM {
     /**
      * @notice Previews and returns the share of a tranche's yield to pay the capital pool as a premium at the given utilization
      * @dev Does not mutate any state
+     * @param _trancheType The tranche type receiving the premium, keying the market's curve alongside the calling accountant
      * @param _marketState The state of this Royco market (perpetual or fixed term), the curve only adapts in PERPETUAL
      * @param _utilizationWAD The utilization of the service the capital pool provides, scaled to WAD precision, the model caps it at WAD
      * @return yieldShareWAD The share of the tranche's yield paid to the capital pool as a premium, scaled to WAD precision
      *                       It is implied that (WAD - yieldShareWAD) is retained by the paying tranche, excluding any protocol fees
      */
-    function previewYieldShare(MarketState _marketState, uint256 _utilizationWAD) external view returns (uint256 yieldShareWAD);
+    function previewYieldShare(TrancheType _trancheType, MarketState _marketState, uint256 _utilizationWAD) external view returns (uint256 yieldShareWAD);
 
     /**
      * @notice Returns the share of a tranche's yield to pay the capital pool as a premium at the given utilization
      * @dev Can mutate state: the adaptive models translate their curve based on the elapsed time and utilization
+     * @param _trancheType The tranche type receiving the premium, keying the market's curve alongside the calling accountant
      * @param _marketState The state of this Royco market (perpetual or fixed term), the curve only adapts in PERPETUAL
      * @param _utilizationWAD The utilization of the service the capital pool provides, scaled to WAD precision, the model caps it at WAD
      * @return yieldShareWAD The share of the tranche's yield paid to the capital pool as a premium, scaled to WAD precision
      *                       It is implied that (WAD - yieldShareWAD) is retained by the paying tranche, excluding any protocol fees
      */
-    function yieldShare(MarketState _marketState, uint256 _utilizationWAD) external returns (uint256 yieldShareWAD);
+    function yieldShare(TrancheType _trancheType, MarketState _marketState, uint256 _utilizationWAD) external returns (uint256 yieldShareWAD);
 }

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IYDM } from "../../src/interfaces/IYDM.sol";
-import { MarketState } from "../../src/libraries/Types.sol";
+import { MarketState, TrancheType } from "../../src/libraries/Types.sol";
 
 /**
  * @title MockYDM
@@ -12,9 +12,11 @@ import { MarketState } from "../../src/libraries/Types.sol";
  *      then the per-accountant pinned share, then the global default share
  * @dev previewYieldShare is a STATICCALL from the accountant, so preview invocations cannot be recorded on-chain, only mutating
  *      calls are counted, use vm.expectCall to observe previews
- * @dev Fidelity gaps vs the production YDMs: initializeYDMForMarket accepts any curve without the monotonicity and
- *      nonzero-target validation StaticCurveYDM enforces (INVALID_YDM_INITIALIZATION), is freely re-callable, and the
- *      output is a pinned constant with no utilization dependence or adaptation
+ * @dev Fidelity gaps vs the production YDMs: initializeYDMForMarket accepts any curve without the monotonicity,
+ *      nonzero-target, and non-senior tranche type validation the production models enforce (INVALID_YDM_INITIALIZATION),
+ *      is freely re-callable, and the output is a pinned constant with no utilization dependence or adaptation
+ * @dev The tranche type is recorded on every call but does not key the resolution: output is resolved per accountant,
+ *      tests pin one instance per tranche slot when the outputs must differ
  */
 contract MockYDM is IYDM {
     /// @dev A per-accountant pinned yield share and whether it is set, so a pinned zero is distinguishable from unset
@@ -35,6 +37,9 @@ contract MockYDM is IYDM {
     /// @notice Whether initializeYDMForMarket was invoked for the accountant, recording the raw-call init path
     mapping(address accountant => bool initialized) public initializedFor;
 
+    /// @notice The tranche type passed to the last initializeYDMForMarket call per accountant
+    mapping(address accountant => TrancheType trancheType) public lastInitializedTrancheType;
+
     /// @notice The initialization parameters recorded per accountant, (yAtZero, yAtTarget, yAtFull)
     mapping(address accountant => uint64[3] curve) private _initParams;
 
@@ -46,6 +51,9 @@ contract MockYDM is IYDM {
 
     /// @dev Whether both entrypoints revert
     bool private _revertMode;
+
+    /// @notice The tranche type passed to the last mutating call
+    TrancheType public lastTrancheType;
 
     /// @notice The market state passed to the last mutating call
     MarketState public lastMarketState;
@@ -66,28 +74,31 @@ contract MockYDM is IYDM {
     /**
      * @notice Initializes this mock for the calling accountant, satisfying the accountant's raw-call init path
      * @dev Accepts any curve without validation and pins the target-utilization value as the accountant's share
+     * @param _trancheType The tranche type receiving the premium, recorded only
      * @param _yieldShareAtZeroUtilWAD The yield share at 0% utilization, recorded only
      * @param _yieldShareAtTargetWAD The yield share at target utilization, pinned as the accountant's share
      * @param _yieldShareAtFullUtilWAD The yield share at 100% utilization, recorded only
      */
-    function initializeYDMForMarket(uint64 _yieldShareAtZeroUtilWAD, uint64 _yieldShareAtTargetWAD, uint64 _yieldShareAtFullUtilWAD) external {
+    function initializeYDMForMarket(TrancheType _trancheType, uint64 _yieldShareAtZeroUtilWAD, uint64 _yieldShareAtTargetWAD, uint64 _yieldShareAtFullUtilWAD) external {
         initializedFor[msg.sender] = true;
+        lastInitializedTrancheType[msg.sender] = _trancheType;
         _initParams[msg.sender] = [_yieldShareAtZeroUtilWAD, _yieldShareAtTargetWAD, _yieldShareAtFullUtilWAD];
         _pinned[msg.sender] = PinnedShare({ isPinned: true, yieldShareWAD: _yieldShareAtTargetWAD });
     }
 
     /// @inheritdoc IYDM
     /// @dev Peeks the next script entry without consuming it, so a preview predicts what the next mutating call returns
-    function previewYieldShare(MarketState, uint256) external view override(IYDM) returns (uint256 yieldShareWAD) {
+    function previewYieldShare(TrancheType, MarketState, uint256) external view override(IYDM) returns (uint256 yieldShareWAD) {
         require(!_revertMode, YDM_REVERT_MODE());
         return _resolve(msg.sender);
     }
 
     /// @inheritdoc IYDM
-    function yieldShare(MarketState _marketState, uint256 _utilizationWAD) external override(IYDM) returns (uint256 yieldShareWAD) {
+    function yieldShare(TrancheType _trancheType, MarketState _marketState, uint256 _utilizationWAD) external override(IYDM) returns (uint256 yieldShareWAD) {
         require(!_revertMode, YDM_REVERT_MODE());
 
         // Record the mutating call
+        lastTrancheType = _trancheType;
         lastMarketState = _marketState;
         lastUtilizationWAD = _utilizationWAD;
         lastCaller = msg.sender;

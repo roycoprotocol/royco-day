@@ -34,7 +34,7 @@ import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { RoycoDayBalancerV3Kernel } from "../../src/kernels/RoycoDayBalancerV3Kernel.sol";
 import { BalancerV3LiquidityVenue } from "../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
-import { SyncedAccountingState } from "../../src/libraries/Types.sol";
+import { SyncedAccountingState, TrancheType } from "../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityProviderTranche } from "../../src/tranches/RoycoLiquidityProviderTranche.sol";
@@ -171,7 +171,7 @@ abstract contract DayMarketTestBase is Assertions {
     /// @notice The junior tranche's YDM (cast to MockYDM / StaticCurveYDM / AdaptiveCurveYDM_V2 per params.jtYdmKind)
     IYDM internal jtYdm;
 
-    /// @notice The liquidity provider tranche's YDM, always a distinct instance from jtYdm
+    /// @notice The liquidity provider tranche's YDM, a distinct instance from jtYdm by default though sharing one is legal
     IYDM internal lptYdm;
 
     // =============================
@@ -289,11 +289,11 @@ abstract contract DayMarketTestBase is Assertions {
         vm.label(address(bpt), "MockBPT");
         vm.label(address(bptOracle), "MockBPTOracle");
 
-        // 5. YDMs: always two distinct instances (the accountant reverts YDMS_CANNOT_BE_IDENTICAL)
+        // 5. YDMs: two instances by default, each initializing the curve of its own tranche type
         bytes memory jtYdmInitData;
         bytes memory lptYdmInitData;
-        (jtYdm, jtYdmInitData) = _deployYDM("JT_YDM", _params.jtYdmKind, _params.jtCurve, _params.targetUtilizationWAD);
-        (lptYdm, lptYdmInitData) = _deployYDM("LPT_YDM", _params.lptYdmKind, _params.lptCurve, _params.targetUtilizationWAD);
+        (jtYdm, jtYdmInitData) = _deployYDM("JT_YDM", TrancheType.JUNIOR, _params.jtYdmKind, _params.jtCurve, _params.targetUtilizationWAD);
+        (lptYdm, lptYdmInitData) = _deployYDM("LPT_YDM", TrancheType.LIQUIDITY_PROVIDER, _params.lptYdmKind, _params.lptCurve, _params.targetUtilizationWAD);
 
         // 6. Predict the kernel proxy address so the tranche and accountant impls can bake it into their immutables
         kernelProxyDeployer = makeAddr("KERNEL_PROXY_DEPLOYER");
@@ -694,6 +694,7 @@ abstract contract DayMarketTestBase is Assertions {
      */
     function _deployYDM(
         string memory _label,
+        TrancheType _trancheType,
         uint8 _kind,
         uint64[3] memory _curve,
         uint64 _targetUtilizationWAD
@@ -707,10 +708,10 @@ abstract contract DayMarketTestBase is Assertions {
             (ydm, initData) = (IYDM(address(mock)), bytes(""));
         } else if (_kind == 1) {
             ydm = IYDM(address(new StaticCurveYDM(_targetUtilizationWAD)));
-            initData = abi.encodeCall(StaticCurveYDM.initializeYDMForMarket, (_curve[0], _curve[1], _curve[2]));
+            initData = abi.encodeCall(StaticCurveYDM.initializeYDMForMarket, (_trancheType, _curve[0], _curve[1], _curve[2]));
         } else if (_kind == 2) {
             ydm = IYDM(address(new AdaptiveCurveYDM_V2(_targetUtilizationWAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)))));
-            initData = abi.encodeCall(AdaptiveCurveYDM_V2.initializeYDMForMarket, (_curve[0], _curve[1], _curve[2]));
+            initData = abi.encodeCall(AdaptiveCurveYDM_V2.initializeYDMForMarket, (_trancheType, _curve[0], _curve[1], _curve[2]));
         } else {
             revert("DayMarketTestBase: unknown YDM kind");
         }

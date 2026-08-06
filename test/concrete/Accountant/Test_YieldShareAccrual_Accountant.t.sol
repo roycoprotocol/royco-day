@@ -5,7 +5,7 @@ import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IYDM } from "../../../src/interfaces/IYDM.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
-import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
+import { MarketState, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 
@@ -159,8 +159,8 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         lptYDM.setRates(0.03e18);
         vm.warp(block.timestamp + 250);
         bytes32 preHash = _stateHash();
-        vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.PERPETUAL, SEED_COVERAGE_UTILIZATION_WAD)));
-        vm.expectCall(address(lptYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.PERPETUAL, SEED_LIQUIDITY_UTILIZATION_WAD)));
+        vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (TrancheType.JUNIOR, MarketState.PERPETUAL, SEED_COVERAGE_UTILIZATION_WAD)));
+        vm.expectCall(address(lptYDM), abi.encodeCall(IYDM.previewYieldShare, (TrancheType.LIQUIDITY_PROVIDER, MarketState.PERPETUAL, SEED_LIQUIDITY_UTILIZATION_WAD)));
         accountant.previewSyncTrancheAccounting(toNAVUnits(SEED_COLLATERAL));
         assertEq(_stateHash(), preHash, "preview must not mutate storage");
         assertEq(jtYDM.yieldShareCallCount(), 0, "preview must not call the mutating yieldShare");

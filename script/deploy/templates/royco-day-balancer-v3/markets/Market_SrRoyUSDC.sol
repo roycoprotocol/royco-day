@@ -42,12 +42,14 @@ abstract contract Market_SrRoyUSDC is DayMarketRegistryBase {
                 coverageLiquidationUtilizationWAD: calculateCoverageLiquidationUtilizationWAD(0.2e18, 0.02e18),
                 minLiquidityWAD: 0.5e18,
                 jtYdm: YDMSelection({
+                    deployed: address(0),
                     ydmType: YDMType.AdaptiveCurve_V2,
                     curveParams: abi.encode(
                         AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.1e18, yieldShareAtTargetUtilWAD: 0.14e18, yieldShareAtFullUtilWAD: 0.31e18 })
                     )
                 }),
                 lptYdm: YDMSelection({
+                    deployed: address(0),
                     ydmType: YDMType.AdaptiveCurve_V2,
                     curveParams: abi.encode(
                         AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.18e18, yieldShareAtTargetUtilWAD: 0.22e18, yieldShareAtFullUtilWAD: 0.31e18 })

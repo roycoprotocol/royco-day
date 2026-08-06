@@ -12,6 +12,7 @@ import { IRoycoVaultTranche } from "../../../../src/interfaces/IRoycoVaultTranch
 import { IYDM } from "../../../../src/interfaces/IYDM.sol";
 import { IBaseTemplate } from "../../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoProtocolTemplate } from "../../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
+import { TrancheType } from "../../../../src/libraries/Types.sol";
 import { toNAVUnits } from "../../../../src/libraries/Units.sol";
 import { BalancerV3PoolCreationParams } from "../../../../src/libraries/logic/liquidity-venue/BalancerV3VenueCreationLogic.sol";
 import { DeploymentResult, MarketUpstream } from "../../../config/DeploymentTypes.sol";
@@ -21,6 +22,7 @@ import { YDMLib } from "../../utils/YDMLib.sol";
 import { DayMarketRegistry } from "./DayMarketRegistry.sol";
 import { DayMarketConfig } from "./DayMarketTypes.sol";
 import { CollateralOracleDeployer } from "./DeployCollateralOracle.s.sol";
+import { YDMDeployer } from "./DeployYDM.s.sol";
 import { console2 } from "lib/forge-std/src/console2.sol";
 
 /**
@@ -33,7 +35,7 @@ import { console2 } from "lib/forge-std/src/console2.sol";
  *      lookup is baked in (the CLI wrapper resolves MARKET_NAME through the family registry). The wiring tx carries
  *      the explicit 16.7M gas stipend, deliberately just under the EIP-7825 per-transaction cap of 16,777,216.
  */
-contract DeployMarketComponent is CollateralOracleDeployer {
+contract DeployMarketComponent is CollateralOracleDeployer, YDMDeployer {
     MarketUpstream internal UP;
 
     constructor(MarketUpstream memory _up) {
@@ -57,6 +59,11 @@ contract DeployMarketComponent is CollateralOracleDeployer {
         if (_config.oracle.deployed == address(0)) {
             _config.oracle.deployed = deployCollateralOracle(_config, _marketIdSeed);
         }
+
+        // Resolve the market's yield distribution models before params are built (deployed here when the config leaves them unset)
+        // The junior and liquidity provider selections may resolve to the same instance since curves are keyed per tranche type
+        if (_config.accountant.jtYdm.deployed == address(0)) _config.accountant.jtYdm.deployed = deployYDM("JT model  ", _config.accountant.jtYdm);
+        if (_config.accountant.lptYdm.deployed == address(0)) _config.accountant.lptYdm.deployed = deployYDM("LPT model ", _config.accountant.lptYdm);
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory params = buildMarketParams(_config, _marketIdSeed, UP.factory, _deployer);
 
         // The template pulls the market's genesis pool liquidity from the account calling the factory's deployment
@@ -130,19 +137,20 @@ contract DeployMarketComponent is CollateralOracleDeployer {
         // Genesis pool liquidity, seeded by the template as a multi-asset deposit once the market is wired
         params.poolInitializationParams = _config.poolInitialization;
 
-        // The model shapes this market selects from the template's per-slot instances
-        params.jtYdmType = YDMLib.ydmTypeName(_config.accountant.jtYdm.ydmType);
-        params.lptYdmType = YDMLib.ydmTypeName(_config.accountant.lptYdm.ydmType);
+        // The market's yield distribution models, resolved (or deployed) by the pipeline and passed by address
+        params.jtYdm = _config.accountant.jtYdm.deployed;
+        params.lptYdm = _config.accountant.lptYdm.deployed;
 
-        // Accountant params. The template resolves both model instances from its registry by shape name. BOTH YDMs get
-        // initialization data so the accountant initializes each of them.
+        // Accountant params. BOTH YDM curves get initialization data so the accountant initializes each of them.
         params.accountantParams = IBaseTemplate.AccountantDeploymentParams({
             fixedTermGracePeriodSeconds: _config.accountant.fixedTermGracePeriodSeconds,
             minCoverageWAD: _config.accountant.minCoverageWAD,
             coverageLiquidationUtilizationWAD: _config.accountant.coverageLiquidationUtilizationWAD,
             minLiquidityWAD: _config.accountant.minLiquidityWAD,
-            jtYDMInitializationData: YDMLib.buildYDMInitializationData(_config.accountant.jtYdm.ydmType, _config.accountant.jtYdm.curveParams),
-            lptYDMInitializationData: YDMLib.buildYDMInitializationData(_config.accountant.lptYdm.ydmType, _config.accountant.lptYdm.curveParams),
+            jtYDMInitializationData: YDMLib.buildYDMInitializationData(TrancheType.JUNIOR, _config.accountant.jtYdm.ydmType, _config.accountant.jtYdm.curveParams),
+            lptYDMInitializationData: YDMLib.buildYDMInitializationData(
+                TrancheType.LIQUIDITY_PROVIDER, _config.accountant.lptYdm.ydmType, _config.accountant.lptYdm.curveParams
+            ),
             maxJTYieldShareWAD: _config.accountant.maxJTYieldShareWAD,
             maxLPTYieldShareWAD: _config.accountant.maxLPTYieldShareWAD,
             fixedTermDurationSeconds: _config.accountant.fixedTermDurationSeconds,

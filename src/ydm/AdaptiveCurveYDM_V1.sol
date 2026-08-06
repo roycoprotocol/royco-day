@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
+import { TrancheType } from "../interfaces/IYDM.sol";
 import { WAD, WAD_INT } from "../libraries/Constants.sol";
 import { BaseAdaptiveCurveYDM } from "./base/BaseAdaptiveCurveYDM.sol";
 
@@ -30,25 +31,29 @@ contract AdaptiveCurveYDM_V1 is BaseAdaptiveCurveYDM {
         uint160 steepnessAfterTargetWAD;
     }
 
-    /// @dev A mapping from market accountants to its market's current YDM curve
-    /// @dev The curve is adapted by market forces over time
-    mapping(address accountant => AdaptiveYieldCurve curve) public accountantToCurve;
+    /// @dev A mapping from market accountants and the tranche types receiving the premium to the market's current YDM curves
+    /// @dev The curves are adapted by market forces over time
+    mapping(address accountant => mapping(TrancheType trancheType => AdaptiveYieldCurve curve)) public accountantToCurve;
 
     /**
      * @notice Emitted when the adaptive curve YDM is initialized for a market
      * @param accountant The accountant for the market that the YDM was initialized for
+     * @param trancheType The tranche type receiving the premium priced by this curve
      * @param steepnessAfterTargetWAD The steepness of the curve for this market (ratio of yield share at 100% utilization to yield share at target), scaled to WAD precision
      * @param initialYieldShareAtTargetWAD The initial yield share at target utilization, scaled to WAD precision
      */
-    event AdaptiveCurveYdmInitialized(address indexed accountant, uint256 steepnessAfterTargetWAD, uint256 initialYieldShareAtTargetWAD);
+    event AdaptiveCurveYdmInitialized(
+        address indexed accountant, TrancheType indexed trancheType, uint256 steepnessAfterTargetWAD, uint256 initialYieldShareAtTargetWAD
+    );
 
     /**
      * @notice Emitted when the yield share is updated and the curve is adapted (in a PERPETUAL state)
      * @param accountant The accountant for the market that the yield share was updated for
+     * @param trancheType The tranche type receiving the premium priced by this curve
      * @param avgYieldShareWAD The average yield share during the period since the last adaptation (returned to the accountant)
      * @param newYieldShareAtTargetWAD The new yield share at the target utilization after applying adaptations
      */
-    event YdmAdaptedOutput(address indexed accountant, uint256 avgYieldShareWAD, uint256 newYieldShareAtTargetWAD);
+    event YdmAdaptedOutput(address indexed accountant, TrancheType indexed trancheType, uint256 avgYieldShareWAD, uint256 newYieldShareAtTargetWAD);
 
     /**
      * @notice Sets the per-instance target utilization (the kink), the bounds on the adaptive yield share at target, and the boundary adaptation speed shared by every market this YDM serves
@@ -68,24 +73,28 @@ contract AdaptiveCurveYDM_V1 is BaseAdaptiveCurveYDM {
     { }
 
     /**
-     * @notice Initializes the YDM curve for a particular Royco market
+     * @notice Initializes the YDM curve for a particular Royco market and tranche type
      * @dev Must be called during the initialization of the accountant for the Royco market
+     * @param _trancheType The tranche type receiving the premium priced by this curve, cannot be the senior tranche
      * @param _yieldShareAtTargetUtilWAD The initial yield share at target utilization, scaled to WAD precision
      * @param _yieldShareAtFullUtilWAD The initial yield share at 100% utilization, scaled to WAD precision
      */
-    function initializeYDMForMarket(uint64 _yieldShareAtTargetUtilWAD, uint64 _yieldShareAtFullUtilWAD) external {
+    function initializeYDMForMarket(TrancheType _trancheType, uint64 _yieldShareAtTargetUtilWAD, uint64 _yieldShareAtFullUtilWAD) external {
+        // The senior tranche pays the premiums and never receives one
+        require(_trancheType != TrancheType.SENIOR, INVALID_YDM_INITIALIZATION());
+
         // Ensure that the initial YDM curve is valid
         // This YDM derives its zero-utilization anchor from the steepness rather than taking it as an input which is guaranteed to be less than or equal to the yield share at target utilization, so it passes 0 to trivially clear the zero-below-target check
         _validateYDMInitialization(0, _yieldShareAtTargetUtilWAD, _yieldShareAtFullUtilWAD);
 
-        // Initialize the YDM curve for this market
-        AdaptiveYieldCurve storage curve = accountantToCurve[msg.sender];
+        // Initialize the YDM curve for this market and tranche type
+        AdaptiveYieldCurve storage curve = accountantToCurve[msg.sender][_trancheType];
         curve.yieldShareAtTargetWAD = _yieldShareAtTargetUtilWAD;
         curve.steepnessAfterTargetWAD = uint160((_yieldShareAtFullUtilWAD * WAD) / _yieldShareAtTargetUtilWAD);
         // Ensure that the last adaptation timestamp is zero on initialization: only pertains to reinitialization
-        delete accountantToCurve[msg.sender].lastAdaptationTimestamp;
+        delete accountantToCurve[msg.sender][_trancheType].lastAdaptationTimestamp;
 
-        emit AdaptiveCurveYdmInitialized(msg.sender, curve.steepnessAfterTargetWAD, _yieldShareAtTargetUtilWAD);
+        emit AdaptiveCurveYdmInitialized(msg.sender, _trancheType, curve.steepnessAfterTargetWAD, _yieldShareAtTargetUtilWAD);
     }
 
     /**
@@ -116,14 +125,18 @@ contract AdaptiveCurveYDM_V1 is BaseAdaptiveCurveYDM {
      * Steepness (S) is fixed at initialization and determines the curve's shape (ratio between yield share target and full utilization)
      * Y_T is the single adaptive parameter that shifts the curve vertically in response to market forces
      */
-    function _computeYieldShare(int256 _normalizedDeltaFromTargetWAD, uint256 _avgYieldShareAtTargetWAD)
+    function _computeYieldShare(
+        TrancheType _trancheType,
+        int256 _normalizedDeltaFromTargetWAD,
+        uint256 _avgYieldShareAtTargetWAD
+    )
         internal
         view
         override
         returns (uint256 yieldShareWAD)
     {
         // Compute the coefficient based on the region of the curve that the market is currently in
-        int256 steepnessWAD = int256(uint256(accountantToCurve[msg.sender].steepnessAfterTargetWAD));
+        int256 steepnessWAD = int256(uint256(accountantToCurve[msg.sender][_trancheType].steepnessAfterTargetWAD));
         int256 coefficient = (_normalizedDeltaFromTargetWAD < 0)
             ? (WAD_INT - ((WAD_INT ** 2) / steepnessWAD))  // 1 - 1/S if below the target utilization
             : (steepnessWAD - WAD_INT); // S - 1 if at or above the target utilization
@@ -133,18 +146,18 @@ contract AdaptiveCurveYDM_V1 is BaseAdaptiveCurveYDM {
     }
 
     /// @inheritdoc BaseAdaptiveCurveYDM
-    function _readAdaptiveCurve() internal view override returns (uint256 yieldShareAtTargetWAD, uint256 lastAdaptationTimestamp) {
-        AdaptiveYieldCurve storage curve = accountantToCurve[msg.sender];
+    function _readAdaptiveCurve(TrancheType _trancheType) internal view override returns (uint256 yieldShareAtTargetWAD, uint256 lastAdaptationTimestamp) {
+        AdaptiveYieldCurve storage curve = accountantToCurve[msg.sender][_trancheType];
         return (curve.yieldShareAtTargetWAD, curve.lastAdaptationTimestamp);
     }
 
     /// @inheritdoc BaseAdaptiveCurveYDM
-    function _writeAdaptiveCurve(uint256 _newYieldShareAtTargetWAD, uint256 _yieldShareWAD) internal override {
+    function _writeAdaptiveCurve(TrancheType _trancheType, uint256 _newYieldShareAtTargetWAD, uint256 _yieldShareWAD) internal override {
         // Apply the adaptations to the curve
-        AdaptiveYieldCurve storage curve = accountantToCurve[msg.sender];
+        AdaptiveYieldCurve storage curve = accountantToCurve[msg.sender][_trancheType];
         curve.yieldShareAtTargetWAD = uint64(_newYieldShareAtTargetWAD);
         curve.lastAdaptationTimestamp = uint32(block.timestamp);
 
-        emit YdmAdaptedOutput(msg.sender, _yieldShareWAD, _newYieldShareAtTargetWAD);
+        emit YdmAdaptedOutput(msg.sender, _trancheType, _yieldShareWAD, _newYieldShareAtTargetWAD);
     }
 }

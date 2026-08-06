@@ -5,7 +5,6 @@ import { DayMarketRegistry } from "../../script/deploy/templates/royco-day-balan
 import { DeployImplementationsComponent } from "../../script/deploy/templates/royco-day-balancer-v3/DeployImplementations.s.sol";
 import { DeployMarketComponent } from "../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { DeployTemplateComponent } from "../../script/deploy/templates/royco-day-balancer-v3/DeployTemplate.s.sol";
-import { DeployYDMsComponent } from "../../script/deploy/templates/royco-day-balancer-v3/DeployYDMs.s.sol";
 import { ImplementationSet, MarketUpstream, TemplateUpstream } from "../../script/config/DeploymentTypes.sol";
 import { RoycoAccessManager } from "../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
@@ -15,20 +14,17 @@ import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../src/factory/te
  * @title TemplateScaffold
  * @notice Stands up the Day template family for the direct-template fork suites — the suites that hand-build a
  *         factory via `FactoryScaffold` and then drive `executeMarketDeployment` themselves. Composes the REAL
- *         per-component deploy scripts (implementations -> template -> YDM registry -> market param builder) against
- *         the caller's scaffolded factory, replacing the old monolith's `deployTemplateForTest` /
- *         `registerYieldDistributionModelsForTest` / `buildMarketParams` surface.
- * @dev `standUp` does NOT register the YDM models: the caller binds `setYieldDistributionModels` to
- *      ADMIN_FACTORY_ROLE (the production binding), grants that role to `result.ydms`, and calls
- *      `result.ydms.registerModels()` — mirroring the auth choreography these suites assert on. Everything deployed
- *      here is CREATE2/CREATE3-idempotent per (chain, factory).
+ *         per-component deploy scripts (implementations -> template -> market param builder) against the caller's
+ *         scaffolded factory, replacing the old monolith's `deployTemplateForTest` / `buildMarketParams` surface.
+ * @dev The yield distribution models are NOT template state: the market component deploys (or reuses) each market's
+ *      model instances from its config selections and passes them by address in the market params. Everything
+ *      deployed here is CREATE2/CREATE3-idempotent per (chain, factory).
  */
 library TemplateScaffold {
     struct Result {
         DayMarketRegistry registry;
         ImplementationSet impls;
         RoycoDayBalancerV3MarketDeploymentTemplate template;
-        DeployYDMsComponent ydms;
         DeployMarketComponent market;
     }
 
@@ -40,7 +36,6 @@ library TemplateScaffold {
         r.impls = implsComponent.deployImplementationSet();
 
         r.template = RoycoDayBalancerV3MarketDeploymentTemplate(deployTemplateFor(_am, _factory, _roycoBlacklist, r.impls));
-        r.ydms = new DeployYDMsComponent(address(r.template));
 
         // The market component here is only the param builder + oracle deployer for these suites — they execute the
         // factory call themselves, so the periphery upstream legs are deliberately unset

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { TrancheType } from "../../src/interfaces/IYDM.sol";
 import { WAD_INT } from "../../src/libraries/Constants.sol";
 import { BaseAdaptiveCurveYDM } from "../../src/ydm/base/BaseAdaptiveCurveYDM.sol";
 
@@ -13,6 +14,8 @@ import { BaseAdaptiveCurveYDM } from "../../src/ydm/base/BaseAdaptiveCurveYDM.so
  *      recovers it as int256(output) - WAD_INT, making the base's region normalization directly observable
  * @dev Per-market curve state is keyed by the calling accountant and freely seedable, including the last
  *      adaptation timestamp, so elapsed-time adaptation paths are drivable without a prior mutating call
+ * @dev The curve hooks ignore the tranche type: the base engine under test only threads it through, so one
+ *      shared curve per market keeps the harness minimal
  */
 contract EchoAdaptiveCurveYDM is BaseAdaptiveCurveYDM {
     /// @notice Selects which curve hook input the output echoes
@@ -60,7 +63,7 @@ contract EchoAdaptiveCurveYDM is BaseAdaptiveCurveYDM {
     }
 
     /// @dev Echoes the selected curve hook input, shifting the signed normalized delta into unsigned range
-    function _computeYieldShare(int256 _normalizedDeltaFromTargetWAD, uint256 _avgYieldShareAtTargetWAD) internal view override returns (uint256) {
+    function _computeYieldShare(TrancheType, int256 _normalizedDeltaFromTargetWAD, uint256 _avgYieldShareAtTargetWAD) internal view override returns (uint256) {
         if (echoMode == EchoMode.NORMALIZED_DELTA_SHIFTED) {
             // The normalized delta lies in [-WAD, WAD], so the shifted value lies in [0, 2 * WAD]
             // forge-lint: disable-next-line(unsafe-typecast)
@@ -69,11 +72,11 @@ contract EchoAdaptiveCurveYDM is BaseAdaptiveCurveYDM {
         return _avgYieldShareAtTargetWAD;
     }
 
-    function _readAdaptiveCurve() internal view override returns (uint256 yieldShareAtTargetWAD, uint256 lastAdaptationTs) {
+    function _readAdaptiveCurve(TrancheType) internal view override returns (uint256 yieldShareAtTargetWAD, uint256 lastAdaptationTs) {
         return (yieldShareAtTarget[msg.sender], lastAdaptationTimestamp[msg.sender]);
     }
 
-    function _writeAdaptiveCurve(uint256 _newYieldShareAtTargetWAD, uint256 _yieldShareWAD) internal override {
+    function _writeAdaptiveCurve(TrancheType, uint256 _newYieldShareAtTargetWAD, uint256 _yieldShareWAD) internal override {
         yieldShareAtTarget[msg.sender] = _newYieldShareAtTargetWAD;
         lastAdaptationTimestamp[msg.sender] = block.timestamp;
         lastWrittenYieldShare[msg.sender] = _yieldShareWAD;

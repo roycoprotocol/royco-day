@@ -8,7 +8,7 @@ import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { console2 } from "../../lib/forge-std/src/console2.sol";
 
 import { WAD } from "../../src/libraries/Constants.sol";
-import { MarketState } from "../../src/libraries/Types.sol";
+import { MarketState, TrancheType } from "../../src/libraries/Types.sol";
 import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { FixedYDM } from "../../src/ydm/FixedYDM.sol";
@@ -21,7 +21,9 @@ import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
  *      utilization, market state, elapsed time, and reinitialization.
  *
  * Each Handler IS the accountant: it deploys and initializes its own model in its constructor (msg.sender == handler),
- * so the model keys all per-market storage off the handler address. The fuzzer drives the handler's four actions:
+ * so the model keys all per-market storage off the handler address. Curves are keyed per tranche type since the
+ * refactor: every handler pins TrancheType.JUNIOR as the canonical premium-receiving type, the per-type keying
+ * itself is exercised by the isolation fuzz tests in test/fuzz/YDM. The fuzzer drives the handler's four actions:
  *   - pokeYieldShare(util, stateSeed): the mutating IYDM.yieldShare path over RAW uint256 util + a MarketState from the seed
  *   - previewOnly(util, stateSeed):    the view IYDM.previewYieldShare path
  *   - warp(secs):                       advance time up to ~50 years so the adaptive engine actually adapts
@@ -87,12 +89,12 @@ contract StaticYDMHandler is BaseYDMHandler {
     constructor(uint256 _targetWAD) {
         model = new StaticCurveYDM(_targetWAD);
         // Flat init: y0 == yT == yFull => both slopes are 0, so it initializes for ANY target in (0, WAD) with no SafeCast overflow.
-        model.initializeYDMForMarket(1e17, 1e17, 1e17);
+        model.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 1e17, 1e17);
     }
 
     function pokeYieldShare(uint256 _util, uint8 _stateSeed) external {
         ghost_yieldShareCalls++;
-        try model.yieldShare(_state(_stateSeed), _util) returns (uint256 ys) {
+        try model.yieldShare(TrancheType.JUNIOR, _state(_stateSeed), _util) returns (uint256 ys) {
             _record(ys);
         } catch {
             everReverted = true;
@@ -101,7 +103,7 @@ contract StaticYDMHandler is BaseYDMHandler {
 
     function previewOnly(uint256 _util, uint8 _stateSeed) external {
         ghost_previewCalls++;
-        try model.previewYieldShare(_state(_stateSeed), _util) returns (uint256 ys) {
+        try model.previewYieldShare(TrancheType.JUNIOR, _state(_stateSeed), _util) returns (uint256 ys) {
             _record(ys);
         } catch {
             everReverted = true;
@@ -122,7 +124,7 @@ contract StaticYDMHandler is BaseYDMHandler {
         uint256 yFullHi = yT + aboveCap > WAD ? WAD : yT + aboveCap;
         uint256 yFull = bound(uint256(_yFullSeed), yT, yFullHi);
 
-        try model.initializeYDMForMarket(uint64(y0), uint64(yT), uint64(yFull)) { }
+        try model.initializeYDMForMarket(TrancheType.JUNIOR, uint64(y0), uint64(yT), uint64(yFull)) { }
         catch {
             everReverted = true;
         }
@@ -142,12 +144,12 @@ contract AdaptiveV1Handler is BaseYDMHandler {
     constructor(uint256 _targetWAD) {
         model = new AdaptiveCurveYDM_V1(_targetWAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         // Valid V1 init for any target: yT in [1e14, WAD], yT <= yFull <= WAD.
-        model.initializeYDMForMarket(1e17, 8e17);
+        model.initializeYDMForMarket(TrancheType.JUNIOR, 1e17, 8e17);
     }
 
     function pokeYieldShare(uint256 _util, uint8 _stateSeed) external {
         ghost_yieldShareCalls++;
-        try model.yieldShare(_state(_stateSeed), _util) returns (uint256 ys) {
+        try model.yieldShare(TrancheType.JUNIOR, _state(_stateSeed), _util) returns (uint256 ys) {
             _record(ys);
         } catch {
             everReverted = true;
@@ -156,7 +158,7 @@ contract AdaptiveV1Handler is BaseYDMHandler {
 
     function previewOnly(uint256 _util, uint8 _stateSeed) external {
         ghost_previewCalls++;
-        try model.previewYieldShare(_state(_stateSeed), _util) returns (uint256 ys) {
+        try model.previewYieldShare(TrancheType.JUNIOR, _state(_stateSeed), _util) returns (uint256 ys) {
             _record(ys);
         } catch {
             everReverted = true;
@@ -168,7 +170,7 @@ contract AdaptiveV1Handler is BaseYDMHandler {
         ghost_reinitCalls++;
         uint256 yT = bound(uint256(_yTSeed), MIN_YT, WAD);
         uint256 yFull = bound(uint256(_yFullSeed), yT, WAD);
-        try model.initializeYDMForMarket(uint64(yT), uint64(yFull)) { }
+        try model.initializeYDMForMarket(TrancheType.JUNIOR, uint64(yT), uint64(yFull)) { }
         catch {
             everReverted = true;
         }
@@ -176,7 +178,7 @@ contract AdaptiveV1Handler is BaseYDMHandler {
 
     /// @dev Reads the stored yield share at target for this handler's market (element 0 of the curve struct).
     function storedYieldShareAtTargetWAD() external view returns (uint256 yTWAD) {
-        (yTWAD,,) = model.accountantToCurve(address(this));
+        (yTWAD,,) = model.accountantToCurve(address(this), TrancheType.JUNIOR);
     }
 }
 
@@ -192,12 +194,12 @@ contract AdaptiveV2Handler is BaseYDMHandler {
     constructor(uint256 _targetWAD) {
         model = new AdaptiveCurveYDM_V2(_targetWAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         // Valid V2 init for any target: y0 <= yT, yT >= 1e14, yT <= yFull <= WAD.
-        model.initializeYDMForMarket(0, 1e17, 8e17);
+        model.initializeYDMForMarket(TrancheType.JUNIOR, 0, 1e17, 8e17);
     }
 
     function pokeYieldShare(uint256 _util, uint8 _stateSeed) external {
         ghost_yieldShareCalls++;
-        try model.yieldShare(_state(_stateSeed), _util) returns (uint256 ys) {
+        try model.yieldShare(TrancheType.JUNIOR, _state(_stateSeed), _util) returns (uint256 ys) {
             _record(ys);
         } catch {
             everReverted = true;
@@ -206,7 +208,7 @@ contract AdaptiveV2Handler is BaseYDMHandler {
 
     function previewOnly(uint256 _util, uint8 _stateSeed) external {
         ghost_previewCalls++;
-        try model.previewYieldShare(_state(_stateSeed), _util) returns (uint256 ys) {
+        try model.previewYieldShare(TrancheType.JUNIOR, _state(_stateSeed), _util) returns (uint256 ys) {
             _record(ys);
         } catch {
             everReverted = true;
@@ -219,7 +221,7 @@ contract AdaptiveV2Handler is BaseYDMHandler {
         uint256 yT = bound(uint256(_yTSeed), MIN_YT, WAD);
         uint256 y0 = bound(uint256(_y0Seed), 0, yT);
         uint256 yFull = bound(uint256(_yFullSeed), yT, WAD);
-        try model.initializeYDMForMarket(uint64(y0), uint64(yT), uint64(yFull)) { }
+        try model.initializeYDMForMarket(TrancheType.JUNIOR, uint64(y0), uint64(yT), uint64(yFull)) { }
         catch {
             everReverted = true;
         }
@@ -227,7 +229,7 @@ contract AdaptiveV2Handler is BaseYDMHandler {
 
     /// @dev Reads the stored yield share at target for this handler's market (element 0 of the curve struct).
     function storedYieldShareAtTargetWAD() external view returns (uint256 yTWAD) {
-        (yTWAD,,,) = model.accountantToCurve(address(this));
+        (yTWAD,,,) = model.accountantToCurve(address(this), TrancheType.JUNIOR);
     }
 }
 
@@ -478,13 +480,13 @@ contract FixedYDMHandler is BaseYDMHandler {
     /// @dev Deploys the model and seeds the reference share, zero included in the reinit sweep below.
     constructor(uint64 _initialShareWAD) {
         model = new FixedYDM();
-        model.initializeYDMForMarket(_initialShareWAD);
+        model.initializeYDMForMarket(TrancheType.JUNIOR, _initialShareWAD);
         ghost_configuredShareWAD = _initialShareWAD;
     }
 
     function pokeYieldShare(uint256 _util, uint8 _stateSeed) external {
         ghost_yieldShareCalls++;
-        try model.yieldShare(_state(_stateSeed), _util) returns (uint256 ys) {
+        try model.yieldShare(TrancheType.JUNIOR, _state(_stateSeed), _util) returns (uint256 ys) {
             _record(ys);
             if (ys != ghost_configuredShareWAD) everMismatched = true;
         } catch {
@@ -494,7 +496,7 @@ contract FixedYDMHandler is BaseYDMHandler {
 
     function previewOnly(uint256 _util, uint8 _stateSeed) external {
         ghost_previewCalls++;
-        try model.previewYieldShare(_state(_stateSeed), _util) returns (uint256 ys) {
+        try model.previewYieldShare(TrancheType.JUNIOR, _state(_stateSeed), _util) returns (uint256 ys) {
             _record(ys);
             if (ys != ghost_configuredShareWAD) everMismatched = true;
         } catch {
@@ -506,7 +508,7 @@ contract FixedYDMHandler is BaseYDMHandler {
     function reinit(uint64 _shareSeed) external {
         ghost_reinitCalls++;
         uint64 share = uint64(bound(uint256(_shareSeed), 0, WAD));
-        try model.initializeYDMForMarket(share) {
+        try model.initializeYDMForMarket(TrancheType.JUNIOR, share) {
             ghost_configuredShareWAD = share;
         } catch {
             everReverted = true;

@@ -44,7 +44,7 @@ contract ApplyRoleGraphComponent is DeployScriptBase, RoleGraphConfig {
         if (_factoryAdmin != _deployer) am.grantRole(ADMIN_ROLE, _factoryAdmin, _factoryAdminDelay);
 
         // The deployer needs ADMIN_FACTORY_ROLE for the bootstrap's admin-gated steps (registerTemplate, the
-        // template's configuration-surface bindings, YDM registration); market deployment itself is PUBLIC.
+        // template's configuration-surface bindings); market deployment itself is PUBLIC.
         am.grantRole(ADMIN_FACTORY_ROLE, _deployer, 0);
 
         // Pass 1: grant every assignment WHILE each role's admin is still ADMIN_ROLE (role 0), which the deployer holds.

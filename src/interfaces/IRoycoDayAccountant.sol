@@ -16,9 +16,9 @@ interface IRoycoDayAccountant {
      * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity provider tranche's market making inventory, scaled to WAD precision
      * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
-     * @custom:field jtYDMInitializationData - The data used to initialize the JT YDM for this market
-     * @custom:field lptYDM - The liquidity provider tranche's Yield Distribution Model (LPT YDM), responsible for determining the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche
-     * @custom:field lptYDMInitializationData - The data used to initialize the LPT YDM for this market
+     * @custom:field jtYDMInitializationData - The data used to initialize the JT YDM's junior tranche curve for this market
+     * @custom:field lptYDM - The liquidity provider tranche's Yield Distribution Model (LPT YDM), responsible for determining the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche, can share an instance with the JT YDM since curves are keyed per tranche type
+     * @custom:field lptYDMInitializationData - The data used to initialize the LPT YDM's liquidity provider tranche curve for this market
      * @custom:field maxJTYieldShareWAD - The maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
      * @custom:field maxLPTYieldShareWAD - The maximum LPT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
@@ -74,7 +74,7 @@ interface IRoycoDayAccountant {
      * @custom:field lastPremiumPaymentTimestamp - The timestamp at which the last premium payments occurred (the risk and liquidity premiums are always paid together)
      * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
      * @custom:field maxJTYieldShareWAD - The maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
-     * @custom:field lptYDM - The liquidity provider tranche's Yield Distribution Model (LPT YDM), responsible for determining the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche
+     * @custom:field lptYDM - The liquidity provider tranche's Yield Distribution Model (LPT YDM), responsible for determining the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche, can share an instance with the JT YDM since curves are keyed per tranche type
      * @custom:field maxLPTYieldShareWAD - The maximum LPT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (JT YDM output) since the last premium payment, scaled to WAD precision
      * @custom:field twLPTYieldShareAccruedWAD - The time-weighted liquidity provider tranche yield share (LPT YDM output) since the last premium payment, scaled to WAD precision
@@ -214,9 +214,6 @@ interface IRoycoDayAccountant {
     /// @notice Thrown when the configured protocol fee exceeds the maximum
     error MAX_PROTOCOL_FEE_EXCEEDED();
 
-    /// @notice Thrown when the junior and liquidity provider tranche YDMs are identical
-    error YDMS_CANNOT_BE_IDENTICAL();
-
     /// @notice Thrown when the collateral NAV doesn't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();
 
@@ -311,16 +308,16 @@ interface IRoycoDayAccountant {
     /**
      * @notice Updates the JT YDM (Junior Tranche Yield Distribution Model) for this market
      * @dev Only callable by a designated admin
-     * @param _jtYDM The new JT YDM address to set
-     * @param _jtYDMInitializationData The data used to initialize the new JT YDM for this market
+     * @param _jtYDM The new JT YDM address to set, can share an instance with the LPT YDM since curves are keyed per tranche type
+     * @param _jtYDMInitializationData The data used to initialize the new JT YDM's junior tranche curve for this market
      */
     function setJuniorTrancheYDM(address _jtYDM, bytes calldata _jtYDMInitializationData) external;
 
     /**
      * @notice Updates the LPT YDM (Liquidity Provider Tranche Yield Distribution Model) for this market
      * @dev Only callable by a designated admin
-     * @param _lptYDM The new LPT YDM address to set
-     * @param _lptYDMInitializationData The data used to initialize the new LPT YDM for this market
+     * @param _lptYDM The new LPT YDM address to set, can share an instance with the JT YDM since curves are keyed per tranche type
+     * @param _lptYDMInitializationData The data used to initialize the new LPT YDM's liquidity provider tranche curve for this market
      */
     function setLiquidityProviderTrancheYDM(address _lptYDM, bytes calldata _lptYDMInitializationData) external;
 

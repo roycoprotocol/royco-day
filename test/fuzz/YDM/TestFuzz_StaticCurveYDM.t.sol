@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
-import { MarketState } from "../../../src/libraries/Types.sol";
+import { MarketState, TrancheType } from "../../../src/libraries/Types.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
@@ -48,10 +48,10 @@ contract TestFuzz_YieldShare_StaticCurveYDM is Test {
         yFull = yT + bound(_riseGte, 0, riseGteMax); // uniform over the feasible above-kink rises incl. the flat edge
     }
 
-    /// @notice Deploys a static curve at the given kink and initializes it with this test as the market accountant
-    function _deployCurve(uint256 _targetU, uint256 _y0, uint256 _yT, uint256 _yFull) internal returns (StaticCurveYDM ydm) {
+    /// @notice Deploys a static curve at the given kink and initializes the given tranche type's curve with this test as the market accountant
+    function _deployCurve(TrancheType _trancheType, uint256 _targetU, uint256 _y0, uint256 _yT, uint256 _yFull) internal returns (StaticCurveYDM ydm) {
         ydm = new StaticCurveYDM(_targetU);
-        ydm.initializeYDMForMarket(uint64(_y0), uint64(_yT), uint64(_yFull));
+        ydm.initializeYDMForMarket(_trancheType, uint64(_y0), uint64(_yT), uint64(_yFull));
     }
 
     /**
@@ -72,16 +72,16 @@ contract TestFuzz_YieldShare_StaticCurveYDM is Test {
         (uint256 targetU, uint256 y0, uint256 yT, uint256 yFull) = _boundCurve(_targetU, _yT, _riseLt, _riseGte);
         uint256 u = bound(_u, 0, 2 * WAD); // half the mass below 100% (spanning the kink), half in the over-capacity region
 
-        StaticCurveYDM ydm = _deployCurve(targetU, y0, yT, yFull);
+        StaticCurveYDM ydm = _deployCurve(TrancheType.JUNIOR, targetU, y0, yT, yFull);
 
-        uint256 preview = ydm.previewYieldShare(MarketState.PERPETUAL, u);
+        uint256 preview = ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u);
         assertEq(preview, RoycoTestMath.staticCurveYieldShare(u, y0, yT, yFull, targetU), "static curve output must equal the independent mirror exactly");
 
         // A static curve reads identically in both market states (nothing adapts, so nothing is state-dependent)
-        assertEq(ydm.previewYieldShare(MarketState.FIXED_TERM, u), preview, "market state must not change a static curve's output");
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.FIXED_TERM, u), preview, "market state must not change a static curve's output");
 
         // The mutating call only emits an event, so it must return exactly what the preview promised
-        assertEq(ydm.yieldShare(MarketState.PERPETUAL, u), preview, "mutating call must return the previewed share");
+        assertEq(ydm.yieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u), preview, "mutating call must return the previewed share");
 
         // The share paid can never exceed the whole of the paying tranche's yield
         assertLe(preview, WAD, "yield share must never exceed 100%");
@@ -108,11 +108,11 @@ contract TestFuzz_YieldShare_StaticCurveYDM is Test {
         uint256 uHi = bound(_uHi, 0, 2 * WAD); // ordered below, so every pair (incl. equal points) is exercised
         if (uLo > uHi) (uLo, uHi) = (uHi, uLo);
 
-        StaticCurveYDM ydm = _deployCurve(targetU, y0, yT, yFull);
+        StaticCurveYDM ydm = _deployCurve(TrancheType.JUNIOR, targetU, y0, yT, yFull);
 
         assertLe(
-            ydm.previewYieldShare(MarketState.PERPETUAL, uLo),
-            ydm.previewYieldShare(MarketState.PERPETUAL, uHi),
+            ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, uLo),
+            ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, uHi),
             "a higher utilization must never be paid a smaller yield share"
         );
     }
@@ -126,11 +126,54 @@ contract TestFuzz_YieldShare_StaticCurveYDM is Test {
         (uint256 targetU, uint256 y0, uint256 yT, uint256 yFull) = _boundCurve(_targetU, _yT, _riseLt, _riseGte);
         uint256 u = bound(_u, WAD, type(uint256).max); // the entire over-capacity range up to the absolute maximum input
 
-        StaticCurveYDM ydm = _deployCurve(targetU, y0, yT, yFull);
+        StaticCurveYDM ydm = _deployCurve(TrancheType.JUNIOR, targetU, y0, yT, yFull);
 
-        uint256 atFull = ydm.previewYieldShare(MarketState.PERPETUAL, WAD);
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, u), atFull, "over-capacity utilization must saturate at the 100% output");
+        uint256 atFull = ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, WAD);
+        assertEq(ydm.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u), atFull, "over-capacity utilization must saturate at the 100% output");
         assertEq(atFull, RoycoTestMath.staticCurveYieldShare(WAD, y0, yT, yFull, targetU), "the 100% output must equal the independent mirror exactly");
         assertLe(atFull, WAD, "yield share must never exceed 100%");
+    }
+
+    /**
+     * Property: one instance serves the junior and LP curves side by side without cross-talk. Each tranche
+     * type's curve is initialized with its own independently fuzzed parameters on a single shared instance,
+     * and each preview must equal the output of a reference instance holding only that curve, so per-type
+     * keying isolates the curves exactly
+     */
+    function testFuzz_StaticCurve_SharedInstanceServesJuniorAndLpCurvesInIsolation(
+        uint256 _targetU,
+        uint256 _yTJunior,
+        uint256 _riseLtJunior,
+        uint256 _riseGteJunior,
+        uint256 _yTLp,
+        uint256 _riseLtLp,
+        uint256 _riseGteLp,
+        uint256 _u
+    )
+        public
+    {
+        // Both curves share the instance's kink (a constructor immutable), so bound each param tuple around the
+        // same target seed (bound is deterministic, both calls land on the identical kink)
+        (uint256 targetU, uint256 y0J, uint256 yTJ, uint256 yFullJ) = _boundCurve(_targetU, _yTJunior, _riseLtJunior, _riseGteJunior);
+        (, uint256 y0L, uint256 yTL, uint256 yFullL) = _boundCurve(_targetU, _yTLp, _riseLtLp, _riseGteLp);
+        uint256 u = bound(_u, 0, 2 * WAD); // half the mass below 100% (spanning the kink), half in the over-capacity region
+
+        // One shared instance with both curves, plus a single-curve reference instance per tranche type
+        StaticCurveYDM shared = new StaticCurveYDM(targetU);
+        shared.initializeYDMForMarket(TrancheType.JUNIOR, uint64(y0J), uint64(yTJ), uint64(yFullJ));
+        shared.initializeYDMForMarket(TrancheType.LIQUIDITY_PROVIDER, uint64(y0L), uint64(yTL), uint64(yFullL));
+        StaticCurveYDM refJunior = _deployCurve(TrancheType.JUNIOR, targetU, y0J, yTJ, yFullJ);
+        StaticCurveYDM refLp = _deployCurve(TrancheType.LIQUIDITY_PROVIDER, targetU, y0L, yTL, yFullL);
+
+        assertEq(
+            shared.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u),
+            refJunior.previewYieldShare(TrancheType.JUNIOR, MarketState.PERPETUAL, u),
+            "the junior curve on the shared instance must read exactly as if it were the only curve"
+        );
+        assertEq(
+            shared.previewYieldShare(TrancheType.LIQUIDITY_PROVIDER, MarketState.PERPETUAL, u),
+            refLp.previewYieldShare(TrancheType.LIQUIDITY_PROVIDER, MarketState.PERPETUAL, u),
+            "the LP curve on the shared instance must read exactly as if it were the only curve"
+        );
     }
 }

@@ -12,7 +12,7 @@ import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.s
 import { ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { RoycoDayBalancerV3Kernel } from "../../../src/kernels/RoycoDayBalancerV3Kernel.sol";
-import { AssetClaims } from "../../../src/libraries/Types.sol";
+import { AssetClaims, TrancheType } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityProviderTranche } from "../../../src/tranches/RoycoLiquidityProviderTranche.sol";
@@ -278,11 +278,11 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         bpt = new MockBPT(IVault(address(balancerVault)), "Royco BPT", "rBPT");
         bptOracle = new MockBPTOracle(balancerVault, address(bpt));
 
-        // YDMs: always two distinct instances (the accountant rejects identical YDMs)
+        // YDMs: two instances by default, each initializing the curve of its own tranche type
         bytes memory jtYdmInitData;
         bytes memory lptYdmInitData;
-        (jtYdm, jtYdmInitData) = _deployYDM("JT_YDM", params.jtYdmKind, params.jtCurve, params.targetUtilizationWAD);
-        (lptYdm, lptYdmInitData) = _deployYDM("LPT_YDM", params.lptYdmKind, params.lptCurve, params.targetUtilizationWAD);
+        (jtYdm, jtYdmInitData) = _deployYDM("JT_YDM", TrancheType.JUNIOR, params.jtYdmKind, params.jtCurve, params.targetUtilizationWAD);
+        (lptYdm, lptYdmInitData) = _deployYDM("LPT_YDM", TrancheType.LIQUIDITY_PROVIDER, params.lptYdmKind, params.lptCurve, params.targetUtilizationWAD);
 
         // Predict the kernel proxy address so the tranche and accountant impls can bake it into their immutables
         kernelProxyDeployer = makeAddr("KERNEL_PROXY_DEPLOYER");

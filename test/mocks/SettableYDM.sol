@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IYDM } from "../../src/interfaces/IYDM.sol";
-import { MarketState } from "../../src/libraries/Types.sol";
+import { MarketState, TrancheType } from "../../src/libraries/Types.sol";
 
 /// @title SettableYDM
 /// @notice Minimal yield distribution model whose output is a single settable storage value on both entrypoints
@@ -16,12 +16,12 @@ contract SettableYDM is IYDM {
     }
 
     /// @inheritdoc IYDM
-    function previewYieldShare(MarketState, uint256) external view override(IYDM) returns (uint256) {
+    function previewYieldShare(TrancheType, MarketState, uint256) external view override(IYDM) returns (uint256) {
         return yieldShareWAD;
     }
 
     /// @inheritdoc IYDM
-    function yieldShare(MarketState, uint256) external view override(IYDM) returns (uint256) {
+    function yieldShare(TrancheType, MarketState, uint256) external view override(IYDM) returns (uint256) {
         return yieldShareWAD;
     }
 }

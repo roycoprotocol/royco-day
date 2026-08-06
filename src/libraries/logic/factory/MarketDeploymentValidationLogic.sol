@@ -42,9 +42,6 @@ library MarketDeploymentValidationLogic {
     /// @notice Thrown when a market is deployed without genesis pool liquidity
     error POOL_SEED_REQUIRED();
 
-    /// @notice Thrown when a tranche selects its yield distribution model shape under an empty name
-    error EMPTY_YDM_TYPE();
-
     /// @notice Thrown when a yield distribution model is handed an empty initialization blob
     error EMPTY_YDM_INITIALIZATION_DATA();
 
@@ -110,8 +107,9 @@ library MarketDeploymentValidationLogic {
         // Validate the pool's initialization parameters
         _validatePoolInitializationParams(params.poolInitializationParams, params.accountantParams);
 
-        // Each tranche selects its model by shape name out of the template's registry, and the empty name is never registered
-        require(bytes(params.jtYdmType).length != 0 && bytes(params.lptYdmType).length != 0, EMPTY_YDM_TYPE());
+        // The YDMs are mandatory and deployer-supplied like the collateral asset oracle, and may share an instance since curves are keyed per tranche type
+        _requireContract(params.jtYdm);
+        _requireContract(params.lptYdm);
 
         // The senior tranche self-liquidation bonus must be less than WAD
         require(params.stSelfLiquidationBonusWAD < WAD, INVALID_ACCOUNTANT_CONFIG());
@@ -262,7 +260,7 @@ library MarketDeploymentValidationLogic {
         // Pool: remains hookless, the kernel serves as its senior-leg rate provider
         require(_vault.getHooksConfig(_pool).hooksContract == address(0), MARKET_WIRING_VERIFICATION_FAILED(_pool));
 
-        // Accountant: kernel binding and the injected JT YDM / LPT LDM instances
+        // Accountant: kernel binding and the injected JT and LPT YDM instances
         IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = IRoycoDayAccountant(_result.accountant).getState();
         require(accountantState.kernel == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
         require(accountantState.jtYDM == _result.ydm && accountantState.lptYDM == _result.lptYdm, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));

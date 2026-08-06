@@ -21,8 +21,8 @@ import { DeployScriptBase } from "../../core/DeployScriptBase.sol";
  *         binds its configuration surface to the governing roles.
  * @dev CREATE2-deployed at a salt derived from the FULL construction params, so a chain reaches the same template
  *      for the same wiring and a genuinely different wiring gets its own template rather than silently reusing one.
- *      The yield distribution models are NOT construction params: they live in the template's own storage and are
- *      registered separately (DeployYDMs), so shipping a new model shape does not move the template address.
+ *      The yield distribution models are NOT template state: each market supplies its model instances by address
+ *      in its deployment params, so shipping a new model shape never touches the template.
  * @dev Registration and role binding require the deployer's ADMIN_FACTORY_ROLE / ADMIN_ROLE — this script must run
  *      BEFORE the renounce step.
  */
@@ -97,10 +97,9 @@ contract DeployTemplateComponent is DeployScriptBase, TemplateConfig {
     function _bindTemplateConfigurationRoles(address _template) internal {
         if (IRoycoAccessManager(UP.accessManager).wasEverConfigured(_template)) return;
 
-        bytes4[] memory factoryAdminSelectors = new bytes4[](3);
-        factoryAdminSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
-        factoryAdminSelectors[1] = BaseDeploymentTemplate.setProtocolFeeRecipient.selector;
-        factoryAdminSelectors[2] = RoycoDayBalancerV3MarketDeploymentTemplate.setBalancerPoolConfig.selector;
+        bytes4[] memory factoryAdminSelectors = new bytes4[](2);
+        factoryAdminSelectors[0] = BaseDeploymentTemplate.setProtocolFeeRecipient.selector;
+        factoryAdminSelectors[1] = RoycoDayBalancerV3MarketDeploymentTemplate.setBalancerPoolConfig.selector;
         AccessManager(UP.accessManager).setTargetFunctionRole(_template, factoryAdminSelectors, ADMIN_FACTORY_ROLE);
 
         // The fee set answers to the same role as each market's own protocol fee setters
