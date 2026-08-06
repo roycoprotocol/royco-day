@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
-import { IRoycoAuth } from "../interfaces/IRoycoAuth.sol";
 import { IIdleCDO } from "../interfaces/external/idle-finance/IIdleCDO.sol";
 import { WAD_DECIMALS } from "../libraries/Constants.sol";
 import { ChainlinkPriceOracleBase } from "./base/ChainlinkPriceOracleBase.sol";
@@ -54,7 +53,7 @@ contract IdleCDOTranchePriceOracle is ClockedChainlinkPriceOracleBase {
             _cdoPriceStalenessThresholdSeconds
         )
     {
-        require(_idleCDO != address(0), IRoycoAuth.NULL_ADDRESS());
+        require(_idleCDO != address(0), NULL_ADDRESS());
         // virtualPrice treats any unknown address as the BB tranche, so the tranche must be validated here
         require(_tranche == IIdleCDO(_idleCDO).AATranche() || _tranche == IIdleCDO(_idleCDO).BBTranche(), COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE());
 

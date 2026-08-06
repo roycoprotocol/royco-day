@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { IRoycoAuth } from "../../interfaces/IRoycoAuth.sol";
 import { IRoycoPriceOracle } from "../../interfaces/IRoycoPriceOracle.sol";
 import { AggregatorV3Interface } from "../../interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { WAD_DECIMALS } from "../../libraries/Constants.sol";
@@ -32,11 +31,11 @@ abstract contract ChainlinkPriceOracleBase is IRoycoPriceOracle {
     // The oracle is a construction immutable, so its price precision is locked at construction
     uint256 internal immutable _ORACLE_PRICE_PRECISION;
 
+    /// @notice Thrown when the collateral asset or oracle is constructed as the null address
+    error NULL_ADDRESS();
+
     /// @notice Thrown when the Chainlink (compatible) oracle reports a non-positive price
     error INVALID_PRICE();
-
-    /// @notice Thrown when the Chainlink (compatible) oracle's price is incomplete
-    error INCOMPLETE_PRICE();
 
     /// @notice Thrown when the Chainlink (compatible) oracle's report is older than the feed staleness threshold
     error STALE_FEED_PRICE();
@@ -52,7 +51,7 @@ abstract contract ChainlinkPriceOracleBase is IRoycoPriceOracle {
      */
     constructor(address _collateralAsset, address _oracle, uint32 _chainlinkOracleStalenessThresholdSeconds) {
         // Sanity checks on the collateral asset and oracle configuration
-        require(_collateralAsset != address(0) && _oracle != address(0), IRoycoAuth.NULL_ADDRESS());
+        require(_collateralAsset != address(0) && _oracle != address(0), NULL_ADDRESS());
         require(_chainlinkOracleStalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
         COLLATERAL_ASSET = _collateralAsset;
         ORACLE = AggregatorV3Interface(_oracle);
@@ -67,17 +66,16 @@ abstract contract ChainlinkPriceOracleBase is IRoycoPriceOracle {
      * @dev The conversion rate is always current, so the feed's update timestamp passes through unchanged
      */
     function getPrice() public view virtual override(IRoycoPriceOracle) returns (NAV_UNIT price, uint256 updatedAt) {
-        // Fetch the reference asset price in NAV units
-        (uint80 roundId, int256 answer,, uint256 feedUpdatedAt, uint80 answeredInRound) = ORACLE.latestRoundData();
+        // Fetch the reference asset price from the Chainlink (compatible) oracle
+        int256 answer;
+        (, answer,, updatedAt,) = ORACLE.latestRoundData();
 
         // Conduct sanity checks
         require(answer > 0, INVALID_PRICE());
-        require(answeredInRound >= roundId, INCOMPLETE_PRICE());
-        require((feedUpdatedAt + FEED_STALENESS_THRESHOLD_SECONDS) >= block.timestamp, STALE_FEED_PRICE());
+        require((updatedAt + FEED_STALENESS_THRESHOLD_SECONDS) >= block.timestamp, STALE_FEED_PRICE());
 
         // Compose the two hops: collateral value in reference assets (WAD) times reference asset price in NAV units, floored once
         price = toNAVUnits(_getCollateralToReferenceAssetConversionRateWAD().mulDiv(uint256(answer), _ORACLE_PRICE_PRECISION, Math.Rounding.Floor));
-        updatedAt = feedUpdatedAt;
     }
 
     /// @inheritdoc IRoycoPriceOracle

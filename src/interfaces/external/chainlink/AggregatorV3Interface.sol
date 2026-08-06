@@ -27,7 +27,7 @@ interface AggregatorV3Interface {
      * @return answer - The answer for the round
      * @return startedAt - The timestamp when the round started
      * @return updatedAt - The timestamp when the round was updated
-     * @return answeredInRound - The round ID in which the answer was computed
+     * @return answeredInRound - Deprecated, previously used when answers could take multiple rounds to be computed
      */
     function getRoundData(uint80 _roundId) external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
 
@@ -38,7 +38,7 @@ interface AggregatorV3Interface {
      * @return answer - The latest answer
      * @return startedAt - The timestamp when the latest round started
      * @return updatedAt - The timestamp when the latest round was updated
-     * @return answeredInRound - The round ID in which the latest answer was computed
+     * @return answeredInRound - Deprecated, previously used when answers could take multiple rounds to be computed
      */
     function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
 }

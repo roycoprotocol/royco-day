@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { NAV_UNIT, toUint256 } from "../../../src/libraries/Units.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
@@ -266,11 +265,12 @@ contract Test_CollateralOracles is Test {
         erc4626Oracle.getPrice();
     }
 
-    /// A round answered before it started is carrying a stale answer forward, so the composition refuses it
-    function test_RevertIf_ERC4626_feedRoundIncomplete() public {
+    /// answeredInRound is deprecated and OCR aggregators always answer in the reporting round, so a lagging value must not block pricing
+    function test_ERC4626_deprecatedAnsweredInRound_isIgnoredByPricing() public {
+        (NAV_UNIT priceBefore,) = erc4626Oracle.getPrice();
         feed.setAll(7, 1e8, T0 - 50, T0 - 10, 6);
-        vm.expectRevert(ChainlinkPriceOracleBase.INCOMPLETE_PRICE.selector);
-        erc4626Oracle.getPrice();
+        (NAV_UNIT priceAfter,) = erc4626Oracle.getPrice();
+        assertEq(toUint256(priceAfter), toUint256(priceBefore), "a lagging answeredInRound must not change or block pricing");
     }
 
     /// Construction wires the collateral identity and rejects null configuration
@@ -281,11 +281,11 @@ contract Test_CollateralOracles is Test {
         assertEq(
             erc4626Oracle.description(), string.concat("sNUSD / ", feed.description()), "the description reads as the triangulated pair chain through the feed"
         );
-        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
+        vm.expectRevert(ChainlinkPriceOracleBase.NULL_ADDRESS.selector);
         new ERC4626SharePriceOracle(
             address(0), ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS, address(feed), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS
         );
-        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
+        vm.expectRevert(ChainlinkPriceOracleBase.NULL_ADDRESS.selector);
         new ERC4626SharePriceOracle(
             address(vault), ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS, address(0), 0, uint32(T0), FEED_STALENESS, VAULT_SHARE_PRICE_STALENESS
         );
@@ -494,7 +494,7 @@ contract Test_CollateralOracles is Test {
         assertEq(cdoOracle.version(), 1, "version");
         assertEq(cdoOracle.description(), string.concat("AA_FalconXUSDC / ", feed.description()), "the description chains through the feed");
         // The constructor body's typed null check rejects a null CDO before any read can touch it
-        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
+        vm.expectRevert(ChainlinkPriceOracleBase.NULL_ADDRESS.selector);
         new IdleCDOTranchePriceOracle(address(0), address(aaTranche), address(feed), 0, 0, FEED_STALENESS, CDO_PRICE_STALENESS);
         // The CDO's virtualPrice silently computes the BB price for any unknown address, so membership is checked
         vm.expectRevert(IdleCDOTranchePriceOracle.COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE.selector);

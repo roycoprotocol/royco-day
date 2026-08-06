@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { NAV_UNIT, toUint256 } from "../../../src/libraries/Units.sol";
 import { ChainlinkPriceOracle } from "../../../src/oracle/ChainlinkPriceOracle.sol";
 import { ChainlinkPriceOracleBase } from "../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
@@ -88,12 +87,12 @@ contract Test_ChainlinkIdentityOracle is Test {
         oracle.getPrice();
     }
 
-    /// A round answered before it started carries a stale answer forward, so the composition refuses it
-    function test_RevertIf_FeedRoundIncomplete() public {
+    /// answeredInRound is deprecated and OCR aggregators always answer in the reporting round, so a lagging value must not block pricing
+    function test_DeprecatedAnsweredInRound_isIgnoredByPricing() public {
         feed.setRoundId(5);
         feed.setAnsweredInRound(4);
-        vm.expectRevert(ChainlinkPriceOracleBase.INCOMPLETE_PRICE.selector);
-        oracle.getPrice();
+        (NAV_UNIT price,) = oracle.getPrice();
+        assertEq(toUint256(price), 1e18, "a lagging answeredInRound must not block pricing");
     }
 
     /// Construction pins the wiring and rejects null components
@@ -101,9 +100,9 @@ contract Test_ChainlinkIdentityOracle is Test {
         assertEq(oracle.COLLATERAL_ASSET(), address(collateral), "the collateral asset is wired");
         assertEq(address(oracle.ORACLE()), address(feed), "the feed is wired");
         assertEq(oracle.version(), 1, "version");
-        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
+        vm.expectRevert(ChainlinkPriceOracleBase.NULL_ADDRESS.selector);
         new ChainlinkPriceOracle(address(0), address(feed), 1 days);
-        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
+        vm.expectRevert(ChainlinkPriceOracleBase.NULL_ADDRESS.selector);
         new ChainlinkPriceOracle(address(collateral), address(0), 1 days);
     }
 }
