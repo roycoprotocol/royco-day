@@ -9,9 +9,7 @@ import { AccountantEconomics, CollateralOracleConfig, DayMarketConfig, KernelSet
 import { DayMarketRegistryBase } from "./DayMarketRegistryBase.sol";
 
 /// @title Market_SrRoyUSDC
-/// @notice The srRoyUSDC market: an srRoyUSDC (6-decimal ERC4626 over USDC) senior/junior pair whose LPT pool quotes
-///         in sUSDe — the only market whose quote leg is an external rate-bearing token, and the upstream market the
-///         sheet markets' pools quote against.
+/// @notice The srRoyUSDC market: an srRoyUSDC (6-decimal ERC4626 over USDC) senior/junior pair whose LPT pool quotes in frxUSD
 abstract contract Market_SrRoyUSDC is DayMarketRegistryBase {
     function _initializeSrRoyUsdcMarket() internal {
         _dayMarketConfigs[SRROYUSDC] = DayMarketConfig({
@@ -73,16 +71,16 @@ abstract contract Market_SrRoyUSDC is DayMarketRegistryBase {
                 )
             }),
             pool: GyroECLPPoolParams({
-                name: "Senior SrRoyUSDC / sUSDe",
-                symbol: "srsrRoyUSDC/sUSDe",
+                name: "Senior SrRoyUSDC / frxUSD",
+                symbol: "srsrRoyUSDC/frxUSD",
                 eclpParams: _srRoyUsdcEclpParams(),
                 derivedEclpParams: _srRoyUsdcDerivedEclpParams(),
-                quoteAsset: 0x9D39A5DE30e57443BfF2A8307A4256c8797A3497,
-                quoteAssetRateProvider: 0x3A244e6B3cfed21593a5E5B347B593C0B48C7dA1
+                quoteAsset: 0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29, // frxUSD (18 decimals)
+                quoteAssetRateProvider: address(0)
             }),
             poolInitialization: RoycoDayBalancerV3MarketDeploymentTemplate.PoolInitializationParams({
                 collateralAmount: 0, // no collateral leg: the genesis liquidity is quote-only
-                quoteAmount: 1e18, // 1 sUSDe (~$1.24): the quote is 18 decimals, and the seed must cover the 1e12 dead-share lock
+                quoteAmount: 1e18, // 1 frxUSD ($1)
                 minLPTAssetsOut: 0
             }),
             stEntryPointConfig: _defaultEntryPointTrancheConfig(),

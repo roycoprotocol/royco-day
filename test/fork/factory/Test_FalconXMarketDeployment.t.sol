@@ -134,7 +134,7 @@ contract Test_FalconXMarketDeployment is Test {
     // ─── upstream (srRoyUSDC) helpers ───
 
     /// @dev Deploys the srRoyUSDC market from its own config, exactly as Test_SrRoyUsdcMarketDeployment does: the
-    ///      ERC4626 share-price oracle is deployed directly and the 18-decimal sUSDe genesis seed is dealt
+    ///      ERC4626 share-price oracle is deployed directly and the 18-decimal frxUSD genesis seed is dealt
     function _deployUpstreamSrRoyUsdc() internal {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
         cfg.oracle.deployed = address(_newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams));
@@ -158,7 +158,7 @@ contract Test_FalconXMarketDeployment is Test {
         am.grantRole(ST_LP_ROLE, DEPLOYER, 0);
 
         // The upstream market enforces BOTH sides on the senior deposit: 20% junior coverage below it and a 50%
-        // market-making floor above it, against a genesis pool holding only ~1 sUSDe (~$1.24) of quote depth. The
+        // market-making floor above it, against a genesis pool holding only ~1 frxUSD (~$1) of quote depth. The
         // junior leg is generous; the senior mint stays small enough that half its NAV fits the genesis liquidity,
         // while still covering the 1e6-share FalconX seed
         uint256 jtAssets = 10e6;

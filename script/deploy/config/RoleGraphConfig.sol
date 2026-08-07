@@ -78,7 +78,6 @@ abstract contract RoleGraphConfig is EnvConfig {
         address pauser = _isTest ? testDeploymentAdmin : WAY_PAUSE;
         address guardianVeto = _isTest ? testDeploymentAdmin : FNDN_VETO;
         address lpOperator = _isTest ? testDeploymentAdmin : AUTO;
-        address protocolFeeRecipient = _isTest ? testDeploymentAdmin : PROTOCOL_FEE_RECIPIENT;
 
         return RoleAssignmentAddresses({
             pauserAddress: pauser,
@@ -94,7 +93,7 @@ abstract contract RoleGraphConfig is EnvConfig {
             lpRoleAdminOperatorAddress: lpOperator,
             guardianAddress: fndn,
             guardianVetoAddress: guardianVeto,
-            protocolFeeRecipientAddress: protocolFeeRecipient,
+            lpRoleHolderAddress: fndn,
             balancerPoolManagerAddress: way,
             marketOpsAddress: way,
             marketReinvestLiquidityPremiumAddress: way,
@@ -114,11 +113,11 @@ abstract contract RoleGraphConfig is EnvConfig {
         roleAssignments[5] = _assignment(ADMIN_PROTOCOL_FEE_SETTER_ROLE, _addresses.adminProtocolFeeSetterAddress);
         roleAssignments[6] = _assignment(ADMIN_ORACLE_ROLE, _addresses.adminOracleAddress);
         roleAssignments[7] = _assignment(LP_ROLE_ADMIN_ROLE, _addresses.lpRoleAdminAddress);
-        roleAssignments[8] = _assignment(ST_LP_ROLE, _addresses.protocolFeeRecipientAddress);
-        roleAssignments[9] = _assignment(JT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
+        roleAssignments[8] = _assignment(ST_LP_ROLE, _addresses.lpRoleHolderAddress);
+        roleAssignments[9] = _assignment(JT_LP_ROLE, _addresses.lpRoleHolderAddress);
         roleAssignments[10] = _assignment(GUARDIAN_ROLE, _addresses.guardianAddress);
         roleAssignments[11] = _assignment(ADMIN_UNPAUSER_ROLE, _addresses.unpauserAddress);
-        roleAssignments[12] = _assignment(LPT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
+        roleAssignments[12] = _assignment(LPT_LP_ROLE, _addresses.lpRoleHolderAddress);
         roleAssignments[13] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
         roleAssignments[14] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
         roleAssignments[15] = _assignment(ADMIN_BLACKLIST_ROLE, _addresses.marketOpsAddress);

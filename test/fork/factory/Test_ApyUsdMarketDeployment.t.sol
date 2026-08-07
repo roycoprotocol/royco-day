@@ -127,7 +127,7 @@ contract Test_ApyUsdMarketDeployment is Test {
     // ─── upstream (srRoyUSDC) helpers ───
 
     /// @dev Deploys the srRoyUSDC market from its own config, exactly as Test_SrRoyUsdcMarketDeployment does: the
-    ///      ERC4626 share-price oracle is deployed directly and the 18-decimal sUSDe genesis seed is dealt
+    ///      ERC4626 share-price oracle is deployed directly and the 18-decimal frxUSD genesis seed is dealt
     function _deployUpstreamSrRoyUsdc() internal {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
         cfg.oracle.deployed = address(

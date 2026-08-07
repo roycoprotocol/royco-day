@@ -63,7 +63,7 @@ struct RoleAssignmentAddresses {
     address guardianAddress;
     // The FNDN_VETO fast-response co-hold on GUARDIAN_ROLE (immediate)
     address guardianVetoAddress;
-    address protocolFeeRecipientAddress;
+    address lpRoleHolderAddress;
     address balancerPoolManagerAddress;
     address marketOpsAddress;
     address marketReinvestLiquidityPremiumAddress;

@@ -64,7 +64,7 @@ contract Test_DeployScriptConfig is Test {
      */
     function test_GetRoleConfig_ResolvesEveryGeneratedRoleAssignment() public view {
         // 19 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
-        // The fee recipient deliberately carries three LP roles (ST/JT/LPT), market ops carries the blacklist
+        // The LP-role holder deliberately carries three LP roles (ST/JT/LPT), market ops carries the blacklist
         // admin role alongside its own, and the three co-hold fields (guardian veto, emergency oracle admin, LP
         // operator) each add a second holder to an already-emitted role — 19 addresses fan out to 22 assignments.
         RoleAssignmentAddresses memory addresses = RoleAssignmentAddresses({
@@ -81,7 +81,7 @@ contract Test_DeployScriptConfig is Test {
             lpRoleAdminOperatorAddress: address(0x1014),
             guardianAddress: address(0x100A),
             guardianVetoAddress: address(0x1015),
-            protocolFeeRecipientAddress: address(0x100D),
+            lpRoleHolderAddress: address(0x100D),
             balancerPoolManagerAddress: address(0x100E),
             marketOpsAddress: address(0x100F),
             marketReinvestLiquidityPremiumAddress: address(0x1012),
@@ -91,10 +91,10 @@ contract Test_DeployScriptConfig is Test {
 
         RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
 
-        // Independently derived count: the address surface is 19 fields, of which the fee recipient maps to the
+        // Independently derived count: the address surface is 19 fields, of which the LP-role holder maps to the
         // three LP roles, market ops maps to its own role plus the blacklist admin role, the three co-hold fields
         // append one entry each, and the other 14 map one-to-one, so 14 + 3 + 2 + 3 = 22 assignments.
-        assertEq(assignments.length, 22, "one assignment per (role, assignee) pair: 14 one-to-one + 3 LP roles + 2 on market ops + 3 co-holds");
+        assertEq(assignments.length, 22, "one assignment per (role, assignee) pair: 14 one-to-one + 3 LP roles on the holder + 2 on market ops + 3 co-holds");
 
         for (uint256 i; i < assignments.length; ++i) {
             uint64 role = assignments[i].role;
@@ -199,9 +199,11 @@ contract Test_DeployScriptConfig is Test {
         // The dedicated fast-response seats are distinct from each other and from FNDN's seats
         assertTrue(a.pauserAddress != a.unpauserAddress, "pause and unpause must be split (only FNDN clears a pause)");
         assertTrue(a.guardianVetoAddress != a.guardianAddress, "the veto multisig must be a second, distinct guardian");
-        // FNDN keeps the unwind surface: unpause, fee collection, and the emergency oracle co-hold
+        // FNDN keeps the unwind surface: unpause, fee collection, the emergency oracle co-hold, and the three
+        // LP-role grants made at bootstrap
         assertEq(a.unpauserAddress, a.entryPointFeeCollectorAddress, "FNDN holds unpause and fee collection");
         assertEq(a.adminOracleEmergencyAddress, a.guardianAddress, "FNDN co-holds the emergency oracle seat");
+        assertEq(a.lpRoleHolderAddress, a.guardianAddress, "FNDN holds the three LP roles granted at bootstrap");
 
         // Kerchkoffs delay tiers: entry point config on the SHORT tier, fee claim and LP-role admin immediate
         assertEq(deployScript.getRoleConfig(ADMIN_ENTRY_POINT_ROLE).executionDelay, 24 hours, "entry point admin must ride the 24h tier");

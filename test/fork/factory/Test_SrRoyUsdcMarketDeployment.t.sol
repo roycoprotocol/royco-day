@@ -30,8 +30,8 @@ import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 
 /// @title Test_SrRoyUsdcMarketDeployment
 /// @notice Fork test for the srRoyUSDC market config: an srRoyUSDC (ERC4626 over USDC) senior/junior pair whose LPT
-///         pool quotes in sUSDe — the only market whose quote leg is a rate-bearing token. Covers the deltas no other
-///         suite reaches: the quote leg registered WITH_RATE against the configured sUSDe rate provider, an 18-decimal
+///         pool quotes in frxUSD — a plain stablecoin quote registered STANDARD with no rate provider. Covers the
+///         deltas no other suite reaches: the STANDARD external-stable quote leg, an 18-decimal
 ///         quote seeding the genesis pool, and the LPT liquidity premium switched ON (nonzero minLiquidityWAD and
 ///         maxLPTYieldShareWAD, distinct V2 curves for JT and LPT).
 /// @dev Modeled on Test_ChainlinkOracleMarketDeployment's direct-template pattern. Requires a mainnet fork. FAILS
@@ -42,8 +42,7 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
 
     /// @dev The market's real mainnet contract set, cross-checked on-chain in setUp so a config drift fails loudly
     address internal constant SRROYUSDC_VAULT = 0xcD9f5907F92818bC06c9Ad70217f089E190d2a32; // ERC4626 over USDC
-    address internal constant SUSDE = 0x9D39A5DE30e57443BfF2A8307A4256c8797A3497; // 18-decimals, rate-bearing quote
-    address internal constant SUSDE_RATE_PROVIDER = 0x3A244e6B3cfed21593a5E5B347B593C0B48C7dA1;
+    address internal constant FRXUSD = 0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29; // 18-decimals, plain stablecoin quote
     address internal constant USDC_USD_FEED = 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6; // Chainlink, 8 decimals
 
     RoycoAccessManager internal am;
@@ -59,7 +58,7 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
     address internal FACTORY_ADMIN = makeAddr("FACTORY_ADMIN");
     address internal DEPLOYER = makeAddr("DEPLOYER");
 
-    /// @dev A stable SEED, not a final id: `buildMarketParams` mines the id that sorts the ST proxy below sUSDe on
+    /// @dev A stable SEED, not a final id: `buildMarketParams` mines the id that sorts the ST proxy below frxUSD on
     ///      top of it, against the full params and the deploying account
     bytes32 internal constant MARKET_ID_SEED = keccak256("SRROYUSDC_TEST_SEED");
 
@@ -96,8 +95,8 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
         assertEq(cfg.collateralAsset, SRROYUSDC_VAULT, "config collateral != srRoyUSDC vault");
         assertEq(IERC4626(cfg.collateralAsset).asset(), IERC4626(SRROYUSDC_VAULT).asset(), "vault underlying drifted");
-        assertEq(cfg.pool.quoteAsset, SUSDE, "config quote != sUSDe");
-        assertEq(cfg.pool.quoteAssetRateProvider, SUSDE_RATE_PROVIDER, "config rate provider != sUSDe provider");
+        assertEq(cfg.pool.quoteAsset, FRXUSD, "config quote != frxUSD");
+        assertEq(cfg.pool.quoteAssetRateProvider, address(0), "a plain-stable quote must carry no rate provider");
     }
 
     // ─── helpers ───
@@ -117,7 +116,7 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         _fundPoolSeed(cfg);
     }
 
-    /// @dev The genesis seed is pulled from the deployment caller: fund and approve the 18-decimal sUSDe quote leg
+    /// @dev The genesis seed is pulled from the deployment caller: fund and approve the 18-decimal frxUSD quote leg
     function _fundPoolSeed(DayMarketConfig memory _cfg) internal {
         deal(_cfg.pool.quoteAsset, DEPLOYER, _cfg.poolInitialization.quoteAmount);
         vm.prank(DEPLOYER);
@@ -134,10 +133,10 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
     // DEPLOYMENT WIRING (the srRoyUSDC deltas)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice The quote leg is registered WITH_RATE against the configured sUSDe rate provider — the only market
-    ///         config exercising a non-null `quoteAssetRateProvider` — while the senior leg stays kernel-rate-provided,
-    ///         and neither leg pays Balancer yield fees per the template's pool policy
-    function test_ExecuteMarketDeployment_QuoteLegIsRateProvided() external {
+    /// @notice The plain-stable quote leg registers STANDARD with no rate provider — frxUSD is the base unit, so
+    ///         there is no redemption rate to scale by — while the senior leg stays kernel-rate-provided, and
+    ///         neither leg pays Balancer yield fees per the template's pool policy
+    function test_ExecuteMarketDeployment_QuoteLegIsStandard() external {
         _register();
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
         address pool = IRoycoDayKernel(r.kernel).lptAsset();
@@ -146,17 +145,17 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         (IERC20[] memory tokens, TokenInfo[] memory info,,) = vault.getPoolTokenInfo(pool);
         assertEq(tokens.length, 2, "pool token count");
         assertEq(address(tokens[0]), r.seniorTranche, "senior leg must be token0");
-        assertEq(address(tokens[1]), SUSDE, "quote leg must be sUSDe");
+        assertEq(address(tokens[1]), FRXUSD, "quote leg must be frxUSD");
 
         assertTrue(info[0].tokenType == TokenType.WITH_RATE, "senior leg not WITH_RATE");
         assertEq(address(info[0].rateProvider), r.kernel, "senior rate provider != kernel");
-        assertTrue(info[1].tokenType == TokenType.WITH_RATE, "quote leg not WITH_RATE");
-        assertEq(address(info[1].rateProvider), SUSDE_RATE_PROVIDER, "quote rate provider != configured sUSDe provider");
+        assertTrue(info[1].tokenType == TokenType.STANDARD, "a plain-stable quote leg must register STANDARD");
+        assertEq(address(info[1].rateProvider), address(0), "a STANDARD quote leg must carry no rate provider");
         assertFalse(info[0].paysYieldFees, "senior leg must not pay Balancer yield fees");
         assertFalse(info[1].paysYieldFees, "quote leg must not pay Balancer yield fees");
     }
 
-    /// @notice The kernel wires the market's real asset set — srRoyUSDC collateral, sUSDe quote — and the ERC4626
+    /// @notice The kernel wires the market's real asset set — srRoyUSDC collateral, frxUSD quote — and the ERC4626
     ///         share-price oracle passes the collateral identity check and prices one share at a plausible USD value
     function test_ExecuteMarketDeployment_KernelAssetsAndOracle() external {
         _register();
@@ -164,7 +163,7 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
 
         IRoycoDayKernel kernel = IRoycoDayKernel(r.kernel);
         assertEq(kernel.collateralAsset(), SRROYUSDC_VAULT, "kernel collateral != srRoyUSDC vault");
-        assertEq(kernel.quoteAsset(), SUSDE, "kernel quote != sUSDe");
+        assertEq(kernel.quoteAsset(), FRXUSD, "kernel quote != frxUSD");
 
         address oracle = kernel.getCollateralAssetOracle();
         assertEq(ERC4626SharePriceOracle(oracle).COLLATERAL_ASSET(), SRROYUSDC_VAULT, "oracle collateral != market collateral");
@@ -193,7 +192,7 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         assertEq(a.lptYDM, r.lptYdm, "accountant LPT model != registry instance");
     }
 
-    /// @notice The 18-decimal sUSDe genesis seed lands: the pool opens with quote-only depth, the dead-share lock is
+    /// @notice The 18-decimal frxUSD genesis seed lands: the pool opens with quote-only depth, the dead-share lock is
     ///         parked, and the deployer holds the remainder — the exact flow a 6-decimals-assumption seed would break
     function test_ExecuteMarketDeployment_GenesisSeedWithEighteenDecimalQuote() external {
         _register();
@@ -225,7 +224,7 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
     function test_RevertIf_SeedIsDustAgainstTheQuoteDecimals() external {
         _register();
         DayMarketConfig memory cfg = _marketConfig();
-        cfg.poolInitialization.quoteAmount = 1e6; // "$1" under a 6-decimals assumption; ~1e-12 sUSDe in reality
+        cfg.poolInitialization.quoteAmount = 1e6; // "$1" under a 6-decimals assumption; ~1e-12 frxUSD in reality
         _fundPoolSeed(cfg);
 
         bytes memory p = abi.encode(marketBuilder.buildMarketParams(cfg, MARKET_ID_SEED, address(factory), DEPLOYER));
