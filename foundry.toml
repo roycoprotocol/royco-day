@@ -78,6 +78,13 @@ build_info = false
 # Research profile: the ONLY profile that compiles test/research/** — run its suites deliberately
 [profile.research]
 skip = []
+# Default entries plus read access to the research fixture dir (the §12.1 wizard-vs-Solidity
+# verification JSON emitted by royco-rwa-frontend/scripts/generate-eclp-verification-fixtures.ts).
+fs_permissions = [
+    { access = "read", path = "./out" },
+    { access = "read-write", path = "./output" },
+    { access = "read", path = "./test/research/eclp/fixtures" },
+]
 
 # Nightly profile: deep fuzz/invariant sweeps across token decimal configurations
 [profile.nightly]

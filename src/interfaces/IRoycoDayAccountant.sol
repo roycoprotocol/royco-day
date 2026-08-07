@@ -199,6 +199,10 @@ interface IRoycoDayAccountant {
      */
     event MaxYieldSharesUpdated(uint64 maxJTYieldShareWAD, uint64 maxLPTYieldShareWAD);
 
+    /// @notice Emitted when the kernel commits the freshly marked liquidity provider tranche raw NAV
+    /// @param freshLPTRawNAV The committed liquidity provider tranche raw NAV in NAV units
+    event LPTRawNAVCommitted(NAV_UNIT freshLPTRawNAV);
+
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
     error ONLY_ROYCO_KERNEL();
 

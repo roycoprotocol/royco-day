@@ -104,26 +104,22 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT value) {
-        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        return _collateralAssets.mulDiv(_getCollateralAssetPrice(), toTrancheUnits($.oneWholeCollateralAsset), Math.Rounding.Floor);
+        return _collateralAssets.mulDiv(_getCollateralAssetPrice(), toTrancheUnits(_getRoycoDayKernelStorage().oneWholeCollateralAsset), Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoDayKernel
     function convertValueToCollateralAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT collateralAssets) {
-        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        return _value.mulDiv(toTrancheUnits($.oneWholeCollateralAsset), _getCollateralAssetPrice(), Math.Rounding.Floor);
+        return _value.mulDiv(toTrancheUnits(_getRoycoDayKernelStorage().oneWholeCollateralAsset), _getCollateralAssetPrice(), Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoDayKernel
     function convertLPTAssetsToValue(TRANCHE_UNIT _lptAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT value) {
-        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        return _lptAssets.mulDiv(_getLPTAssetPrice(), toTrancheUnits($.oneWholeLPTAsset), Math.Rounding.Floor);
+        return _lptAssets.mulDiv(_getLPTAssetPrice(), toTrancheUnits(_getRoycoDayKernelStorage().oneWholeLPTAsset), Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoDayKernel
     function convertValueToLPTAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT lptAssets) {
-        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        return _value.mulDiv(toTrancheUnits($.oneWholeLPTAsset), _getLPTAssetPrice(), Math.Rounding.Floor);
+        return _value.mulDiv(toTrancheUnits(_getRoycoDayKernelStorage().oneWholeLPTAsset), _getLPTAssetPrice(), Math.Rounding.Floor);
     }
 
     // =============================

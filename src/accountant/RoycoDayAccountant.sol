@@ -188,6 +188,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Commit the freshly marked liquidity provider tranche raw NAV: the kernel marks it after the sync commits the senior/junior NAVs and mints any fee shares
         // The LPT raw NAV is dependent on the fresh ST share price which is resolved on the preceding pre-op synchronization
         _getRoycoDayAccountantStorage().lastLPTRawNAV = _freshLPTRawNAV;
+        emit LPTRawNAVCommitted(_freshLPTRawNAV);
     }
 
     /// @inheritdoc IRoycoDayAccountant
