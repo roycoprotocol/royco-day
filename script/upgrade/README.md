@@ -64,7 +64,7 @@ Per-kind payload formats (decoded by the matching module):
 
 ## CREATE2 salt convention
 
-The user owns the salt — they set `saltVersion` per upgrade entry (typically bumped each time, e.g. `V2 → V3`). Modules combine it with a per-kind prefix matching `script/Deploy.s.sol`'s convention:
+The user owns the salt — they set `saltVersion` per upgrade entry (typically bumped each time, e.g. `V2 → V3`). Modules combine it with a per-kind prefix matching the deploy pipeline's convention (`script/deploy/utils/RoycoDeterministic.sol`):
 
 | Kind                | Salt formula                                                                                  |
 | ------------------- | --------------------------------------------------------------------------------------------- |
@@ -123,8 +123,8 @@ Each module defines `snapshotState(proxy)` (captured AFTER the 2-day warp, right
 execute) and `verify(proxy, preStateSnapshot)` (called right after). Both reads happen at the same
 `block.timestamp`, so time-dependent views compare apples-to-apples.
 
-- **Tranche**: `name`, `symbol`, `totalSupply`, `asset`, `KERNEL`, `TRANCHE_TYPE`, and `totalAssets()` (all three claim fields: `stAssets`, `jtAssets`, `nav`).
-- **Accountant**: `KERNEL` immutable, full `getState()` (every storage field — fees, coverage, beta, ydm, last*NAV, last*ImpermanentLoss, accrual/distribution timestamps, dust tolerances), and `previewSyncTrancheAccounting(stRawNAV, jtRawNAV)` using the raw NAVs snapshotted pre-upgrade (so the sync preview is a pure function of (storage, `block.timestamp`, inputs) and comparable across the upgrade).
+- **Tranche**: `name`, `symbol`, `totalSupply`, `asset`, `KERNEL`, `TRANCHE_TYPE`, and `totalAssets()` (the claim fields: `collateralAssets`, `nav`).
+- **Accountant**: `KERNEL` immutable, full `getState()` (every storage field — fees, coverage, beta, ydm, last*NAV, last*ImpermanentLoss, accrual/distribution timestamps, `dustTolerance`), and `previewSyncTrancheAccounting(collateralNAV)` using the collateral NAV snapshotted pre-upgrade (so the sync preview is a pure function of (storage, `block.timestamp`, inputs) and comparable across the upgrade).
 - **Factory**: `expiration()`, and for every role in `RolesConfiguration` (plus the AccessManager `ADMIN_ROLE` id 0): role admin, role guardian, role grant-delay, and `hasRole(role, account)` for `ROOT_MULTISIG` and `EXECUTOR_MULTISIG` (both `isMember` and `executionDelay`).
 
 If any check fails the script reverts before writing JSONs — you do not get a half-good batch. `schedule` and `execute` are both hard-failing during simulation; any revert from either is surfaced.

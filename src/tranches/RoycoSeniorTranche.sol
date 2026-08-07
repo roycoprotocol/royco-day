@@ -8,14 +8,12 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
 /**
  * @title RoycoSeniorTranche
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Senior tranche implementation for Royco markets
  */
 contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {
-    constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
-
     /// @notice Initializes the Royco senior tranche
-    /// @param _stParams Deployment parameters including name, symbol, and initial authority for the senior tranche
+    /// @param _stParams Deployment parameters including name, symbol, initial authority, kernel, and asset for the senior tranche
     function initialize(RoycoTrancheInitParams calldata _stParams) external initializer {
         // Initialize the Royco Senior Tranche
         __RoycoTranche_init(_stParams);
@@ -27,20 +25,19 @@ contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {
     }
 
     /// @inheritdoc IRoycoSeniorTranche
-    function mintLiquidityPremiumShares(
-        address _to,
-        uint256 _liquidityPremiumShares
-    )
+    function mintLiquidityPremiumShares(uint256 _liquidityPremiumShares)
         external
         virtual
         override(IRoycoSeniorTranche)
         onlyKernel
         returns (uint256 totalTrancheShares)
     {
-        // Mint the precomputed liquidity premium shares to the holder (the kernel custodies them for the liquidity tranche)
-        if (_liquidityPremiumShares != 0) _mint(_to, _liquidityPremiumShares);
+        address kernel = kernel();
+
+        // Mint the precomputed liquidity premium shares to the kernel, which custodies them for the liquidity provider tranche
+        if (_liquidityPremiumShares != 0) _mint(kernel, _liquidityPremiumShares);
 
         totalTrancheShares = totalSupply();
-        emit LiquidityPremiumSharesMinted(_to, _liquidityPremiumShares, totalTrancheShares);
+        emit LiquidityPremiumSharesMinted(kernel, _liquidityPremiumShares, totalTrancheShares);
     }
 }

@@ -6,6 +6,7 @@ import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
+import { DispatchMode } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
@@ -21,6 +22,24 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *      wrong admin collapses the deployment's privilege separation
  */
 contract Test_AdminAndGates_Kernel is DayMarketTestBase {
+    /// The kernel refuses to price against a zero composed collateral report whatever the oracle returns: the
+    /// zero-price guard is the kernel's own, independent of the oracle-side feed validations, so a broken or
+    /// collapsed conversion hop can never mark NAV at zero
+    function test_RevertIf_CollateralOracleReportsZeroPrice() public {
+        setOracleMode(ORACLE_MODE_ZERO);
+        vm.expectRevert(IRoycoDayKernel.INVALID_PRICE.selector);
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(uint256(1e18)));
+
+        // A negative-answer source surfaces identically: NAV prices are unsigned so it reads as zero
+        setOracleMode(ORACLE_MODE_NEGATIVE);
+        vm.expectRevert(IRoycoDayKernel.INVALID_PRICE.selector);
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(uint256(1e18)));
+
+        // Restoring the oracle restores pricing
+        setOracleMode(ORACLE_MODE_NONE);
+        assertTrue(kernel.convertCollateralAssetsToValue(toTrancheUnits(uint256(1e18))) != ZERO_NAV_UNITS, "a restored oracle prices again");
+    }
+
     /// @dev An unprivileged address probing every gated entrypoint
     address internal ATTACKER;
 
@@ -176,26 +195,58 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
         kernel.preTrancheBalanceUpdateHook(address(this), address(this), makeAddr("RECIPIENT"), 1);
     }
 
-    /// @notice Every venue driver is a kernel self-call seam, an external caller is rejected on each of the five entrypoints
-    function test_RevertIf_VenueDriversCalledExternally() public {
-        vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-        kernel.addLiquidity(1e18, 1e6, toTrancheUnits(0));
-        vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-        kernel.removeLiquidity(toTrancheUnits(1e18), 0, 0, address(this));
-        vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-        kernel.previewAddLiquidity(1e18, 1e6);
-        vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-        kernel.previewRemoveLiquidity(toTrancheUnits(1e18));
-        vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-        kernel.attemptLiquidityPremiumReinvestment(type(uint256).max, ZERO_NAV_UNITS, 0);
+    /**
+     * @notice The kernel's multi-asset entrypoints only accept the liquidity provider tranche as caller, an external
+     *         intruder is rejected on both entrypoints in both preview modes
+     * @dev A direct call with _isPreview true is the dangerous shape: the flow's mutations commit with no outer
+     *      preview revert to unwind them, the deposit arm credits ST assets never received and mints senior
+     *      shares against them then skips the post-op validation, the redeem arm debits the kernel's senior
+     *      share and LPT asset ledgers with no senior burn and no post-op sync, so this gate is the sole defense
+     *      against committing phantom accounting
+     */
+    function test_RevertIf_KernelMultiAssetEntrypointsCalledByNonTranche() public {
+        vm.startPrank(ATTACKER);
+        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
+        kernel.lptDepositMultiAsset(DispatchMode.EXECUTE, toTrancheUnits(1e18), 1e6, toTrancheUnits(0), ATTACKER, ATTACKER);
+        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
+        kernel.lptDepositMultiAsset(DispatchMode.SIMULATE, toTrancheUnits(1e18), 1e6, toTrancheUnits(0), ATTACKER, ATTACKER);
+        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
+        kernel.lptRedeemMultiAsset(DispatchMode.EXECUTE, 1e18, 0, 0, ATTACKER, ATTACKER, ATTACKER);
+        vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_PROVIDER_TRANCHE.selector);
+        kernel.lptRedeemMultiAsset(DispatchMode.SIMULATE, 1e18, 0, 0, ATTACKER, ATTACKER, ATTACKER);
+        vm.stopPrank();
     }
 
-    /// @notice The Balancer callbacks only accept the vault as caller, so no one can forge a settlement frame around the kernel's custody
+    /// @notice Every venue driver is a kernel self-call seam, an external caller is rejected on each entrypoint in both modes
+    function test_RevertIf_VenueDriversCalledExternally() public {
+        vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
+        kernel.addLiquidity(DispatchMode.EXECUTE, 1e18, 1e6, toTrancheUnits(0));
+        vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
+        kernel.removeLiquidity(DispatchMode.EXECUTE, toTrancheUnits(1e18), 0, 0, address(this));
+        vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
+        kernel.addLiquidity(DispatchMode.SIMULATE, 1e18, 1e6, toTrancheUnits(0));
+        vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
+        kernel.removeLiquidity(DispatchMode.SIMULATE, toTrancheUnits(1e18), 0, 0, address(this));
+        vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
+        kernel.attemptLiquidityPremiumReinvestment(type(uint256).max, ZERO_NAV_UNITS);
+    }
+
+    /**
+     * @notice The Balancer callbacks only accept the vault as caller, so no one can forge a settlement frame
+     *         around the kernel's custody, an external caller is rejected on both callbacks in both preview modes
+     * @dev A direct call with _isPreview true is the dangerous shape here too: outside a real vault unlock there
+     *      is no outer SIMULATION_CANNOT_MUTATE_STATE revert to unwind the callback's vault-side mutations, so
+     *      the gate must hold in preview mode as well
+     */
     function test_RevertIf_BalancerCallbacksCalledByNonVault() public {
         vm.expectRevert(abi.encodeWithSelector(IVaultErrors.SenderIsNotVault.selector, address(this)));
-        kernel.addBalancerV3Liquidity(false, 1e18, 1e6, toTrancheUnits(0));
+        kernel.addBalancerV3Liquidity(DispatchMode.EXECUTE, 1e18, 1e6, toTrancheUnits(0));
         vm.expectRevert(abi.encodeWithSelector(IVaultErrors.SenderIsNotVault.selector, address(this)));
-        kernel.removeBalancerV3Liquidity(false, toTrancheUnits(1e18), 0, 0, address(this));
+        kernel.addBalancerV3Liquidity(DispatchMode.SIMULATE, 1e18, 1e6, toTrancheUnits(0));
+        vm.expectRevert(abi.encodeWithSelector(IVaultErrors.SenderIsNotVault.selector, address(this)));
+        kernel.removeBalancerV3Liquidity(DispatchMode.EXECUTE, toTrancheUnits(1e18), 0, 0, address(this));
+        vm.expectRevert(abi.encodeWithSelector(IVaultErrors.SenderIsNotVault.selector, address(this)));
+        kernel.removeBalancerV3Liquidity(DispatchMode.SIMULATE, toTrancheUnits(1e18), 0, 0, address(this));
     }
 }
 
@@ -215,9 +266,10 @@ contract Test_ColdCacheRateProvider_Kernel is DayMarketTestBase {
     /**
      * @notice On a freshly seeded market the cold-cache rate is exactly 1.0, the first mint's NAV per share
      * @dev The transient cache written by setUp's deposits cleared when that transaction ended, so this read takes
-     *      the live-derivation path: stEffectiveNAV 100e18 over 100e18 shares = 1e18 per whole share
+     *      the live-derivation path: NAV-per-share is convertToValue(WAD, supply, stEffectiveNAV) against the
+     *      virtual-share/asset offset, floor((100e18 + 1) * 1e18 / (100e18 + 1)) = 1000000000000000000, exactly 1.0
      */
     function test_GetRate_SeededMarketDerivesCommittedNavPerShare() public view {
-        assertEq(kernel.getRate(), 1e18, "the cold-cache rate must be stEffectiveNAV / supply = 100e18 / 100e18 = 1.0");
+        assertEq(kernel.getRate(), 1_000_000_000_000_000_000, "the cold-cache rate must be floor((100e18 + 1) * 1e18 / (100e18 + 1))");
     }
 }

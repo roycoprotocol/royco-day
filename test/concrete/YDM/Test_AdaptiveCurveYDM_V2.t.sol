@@ -161,8 +161,8 @@ contract Test_AdaptiveCurveYDM_V2 is Test {
         assertEq(ydm.MIN_YIELD_SHARE_AT_TARGET_WAD(), MIN_YT, "min yT == 1e14");
         assertEq(ydm.MAX_YIELD_SHARE_AT_TARGET_WAD(), MAX_YT, "max yT == WAD");
         assertEq(ydm.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), SPEED_V2, "V2 speed == 100e18/365days");
-        assertEq(ydm.MAX_ADAPTATION_SPEED_WAD(), SPEED_LIMIT, "speed limit == 100e18/365days");
-        assertEq(ydm.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), ydm.MAX_ADAPTATION_SPEED_WAD(), "V2 speed sits at the limit");
+        // The ceiling itself is private, its enforcement is pinned by the base suite constructor boundary tests
+        assertEq(ydm.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), SPEED_LIMIT, "V2 speed sits at the limit");
     }
 
     // =====================================================================

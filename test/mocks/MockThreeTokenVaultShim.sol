@@ -5,8 +5,8 @@ import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/I
 
 /**
  * @title MockThreeTokenVaultShim
- * @notice Minimal vault shim registering a pool with an arbitrary token list, the only way to reach the LT
- *         quoter constructor's POOL_MUST_HAVE_TWO_TOKENS guard, since MockBalancerVault's registry is
+ * @notice Minimal vault shim registering a pool with an arbitrary token list, the only way to reach the LPT
+ *         venue constructor's POOL_MUST_HAVE_TWO_TOKENS guard, since MockBalancerVault's registry is
  *         structurally two-token
  */
 contract MockThreeTokenVaultShim {

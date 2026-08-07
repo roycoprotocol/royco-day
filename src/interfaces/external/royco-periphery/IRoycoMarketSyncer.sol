@@ -12,8 +12,10 @@ interface IRoycoMarketSyncer {
     /// @param _marketKernels The market kernels to register
     function addMarketKernels(address[] calldata _marketKernels) external;
 
-    /// @notice Returns whether the specified market kernel is registered on the syncer
-    /// @param _marketKernel The market kernel to check
-    /// @return registered Whether the market kernel is registered
+    /**
+     * @notice Returns whether the specified market kernel is registered on the syncer
+     * @param _marketKernel The market kernel to check
+     * @return registered Whether the market kernel is registered
+     */
     function isMarketKernelRegistered(address _marketKernel) external view returns (bool registered);
 }

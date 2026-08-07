@@ -2,20 +2,23 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { ADMIN_FACTORY_ROLE, ADMIN_ROLE, DEPLOYER_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_FACTORY_ROLE } from "../../../src/factory/Roles.sol";
+import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
+import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { MockDeploymentTemplate } from "../../mocks/MockDeploymentTemplate.sol";
-import { MockKernelTrancheSet } from "../../mocks/MockKernelTrancheSet.sol";
-import { UninitializedERC1967Proxy } from "../../mocks/UninitializedERC1967Proxy.sol";
+import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 
 /// @title Test_FactoryTrancheRegistry
-/// @notice Pins how `RoycoFactory.executeMarketDeployment` populates the tranche-to-kernel registry when a
-///         template's `DeploymentResult` carries a zero tranche member
+/// @notice Pins how `RoycoFactory.executeMarketDeployment` validates a template's `DeploymentResult` and populates the
+///         tranche-to-kernel registry. Every market is anchored on a kernel and all three tranches (senior, junior,
+///         and liquidity provider), so a result missing any component is rejected and the null address never enters
+///         the registry
 contract Test_FactoryTrancheRegistry is Test {
-    AccessManager internal am;
+    RoycoAccessManager internal am;
+    RoycoFactoryGatekeeper internal gatekeeper;
     RoycoFactory internal factory;
     MockDeploymentTemplate internal template;
 
@@ -24,88 +27,34 @@ contract Test_FactoryTrancheRegistry is Test {
 
     function setUp() public {
         // This test contract is the AccessManager admin (ADMIN_ROLE).
-        am = new AccessManager(address(this));
+        am = new RoycoAccessManager(address(this));
 
         // `initialize` requires the factory to already hold ADMIN_ROLE on the AM, so deploy the proxy uninitialized,
         // grant its (now known) address ADMIN_ROLE, then initialize.
-        RoycoFactory impl = new RoycoFactory();
-        factory = RoycoFactory(address(new UninitializedERC1967Proxy(address(impl))));
-        am.grantRole(ADMIN_ROLE, address(factory), 0);
-        factory.initialize(address(am));
+        // The gatekeeper holds ADMIN_ROLE on the factory's behalf; the scaffold stands both up and wires the
+        // factory's own selectors and roles
+        (factory, gatekeeper,,) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         // Grant the roles the factory's initialize() bound to its gated selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
-        am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
 
-        // A canned-result template bound to this factory: empty-array initialize is accepted (the component loop
-        // runs zero times but the initializer version still lands at 1), which is all registration checks for.
+        // A canned-result template bound to this factory: registration only checks the template points back at
+        // this factory, so no initialization step is needed.
         template = new MockDeploymentTemplate(IRoycoFactory(address(factory)));
-        template.initialize(new bytes32[](0), new bytes[](0));
         vm.prank(FACTORY_ADMIN);
         factory.registerTemplate(address(template));
     }
 
-    /**
-     * @notice A template result with `liquidityTranche == address(0)` (the documented shape for a market without a
-     *         liquidity tranche) leaves the ZERO ADDRESS unmapped as a tranche key, so `getMarket(address(0))`
-     *         keeps returning the documented all-zeros unknown-tranche sentinel.
-     * @dev `executeMarketDeployment` skips the registry write for a zero tranche member, so
-     *      `trancheToKernel[address(0)]` stays unset and `getMarket(address(0))` — whose unknown-tranche branch
-     *      fires when the mapping is EMPTY — returns all zeros for a key that names no tranche. Severity context:
-     *      only an admin-registered template can reach this write, and a zero member is exactly the advertised
-     *      ST/JT-only result shape, not a malicious one.
-     */
-    function test_ZeroTrancheFromTemplate_SkipsRegistryWrite_PreservesZeroAddressSentinel() external {
-        address seniorTranche = makeAddr("SENIOR_TRANCHE");
-        address juniorTranche = makeAddr("JUNIOR_TRANCHE");
-        // The kernel stand-in reports the same ST/JT set the result carries, and no liquidity tranche.
-        MockKernelTrancheSet kernel = new MockKernelTrancheSet(seniorTranche, juniorTranche, address(0));
-
-        // An ST/JT-only market result: `liquidityTranche` is zero exactly as the result struct documents for
-        // markets without a liquidity tranche.
-        template.setDeploymentResult(
-            IRoycoProtocolTemplate.DeploymentResult({
-                seniorTranche: seniorTranche,
-                juniorTranche: juniorTranche,
-                liquidityTranche: address(0),
-                kernel: address(kernel),
-                accountant: makeAddr("ACCOUNTANT"),
-                ydm: makeAddr("YDM"),
-                ltYdm: address(0),
-                extras: ""
-            })
-        );
-
-        // Empty params: the mock returns its canned result without any component deployment.
-        vm.prank(DEPLOYER);
-        factory.executeMarketDeployment(address(template), "");
-
-        // The two real tranche keys resolve to the kernel, as intended.
-        assertEq(factory.trancheToKernel(seniorTranche), address(kernel), "senior key -> kernel");
-        assertEq(factory.trancheToKernel(juniorTranche), address(kernel), "junior key -> kernel");
-
-        // The zero-tranche registry write is skipped, so the zero-address key is never poisoned:
-        // `trancheToKernel(address(0))` stays address(0), as no tranche lives at the zero address.
-        assertEq(factory.trancheToKernel(address(0)), address(0), "zero-address key must not be poisoned");
-
-        // Consequently `getMarket(address(0))` hits its unknown-tranche branch and returns all zeros.
-        (address st, address jt, address lt, address k) = factory.getMarket(address(0));
-        assertEq(st, address(0), "sentinel intact: senior does not resolve for the zero key");
-        assertEq(jt, address(0), "sentinel intact: junior does not resolve for the zero key");
-        assertEq(lt, address(0), "sentinel intact: liquidity does not resolve for the zero key");
-        assertEq(k, address(0), "sentinel intact: kernel does not resolve for the zero key");
-    }
-
-    /// @dev Builds a canned deployment result with the given market components and inert non-market fields
+    /// @dev Builds a canned deployment result with the given tranche/kernel addresses and inert non-market fields
     function _result(address _st, address _jt, address _lt, address _kernel) internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
         return IRoycoProtocolTemplate.DeploymentResult({
             seniorTranche: _st,
             juniorTranche: _jt,
-            liquidityTranche: _lt,
+            liquidityProviderTranche: _lt,
             kernel: _kernel,
             accountant: makeAddr("ACCOUNTANT"),
             ydm: makeAddr("YDM"),
-            ltYdm: address(0),
+            lptYdm: address(0),
             extras: ""
         });
     }
@@ -120,7 +69,7 @@ contract Test_FactoryTrancheRegistry is Test {
     /// A template result without a kernel is rejected: every tranche registers against the kernel, so there is
     /// nothing to anchor a market to
     function test_ExecuteMarketDeployment_RevertIf_ResultHasNoKernel() external {
-        template.setDeploymentResult(_result(makeAddr("ST"), makeAddr("JT"), makeAddr("LT"), address(0)));
+        template.setDeploymentResult(_result(makeAddr("ST"), makeAddr("JT"), makeAddr("LPT"), address(0)));
         vm.prank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.INVALID_DEPLOYMENT_RESULT.selector);
         factory.executeMarketDeployment(address(template), "");
@@ -129,31 +78,38 @@ contract Test_FactoryTrancheRegistry is Test {
     /// A template result without a senior tranche is rejected: every market is anchored on protected senior capital,
     /// so a result with no ST names no valid market
     function test_ExecuteMarketDeployment_RevertIf_ResultHasNoSeniorTranche() external {
-        template.setDeploymentResult(_result(address(0), makeAddr("JT"), makeAddr("LT"), makeAddr("KERNEL")));
+        template.setDeploymentResult(_result(address(0), makeAddr("JT"), makeAddr("LPT"), makeAddr("KERNEL")));
         vm.prank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.INVALID_DEPLOYMENT_RESULT.selector);
         factory.executeMarketDeployment(address(template), "");
     }
 
-    /// A template result with neither a junior nor a liquidity tranche is rejected: the senior tranche must be
-    /// served by at least one subordinate tranche (coverage, liquidity, or both)
-    function test_ExecuteMarketDeployment_RevertIf_ResultHasNoSubordinateTranche() external {
-        template.setDeploymentResult(_result(makeAddr("ST"), address(0), address(0), makeAddr("KERNEL")));
+    /// A template result without a junior tranche is rejected: every market carries all three tranches
+    function test_ExecuteMarketDeployment_RevertIf_ResultHasNoJuniorTranche() external {
+        template.setDeploymentResult(_result(makeAddr("ST"), address(0), makeAddr("LPT"), makeAddr("KERNEL")));
         vm.prank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.INVALID_DEPLOYMENT_RESULT.selector);
         factory.executeMarketDeployment(address(template), "");
     }
 
-    /// An ST/LT-only result (no junior tranche) is a valid market: the senior and liquidity tranches register
-    /// against the kernel and the absent junior tranche leaves the zero-address key untouched
-    function test_ExecuteMarketDeployment_STAndLTOnlyResult_RegistersBothAndSkipsAbsentJT() external {
-        address st = makeAddr("ST_ONLY_LT");
-        address lt = makeAddr("LT_ONLY_LT");
-        address kernel = makeAddr("KERNEL_ONLY_LT");
-        _deploy(_result(st, address(0), lt, kernel));
+    /// A template result without a liquidity provider tranche is rejected: every market carries all three tranches
+    function test_ExecuteMarketDeployment_RevertIf_ResultHasNoLiquidityProviderTranche() external {
+        template.setDeploymentResult(_result(makeAddr("ST"), makeAddr("JT"), address(0), makeAddr("KERNEL")));
+        vm.prank(DEPLOYER);
+        vm.expectRevert(IRoycoFactory.INVALID_DEPLOYMENT_RESULT.selector);
+        factory.executeMarketDeployment(address(template), "");
+    }
+
+    /// A complete result registers all three tranches (senior, junior, liquidity) against the market's kernel
+    function test_ExecuteMarketDeployment_AllThreeTranches_RegisterAgainstKernel() external {
+        address st = makeAddr("ST");
+        address jt = makeAddr("JT");
+        address lt = makeAddr("LPT");
+        address kernel = makeAddr("KERNEL");
+        _deploy(_result(st, jt, lt, kernel));
 
         assertEq(factory.trancheToKernel(st), kernel, "senior key -> kernel");
+        assertEq(factory.trancheToKernel(jt), kernel, "junior key -> kernel");
         assertEq(factory.trancheToKernel(lt), kernel, "liquidity key -> kernel");
-        assertEq(factory.trancheToKernel(address(0)), address(0), "absent junior tranche leaves the zero key untouched");
     }
 }

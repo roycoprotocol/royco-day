@@ -3,12 +3,12 @@ pragma solidity ^0.8.28;
 
 import { RoycoDayEntryPoint } from "../../src/entrypoint/RoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../src/libraries/Types.sol";
+import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title EntryPointRemitClaimsHarness
- * @notice Exposes RoycoDayEntryPoint._remitRedemptionAndBonusClaims so the different-asset transfer branch — unreachable
- *         under the shipped identical-ST/JT-asset kernel family — and the per-leg transfer gating are unit-testable
- *         against a mock kernel
+ * @notice Exposes RoycoDayEntryPoint._remitRedemptionAndBonusClaims so the per-leg transfer gating (collateral,
+ *         LPT asset, senior shares, and quote) is unit-testable against a mock kernel
  */
 contract EntryPointRemitClaimsHarness is RoycoDayEntryPoint {
     constructor(address _roycoFactory) RoycoDayEntryPoint(_roycoFactory) { }
@@ -29,19 +29,25 @@ contract EntryPointRemitClaimsHarness is RoycoDayEntryPoint {
     }
 }
 
-/// @notice Mock kernel exposing only the asset getters _remitRedemptionAndBonusClaims resolves
+/// @notice Mock kernel exposing the immutables carrier _remitRedemptionAndBonusClaims resolves the market's assets from
 contract MockKernelAssets {
-    address public immutable ST_ASSET;
-    address public immutable JT_ASSET;
-    address public immutable LT_ASSET;
+    address public immutable COLLATERAL_ASSET;
+    address public immutable LPT_ASSET;
     address public immutable SENIOR_TRANCHE;
     address public immutable QUOTE_ASSET;
 
-    constructor(address _stAsset, address _jtAsset, address _ltAsset, address _seniorTranche, address _quoteAsset) {
-        ST_ASSET = _stAsset;
-        JT_ASSET = _jtAsset;
-        LT_ASSET = _ltAsset;
+    constructor(address _collateralAsset, address _lptAsset, address _seniorTranche, address _quoteAsset) {
+        COLLATERAL_ASSET = _collateralAsset;
+        LPT_ASSET = _lptAsset;
         SENIOR_TRANCHE = _seniorTranche;
         QUOTE_ASSET = _quoteAsset;
+    }
+
+    /// @dev The remitter resolves the collateral, LPT, senior tranche, and quote legs off this struct
+    function getImmutableState() external view returns (IRoycoDayKernel.RoycoDayKernelImmutableState memory immutables) {
+        immutables.collateralAsset = COLLATERAL_ASSET;
+        immutables.lptAsset = LPT_ASSET;
+        immutables.seniorTranche = SENIOR_TRANCHE;
+        immutables.quoteAsset = QUOTE_ASSET;
     }
 }

@@ -100,7 +100,7 @@ contract UpgradeBatch is UpgradeBase {
 
     /// @dev Push ST + JT + Kernel + Accountant entries for a market. The caller picks the right
     ///      kernel kind based on the market's deployed kernel type (cross-checked against
-    ///      `script/config/MarketDeploymentConfig.sol`). Order is: tranches → kernel → accountant.
+    ///      `script/deploy/`). Order is: tranches → kernel → accountant.
     function _pushMarketUpgrades(uint256 chainId, string memory marketName, UpgradeKind kernelKind, string memory saltVersion) internal {
         _configs.push(
             UpgradeConfigEntry({ chainId: chainId, kind: UpgradeKind.TRANCHE, saltVersion: saltVersion, payload: abi.encode(marketName, TrancheType.SENIOR) })

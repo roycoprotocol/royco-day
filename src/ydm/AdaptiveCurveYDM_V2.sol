@@ -6,7 +6,7 @@ import { BaseAdaptiveCurveYDM } from "./base/BaseAdaptiveCurveYDM.sol";
 
 /**
  * @title AdaptiveCurveYDM_V2
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Royco's adaptive curve yield distribution model (YDM) V2
  * @dev A general-purpose model for paying a tranche's yield as a premium to a capital pool that provides a service to that tranche
  * @dev It is parameterized purely by the utilization of that service, so the same contract prices any tranche-yield premium
@@ -61,7 +61,7 @@ contract AdaptiveCurveYDM_V2 is BaseAdaptiveCurveYDM {
      * @param _targetUtilizationWAD The target utilization (the kink) for this model, in the range (0, 100%], scaled to WAD precision
      * @param _minYieldShareAtTargetWAD The minimum yield share at target utilization, in the range (0, _maxYieldShareAtTargetWAD], scaled to WAD precision
      * @param _maxYieldShareAtTargetWAD The maximum yield share at target utilization, in the range [_minYieldShareAtTargetWAD, WAD], scaled to WAD precision
-     * @param _adaptationSpeedAtBoundaryWAD The speed at which the curve adapts per second at 0% and 100% utilization, in the range (0, MAX_ADAPTATION_SPEED_WAD], scaled to WAD precision
+     * @param _adaptationSpeedAtBoundaryWAD The speed at which the curve adapts per second at 0% and 100% utilization, in the range (0, _MAX_ADAPTATION_SPEED_WAD], scaled to WAD precision
      */
     constructor(
         uint256 _targetUtilizationWAD,

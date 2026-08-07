@@ -2,38 +2,37 @@
 pragma solidity ^0.8.28;
 
 import { AccessManagedUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
-import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { BeaconProxy } from "../../lib/openzeppelin-contracts/contracts/proxy/beacon/BeaconProxy.sol";
 import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
-import { RoycoBase } from "../base/RoycoBase.sol";
-import { IRoycoAuth } from "../interfaces/IRoycoAuth.sol";
+import { RoycoUUPSBase } from "../base/RoycoUUPSBase.sol";
+import { IRoycoDayEntryPoint } from "../interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
+import { IRoycoFactoryGatekeeper } from "../interfaces/factory/IRoycoFactoryGatekeeper.sol";
 import { IRoycoProtocolTemplate } from "../interfaces/factory/IRoycoProtocolTemplate.sol";
-import {
-    ADMIN_ENTRY_POINT_ROLE,
-    ADMIN_FACTORY_ROLE,
-    ADMIN_PAUSER_ROLE,
-    ADMIN_ROLE,
-    ADMIN_UNPAUSER_ROLE,
-    ADMIN_UPGRADER_ROLE,
-    DEPLOYER_ROLE,
-    SYNC_ROLE
-} from "./RolesConfiguration.sol";
+import { DispatchMode } from "../libraries/Types.sol";
+import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
 
 /**
  * @title RoycoFactory
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Extensible template-driven factory for Royco markets
  */
-contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
+contract RoycoFactory is AccessManagedUpgradeable, RoycoUUPSBase, IRoycoFactory {
+    using DispatchLogic for address;
+
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoFactoryV2State")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ROYCO_FACTORY_STORAGE_SLOT = 0x40ecf137e43ccc3fb8e0ec956edc7094cfc159472690a44f90b2be053a987500;
+    bytes32 private constant _ROYCO_FACTORY_STORAGE_SLOT = 0x40ecf137e43ccc3fb8e0ec956edc7094cfc159472690a44f90b2be053a987500;
+
+    /// @inheritdoc IRoycoFactory
+    address public immutable override(IRoycoFactory) ROYCO_FACTORY_GATEKEEPER;
 
     /// @dev Holds the address of the template currently inside an `executeMarketDeployment` window, `address(0)` otherwise
     address private transient _activeTemplate;
+
+    /// @dev The account that initiated the in-flight market deployment, held transiently so the active template can pull the genesis seed from it
+    address private transient _marketDeployer;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // MODIFIERS
@@ -50,56 +49,24 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     // CONSTRUCTION + INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    constructor() {
+    /// @param _roycoFactoryGatekeeper The gatekeeper this factory routes market target configuration through
+    constructor(address _roycoFactoryGatekeeper) {
+        require(_roycoFactoryGatekeeper != address(0), FACTORY_GATEKEEPER_CANNOT_BE_ZERO_ADDRESS());
+        ROYCO_FACTORY_GATEKEEPER = _roycoFactoryGatekeeper;
         _disableInitializers();
     }
 
-    /**
-     * @notice Initializes the factory proxy against a pre-deployed `AccessManager`
-     * @param _roycoAccessManager Pre-deployed AM. Must already grant `ADMIN_ROLE` to this
-     *        factory's address
-     */
+    /// @notice Initializes the factory proxy against a pre-deployed `RoycoAccessManager`
+    /// @param _roycoAccessManager Pre-deployed access manager whose gatekeeper must already point back at this factory
     function initialize(address _roycoAccessManager) external initializer {
         require(_roycoAccessManager != address(0), ACCESS_MANAGER_CANNOT_BE_ZERO_ADDRESS());
         require(_roycoAccessManager.code.length > 0, ACCESS_MANAGER_HAS_NO_CODE());
 
-        AccessManager am = AccessManager(_roycoAccessManager);
-
-        // Verify the factory holds ADMIN_ROLE on the AM
-        (bool factoryIsAdmin,) = am.hasRole(ADMIN_ROLE, address(this));
-        require(factoryIsAdmin, FACTORY_NOT_ADMIN_ON_ACCESS_MANAGER());
+        // Verify the gatekeeper points back at this factory
+        require(IRoycoFactoryGatekeeper(ROYCO_FACTORY_GATEKEEPER).ROYCO_ACCESS_MANAGER() == _roycoAccessManager, FACTORY_GATEKEEPER_MISMATCH());
 
         // Wire the factory's authority to the specified access manager
         __RoycoBase_init(_roycoAccessManager);
-
-        // Bind factory-level gated selectors to their roles
-        bytes4[] memory deployerSelectors = new bytes4[](1);
-        deployerSelectors[0] = IRoycoFactory.executeMarketDeployment.selector;
-        am.setTargetFunctionRole(address(this), deployerSelectors, DEPLOYER_ROLE);
-
-        bytes4[] memory upgraderSelectors = new bytes4[](1);
-        upgraderSelectors[0] = UUPSUpgradeable.upgradeToAndCall.selector;
-        am.setTargetFunctionRole(address(this), upgraderSelectors, ADMIN_UPGRADER_ROLE);
-
-        bytes4[] memory adminFactorySelectors = new bytes4[](2);
-        adminFactorySelectors[0] = IRoycoFactory.registerTemplate.selector;
-        adminFactorySelectors[1] = IRoycoFactory.disableTemplate.selector;
-        am.setTargetFunctionRole(address(this), adminFactorySelectors, ADMIN_FACTORY_ROLE);
-
-        // Bind the factory's pause/unpause to the pauser/unpauser roles (else they default to ADMIN_ROLE)
-        bytes4[] memory pauserSelectors = new bytes4[](1);
-        pauserSelectors[0] = IRoycoAuth.pause.selector;
-        am.setTargetFunctionRole(address(this), pauserSelectors, ADMIN_PAUSER_ROLE);
-
-        bytes4[] memory unpauserSelectors = new bytes4[](1);
-        unpauserSelectors[0] = IRoycoAuth.unpause.selector;
-        am.setTargetFunctionRole(address(this), unpauserSelectors, ADMIN_UNPAUSER_ROLE);
-
-        // Grant the factory `ADMIN_ENTRY_POINT_ROLE` on the AM
-        am.grantRole(ADMIN_ENTRY_POINT_ROLE, address(this), 0);
-
-        // Grant the factory `SYNC_ROLE` on the AM so market deployments can register kernels on the market syncer
-        am.grantRole(SYNC_ROLE, address(this), 0);
     }
 
     /// @inheritdoc IRoycoFactory
@@ -120,9 +87,6 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
 
         // Sanity: template was constructed pointing at this factory
         require(address(IBaseTemplate(_template).ROYCO_FACTORY()) == address(this), TEMPLATE_BOUND_TO_DIFFERENT_FACTORY());
-
-        // Check if the template is initialized
-        require(IBaseTemplate(_template).isInitialized(), TEMPLATE_NOT_INITIALIZED());
 
         $.isTemplateEnabled[_template] = true;
         emit TemplateRegistered(_template);
@@ -159,28 +123,31 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         require($.isTemplateEnabled[_template], TEMPLATE_NOT_ENABLED());
         require(_activeTemplate == address(0), NO_ACTIVE_TEMPLATE());
 
-        // Bind the active template
+        // Bind the active template and the deployment's initiator (the genesis seed's funder)
         _activeTemplate = _template;
+        _marketDeployer = msg.sender;
 
         // Deploy the market
         result = IBaseTemplate(_template).deployMarket(_params);
 
-        // A valid market must have a kernel, a senior tranche, and at least one complementary tranche (junior, liquidity, or both)
+        // A valid market must have a kernel and all three tranches
         require(
-            result.kernel != address(0) && result.seniorTranche != address(0) && (result.juniorTranche != address(0) || result.liquidityTranche != address(0)),
+            result.kernel != address(0) && result.seniorTranche != address(0) && result.juniorTranche != address(0)
+                && result.liquidityProviderTranche != address(0),
             INVALID_DEPLOYMENT_RESULT()
         );
 
-        // Register each deployed tranche against the market's kernel, skipping an absent junior or liquidity tranche
+        // Register each deployed tranche against the market's kernel
         $.trancheToKernel[result.seniorTranche] = result.kernel;
-        if (result.juniorTranche != address(0)) $.trancheToKernel[result.juniorTranche] = result.kernel;
-        if (result.liquidityTranche != address(0)) $.trancheToKernel[result.liquidityTranche] = result.kernel;
+        $.trancheToKernel[result.juniorTranche] = result.kernel;
+        $.trancheToKernel[result.liquidityProviderTranche] = result.kernel;
 
         // Configure the market's periphery, may read trancheToKernel mapping set above.
-        IBaseTemplate(_template).configureMarketPeriphery(result, _params);
+        IBaseTemplate(_template).postMarketRegistration(result, _params);
 
         // Explicitly clear for clarity: transient storage auto-clears at the end of the transaction as a backstop
         _activeTemplate = address(0);
+        _marketDeployer = address(0);
 
         emit MarketDeploymentCompleted(_template, msg.sender, result);
     }
@@ -190,27 +157,13 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IRoycoFactory
-    function deployDeterministicContract(
-        bytes calldata _creationCode,
-        bytes32 _salt
-    )
-        external
-        override(IRoycoFactory)
-        onlyActiveTemplate
-        whenNotPaused
-        returns (address deployed, bool alreadyDeployed)
-    {
-        // Check if the contract already exists at the predicted address
-        deployed = CREATE3.predictDeterministicAddress(_salt);
-        if (deployed.code.length > 0) return (deployed, true);
-
-        // Deploy the contract
-        return (CREATE3.deployDeterministic(_creationCode, _salt), false);
+    function marketDeployer() external view override(IRoycoFactory) returns (address) {
+        return _marketDeployer;
     }
 
     /// @inheritdoc IRoycoFactory
-    function deployDeterministicProxy(
-        address _implementation,
+    function deployDeterministicProxyFromTemplate(
+        address _beacon,
         bytes calldata _initData,
         bytes32 _salt
     )
@@ -225,7 +178,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         if (deployed.code.length > 0) return (deployed, true);
 
         // Deploy the proxy
-        bytes memory creationCode = abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(_implementation, _initData));
+        bytes memory creationCode = abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(_beacon, _initData));
         deployed = CREATE3.deployDeterministic(creationCode, _salt);
         return (deployed, false);
     }
@@ -236,15 +189,31 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     }
 
     /// @inheritdoc IRoycoFactory
-    function setMarketTargetFunctionRole(address _target, bytes4 _selector, uint64 _roleId) external override(IRoycoFactory) whenNotPaused onlyActiveTemplate {
-        bytes4[] memory selectors = new bytes4[](1);
-        selectors[0] = _selector;
-        AccessManager(authority()).setTargetFunctionRole(_target, selectors, _roleId);
+    function setMarketTargetFunctionRole(
+        address _target,
+        bytes4[] calldata _selectors,
+        uint64[] calldata _roleIds
+    )
+        external
+        override(IRoycoFactory)
+        whenNotPaused
+        onlyActiveTemplate
+    {
+        IRoycoFactoryGatekeeper(ROYCO_FACTORY_GATEKEEPER).configureFreshTarget(_target, _selectors, _roleIds);
     }
 
     /// @inheritdoc IRoycoFactory
-    function grantMarketRole(uint64 _roleId, address _account, uint32 _executionDelay) external override(IRoycoFactory) whenNotPaused onlyActiveTemplate {
-        AccessManager(authority()).grantRole(_roleId, _account, _executionDelay);
+    function configureMarketPeriphery(
+        address[] calldata _tranches,
+        IRoycoDayEntryPoint.TrancheConfig[] calldata _configs,
+        address _kernel
+    )
+        external
+        override(IRoycoFactory)
+        whenNotPaused
+        onlyActiveTemplate
+    {
+        IRoycoFactoryGatekeeper(ROYCO_FACTORY_GATEKEEPER).configureMarketPeriphery(_tranches, _configs, _kernel);
     }
 
     /// @inheritdoc IRoycoFactory
@@ -258,9 +227,11 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         onlyActiveTemplate
         returns (bytes memory result)
     {
-        bool success;
-        (success, result) = _target.call(_data);
-        require(success, FACTORY_CALL_FAILED(result));
+        // The access manager is never a legitimate target for an arbitrary call
+        require(_target != authority() && _target != ROYCO_FACTORY_GATEKEEPER, FACTORY_CALL_TARGET_FORBIDDEN());
+
+        // Forward as an execution dispatch
+        return _target._dispatch(DispatchMode.EXECUTE, _data);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -277,14 +248,14 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         external
         view
         override(IRoycoFactory)
-        returns (address seniorTranche, address juniorTranche, address liquidityTranche, address kernel)
+        returns (address seniorTranche, address juniorTranche, address liquidityProviderTranche, address kernel, address accountant)
     {
         kernel = _getRoycoFactoryStorage().trancheToKernel[_tranche];
         // Unknown tranche: every component resolves to zero
-        if (kernel == address(0)) return (address(0), address(0), address(0), address(0));
-        // The kernel's immutables are the single source of truth for the market's tranche set
+        if (kernel == address(0)) return (address(0), address(0), address(0), address(0), address(0));
+        // The kernel's immutables are the single source of truth for the market's contract set
         IRoycoDayKernel dayKernel = IRoycoDayKernel(kernel);
-        return (dayKernel.SENIOR_TRANCHE(), dayKernel.JUNIOR_TRANCHE(), dayKernel.LIQUIDITY_TRANCHE(), kernel);
+        return (dayKernel.seniorTranche(), dayKernel.juniorTranche(), dayKernel.liquidityProviderTranche(), kernel, dayKernel.accountant());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -293,7 +264,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
 
     function _getRoycoFactoryStorage() private pure returns (IRoycoFactory.RoycoFactoryState storage $) {
         assembly ("memory-safe") {
-            $.slot := ROYCO_FACTORY_STORAGE_SLOT
+            $.slot := _ROYCO_FACTORY_STORAGE_SLOT
         }
     }
 }

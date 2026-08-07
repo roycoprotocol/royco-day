@@ -26,41 +26,41 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
     /// preOpSyncTrancheAccounting reverts for any non-kernel caller, including the admin
     function test_RevertIf_PreOpSyncFromNonKernel() public {
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.preOpSyncTrancheAccounting(toNAVUnits(uint256(1e18)), toNAVUnits(uint256(1e18)));
+        accountant.preOpSyncTrancheAccounting(toNAVUnits(uint256(1e18)));
         vm.prank(stranger);
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.preOpSyncTrancheAccounting(toNAVUnits(uint256(1e18)), toNAVUnits(uint256(1e18)));
+        accountant.preOpSyncTrancheAccounting(toNAVUnits(uint256(1e18)));
     }
 
-    /// commitLiquidityTrancheRawNAV reverts for any non-kernel caller, including the admin
+    /// commitLiquidityProviderTrancheRawNAV reverts for any non-kernel caller, including the admin
     function test_RevertIf_CommitFromNonKernel() public {
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.commitLiquidityTrancheRawNAV(toNAVUnits(uint256(1e18)));
+        accountant.commitLiquidityProviderTrancheRawNAV(toNAVUnits(uint256(1e18)));
         vm.prank(stranger);
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.commitLiquidityTrancheRawNAV(toNAVUnits(uint256(1e18)));
+        accountant.commitLiquidityProviderTrancheRawNAV(toNAVUnits(uint256(1e18)));
     }
 
     /// postOpSyncTrancheAccounting reverts for any non-kernel caller, including the admin
     function test_RevertIf_PostOpSyncFromNonKernel() public {
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, toNAVUnits(uint256(1e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, toNAVUnits(uint256(1e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.prank(stranger);
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, toNAVUnits(uint256(1e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, toNAVUnits(uint256(1e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
     }
 
-    /// all 13 restricted setters (plus inherited pause/unpause) revert AccessManagedUnauthorized for a role-less caller
+    /// all 12 restricted setters (plus inherited pause/unpause) revert AccessManagedUnauthorized for a role-less caller
     function test_RevertIf_UnauthorizedCallerOnAllSetters() public {
-        bytes[] memory calls = new bytes[](15);
+        bytes[] memory calls = new bytes[](14);
         bytes[] memory hardSync = _hardSyncSetterCalls();
-        for (uint256 i; i < 11; ++i) {
+        for (uint256 i; i < 10; ++i) {
             calls[i] = hardSync[i];
         }
-        calls[11] = abi.encodeCall(IRoycoDayAccountant.setJuniorTrancheYDM, (address(0xBEEF), bytes("")));
-        calls[12] = abi.encodeCall(IRoycoDayAccountant.setLiquidityTrancheYDM, (address(0xBEEF), bytes("")));
-        calls[13] = abi.encodeCall(IRoycoAuth.pause, ());
-        calls[14] = abi.encodeCall(IRoycoAuth.unpause, ());
+        calls[10] = abi.encodeCall(IRoycoDayAccountant.setJuniorTrancheYDM, (address(0xBEEF), bytes("")));
+        calls[11] = abi.encodeCall(IRoycoDayAccountant.setLiquidityProviderTrancheYDM, (address(0xBEEF), bytes("")));
+        calls[12] = abi.encodeCall(IRoycoAuth.pause, ());
+        calls[13] = abi.encodeCall(IRoycoAuth.unpause, ());
         for (uint256 i; i < calls.length; ++i) {
             vm.prank(stranger);
             vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
@@ -69,21 +69,24 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
         }
     }
 
-    /// each of the 11 hard-sync setters calls the kernel sync BEFORE its body (snapshot taken at sync equals the pre-call state)
-    function test_SetterSync_hardSyncSettersSyncBeforeBody() public {
+    /// each of the 10 hard-sync setters brackets its body with kernel syncs: one observing the pre-call state before
+    /// the body runs, and one observing the mutated state after, so the config guard always judges the new parameters
+    function test_SetterSync_hardSyncSettersBracketBodyWithSyncs() public {
         bytes[] memory calls = _hardSyncSetterCalls();
         for (uint256 i; i < calls.length; ++i) {
             uint256 countBefore = kernel.syncCallCount();
             bytes32 preHash = _stateHash();
             (bool success,) = address(accountant).call(calls[i]);
             assertTrue(success, "setter must succeed");
-            assertEq(kernel.syncCallCount(), countBefore + 1, "kernel sync not attempted exactly once");
-            assertEq(keccak256(abi.encode(kernel.stateAtLastSync())), preHash, "sync observed post-body state: body ran first");
-            assertTrue(_stateHash() != preHash, "setter body must have mutated state");
+            assertEq(kernel.syncCallCount(), countBefore + 2, "kernel sync not attempted exactly twice");
+            assertEq(kernel.stateHashAtSync(countBefore), preHash, "the first sync must observe the pre-body state");
+            bytes32 postHash = _stateHash();
+            assertTrue(postHash != preHash, "setter body must have mutated state");
+            assertEq(kernel.stateHashAtSync(countBefore + 1), postHash, "the second sync must observe the mutated state the guard judges");
         }
     }
 
-    /// a REVERT-mode kernel bricks all 11 hard-sync setters
+    /// a REVERT-mode kernel bricks all 10 hard-sync setters
     function test_SetterSync_revertingKernelBricksHardSyncSetters() public {
         kernel.setSyncMode(MockAccountantKernel.SyncMode.REVERT);
         bytes[] memory calls = _hardSyncSetterCalls();
@@ -102,9 +105,9 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
         MockRecordingYDM newJT = new MockRecordingYDM();
         accountant.setJuniorTrancheYDM(address(newJT), "");
         assertEq(accountant.getState().jtYDM, address(newJT), "jt ydm updated despite reverting kernel");
-        MockRecordingYDM newLT = new MockRecordingYDM();
-        accountant.setLiquidityTrancheYDM(address(newLT), "");
-        assertEq(accountant.getState().ltYDM, address(newLT), "lt ydm updated despite reverting kernel");
+        MockRecordingYDM newLPT = new MockRecordingYDM();
+        accountant.setLiquidityProviderTrancheYDM(address(newLPT), "");
+        assertEq(accountant.getState().lptYDM, address(newLPT), "lt ydm updated despite reverting kernel");
     }
 
     /// the tolerated kernel sync is still attempted by both YDM setters (counted in NONE mode)
@@ -113,8 +116,8 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
         MockRecordingYDM newJT = new MockRecordingYDM();
         accountant.setJuniorTrancheYDM(address(newJT), "");
         assertEq(kernel.syncCallCount(), countBefore + 1, "jt setter attempted the sync");
-        MockRecordingYDM newLT = new MockRecordingYDM();
-        accountant.setLiquidityTrancheYDM(address(newLT), "");
+        MockRecordingYDM newLPT = new MockRecordingYDM();
+        accountant.setLiquidityProviderTrancheYDM(address(newLPT), "");
         assertEq(kernel.syncCallCount(), countBefore + 2, "lt setter attempted the sync");
     }
 }

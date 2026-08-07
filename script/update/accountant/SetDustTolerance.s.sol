@@ -7,11 +7,8 @@ import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
  * @title SetDustTolerance
- * @notice Generates Safe transaction batches for updating ST and JT NAV dust tolerances across markets and chains
- * @dev Each config entry produces up to TWO transactions inside the chain's batch:
- *      one `setSeniorTrancheDustTolerance(...)` and one `setJuniorTrancheDustTolerance(...)`.
- *      Both ST and JT updates are emitted unconditionally — pass equal values if you only want
- *      to "refresh" one side, or split into separate config entries for finer control.
+ * @notice Generates Safe transaction batches for updating the collateral NAV dust tolerance across markets and chains
+ * @dev Each config entry produces ONE `setDustTolerance(...)` transaction inside the chain's batch.
  *
  *      Usage:
  *      1. Add/update config entries in `_initializeConfigs()` for target markets
@@ -29,10 +26,8 @@ contract SetDustTolerance is ParameterUpdateBase {
     struct SetDustToleranceConfig {
         uint256 chainId;
         string marketName;
-        /// @dev New ST dust tolerance, denominated in NAV units (i.e. WAD-precision USD)
-        uint256 newSTDustTolerance;
-        /// @dev New JT dust tolerance, denominated in NAV units (i.e. WAD-precision USD)
-        uint256 newJTDustTolerance;
+        /// @dev New collateral NAV dust tolerance, denominated in NAV units (i.e. WAD-precision USD)
+        uint256 newDustTolerance;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -75,10 +70,10 @@ contract SetDustTolerance is ParameterUpdateBase {
         for (uint256 c = 0; c < chainIds.length; c++) {
             uint256 chainId = chainIds[c];
 
-            // Two updates per config entry on this chain (one ST, one JT)
+            // One update per config entry on this chain
             uint256 count = 0;
             for (uint256 i = 0; i < _configs.length; i++) {
-                if (_configs[i].chainId == chainId) count += 2;
+                if (_configs[i].chainId == chainId) count++;
             }
 
             // Fork the chain to resolve addresses from the kernel
@@ -92,24 +87,17 @@ contract SetDustTolerance is ParameterUpdateBase {
                 SetDustToleranceConfig storage cfg = _configs[i];
                 MarketAddresses memory addrs = getMarketAddresses(cfg.marketName);
 
-                NAV_UNIT stTol = toNAVUnits(cfg.newSTDustTolerance);
-                NAV_UNIT jtTol = toNAVUnits(cfg.newJTDustTolerance);
+                NAV_UNIT tol = toNAVUnits(cfg.newDustTolerance);
 
                 updates[idx++] = UpdateParams({
                     marketName: cfg.marketName,
                     target: addrs.accountant,
-                    callData: abi.encodeCall(IRoycoDayAccountant.setSeniorTrancheDustTolerance, (stTol)),
-                    description: string.concat("Set ST dust tolerance for ", cfg.marketName, " to ", vm.toString(cfg.newSTDustTolerance))
-                });
-                updates[idx++] = UpdateParams({
-                    marketName: cfg.marketName,
-                    target: addrs.accountant,
-                    callData: abi.encodeCall(IRoycoDayAccountant.setJuniorTrancheDustTolerance, (jtTol)),
-                    description: string.concat("Set JT dust tolerance for ", cfg.marketName, " to ", vm.toString(cfg.newJTDustTolerance))
+                    callData: abi.encodeCall(IRoycoDayAccountant.setDustTolerance, (tol)),
+                    description: string.concat("Set dust tolerance for ", cfg.marketName, " to ", vm.toString(cfg.newDustTolerance))
                 });
             }
 
-            _processChain(chainId, updates, "accountant", "set_dust_tolerance", "Set ST/JT dust tolerance");
+            _processChain(chainId, updates, "accountant", "set_dust_tolerance", "Set collateral NAV dust tolerance");
         }
     }
 
@@ -129,10 +117,8 @@ contract SetDustTolerance is ParameterUpdateBase {
 
         // Dispatch on selector to assert against the right field
         bytes4 selector = bytes4(cd);
-        if (selector == IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector) {
-            require(NAV_UNIT.unwrap(state.stNAVDustTolerance) == expected, VerificationFailed("ST dust tolerance mismatch"));
-        } else if (selector == IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector) {
-            require(NAV_UNIT.unwrap(state.jtNAVDustTolerance) == expected, VerificationFailed("JT dust tolerance mismatch"));
+        if (selector == IRoycoDayAccountant.setDustTolerance.selector) {
+            require(NAV_UNIT.unwrap(state.dustTolerance) == expected, VerificationFailed("Dust tolerance mismatch"));
         } else {
             revert VerificationFailed("Unknown selector in dust tolerance update");
         }

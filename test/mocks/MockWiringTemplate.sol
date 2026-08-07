@@ -10,10 +10,13 @@ import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProto
  * @notice A concrete deployment template that, inside the factory's active-template window, drives the factory's
  *         role-wiring primitives (`setMarketTargetFunctionRole`, `grantMarketRole`, `executeAsFactory`) or a
  *         reentrant `executeMarketDeployment` — so tests can exercise the factory's success-wiring path and its
- *         `FACTORY_CALL_FAILED` / `NO_ACTIVE_TEMPLATE` revert branches off-fork (the production template exercises
+ *         verbatim-bubbling / `NO_ACTIVE_TEMPLATE` revert branches off-fork (the production template exercises
  *         these only in the RPC-gated fork factory suite).
  */
 contract MockWiringTemplate is BaseDeploymentTemplate {
+    /// @dev A non-null placeholder: the base rejects a zero recipient, and no mock market ever pays a fee
+    address internal constant PROTOCOL_FEE_RECIPIENT = address(0xFEE);
+
     uint8 public constant MODE_WIRE = 0;
     uint8 public constant MODE_REENTER = 1;
     uint8 public constant MODE_EXEC_FAIL = 2;
@@ -27,7 +30,7 @@ contract MockWiringTemplate is BaseDeploymentTemplate {
     address public wireAccount;
     IRoycoProtocolTemplate.DeploymentResult private _result;
 
-    constructor(IRoycoFactory _factory) BaseDeploymentTemplate(_factory) { }
+    constructor(IRoycoFactory _factory) BaseDeploymentTemplate(_factory, BaseDeploymentTemplate.ProtocolFeeConfig({ stProtocolFeeWAD: 0, jtProtocolFeeWAD: 0, jtYieldShareProtocolFeeWAD: 0, lptYieldShareProtocolFeeWAD: 0 }), PROTOCOL_FEE_RECIPIENT) { }
 
     function setMode(uint8 _mode) external {
         mode = _mode;
@@ -52,14 +55,13 @@ contract MockWiringTemplate is BaseDeploymentTemplate {
         returns (IRoycoProtocolTemplate.DeploymentResult memory result)
     {
         if (mode == MODE_WIRE) {
-            ROYCO_FACTORY.setMarketTargetFunctionRole(wireTarget, wireSelector, wireRole);
-            ROYCO_FACTORY.grantMarketRole(wireRole, wireAccount, 0);
+            _wireOnce();
         } else if (mode == MODE_REENTER) {
             // Re-entering while this template is the active one trips the singleton guard.
             ROYCO_FACTORY.executeMarketDeployment(address(this), "");
         } else if (mode == MODE_EXEC_FAIL) {
-            // A call to a selector this contract does not implement (no fallback) reverts, so the factory's
-            // executeAsFactory sees success == false and reverts FACTORY_CALL_FAILED.
+            // A call to a selector this contract does not implement (no fallback) reverts with empty data, which
+            // executeAsFactory's dispatch bubbles verbatim.
             ROYCO_FACTORY.executeAsFactory(address(this), hex"deadbeef");
         }
         result = _result;
@@ -67,13 +69,20 @@ contract MockWiringTemplate is BaseDeploymentTemplate {
 
     /// @inheritdoc BaseDeploymentTemplate
     /// @dev In the hook modes, drives the factory's primitives from the post-registration hook phase — proving the
-    ///      active-template window spans `configureMarketPeriphery` and that hook reverts bubble out of the deployment
-    function _configureMarketPeriphery(IRoycoProtocolTemplate.DeploymentResult calldata, bytes calldata) internal override(BaseDeploymentTemplate) {
+    ///      active-template window spans `postMarketRegistration` and that hook reverts bubble out of the deployment
+    function _postMarketRegistration(IRoycoProtocolTemplate.DeploymentResult calldata, bytes calldata) internal override(BaseDeploymentTemplate) {
         if (mode == MODE_WIRE_IN_HOOK) {
-            ROYCO_FACTORY.setMarketTargetFunctionRole(wireTarget, wireSelector, wireRole);
-            ROYCO_FACTORY.grantMarketRole(wireRole, wireAccount, 0);
+            _wireOnce();
         } else if (mode == MODE_EXEC_FAIL_IN_HOOK) {
             ROYCO_FACTORY.executeAsFactory(address(this), hex"deadbeef");
         }
+    }
+
+    /// @dev Drives the factory's target-binding primitive with the single configured (target, selector, role) tuple
+    function _wireOnce() private {
+        bytes4[] memory selectors = new bytes4[](1);
+        uint64[] memory roleIds = new uint64[](1);
+        (selectors[0], roleIds[0]) = (wireSelector, wireRole);
+        ROYCO_FACTORY.setMarketTargetFunctionRole(wireTarget, selectors, roleIds);
     }
 }

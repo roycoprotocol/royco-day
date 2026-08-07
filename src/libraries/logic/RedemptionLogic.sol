@@ -1,25 +1,27 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
-import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
+import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
+import { Cache, CacheKey } from "../Cache.sol";
 import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
-import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
-import { Math, NAV_UNIT, RoycoUnitsMath } from "../Units.sol";
+import { AssetClaims, DispatchMode, MarketState, SyncedAccountingState, TrancheType, toRedemptionOperation } from "../Types.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
 import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
+import { AssetLedgerLogic } from "./AssetLedgerLogic.sol";
 import { BlacklistLogic } from "./BlacklistLogic.sol";
+import { DispatchLogic } from "./DispatchLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { SelfLiquidationLogic } from "./SelfLiquidationLogic.sol";
-import { TrancheClaimsLogic } from "./TrancheClaimsLogic.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
  * @title RedemptionLogic
- * @author Waymont
- * @notice The senior, junior, and liquidity tranche redemption flows, their previews, and max-withdrawable reads for a Royco market
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
+ * @notice The in-kind and multi-asset tranche redemption flows and max-withdrawable reads for a Royco market
  * @dev Invoked by the kernel via delegatecall
  */
 library RedemptionLogic {
@@ -30,282 +32,140 @@ library RedemptionLogic {
     // =============================
 
     /**
-     * @notice Processes the redemption of a specified number of shares from the senior tranche
-     * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
-     * @dev ST redemptions are enabled if the market is in a PERPETUAL state
+     * @notice Processes the in-kind redemption of a specified number of shares of the specified tranche's own assets
+     * @dev The function is expected to transfer the redeemed assets directly to the receiver, based on the redemption claims
+     * @dev Screens the caller, owner, and receiver against the market's blacklist so no blacklisted account can initiate, source, or receive the redemption
+     * @dev Burns the owner's shares after scaling their claims against the pre-burn supply
+     * @dev A null caller is a simulation's synthetic caller, so only it skips the burn: the tranche seam forwards a nonzero msg.sender for every execution
+     * @dev Redemptions are enabled only in a PERPETUAL market state, the JT redemption granted that the market's coverage requirement
+     *      and the LPT redemption granted that the market's liquidity requirement are satisfied post-redemption
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
+     * @param _trancheType An enumerator indicating which tranche to redeem from
      * @param _shares The number of shares to redeem
+     * @param _caller The address that initiated the redemption, the null address for a simulation's synthetic caller (a composite flow forwards its own resolved caller)
+     * @param _owner The address whose tranche shares are burned for the redemption, the null address for a simulation's synthetic owner
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function stRedeem(
+    function inkindRedeem(
         IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        DispatchMode _mode,
+        TrancheType _trancheType,
         uint256 _shares,
+        address _caller,
+        address _owner,
         address _receiver
     )
-        external
+        public
         returns (AssetClaims memory userAssetClaims)
     {
-        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
-        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+        // Reject a zero-share redemption before any work
+        require(_shares != 0, IRoycoDayKernel.MUST_REDEMPTION_NON_ZERO_SHARES());
 
-        SyncedAccountingState memory state;
+        // Screen the redemption's involved accounts against the market's blacklist so no blacklisted account can initiate, source, or receive the redemption
+        BlacklistLogic._enforceNotBlacklisted($, _caller, _owner, _receiver);
+
         uint256 totalTrancheShares;
-        // Execute an accounting sync to reconcile underlying PNL
-        (state, userAssetClaims, totalTrancheShares) = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.SENIOR);
-        // ST redemptions are disabled during a fixed-term market state
+        // Execute an accounting sync to reconcile underlying PNL and read the redeemed tranche's post-mint claims and supply
+        SyncedAccountingState memory state;
+        (state, userAssetClaims, totalTrancheShares) = AccountingSyncLogic.preOpSyncTrancheAccountingFor($, _trancheType);
+        // Redemptions are disabled during a fixed-term market state
         require(state.marketState == MarketState.PERPETUAL, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
+        userAssetClaims = AssetLedgerLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares, true);
 
         // Apply any ST self-liquidation bonus to the redeeming user's asset claims and retrieve the bonus NAV applied
         NAV_UNIT stSelfLiquidationBonusNAV;
-        (userAssetClaims, stSelfLiquidationBonusNAV) = SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus($, state, userAssetClaims);
-
-        // Withdraw the asset claims from each tranche with the self-liquidation bonus applied and transfer them to the receiver
-        TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
-
-        // Execute a post-redeem sync on accounting
-        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.ST_REDEEM, stSelfLiquidationBonusNAV, false);
-    }
-
-    /**
-     * @notice Processes the redemption of a specified number of shares from the junior tranche
-     * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
-     * @dev JT redemptions are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
-     * @param _shares The number of shares to redeem
-     * @param _receiver The address that is receiving the assets
-     * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
-     */
-    function jtRedeem(
-        IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        uint256 _shares,
-        address _receiver
-    )
-        external
-        returns (AssetClaims memory userAssetClaims)
-    {
-        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
-        BlacklistLogic._enforceNotBlacklisted($, _receiver);
-
-        // Execute a pre-op sync on accounting
-        SyncedAccountingState memory state;
-        uint256 totalTrancheShares;
-        (state, userAssetClaims, totalTrancheShares) = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.JUNIOR);
-        // JT redemptions are disabled during a fixed-term market state
-        require(state.marketState == MarketState.PERPETUAL, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
-
-        // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
-        // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
-
-        // Withdraw the asset claims from each tranche and transfer them to the receiver
-        TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
-
-        // Execute a post-redeem sync on accounting, enforcing the market's coverage requirement post-redemption
-        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.JT_REDEEM, ZERO_NAV_UNITS, true);
-    }
-
-    /**
-     * @notice Processes the redemption of a specified number of shares from the liquidity tranche
-     * @dev LT redemptions are enabled only in a PERPETUAL market state, granted that the market's liquidity requirement is satisfied post-redemption
-     * @param _shares The number of shares to redeem
-     * @param _receiver The address that is receiving the assets
-     * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
-     */
-    function ltRedeem(
-        IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        uint256 _shares,
-        address _receiver
-    )
-        external
-        returns (AssetClaims memory userAssetClaims)
-    {
-        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
-        BlacklistLogic._enforceNotBlacklisted($, _receiver);
-
-        // Execute a pre-op sync on accounting
-        SyncedAccountingState memory state;
-        uint256 totalTrancheShares;
-        (state, userAssetClaims, totalTrancheShares) = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.LIQUIDITY);
-        // LT redemptions are disabled during a fixed-term market state
-        require(state.marketState == MarketState.PERPETUAL, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
-
-        // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
-        // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
-
-        // Withdraw the asset claims from each tranche and transfer them to the receiver
-        TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
-
-        // Execute a post-redeem sync on accounting, enforcing the market's liquidity requirement post-redemption
-        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LT_REDEEM, ZERO_NAV_UNITS, true);
-    }
-
-    /**
-     * @notice Atomically exits the liquidity tranche to the LT assets' constituent assets: proportionally removes the LT-asset slice,
-     *         redeems the venue-held senior shares to ST underlying, and returns (ST underlying + quote) to the receiver
-     * @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
-     * @param _ltShares The number of LT shares being redeemed (used to size the proportional LT-asset slice)
-     * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
-     * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
-     * @param _receiver The address that receives the ST underlying and quote
-     * @return stClaims The ST redemption asset claims transferred to the receiver (its ST/JT asset legs)
-     * @return quoteAssets The quote assets returned to the receiver
-     */
-    function ltRedeemMultiAsset(
-        IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        uint256 _ltShares,
-        uint256 _minSTSharesOut,
-        uint256 _minQuoteAssetsOut,
-        address _receiver
-    )
-        external
-        returns (AssetClaims memory stClaims, uint256 quoteAssets)
-    {
-        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account, before any venue interaction
-        BlacklistLogic._enforceNotBlacklisted($, _receiver);
-
-        // Execute a pre-op sync, minting this period's liquidity premium into the kernel's held senior shares so the held pile and the LT supply are consistent for sizing the redeemer's slice
-        (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalLTShares) =
-            AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.LIQUIDITY);
-        // Multi-asset redemptions are disabled during a fixed-term market state
-        require(state.marketState == MarketState.PERPETUAL, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
-
-        // An LT share claims both LT effective-NAV legs: the deployed LT assets and the idle liquidity-premium senior shares
-        // Compute the LT assets
-        AssetClaims memory userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(ltClaims, _ltShares, totalLTShares);
-
-        // Derive the ST total claims and supply from the synced state
-        stClaims = TrancheClaimsLogic._deriveTrancheAssetClaims($, _immutables, TrancheType.SENIOR, state);
-        uint256 totalSTShares = IERC20(_immutables.seniorTranche).totalSupply();
-
-        // Debit both LT legs from the kernel's holdings: the LT-asset slice and the idle premium senior shares
-        // Remove the liquidity equivalent to the LT assets the user has a claim on
-        uint256 stSharesWithdrawn;
-        if (userAssetClaims.stShares != 0) $.ltOwnedSeniorTrancheShares -= userAssetClaims.stShares;
-        $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets - userAssetClaims.ltAssets;
-        (stSharesWithdrawn, quoteAssets) =
-            IRoycoDayKernel(address(this)).removeLiquidity(userAssetClaims.ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
-
-        // Redeem all of the redeemer's senior shares from the venue and from the premium
-        uint256 stSharesToRedeem = stSharesWithdrawn + userAssetClaims.stShares;
-        stClaims = TrancheClaimsLogic._scaleAssetClaims(stClaims, stSharesToRedeem, totalSTShares);
-
-        // Apply any ST self-liquidation bonus to the redeeming user's ST shares claims and retrieve the bonus NAV applied
-        NAV_UNIT stSelfLiquidationBonusNAV;
-        (stClaims, stSelfLiquidationBonusNAV) = SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus($, state, stClaims);
-
-        // Burn the redeemed senior shares and withdraw the bonus-adjusted ST claims to the receiver
-        // The quote assets were remitted in the venue removal above
-        // NOTE: The final post-op accounts for this ST redemption in addition to the preceding LT redemption in one batch call
-        ERC20BurnableUpgradeable(_immutables.seniorTranche).burn(stSharesToRedeem);
-        TrancheClaimsLogic._withdrawAssets($, _immutables, stClaims, _receiver);
-
-        // Execute a post-redeem sync on accounting with the applied ST liquidation bonus
-        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LT_REDEEM, stSelfLiquidationBonusNAV, true);
-    }
-
-    // =============================
-    // Tranche Redeem Preview Functions
-    // =============================
-
-    /**
-     * @notice Previews the redemption of a specified number of shares from the senior tranche
-     * @param _shares The number of shares to redeem
-     * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
-     */
-    function stPreviewRedeem(IRoycoDayKernel.RoycoDayKernelState storage $, uint256 _shares) external view returns (AssetClaims memory userClaim) {
-        // Preview the total claims the senior tranche has on each tranche's assets and the total shares after minting any protocol fee and liquidity premium fee shares post-sync
-        (SyncedAccountingState memory state, AssetClaims memory stClaims, uint256 totalShares) =
-            IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.SENIOR);
-        // ST redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
-        if (state.marketState == MarketState.FIXED_TERM) return userClaim;
-
-        // Calculate the user's claims based on the shares redeemed
-        userClaim = TrancheClaimsLogic._scaleAssetClaims(stClaims, _shares, totalShares);
-        (userClaim,) = SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus($, state, userClaim);
-    }
-
-    /**
-     * @notice Previews the redemption of a specified number of shares from the junior tranche
-     * @dev The kernel may decide to simulate the redemption and revert internally with the result
-     * @dev Should revert if redemptions are asynchronous
-     * @param _shares The number of shares to redeem
-     * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
-     */
-    function jtPreviewRedeem(uint256 _shares) external view returns (AssetClaims memory userClaim) {
-        // Preview the total claims the junior tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
-        (SyncedAccountingState memory state, AssetClaims memory jtClaims, uint256 totalShares) =
-            IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.JUNIOR);
-        // JT redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
-        if (state.marketState == MarketState.FIXED_TERM) return userClaim;
-        // Calculate the user's claims based on the shares redeemed
-        userClaim = TrancheClaimsLogic._scaleAssetClaims(jtClaims, _shares, totalShares);
-    }
-
-    /**
-     * @notice Previews the redemption of a specified number of shares from the liquidity tranche
-     * @param _shares The number of shares to redeem
-     * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
-     */
-    function ltPreviewRedeem(uint256 _shares) external view returns (AssetClaims memory userClaim) {
-        // Preview the total claims the liquidity tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
-        (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalShares) =
-            IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-        // LT redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
-        if (state.marketState == MarketState.FIXED_TERM) return userClaim;
-        // Calculate the user's claims based on the shares redeemed
-        userClaim = TrancheClaimsLogic._scaleAssetClaims(ltClaims, _shares, totalShares);
-    }
-
-    /**
-     * @notice Previews a multi-asset LT redemption of _ltShares by simulating the proportional venue removal and the senior unwind
-     * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net
-     * @param _ltShares The number of LT shares to redeem
-     * @return stClaims The ST redemption asset claims that would be transferred to the receiver, denominated in the respective tranches' tranche units
-     * @return quoteAssets The quote assets the removal would withdraw to the receiver
-     */
-    function ltPreviewRedeemMultiAsset(
-        IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        uint256 _ltShares
-    )
-        external
-        returns (AssetClaims memory stClaims, uint256 quoteAssets)
-    {
-        // Preview the liquidity tranche sync
-        (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalLTShares) =
-            IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-        // Multi-asset redemptions are disabled during a fixed-term market state: return empty claims, matching the reverting redeem path
-        if (state.marketState == MarketState.FIXED_TERM) return (stClaims, 0);
-
-        // An LT share claims both LT effective-NAV legs: the deployed LT assets and the idle liquidity-premium senior shares
-        AssetClaims memory userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(ltClaims, _ltShares, totalLTShares);
-
-        // Derive the ST total claims from the synced state, and the senior supply AFTER this sync mints the premium and ST protocol fee shares
-        // The execution path reads totalSupply() after the pre-op sync has minted those shares, so the preview must use the same post-mint supply
-        stClaims = TrancheClaimsLogic._deriveTrancheAssetClaims($, _immutables, TrancheType.SENIOR, state);
-        (,, uint256 totalSTShares) =
-            FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
-
-        // Quote the proportional venue removal for the LT-asset slice (simulation only: no slippage gate, no settlement)
-        uint256 stSharesWithdrawn;
-        if (userAssetClaims.ltAssets != ZERO_TRANCHE_UNITS) {
-            (stSharesWithdrawn, quoteAssets) = IRoycoDayKernel(address(this)).previewRemoveLiquidity(userAssetClaims.ltAssets);
+        if (_trancheType == TrancheType.SENIOR) {
+            (userAssetClaims, stSelfLiquidationBonusNAV) = SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus($, state, userAssetClaims);
         }
 
-        // The redeemer's senior shares come from both the venue removal and the idle premium pile
-        uint256 stSharesToRedeem = stSharesWithdrawn + userAssetClaims.stShares;
-        stClaims = TrancheClaimsLogic._scaleAssetClaims(stClaims, stSharesToRedeem, totalSTShares);
+        // Debit the withdrawn asset claims from the tranche ledgers
+        AssetLedgerLogic._debitAssets($, userAssetClaims);
 
-        // Apply any ST self-liquidation bonus to the redeeming user's ST shares claims, mirroring the execution path
-        (stClaims,) = SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus($, state, stClaims);
+        // Burn the owner's redeemed shares, their claims were scaled against the pre-burn supply above
+        // A null caller is a simulation's synthetic caller, so only it skips the burn, which feeds no downstream input in this flow
+        // Only the market's tranches reach this flow and their seam forwards a nonzero msg.sender for every execution, so a skipped burn never skips ownership enforcement
+        if (_caller != address(0)) IRoycoVaultTranche(AssetLedgerLogic._getTrancheAddress($, _trancheType)).kernelBurn(_owner, _shares);
+
+        // Execute a post-redeem sync on accounting, enforcing the market's requirements against the redemption's settled state
+        AccountingSyncLogic.postOpSyncTrancheAccounting($, toRedemptionOperation(_trancheType), stSelfLiquidationBonusNAV);
+
+        // Remit the asset claims to the receiver
+        AssetLedgerLogic._remitClaims($, userAssetClaims, _receiver);
+
+        // A preview carries its result out via this revert, unwinding every mutation this flow made
+        if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(userAssetClaims));
+    }
+
+    /**
+     * @notice Atomically exits the liquidity provider tranche to the LPT assets' constituent assets: proportionally removes the LPT-asset slice,
+     *         redeems the venue-held senior shares to collateral, and returns (collateral + quote) to the receiver
+     * @dev Composes the shared redemption legs: an in-kind LPT redemption to the kernel, the proportional venue removal of the redeemed slice, and a senior redemption of the withdrawn and idle premium shares
+     * @dev Screens the caller, owner, and receiver at the flow entry and forwards its caller into the inner legs, whose burns key on it: a preview's null caller skips every burn
+     * @dev Burns the owner's LPT shares after scaling their claims against the pre-burn supply
+     * @dev The flow's intermediate legs defer the liquidity requirement to the final leg's settled state, whose unhealed violation the end-of-flow gate reverts on
+     * @dev LPT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _mode The dispatch mode: SIMULATE computes the operation and unwinds every mutation by reverting with its result, EXECUTE settles it
+     * @param _lptShares The number of LPT shares being redeemed (used to size the proportional LPT-asset slice)
+     * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
+     * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
+     * @param _caller The address that initiated the redemption
+     * @param _owner The address whose LPT shares are burned for the redemption, the null address for a simulation's synthetic owner
+     * @param _receiver The address that receives the collateral and quote
+     * @return stClaims The ST redemption asset claims transferred to the receiver (its collateral asset leg)
+     * @return quoteAssets The quote assets returned to the receiver
+     */
+    function lptRedeemMultiAsset(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        DispatchMode _mode,
+        uint256 _lptShares,
+        uint256 _minSTSharesOut,
+        uint256 _minQuoteAssetsOut,
+        address _caller,
+        address _owner,
+        address _receiver
+    )
+        external
+        returns (AssetClaims memory stClaims, uint256 quoteAssets)
+    {
+        // Screen the redemption's involved accounts against the market's blacklist so no blacklisted account can initiate, source, or receive the redemption
+        BlacklistLogic._enforceNotBlacklisted($, _caller, _owner, _receiver);
+
+        // Mark the multi-asset flow, whose exit below judges the liquidity requirement at the flow's final settled state
+        AccountingSyncLogic._enterMultiAssetFlow();
+
+        // LPT leg: an in-kind LPT redemption of the owner's shares to the kernel itself, debiting the redeemed LPT assets and idle premium senior shares from the tranche ledgers
+        // Its in-flow post-op waives the liquidity requirement the ST leg's post-op enforces on this flow's final settled state
+        AssetClaims memory lptAssetClaims = inkindRedeem($, DispatchMode.EXECUTE, TrancheType.LIQUIDITY_PROVIDER, _lptShares, _caller, _owner, address(this));
+
+        // Remove the redeemed LPT assets from the liquidity venue: the senior shares return to the kernel and the quote goes to the receiver
+        // A preview's removal simulates and unwinds at the venue, carrying its amounts and post-remove mark out in its result
+        uint256 stSharesWithdrawn;
+        NAV_UNIT lptAssetPrice;
+        (stSharesWithdrawn, quoteAssets, lptAssetPrice) =
+            IRoycoDayKernel(address(this)).removeLiquidity(_mode, lptAssetClaims.lptAssets, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
+
+        // Cache the venue's post-remove price for a preview, whose unwound removal would otherwise price the pre-remove pool live
+        // Execution caches nothing: the downstream legs price the settled post-remove venue live at the same mark
+        if (_mode == DispatchMode.SIMULATE) Cache._write(CacheKey.LPT_ASSET_PRICE, toUint256(lptAssetPrice));
+
+        // ST leg: a senior redemption of the removal's withdrawn and idle premium shares to collateral for the receiver, skipped when there are none
+        // Its in-flow post-op enforces the liquidity requirement against this flow's final settled state, after the senior unwind shrank the requirement the removal's depth exit raised
+        stSharesWithdrawn += lptAssetClaims.stShares;
+        if (stSharesWithdrawn != 0) {
+            stClaims = inkindRedeem($, DispatchMode.EXECUTE, TrancheType.SENIOR, stSharesWithdrawn, _caller, address(this), _receiver);
+        }
+
+        // Exit the settled multi-asset flow, reverting on a pending liquidity violation its final settled state never healed
+        AccountingSyncLogic._exitMultiAssetFlow();
+
+        // A preview carries its result out via this revert, unwinding every mutation this flow made
+        if (_mode == DispatchMode.SIMULATE) revert DispatchLogic.SIMULATION_RESULT(abi.encode(stClaims, quoteAssets));
     }
 
     // =============================
@@ -313,167 +173,121 @@ library RedemptionLogic {
     // =============================
 
     /**
-     * @notice Returns the maximum amount of assets that can be withdrawn from the senior tranche
-     * @dev ST redemptions are allowed in PERPETUAL market states
-     * @param _owner The address that is withdrawing the assets
-     * @return stClaimNAV The senior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
-     * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the senior tranche after the post-sync mint of its protocol fee shares and liquidity premium shares
+     * @notice Returns the maximum number of shares that can be redeemed in-kind from the specified tranche, unbounded by any owner's balance
+     * @dev Redemptions are allowed only in a PERPETUAL market state
+     * @dev ST redemptions are otherwise unrestricted: the senior claim never exceeds the collateral NAV under conservation, so its entire effective NAV is withdrawable
+     * @dev JT withdrawals are bounded by the market's coverage requirement and LPT withdrawals by its liquidity requirement
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _trancheType An enumerator indicating which tranche to return the max redeemable shares for
+     * @param _owner The address that is redeeming the shares
+     * @return maxRedeemableShares The maximum number of shares that can be redeemed from the specified tranche
      */
-    function stMaxWithdrawable(
+    function inkindMaxRedeemable(
         IRoycoDayKernel.RoycoDayKernelState storage $,
+        TrancheType _trancheType,
         address _owner
     )
         external
         view
-        returns (NAV_UNIT stClaimNAV, NAV_UNIT stMaxWithdrawableNAV, uint256 totalTrancheShares)
+        returns (uint256 maxRedeemableShares)
     {
-        // If the owner is blacklisted or the kernel is currently paused, return zero claims
-        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) {
-            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        // If the owner is blacklisted or the kernel is currently paused, nothing is redeemable
+        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) return 0;
+
+        // Get the specified tranche's total claim on the market's assets
+        SyncedAccountingState memory state;
+        uint256 totalTrancheShares;
+        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccountingFor(_trancheType);
+
+        // Redemptions are disabled during a fixed-term market state
+        if (state.marketState == MarketState.FIXED_TERM) return 0;
+
+        NAV_UNIT claimNAV;
+        NAV_UNIT maxWithdrawableNAV;
+        if (_trancheType == TrancheType.SENIOR) {
+            // ST redemptions are otherwise unrestricted in a PERPETUAL state: the senior claim never exceeds the collateral NAV under conservation, so its entire effective NAV is withdrawable
+            claimNAV = state.stEffectiveNAV;
+            maxWithdrawableNAV = state.stEffectiveNAV;
+        } else if (_trancheType == TrancheType.JUNIOR) {
+            // The junior tranche's total claim on the collateral NAV is exactly its effective NAV under NAV conservation
+            claimNAV = state.jtEffectiveNAV;
+            // The withdrawal is bounded by the market's coverage requirement
+            maxWithdrawableNAV = IRoycoDayAccountant($.accountant).maxJTWithdrawal(state);
+        } else {
+            // An in-kind redemption pulls a proportional slice of both LPT legs
+            claimNAV = state.lptRawNAV;
+            // The withdrawal is bounded by the market's liquidity requirement
+            maxWithdrawableNAV = IRoycoDayAccountant($.accountant).maxLPTWithdrawal(state);
         }
 
-        // Get the senior tranche's total claim on the market's assets
-        SyncedAccountingState memory state;
-        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.SENIOR);
+        // With no claim on the assets nothing is redeemable
+        if (claimNAV == ZERO_NAV_UNITS) return 0;
 
-        // ST redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
-
-        // ST redemptions are otherwise unrestricted in a PERPETUAL state: the senior claim on each raw NAV pool never exceeds that pool, so its entire effective NAV is withdrawable
-        stClaimNAV = state.stEffectiveNAV;
-        stMaxWithdrawableNAV = state.stEffectiveNAV;
+        // Price the withdrawable NAV into shares through the same virtual shares primitive as deposits and _scaleAssetClaims
+        maxRedeemableShares = ValuationLogic._convertToShares(maxWithdrawableNAV, claimNAV, totalTrancheShares, Math.Rounding.Floor);
     }
 
     /**
-     * @notice Returns the maximum amount of assets that can be withdrawn from the junior tranche
-     * @dev JT redemptions are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
-     * @param _owner The address that is withdrawing the assets
-     * @return jtClaimNAV The junior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
-     * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync
-     */
-    function jtMaxWithdrawable(
-        IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        address _owner
-    )
-        external
-        view
-        returns (NAV_UNIT jtClaimNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
-    {
-        // If the owner is blacklisted or the kernel is currently paused, return zero claims
-        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) {
-            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
-        }
-
-        // Get the junior tranche's total claim on the market's assets
-        SyncedAccountingState memory state;
-        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.JUNIOR);
-
-        // JT redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
-
-        // The junior tranche's total claim on the market's raw NAVs is exactly its effective NAV, since its claims on the ST and JT raw NAVs sum to it under NAV conservation
-        jtClaimNAV = state.jtEffectiveNAV;
-
-        // Get the max withdrawable JT assets in NAV units from the accountant considering the coverage requirement
-        jtMaxWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxJTWithdrawal(state);
-    }
-
-    /**
-     * @notice Returns the maximum amount of assets that can be withdrawn from the liquidity tranche
-     * @param _owner The address that is withdrawing the assets
-     * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
-     * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the liquidity tranche, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the liquidity tranche
-     */
-    function ltMaxWithdrawable(
-        IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        address _owner
-    )
-        external
-        view
-        returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheShares)
-    {
-        // If the owner is blacklisted or the kernel is currently paused, return zero claims
-        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
-
-        // Get the total claims the liquidity tranche has on its own assets
-        SyncedAccountingState memory state;
-        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-
-        // LT redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
-
-        // An in-kind redemption pulls a proportional slice of both LT legs
-        claimOnLTNAV = state.ltRawNAV;
-        // The withdrawal is bounded by the market's liquidity requirement
-        ltMaxWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxLTWithdrawal(state);
-    }
-
-    /**
-     * @notice Returns the maximum amount of assets that can be withdrawn from the liquidity tranche via a multi-asset redemption
+     * @notice Returns the maximum number of shares that can be redeemed from the liquidity provider tranche via a multi-asset redemption, unbounded by any owner's balance
      * @dev A multi-asset redemption redeems the withdrawn and idle premium senior shares in-flow, reducing the liquidity requirement alongside the withdrawal
      *
-     * @dev Liquidity Requirement: LT_RAW_NAV >= (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
-     * @dev Senior share redemption NAV per unit of LT raw NAV withdrawn, r: SENIOR_SHARE_REDEMPTION_NAV / LT_RAW_NAV
-     * @dev Max assets withdrawable from LT multi-asset, z: (LT_RAW_NAV - z) = ((ST_EFFECTIVE_NAV - (z * r)) * MIN_LIQUIDITY)
-     *      Isolate z: z = (LT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)) * LT_RAW_NAV / (LT_RAW_NAV - (SENIOR_SHARE_REDEMPTION_NAV * MIN_LIQUIDITY))
+     * @dev Liquidity Requirement: LPT_RAW_NAV >= (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
+     * @dev Senior share redemption NAV per unit of LPT raw NAV withdrawn, r: SENIOR_SHARE_REDEMPTION_NAV / LPT_RAW_NAV
+     * @dev Max assets withdrawable from LPT multi-asset, z: (LPT_RAW_NAV - z) = ((ST_EFFECTIVE_NAV - (z * r)) * MIN_LIQUIDITY)
+     *      Isolate z: z = (LPT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)) * LPT_RAW_NAV / (LPT_RAW_NAV - (SENIOR_SHARE_REDEMPTION_NAV * MIN_LIQUIDITY))
      *
-     * @dev The idle liquidity premium senior shares are assumed unreinvested (the worst case): a reinvestment grows the LT raw NAV
-     *      and its withdrawable surplus by the same premium value, which can only raise the bound
-     * @param _owner The address that is withdrawing the assets
-     * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
-     * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the liquidity tranche
-     * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net
+     * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _owner The address that is redeeming the shares
+     * @return maxRedeemableShares The maximum number of shares that can be redeemed multi-asset from the liquidity provider tranche
      */
-    function ltMaxWithdrawableMultiAsset(
-        IRoycoDayKernel.RoycoDayKernelState storage $,
-        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
-        address _owner
-    )
-        external
-        returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheShares)
-    {
-        // If the owner is blacklisted or the kernel is currently paused, return zero claims
-        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+    function lptMaxRedeemableMultiAsset(IRoycoDayKernel.RoycoDayKernelState storage $, address _owner) external returns (uint256 maxRedeemableShares) {
+        // If the owner is blacklisted or the kernel is currently paused, nothing is redeemable
+        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) return 0;
 
-        // Get the total claims the liquidity tranche has on its own assets
+        // Get the total claims the liquidity provider tranche has on its own assets
         SyncedAccountingState memory state;
-        AssetClaims memory ltClaims;
-        (state, ltClaims, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
+        AssetClaims memory lptClaims;
+        uint256 totalTrancheShares;
+        (state, lptClaims, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccountingFor(TrancheType.LIQUIDITY_PROVIDER);
 
-        // LT redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        // LPT redemptions are disabled during a fixed-term market state
+        if (state.marketState == MarketState.FIXED_TERM) return 0;
 
-        // A multi-asset redemption pulls a proportional slice of both LT legs
-        claimOnLTNAV = state.ltRawNAV;
-        // The withdrawal is bounded by the market's liquidity requirement
-        NAV_UNIT ltWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxLTWithdrawal(state);
-
-        // Compute the senior tranche shares a proportional removal of the entire LT asset holding would withdraw
+        // Compute the senior tranche shares a proportional removal of the entire LPT asset holding would withdraw
         uint256 stSharesWithdrawn;
-        if (ltClaims.ltAssets != ZERO_TRANCHE_UNITS) (stSharesWithdrawn,) = IRoycoDayKernel(address(this)).previewRemoveLiquidity(ltClaims.ltAssets);
+        if (lptClaims.lptAssets != ZERO_TRANCHE_UNITS) {
+            (stSharesWithdrawn,,) = IRoycoDayKernel(address(this)).removeLiquidity(DispatchMode.SIMULATE, lptClaims.lptAssets, 0, 0, address(0));
+        }
+
+        // A multi-asset redemption pulls a proportional slice of both LPT legs
+        // The claim and the withdrawal bound share the post-remove mark so their ratio sizes the redeemable share fraction exactly
+        NAV_UNIT claimOnLPTNAV = state.lptRawNAV;
+        // The withdrawal is bounded by the market's liquidity requirement
+        NAV_UNIT lptWithdrawableNAV = IRoycoDayAccountant($.accountant).maxLPTWithdrawal(state);
 
         // Value the withdrawn and idle premium senior shares at the post-sync senior share rate, rounding down so the requirement reduction is never overstated
-        (,, uint256 totalSTShares) =
-            FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
+        (,, uint256 totalSTShares) = FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20($.seniorTranche).totalSupply());
         NAV_UNIT stSharesRedeemedNAV =
-            ValuationLogic._convertToValue((stSharesWithdrawn + ltClaims.stShares), totalSTShares, state.stEffectiveNAV, Math.Rounding.Floor);
+            ValuationLogic._convertToValue((stSharesWithdrawn + lptClaims.stShares), totalSTShares, state.stEffectiveNAV, Math.Rounding.Floor);
         // Compute the reduction in the market's liquidity requirement from redeeming the senior shares in-flow
         NAV_UNIT liquidityRequirementReductionNAV = stSharesRedeemedNAV.mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Floor);
 
         // If the requirement reduction outpaces the withdrawal itself, the entire holding is withdrawable unless nothing is withdrawable in kind
-        if (liquidityRequirementReductionNAV >= state.ltRawNAV) {
-            ltMaxWithdrawableNAV = (ltWithdrawableNAV == ZERO_NAV_UNITS) ? ZERO_NAV_UNITS : state.ltRawNAV;
+        NAV_UNIT lptMaxWithdrawableNAV;
+        if (liquidityRequirementReductionNAV >= state.lptRawNAV) {
+            lptMaxWithdrawableNAV = (lptWithdrawableNAV == ZERO_NAV_UNITS) ? ZERO_NAV_UNITS : state.lptRawNAV;
         } else {
             // Scale the in-kind withdrawable NAV by the requirement reduction, capped at the entire holding
-            ltMaxWithdrawableNAV = RoycoUnitsMath.min(
-                ltWithdrawableNAV.mulDiv(state.ltRawNAV, (state.ltRawNAV - liquidityRequirementReductionNAV), Math.Rounding.Floor), state.ltRawNAV
+            lptMaxWithdrawableNAV = RoycoUnitsMath.min(
+                lptWithdrawableNAV.mulDiv(state.lptRawNAV, (state.lptRawNAV - liquidityRequirementReductionNAV), Math.Rounding.Floor), state.lptRawNAV
             );
         }
+
+        // With no claim on the assets nothing is redeemable
+        if (claimOnLPTNAV == ZERO_NAV_UNITS) return 0;
+
+        // Price the withdrawable NAV into shares through the same virtual shares primitive as deposits and _scaleAssetClaims
+        maxRedeemableShares = ValuationLogic._convertToShares(lptMaxWithdrawableNAV, claimOnLPTNAV, totalTrancheShares, Math.Rounding.Floor);
     }
 }

@@ -11,10 +11,11 @@ import { WAD } from "../../src/libraries/Constants.sol";
 import { MarketState } from "../../src/libraries/Types.sol";
 import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../src/ydm/AdaptiveCurveYDM_V2.sol";
+import { FixedYDM } from "../../src/ydm/FixedYDM.sol";
 import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
 
 /**
- * @notice The single dedicated invariant suite for ALL THREE YDM models: StaticCurveYDM, AdaptiveCurveYDM_V1, AdaptiveCurveYDM_V2.
+ * @notice The single dedicated invariant suite for ALL FOUR YDM models: StaticCurveYDM, AdaptiveCurveYDM_V1, AdaptiveCurveYDM_V2, FixedYDM.
  * @dev One invariant test contract per model. Each contract deploys a spread of Handler instances that span the
  *      TARGET_UTILIZATION_WAD range (the constructor immutable kink), so the target dimension is exercised alongside
  *      utilization, market state, elapsed time, and reinitialization.
@@ -458,5 +459,130 @@ contract Invariant_AdaptiveCurveYDM_V2 is StdInvariant, Test {
             reinits += handlers[i].ghost_reinitCalls();
         }
         console2.log("V2 yieldShare/preview/warp/reinit calls", pokes, previews, warps + reinits);
+    }
+}
+
+// =====================================================================
+// FixedYDM handler
+// =====================================================================
+
+contract FixedYDMHandler is BaseYDMHandler {
+    FixedYDM public model;
+
+    /// @notice The share the last successful initialization configured, the value every read must return verbatim
+    uint256 public ghost_configuredShareWAD;
+
+    /// @notice Set true if any read ever returns a value other than the configured share. Must stay false.
+    bool public everMismatched;
+
+    /// @dev Deploys the model and seeds the reference share, zero included in the reinit sweep below.
+    constructor(uint64 _initialShareWAD) {
+        model = new FixedYDM();
+        model.initializeYDMForMarket(_initialShareWAD);
+        ghost_configuredShareWAD = _initialShareWAD;
+    }
+
+    function pokeYieldShare(uint256 _util, uint8 _stateSeed) external {
+        ghost_yieldShareCalls++;
+        try model.yieldShare(_state(_stateSeed), _util) returns (uint256 ys) {
+            _record(ys);
+            if (ys != ghost_configuredShareWAD) everMismatched = true;
+        } catch {
+            everReverted = true;
+        }
+    }
+
+    function previewOnly(uint256 _util, uint8 _stateSeed) external {
+        ghost_previewCalls++;
+        try model.previewYieldShare(_state(_stateSeed), _util) returns (uint256 ys) {
+            _record(ys);
+            if (ys != ghost_configuredShareWAD) everMismatched = true;
+        } catch {
+            everReverted = true;
+        }
+    }
+
+    /// @notice Re-initialize within the full valid range [0, WAD], zero share included by design.
+    function reinit(uint64 _shareSeed) external {
+        ghost_reinitCalls++;
+        uint64 share = uint64(bound(uint256(_shareSeed), 0, WAD));
+        try model.initializeYDMForMarket(share) {
+            ghost_configuredShareWAD = share;
+        } catch {
+            everReverted = true;
+        }
+    }
+}
+
+// =====================================================================
+// Invariant test: FixedYDM
+// =====================================================================
+
+contract Invariant_FixedYDM is StdInvariant, Test {
+    FixedYDMHandler[] internal handlers;
+
+    /// @dev Representative initial shares spanning [0, WAD]: the zero share, dust, mid, and the WAD ceiling.
+    function _initialShares() internal pure returns (uint64[] memory s) {
+        s = new uint64[](4);
+        s[0] = 0;
+        s[1] = 1e14;
+        s[2] = 3e17;
+        s[3] = uint64(WAD);
+    }
+
+    function setUp() public {
+        uint64[] memory shares = _initialShares();
+        bytes4[] memory sel = new bytes4[](4);
+        sel[0] = FixedYDMHandler.pokeYieldShare.selector;
+        sel[1] = FixedYDMHandler.previewOnly.selector;
+        sel[2] = BaseYDMHandler.warp.selector;
+        sel[3] = FixedYDMHandler.reinit.selector;
+
+        for (uint256 i = 0; i < shares.length; i++) {
+            FixedYDMHandler h = new FixedYDMHandler(shares[i]);
+            handlers.push(h);
+            targetContract(address(h));
+            targetSelector(FuzzSelector({ addr: address(h), selectors: sel }));
+        }
+    }
+
+    /// @notice No yieldShare or previewYieldShare output ever exceeds WAD on any state or utilization
+    /// @dev Load-bearing because the accountant pays this share of the senior gain: a share above WAD would
+    ///      pay out more than the whole gain and break NAV conservation in the sync
+    function invariant_yieldShareNeverExceedsWAD() public view {
+        for (uint256 i = 0; i < handlers.length; i++) {
+            assertLe(handlers[i].maxYieldShareObserved(), WAD, "fixed: yield share exceeded WAD");
+        }
+    }
+
+    /// @notice No post-initialization model call ever reverts, on any raw utilization including type(uint256).max
+    /// @dev Load-bearing because the accountant resolves the model inside every sync: a reverting model
+    ///      would brick the market's tranche accounting sync
+    function invariant_callsNeverRevert() public view {
+        for (uint256 i = 0; i < handlers.length; i++) {
+            assertFalse(handlers[i].everReverted(), "fixed: a post-init call reverted");
+        }
+    }
+
+    /// @notice Every read returns exactly the configured share: the model is constant across state, utilization, and time
+    function invariant_outputAlwaysEqualsConfiguredShare() public view {
+        for (uint256 i = 0; i < handlers.length; i++) {
+            assertFalse(handlers[i].everMismatched(), "fixed: a read diverged from the configured share");
+        }
+    }
+
+    /// @dev Prints the per-action call totals across all handler instances, the anti-vacuity evidence for the run
+    function afterInvariant() public view {
+        uint256 pokes;
+        uint256 previews;
+        uint256 warps;
+        uint256 reinits;
+        for (uint256 i = 0; i < handlers.length; i++) {
+            pokes += handlers[i].ghost_yieldShareCalls();
+            previews += handlers[i].ghost_previewCalls();
+            warps += handlers[i].ghost_warpCalls();
+            reinits += handlers[i].ghost_reinitCalls();
+        }
+        console2.log("Fixed yieldShare/preview/warp/reinit calls", pokes, previews, warps + reinits);
     }
 }

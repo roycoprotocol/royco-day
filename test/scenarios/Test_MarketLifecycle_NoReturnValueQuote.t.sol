@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { toUint256 } from "../../src/libraries/Units.sol";
 import { FixtureCell } from "../utils/FixtureTypes.sol";
 import { cellF } from "../utils/TokenConfigs.sol";
 import { Test_MarketLifecycleBase } from "./Test_MarketLifecycleBase.t.sol";
@@ -49,6 +48,6 @@ contract Test_MarketLifecycle_NoReturnValueQuote_NonStandardTokens is Test_Marke
         // The canonical seed routes every quote movement through SafeERC20 pulls and must land the exact
         // shape-independent depth: 6e18 auto-seed + 20e18 explicit = 26e18
         _seedDefault();
-        assertEq(toUint256(liquidityTranche.getRawNAV()), SEEDED_LT_RAW_NAV, "the USDT-shaped quote must not perturb the seeded depth");
+        assertEq(_liveLPTRawNAV(), SEEDED_LPT_RAW_NAV, "the USDT-shaped quote must not perturb the seeded depth");
     }
 }

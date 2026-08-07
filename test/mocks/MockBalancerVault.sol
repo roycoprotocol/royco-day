@@ -8,7 +8,9 @@ import {
     AddLiquidityKind,
     AddLiquidityParams,
     RemoveLiquidityKind,
-    RemoveLiquidityParams
+    RemoveLiquidityParams,
+    SwapKind,
+    VaultSwapParams
 } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -26,7 +28,7 @@ import { MockBPT } from "./MockBPT.sol";
  * @dev The debt/credit session ledger mirrors the real vault, every delta opened by addLiquidity, removeLiquidity, and sendTo must be
  *      closed by settle or sendTo before unlock returns, else BalanceNotSettled
  * @dev The complete fidelity table (mirrored semantics vs deliberate deltas such as linear fair-value add pricing,
- *      no swap surface, and no hook layer) lives in test/mocks/README.md
+ *      constant-price swap math, and no hook layer) lives in test/mocks/README.md
  */
 contract MockBalancerVault {
     using Math for uint256;
@@ -67,6 +69,9 @@ contract MockBalancerVault {
     /// @notice Thrown when a BPT allowance cannot cover the transferFrom
     error BPT_INSUFFICIENT_ALLOWANCE();
 
+    /// @notice Thrown when a swap requests EXACT_OUT, which this mock does not model (curve-shape realism is fork-suite territory)
+    error EXACT_IN_ONLY();
+
     // =============================
     // State
     // =============================
@@ -80,6 +85,9 @@ contract MockBalancerVault {
 
     /// @dev Whether each pool has been registered
     mapping(address pool => bool registered) private _registered;
+
+    /// @dev Whether a pool has been seeded with its genesis liquidity, mirroring the real vault's initialization latch
+    mapping(address pool => bool initialized) private _initialized;
 
     /// @dev Each registered pool's two tokens, in registration order
     mapping(address pool => IERC20[2] tokens) private _poolTokens;
@@ -111,6 +119,9 @@ contract MockBalancerVault {
     /// @notice The haircut applied to the fair-value BPT out on UNBALANCED adds, in basis points
     uint16 public unbalancedFeeBps;
 
+    /// @notice The swap fee retained by the pool on exact-in swaps, charged on the output leg, in basis points
+    uint16 public swapFeeBps;
+
     /// @dev The one-shot BPT-out override for the next add, and whether it is armed
     uint256 private _nextBptOutOverride;
     bool private _nextBptOutOverrideArmed;
@@ -135,12 +146,17 @@ contract MockBalancerVault {
         _poolTokens[_pool] = _tokens;
     }
 
-    /// @notice Returns whether the pool is registered, validated by the kernel quoter constructor
+    /// @notice Returns whether the pool is registered, validated by the kernel venue constructor
     function isPoolRegistered(address _pool) external view returns (bool) {
         return _registered[_pool];
     }
 
-    /// @notice Returns the pool's tokens in registration order, validated by the kernel quoter constructor
+    /// @notice Returns whether the pool has been seeded with its genesis liquidity, routing the kernel's add between initialize and addLiquidity
+    function isPoolInitialized(address _pool) external view returns (bool) {
+        return _initialized[_pool];
+    }
+
+    /// @notice Returns the pool's tokens in registration order, validated by the kernel venue constructor
     function getPoolTokens(address _pool) external view returns (IERC20[] memory tokens) {
         require(_registered[_pool], IVaultErrors.PoolNotRegistered(_pool));
         tokens = new IERC20[](2);
@@ -218,6 +234,12 @@ contract MockBalancerVault {
         return returnData;
     }
 
+    /// @notice Returns whether the vault is currently unlocked, true while a transient accounting session is open
+    /// @dev Mirrors the real vault's transient VaultIsUnlocked flag (IVaultExtension.isUnlocked), read by the venue's whenVaultLocked guard
+    function isUnlocked() external view returns (bool) {
+        return _unlockDepth > 0;
+    }
+
     /**
      * @notice Credits the caller for tokens transferred into the vault, closing open debt
      * @dev credit = min(live balance - tracked reserves, hint), and the reserves snap to the live balance, mirroring the real vault
@@ -253,6 +275,61 @@ contract MockBalancerVault {
      *      converted to BPT at the pool's current NAV per BPT (1:1 with NAV on an empty pool), haircut by unbalancedFeeBps
      * @dev Reverts BptAmountOutBelowMin with the real vault's error shape when the mint falls under minBptAmountOut
      */
+    /**
+     * @notice Initializes a registered pool by seeding its genesis balances, mirroring VaultExtension.initialize
+     * @dev Prices the seed at fair value with NO unbalanced-add haircut (the real initialize mints the invariant and charges no swap fee),
+     *      mints the POOL_MINIMUM_TOTAL_SUPPLY dead BPT to the null address first, and checks minBptAmountOut against the NET
+     *      amount minted to the receiver, so the slippage bound applies to what the receiver actually gets
+     * @dev Opens the token debts the callback must settle, exactly like addLiquidity, and honors the armed one-shot BPT override
+     *      and the forced-revert mode so venue-failure fixtures drive this branch identically
+     */
+    function initialize(
+        address _pool,
+        address _to,
+        IERC20[] memory _tokens,
+        uint256[] memory _exactAmountsIn,
+        uint256 _minBptAmountOut,
+        bytes memory
+    )
+        external
+        returns (uint256 bptAmountOut)
+    {
+        _ensureUnlocked();
+        require(_registered[_pool], IVaultErrors.PoolNotRegistered(_pool));
+        require(!_initialized[_pool], IVaultErrors.PoolAlreadyInitialized(_pool));
+        require(revertMode != RevertMode.ADD && revertMode != RevertMode.ALL, FORCED_ADD_REVERT());
+        require(_tokens.length == 2 && _exactAmountsIn.length == 2, INVALID_AMOUNTS_LENGTH());
+
+        IERC20[2] storage tokens = _poolTokens[_pool];
+        uint256[2] storage balances = _poolBalances[_pool];
+
+        // The passed tokens must match the pool's registration order, the real vault's cross-check on the seed's ordering
+        for (uint256 i; i < 2; ++i) {
+            require(address(_tokens[i]) == address(tokens[i]), IVaultErrors.TokensMismatch(_pool, address(_tokens[i]), address(tokens[i])));
+        }
+
+        // Price the genesis BPT, the armed one-shot override wins as the net mint, else fair value less the dead minimum
+        if (_nextBptOutOverrideArmed) {
+            bptAmountOut = _nextBptOutOverride;
+            _nextBptOutOverrideArmed = false;
+            _nextBptOutOverride = 0;
+        } else {
+            uint256 grossBptOut = _tokenValueWAD(tokens[0], _exactAmountsIn[0]) + _tokenValueWAD(tokens[1], _exactAmountsIn[1]);
+            require(grossBptOut >= POOL_MINIMUM_TOTAL_SUPPLY, IERC20MultiTokenErrors.PoolTotalSupplyTooLow(grossBptOut));
+            bptAmountOut = grossBptOut - POOL_MINIMUM_TOTAL_SUPPLY;
+        }
+        require(bptAmountOut >= _minBptAmountOut, IVaultErrors.BptAmountOutBelowMin(bptAmountOut, _minBptAmountOut));
+
+        // Commit the seed, credit the pool balances, open the token debts the callback must settle, and mint the BPT with its dead minimum
+        balances[0] += _exactAmountsIn[0];
+        balances[1] += _exactAmountsIn[1];
+        if (_exactAmountsIn[0] > 0) _accountDelta(tokens[0], int256(_exactAmountsIn[0]));
+        if (_exactAmountsIn[1] > 0) _accountDelta(tokens[1], int256(_exactAmountsIn[1]));
+        _mintMinimumSupplyReserve(_pool);
+        _mintBpt(_pool, _to, bptAmountOut);
+        _initialized[_pool] = true;
+    }
+
     function addLiquidity(AddLiquidityParams memory params) external returns (uint256[] memory amountsIn, uint256 bptAmountOut, bytes memory returnData) {
         _ensureUnlocked();
         require(_registered[params.pool], IVaultErrors.PoolNotRegistered(params.pool));
@@ -329,6 +406,61 @@ contract MockBalancerVault {
     }
 
     // =============================
+    // Swap (the exogenous-party surface, router-style through unlock)
+    // =============================
+
+    /**
+     * @notice Performs an EXACT_IN swap between the pool's two tokens at the mock's pinned per-token prices
+     * @dev Mirrors the real vault's ACCESS shape exactly: swap is onlyWhenUnlocked, so an external party routes
+     *      it through unlock (see MockBalancerRouter), the input opens a debt the router must settle and the
+     *      output opens a credit sendTo consumes, and the same AmountGivenZero / CannotSwapSameToken /
+     *      SwapLimit error shapes fire. The MATH is deliberately not the real vault's: amountOut is the input's
+     *      fair value re-priced at the pinned rates (the senior leg through the live rate provider) less the
+     *      configured swapFeeBps retained by the pool, so an exogenous swap moves pool COMPOSITION and fee value
+     *      at constant prices. E-CLP curve-shape realism (price impact, imbalance fees) is the fork suites' job
+     * @dev Balances are updated atomically inside the call, an output exceeding the pool's leg reverts with the
+     *      checked-arithmetic panic exactly like draining a real constant-price leg would
+     * @param params The real vault's VaultSwapParams, EXACT_IN only, limitRaw is the minimum amount out
+     * @return amountCalculated The computed output amount
+     * @return amountIn The exact input amount (params.amountGivenRaw)
+     * @return amountOut The computed output amount
+     */
+    function swap(VaultSwapParams memory params) external returns (uint256 amountCalculated, uint256 amountIn, uint256 amountOut) {
+        _ensureUnlocked();
+        require(_registered[params.pool], IVaultErrors.PoolNotRegistered(params.pool));
+        require(_initialized[params.pool], IVaultErrors.PoolNotInitialized(params.pool));
+        require(params.kind == SwapKind.EXACT_IN, EXACT_IN_ONLY());
+        require(params.amountGivenRaw != 0, IVaultErrors.AmountGivenZero());
+        require(params.tokenIn != params.tokenOut, IVaultErrors.CannotSwapSameToken());
+
+        // Resolve both tokens against the pool's registration order
+        IERC20[2] storage tokens = _poolTokens[params.pool];
+        uint256 indexIn;
+        if (tokens[0] == params.tokenIn) indexIn = 0;
+        else if (tokens[1] == params.tokenIn) indexIn = 1;
+        else revert IVaultErrors.TokenNotRegistered(params.tokenIn);
+        uint256 indexOut = 1 - indexIn;
+        require(tokens[indexOut] == params.tokenOut, IVaultErrors.TokenNotRegistered(params.tokenOut));
+
+        // Price the output at the pinned rates: fair value in, floored out, less the pool-retained fee
+        amountIn = params.amountGivenRaw;
+        uint256 valueInWAD = _tokenValueWAD(params.tokenIn, amountIn);
+        uint256 grossAmountOut =
+            valueInWAD.mulDiv(10 ** IERC20Metadata(address(params.tokenOut)).decimals(), getTokenPriceWAD(address(params.tokenOut)), Math.Rounding.Floor);
+        amountOut = (grossAmountOut * (10_000 - swapFeeBps)) / 10_000;
+        require(amountOut >= params.limitRaw, IVaultErrors.SwapLimit(amountOut, params.limitRaw));
+
+        // Commit the swap atomically and open the session deltas the router must close
+        uint256[2] storage balances = _poolBalances[params.pool];
+        balances[indexIn] += amountIn;
+        balances[indexOut] -= amountOut;
+        _accountDelta(params.tokenIn, int256(amountIn));
+        if (amountOut > 0) _accountDelta(params.tokenOut, -int256(amountOut));
+
+        amountCalculated = amountOut;
+    }
+
+    // =============================
     // Quote (preview with revert-discard semantics)
     // =============================
 
@@ -379,6 +511,12 @@ contract MockBalancerVault {
     function setUnbalancedFeeBps(uint16 _unbalancedFeeBps) external {
         require(_unbalancedFeeBps <= 10_000, INVALID_FEE_BPS());
         unbalancedFeeBps = _unbalancedFeeBps;
+    }
+
+    /// @notice Sets the swap fee retained by the pool on exact-in swaps, charged on the output leg, in basis points
+    function setSwapFeeBps(uint16 _swapFeeBps) external {
+        require(_swapFeeBps <= 10_000, INVALID_FEE_BPS());
+        swapFeeBps = _swapFeeBps;
     }
 
     /// @notice Arms a one-shot BPT-out override consumed by the next committed add, driving the slippage gate deterministically
@@ -444,6 +582,8 @@ contract MockBalancerVault {
         }
         if (_bptTotalSupply[_pool] == 0) _mintMinimumSupplyReserve(_pool);
         _mintBpt(_pool, _to, _bptAmount);
+        // Fixture seeding is the pool's genesis liquidity, so it latches initialization exactly like the kernel-driven seed
+        _initialized[_pool] = true;
     }
 
     /**

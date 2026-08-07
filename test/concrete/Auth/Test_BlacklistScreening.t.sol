@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
+import { RoycoUUPSBase } from "../../../src/base/RoycoUUPSBase.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockRevertingSanctionsList } from "../../mocks/MockRevertingSanctionsList.sol";
 import { MockSanctionsList } from "../../mocks/MockSanctionsList.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_BlacklistScreening_RoycoBlacklist
@@ -88,7 +91,9 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         (initialAccounts[0], initialAccounts[1]) = (FLAGGED, CLEAN);
         RoycoBlacklist seeded = RoycoBlacklist(
             address(
-                new ERC1967Proxy(address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(accessManager), address(0), initialAccounts)))
+                new ERC1967Proxy(
+                    address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(accessManager), address(0), initialAccounts))
+                )
             )
         );
         assertTrue(seeded.isBlacklisted(FLAGGED) && seeded.isBlacklisted(CLEAN), "every genesis-listed account must be flagged");
@@ -161,10 +166,10 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
 
         assertEq(toUint256(seniorTranche.maxDeposit(FLAGGED)), 0, "senior deposit capacity must be zero for a flagged account");
         assertEq(toUint256(juniorTranche.maxDeposit(FLAGGED)), 0, "junior deposit capacity must be zero for a flagged account");
-        assertEq(toUint256(liquidityTranche.maxDeposit(FLAGGED)), 0, "liquidity deposit capacity must be zero for a flagged account");
+        assertEq(toUint256(liquidityProviderTranche.maxDeposit(FLAGGED)), 0, "liquidity deposit capacity must be zero for a flagged account");
         assertEq(seniorTranche.maxRedeem(FLAGGED), 0, "senior redemption capacity must be zero for a flagged account");
         assertEq(juniorTranche.maxRedeem(FLAGGED), 0, "junior redemption capacity must be zero for a flagged account");
-        assertEq(liquidityTranche.maxRedeem(FLAGGED), 0, "liquidity redemption capacity must be zero for a flagged account");
+        assertEq(liquidityProviderTranche.maxRedeem(FLAGGED), 0, "liquidity redemption capacity must be zero for a flagged account");
 
         // The same views stay live for a clean account: the senior provider still holds its 100e18 seeded shares
         assertEq(seniorTranche.maxRedeem(ST_PROVIDER), 100e18, "a clean account's redemption capacity must be unaffected by screening");
@@ -230,7 +235,7 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         uint256 quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
         // Coverage after seed: (100 + 30) x 0.2 / 30 = 0.8667 <= 1, then pool depth of 2e18 senior legs against 8 quote
         _seedMarket(100e18, 30e18);
-        _seedLT(10e18, 2e18, 8 * quoteUnit);
+        _seedLPT(10e18, 2e18, 8 * quoteUnit);
         _sync();
 
         vm.prank(MARKET_OPS_ADMIN);
@@ -250,14 +255,14 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         juniorTranche.redeem(1e18, FLAGGED, JT_PROVIDER);
 
         // Liquidity in-kind: the BPT payout receiver is screened
-        vm.prank(LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
         vm.expectRevert(receiverBlacklisted);
-        liquidityTranche.redeem(1e18, FLAGGED, LT_PROVIDER);
+        liquidityProviderTranche.redeem(1e18, FLAGGED, LPT_PROVIDER);
 
         // Liquidity multi-asset: the quote and senior-unwind receiver is screened before the venue removal runs
-        vm.prank(LT_PROVIDER);
+        vm.prank(LPT_PROVIDER);
         vm.expectRevert(receiverBlacklisted);
-        liquidityTranche.redeemMultiAsset(1e18, 0, 0, FLAGGED, LT_PROVIDER);
+        liquidityProviderTranche.redeemMultiAsset(1e18, 0, 0, FLAGGED, LPT_PROVIDER);
 
         // The clean receiver still settles: a senior redemption to CLEAN pays out its vault shares
         uint256 cleanBefore = stJtVault.balanceOf(CLEAN);
@@ -333,13 +338,13 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
         juniorTranche.maxDeposit(CLEAN);
         vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
-        liquidityTranche.maxDeposit(CLEAN);
+        liquidityProviderTranche.maxDeposit(CLEAN);
         vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
         seniorTranche.maxRedeem(ST_PROVIDER);
         vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
         juniorTranche.maxRedeem(JT_PROVIDER);
         vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
-        liquidityTranche.maxRedeem(LT_PROVIDER);
+        liquidityProviderTranche.maxRedeem(LPT_PROVIDER);
     }
 
     /**
@@ -372,13 +377,14 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         assertEq(seniorTranche.balanceOf(CLEAN), 5e18, "the receiver must hold exactly the transferred shares");
 
         // The previously-bricked deposit path also lands: 10e18 vault shares into a junior tranche holding
-        // 30e18 shares against 30e18 effective NAV mint 10e18 x 30 / 30 = 10e18 new shares
+        // 30e18 shares against 30e18 effective NAV mints floor((30e18+1) x 10e18 / (30e18+1)) = 10e18
+        // new shares (the 1-wei virtual-shares offset cancels in the ratio, leaving the exact 1:1 mint)
         stJtVault.mintShares(JT_PROVIDER, 10e18);
         vm.startPrank(JT_PROVIDER);
         stJtVault.approve(address(juniorTranche), 10e18);
         juniorTranche.deposit(toTrancheUnits(10e18), JT_PROVIDER);
         vm.stopPrank();
-        assertEq(juniorTranche.balanceOf(JT_PROVIDER), 40e18, "the junior provider must hold the seeded 30e18 plus the 10e18 minted");
+        assertEq(juniorTranche.balanceOf(JT_PROVIDER), 30e18 + 10e18, "the junior provider must hold the seeded 30e18 plus the offset-derived minted shares");
     }
 
     /**
@@ -409,5 +415,79 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         // and the never-revert view surface reverts instead of reporting capacity
         vm.expectRevert();
         seniorTranche.maxDeposit(CLEAN);
+    }
+
+    // =============================
+    // Mutation auth gates
+    // =============================
+
+    /**
+     * @notice Every blacklist mutator is restricted: a roleless caller can neither flag, clear, nor rewire the
+     *         sanctions overlay
+     * @dev The list is a compliance control, so who can move it is as load-bearing as what it screens
+     */
+    function test_RevertIf_UnauthorizedCallerMutatesBlacklistOrSanctionsList() public {
+        address attacker = makeAddr("BLACKLIST_ATTACKER");
+        bytes memory unauthorized = abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, attacker);
+
+        vm.startPrank(attacker);
+        vm.expectRevert(unauthorized);
+        roycoBlacklist.blacklistAccounts(_one(FLAGGED));
+        vm.expectRevert(unauthorized);
+        roycoBlacklist.unblacklistAccounts(_one(FLAGGED));
+        vm.expectRevert(unauthorized);
+        roycoBlacklist.setSanctionsList(address(sanctionsList));
+        vm.stopPrank();
+
+        // The gates block state, not just calls: nothing was flagged and no overlay was wired
+        assertFalse(roycoBlacklist.isBlacklisted(FLAGGED), "the failed flagging must not have landed");
+        assertEq(roycoBlacklist.getSanctionsList(), address(0), "the failed overlay wiring must not have landed");
+    }
+
+    /// @notice Re-flagging an already-blacklisted account is an idempotent no-op that still emits, and clearing a
+    ///         never-flagged account is equally harmless, so batch operators need no read-before-write
+    function test_Idempotency_ReflagEmitsAndReclearIsHarmless() public {
+        roycoBlacklist.blacklistAccounts(_one(FLAGGED));
+        vm.expectEmit(address(roycoBlacklist));
+        emit IRoycoBlacklist.AccountBlacklisted(FLAGGED);
+        roycoBlacklist.blacklistAccounts(_one(FLAGGED));
+        assertTrue(roycoBlacklist.isBlacklisted(FLAGGED), "the account must stay flagged through the re-flag");
+
+        roycoBlacklist.unblacklistAccounts(_one(CLEAN));
+        assertFalse(roycoBlacklist.isBlacklisted(CLEAN), "clearing a never-flagged account must be a no-op");
+    }
+
+    // =============================
+    // Upgrade gate
+    // =============================
+
+    /**
+     * @notice The blacklist's UUPS upgrade path enforces the restricted gate and the code-existence check, and a
+     *         legitimate upgrade preserves the flagged set
+     * @dev A hijacked or state-losing upgrade would silently unflag every account, so all three legs are pinned
+     */
+    function test_Upgrade_AuthGateCodeCheckAndStatePreservation() public {
+        roycoBlacklist.blacklistAccounts(_one(FLAGGED));
+        roycoBlacklist.setSanctionsList(address(sanctionsList));
+
+        // A roleless caller cannot upgrade
+        address attacker = makeAddr("UPGRADE_ATTACKER");
+        address newImpl = address(new RoycoBlacklist());
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, attacker));
+        UUPSUpgradeable(address(roycoBlacklist)).upgradeToAndCall(newImpl, "");
+
+        // An authorized upgrade to a codeless target is refused, it would brick the proxy
+        vm.expectRevert(RoycoUUPSBase.INVALID_IMPLEMENTATION.selector);
+        UUPSUpgradeable(address(roycoBlacklist)).upgradeToAndCall(makeAddr("CODELESS_IMPL"), "");
+
+        // A legitimate upgrade lands and every piece of blacklist state survives the implementation swap
+        UUPSUpgradeable(address(roycoBlacklist)).upgradeToAndCall(newImpl, "");
+        assertTrue(roycoBlacklist.isBlacklisted(FLAGGED), "the flagged set must survive the upgrade");
+        assertEq(roycoBlacklist.getSanctionsList(), address(sanctionsList), "the sanctions overlay must survive the upgrade");
+
+        // The upgraded proxy cannot be re-initialized into a takeover
+        vm.expectRevert();
+        roycoBlacklist.initialize(attacker, address(0), new address[](0));
     }
 }

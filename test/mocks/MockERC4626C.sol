@@ -9,10 +9,12 @@ import { WAD, WAD_DECIMALS } from "../../src/libraries/Constants.sol";
 
 /**
  * @title MockERC4626C
- * @notice ERC4626-shaped test vault over a MockERC20C underlying, implementing only what the identical-shares quoter family touches
+ * @notice ERC4626-shaped test vault over a MockERC20C underlying, implementing only what the identical-shares venue family touches
  * @dev The rate (assets per share, WAD-normalized) moves ONLY via setRate and accrue, never on its own, so PnL injection is an explicit test action
- * @dev Satisfies the quoter identity, convertToAssets(10 ** (18 + shareDecimals - underlyingDecimals)) == the intended WAD tranche-unit to base-asset rate
- * @dev Fidelity gaps vs a real ERC4626 vault: no preview/max surface and no Deposit/Withdraw events (the quoters
+ * @dev Satisfies the venue identity, convertToAssets(10 ** (18 + shareDecimals - underlyingDecimals)) == the intended WAD tranche-unit to base-asset rate
+ * @dev previewRedeem quotes the conversion less a pinned relative haircut (zero by default), so the oracle's
+ *      query modes are distinguishable under test without a balance-derived fee model
+ * @dev Fidelity gaps vs a real ERC4626 vault: no max surface and no Deposit/Withdraw events (the venues
  *      never call them), the rate is a pinned knob rather than a balance-derived value, and mintShares mints
  *      without pulling underlying so redeeming free-minted shares requires funding the vault separately
  */
@@ -35,7 +37,10 @@ contract MockERC4626C {
     /// @notice Thrown when the rate is set to zero or an accrual would drive it to or below zero
     error INVALID_RATE();
 
-    /// @notice Thrown when the decimal configuration breaks the quoter's WAD scaling assumption (18 + shareDecimals >= underlyingDecimals)
+    /// @notice Thrown when the redemption haircut is set to WAD or above, which would quote redemptions at or below zero
+    error INVALID_HAIRCUT();
+
+    /// @notice Thrown when the decimal configuration breaks the venue's WAD scaling assumption (18 + shareDecimals >= underlyingDecimals)
     error INVALID_DECIMAL_CONFIGURATION();
 
     /// @dev The underlying asset the vault shares convert to
@@ -46,7 +51,7 @@ contract MockERC4626C {
 
     /**
      * @dev The share amount that converts to exactly rateWAD assets, 10 ** (18 + shareDecimals - underlyingDecimals)
-     * @dev This is the same scalar the quoter derives, so convertToAssets(RATE_SCALAR) == rateWAD by construction
+     * @dev This is the same scalar the venue derives, so convertToAssets(RATE_SCALAR) == rateWAD by construction
      */
     uint256 private immutable RATE_SCALAR;
 
@@ -68,6 +73,9 @@ contract MockERC4626C {
     /// @notice The assets-per-share rate, WAD-normalized (WAD == 1 whole underlying per whole share). Moves only via setRate and accrue
     uint256 public rateWAD = WAD;
 
+    /// @notice The relative haircut previewRedeem quotes below convertToAssets, scaled to WAD precision (zero quotes the exact conversion)
+    uint256 public redemptionHaircutWAD;
+
     /**
      * @notice Deploys the mock vault share token over the specified underlying
      * @param _underlying The underlying asset (a MockERC20C in the fixture's token shapes)
@@ -87,7 +95,7 @@ contract MockERC4626C {
     }
 
     // =============================
-    // ERC4626 Surface (the subset the quoter family touches)
+    // ERC4626 Surface (the subset the venue family touches)
     // =============================
 
     /// @notice Returns the underlying asset the vault shares convert to
@@ -98,6 +106,12 @@ contract MockERC4626C {
     /// @notice Converts the share amount to underlying assets at the current rate, rounding down
     function convertToAssets(uint256 _shares) public view returns (uint256) {
         return _shares.mulDiv(rateWAD, RATE_SCALAR, Math.Rounding.Floor);
+    }
+
+    /// @notice Quotes the underlying assets a redemption of the share amount would pay, the conversion less the pinned haircut
+    function previewRedeem(uint256 _shares) external view returns (uint256) {
+        uint256 assets = convertToAssets(_shares);
+        return assets - assets.mulDiv(redemptionHaircutWAD, WAD, Math.Rounding.Floor);
     }
 
     /// @notice Converts the asset amount to shares at the current rate, rounding down
@@ -133,6 +147,12 @@ contract MockERC4626C {
     function setRate(uint256 _rateWAD) external {
         require(_rateWAD > 0, INVALID_RATE());
         rateWAD = _rateWAD;
+    }
+
+    /// @notice Pins the relative haircut previewRedeem quotes below convertToAssets
+    function setRedemptionHaircut(uint256 _redemptionHaircutWAD) external {
+        require(_redemptionHaircutWAD < WAD, INVALID_HAIRCUT());
+        redemptionHaircutWAD = _redemptionHaircutWAD;
     }
 
     /// @notice Multiplies the rate by (1e18 + bps * 1e14), so positive bps accrues yield and negative bps injects a loss

@@ -333,7 +333,7 @@ point. The tilt sets a ceiling; flow sets the realized average. Three implicatio
   yield case into its liability; the 99.99 pool barely notices.
 - If LP yield is a first-class product goal, this pool is the wrong lever — its own mechanics
   suppress inventory, and the marking calendar taxes whatever inventory remains. In the Day
-  system the LT holders' real compensation is the **liquidity premium** the kernel mints;
+  system the LPT holders' real compensation is the **liquidity premium** the kernel mints;
   in-pool carry is a garnish at any tilt.
 
 ---
@@ -390,7 +390,7 @@ of stables.
 
 - **Both legs `WITH_RATE`** — ST provider = the kernel's share rate, quote provider = the
   stable's accrual rate. STANDARD quote wiring kills the pool in ~18 days (T4).
-- **`disableUnbalancedLiquidity` stays off** — the kernel's own LT deposits and premium
+- **`disableUnbalancedLiquidity` stays off** — the kernel's own LPT deposits and premium
   reinvestment *are* unbalanced adds.
 - **Genesis: dust-seed single-sided in stables** at deployment (e.g. $1). Measured loss: $0.00 at
   every size — *and still $0.00 at the 0.01 bp pool-minimum fee* (C4's 0.0063 bp β-gap stays
@@ -509,7 +509,7 @@ quantified what the tight floor cost in arb restock incentive.
 | "No arbs from rate changes" as a universal | True same-block; false across marks: 50 bp/yr under cadence mismatch, inventory-share × 5%/yr carry drag under stale marks | **Conditional** — it is an ops invariant, not a geometric one |
 | Deep-drain exit slippage 4.5 → 490 bp | 0.25 → 1.9 bp on the A/D band; 6.3 → 137 bp on the shipping band (T8) | **Both right — band width**, and since resolved: the T8/T9 studies chose a middle course (α = 1/1.02), shallower than the benchmark's 10% tail, far deeper than the 15 bp floor (§7.3) |
 | Whale add loses ~$81 to a standing arb (their 90% family) | $0 here — the displacement lands inside the fee shield | **Both right** — their 90% band's β-gap (23.5 bp) exceeds the fee; every band measured here keeps the gap under it (≤ 0.53 bp). Same physics, opposite regime |
-| `disableUnbalancedLiquidity` plausibly enabled for this pool | **Must stay off**: the Day kernel's own LT deposits and premium reinvestment *are* unbalanced adds | **Corrected** (product constraint) |
+| `disableUnbalancedLiquidity` plausibly enabled for this pool | **Must stay off**: the Day kernel's own LPT deposits and premium reinvestment *are* unbalanced adds | **Corrected** (product constraint) |
 
 ---
 

@@ -1,20 +1,19 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
-import { ADMIN_ENTRY_POINT_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_ENTRY_POINT_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { TrancheType } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
-import { MockRoycoFactory } from "../../mocks/MockRoycoFactory.sol";
+import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 
 /**
  * @title Test_EntryPointConstructionAndAdmin
@@ -26,7 +25,7 @@ contract Test_EntryPointConstructionAndAdmin is EntryPointTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
     }
@@ -47,11 +46,11 @@ contract Test_EntryPointConstructionAndAdmin is EntryPointTestBase {
         // The fixture initializes the entry point empty and routes the initial configs through the factory
         // (mirroring production market deployments); the stored configs must be enriched with the tranche's
         // asset, kernel, and type
-        IRoycoDayEntryPoint.EnrichedTrancheConfig memory config = entryPoint.getTrancheConfig(address(liquidityTranche));
-        assertEq(config.asset, address(bpt), "the LT config must cache the tranche asset");
-        assertEq(config.kernel, address(kernel), "the LT config must cache the market kernel");
-        assertEq(uint8(config.trancheType), uint8(TrancheType.LIQUIDITY), "the LT config must cache the tranche type");
-        assertTrue(config.baseConfig.enabled, "the LT must be enabled by the factory-routed initial configuration");
+        IRoycoDayEntryPoint.EnrichedTrancheConfig memory config = entryPoint.getTrancheConfig(address(liquidityProviderTranche));
+        assertEq(config.asset, address(bpt), "the LPT config must cache the tranche asset");
+        assertEq(config.kernel, address(kernel), "the LPT config must cache the market kernel");
+        assertEq(uint8(config.trancheType), uint8(TrancheType.LIQUIDITY_PROVIDER), "the LPT config must cache the tranche type");
+        assertTrue(config.baseConfig.enabled, "the LPT must be enabled by the factory-routed initial configuration");
     }
 
     function test_initialize_cannotBeReinitialized() public {
@@ -109,28 +108,30 @@ contract Test_EntryPointConstructionAndAdmin is EntryPointTestBase {
     // ---------------------------------------------------------------------
 
     function test_factoryRoute_modifyTrancheConfigs_succeeds() public {
-        // The factory (holding ADMIN_ENTRY_POINT_ROLE) can apply config changes, as production deployments do
+        // The factory (holding ADMIN_ENTRY_POINT_ROLE) applies config changes from a deployment's hook phase, as
+        // production governance does: a tranche is configured ONCE by its deployment, and every later change is an
+        // ADMIN_ENTRY_POINT_ROLE call straight at the entry point
         (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
         configs[1].redemptionDelaySeconds = 3 hours;
-        entryPointFactory.executeAsFactory(address(entryPoint), abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
+        _modifyTrancheConfigsAsAdmin(tranches, configs);
 
-        assertEq(
-            entryPoint.getTrancheConfig(tranches[1]).baseConfig.redemptionDelaySeconds, 3 hours, "the factory-routed config update must be stored"
-        );
+        assertEq(entryPoint.getTrancheConfig(tranches[1]).baseConfig.redemptionDelaySeconds, 3 hours, "the factory-routed config update must be stored");
     }
 
-    function test_factoryRoute_revertsWhenFactoryLacksRole() public {
-        // Without ADMIN_ENTRY_POINT_ROLE the factory's forwarded call fails the entry point's access check
-        accessManager.revokeRole(ADMIN_ENTRY_POINT_ROLE, address(entryPointFactory));
+    function test_deploymentRoute_revertsWhenGatekeeperLacksRole() public {
+        // The gatekeeper, not the factory, drives the entry point. Without ADMIN_ENTRY_POINT_ROLE its call fails the
+        // entry point's access check, which bubbles back through the factory and unwinds the whole deployment
+        accessManager.revokeRole(ADMIN_ENTRY_POINT_ROLE, address(entryPointFactoryGatekeeper));
 
-        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                MockRoycoFactory.FACTORY_CALL_FAILED.selector,
-                abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(entryPointFactory))
-            )
-        );
-        entryPointFactory.executeAsFactory(address(entryPoint), abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
+        // Fresh tranche addresses: the fixture's own were configured by its deployment, and the gatekeeper's
+        // freshness check would fire before the access check this test is about
+        address[] memory tranches = new address[](1);
+        tranches[0] = makeAddr("UNCONFIGURED_TRANCHE");
+        IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](1);
+
+        registrationTemplate.queueTrancheConfigs(tranches, configs);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(entryPointFactoryGatekeeper)));
+        entryPointFactory.executeMarketDeployment(address(registrationTemplate), "");
     }
 
     // ---------------------------------------------------------------------

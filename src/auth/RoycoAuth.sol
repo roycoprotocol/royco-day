@@ -7,7 +7,7 @@ import { IRoycoAuth } from "../interfaces/IRoycoAuth.sol";
 
 /**
  * @title RoycoAuth
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Abstract contract that provides access control and pausability functionality for Royco contracts
  * @dev Combines OpenZeppelin's AccessManager-based access control (`restricted` gating) with pausability
  */

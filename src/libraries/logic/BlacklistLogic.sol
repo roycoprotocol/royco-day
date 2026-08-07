@@ -6,14 +6,14 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title BlacklistLogic
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Blacklist screening for a Royco market
  */
 library BlacklistLogic {
     /**
      * @notice Returns whether an account is blacklisted by the market's configured blacklist
      * @dev Returns false when no blacklist is configured (the null address disables screening)
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _account The address of the account to check
      * @return Whether the account is blacklisted by the market's configured blacklist
      */
@@ -26,7 +26,7 @@ library BlacklistLogic {
      * @notice Screens a single account against the market's configured blacklist
      * @dev No-op when no blacklist is configured (the null address disables screening)
      * @dev Reverts if the specified account is blacklisted
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _account The address of the account to screen
      */
     function _enforceNotBlacklisted(IRoycoDayKernel.RoycoDayKernelState storage $, address _account) internal view {
@@ -39,7 +39,7 @@ library BlacklistLogic {
      * @notice Batch-screens the specified accounts against the market's configured blacklist
      * @dev No-op when no blacklist is configured (the null address disables screening)
      * @dev Reverts if any specified account is blacklisted
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _accounts The addresses of the accounts to screen
      */
     function _enforceNotBlacklisted(IRoycoDayKernel.RoycoDayKernelState storage $, address[] memory _accounts) internal view {
@@ -49,10 +49,29 @@ library BlacklistLogic {
     }
 
     /**
+     * @notice Batch-screens the accounts involved in a tranche deposit against the market's configured blacklist
+     * @dev No-op when no blacklist is configured (the null address disables screening)
+     * @dev Reverts if any specified account is blacklisted
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _caller The address that initiated the deposit
+     * @param _receiver The address receiving the minted tranche shares
+     */
+    function _enforceNotBlacklisted(IRoycoDayKernel.RoycoDayKernelState storage $, address _caller, address _receiver) internal view {
+        // Batch screen the specified accounts against the market's blacklist if one is configured (the null address disables screening)
+        address roycoBlacklist = $.roycoBlacklist;
+        if (roycoBlacklist != address(0)) {
+            address[] memory accountsToScreen = new address[](2);
+            accountsToScreen[0] = _caller;
+            accountsToScreen[1] = _receiver;
+            IRoycoBlacklist(roycoBlacklist).enforceNotBlacklisted(accountsToScreen);
+        }
+    }
+
+    /**
      * @notice Batch-screens the accounts involved in a tranche share balance update against the market's configured blacklist
      * @dev No-op when no blacklist is configured (the null address disables screening)
      * @dev Reverts if any specified account is blacklisted
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param $ The storage state of the Royco Kernel that is delegatecalling into this function
      * @param _caller The address that initiated the balance update
      * @param _from The address the shares are moving from
      * @param _to The address the shares are moving to

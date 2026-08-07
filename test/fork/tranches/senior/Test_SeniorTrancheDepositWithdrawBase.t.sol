@@ -2,14 +2,13 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { ADMIN_ACCOUNTANT_ROLE } from "../../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
 import { AssetClaims, MarketState, SyncedAccountingState, TrancheType } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
-import {
-    Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest
-} from "../../kernels/Identical_ERC4626_Chainlink_BalancerV3_LT/base/Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest.sol";
+import { ERC4626_Chainlink_KernelSuite } from "../../oracles/ERC4626_Chainlink/ERC4626_Chainlink_KernelSuite.sol";
 
 /**
  * @title Test_SeniorTrancheDepositWithdrawBase
@@ -17,7 +16,8 @@ import {
  *         per-market test instantiates it by inheriting both this suite and a market fixture (e.g. `Neutrl_snUSD_Market`);
  *         both share `Test_KernelSuiteBase` as the deploy/setUp base.
  * @dev Covers three concerns: (A) deposits mint the correct shares, (B) deposit/withdraw limits from the
- *      coverage + liquidity utilization gates, and (C) the preview/max view surface. Senior mechanics pinned:
+ *      coverage + liquidity utilization gates, and (C) the preview/max surface (previews simulate the real
+ *      deposit/redeem path and are not view). Senior mechanics pinned:
  *      - ST deposit: PERPETUAL-only; post-op coverage gate (`COVERAGE_REQUIREMENT_VIOLATED`) AND liquidity gate
  *        (`LIQUIDITY_REQUIREMENT_VIOLATED`); `maxSTDeposit = min(coverage-branch, liquidity-branch)`.
  *      - ST redeem: PERPETUAL-only; NO coverage/liquidity gate; senior tranche self-liquidation bonus once
@@ -28,14 +28,14 @@ import {
  *      `simulate*` hooks move both legs together. FIXED_TERM / self-liquidation-bonus tests are therefore best-effort:
  *      they attempt to reach the target state and `vm.skip` (with a reason) if a symmetric-PnL market cannot get there.
  */
-abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest {
+abstract contract Test_SeniorTrancheDepositWithdrawBase is ERC4626_Chainlink_KernelSuite {
     uint256 internal constant WAD = 1e18;
 
     // ─── senior helpers ──────────────────────────────────────────────────────
 
     /// @dev Live senior-side synced state (utilizations, effective NAVs, market state). `getState()` is stale marks.
     function _stSynced() internal view returns (SyncedAccountingState memory s) {
-        (s,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (s,,) = KERNEL.previewSyncTrancheAccountingFor(TrancheType.SENIOR);
     }
 
     /// @dev One of the 4 ST-LP provider addresses (all hold ST_LP_ROLE + are funded in setUp).
@@ -70,16 +70,18 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         return (toUint256(ST.totalAssets().nav) * WAD) / supply;
     }
 
-    /// @dev Runs an accountant setter through its 2-day AccessManager execution delay while keeping the base->NAV feed
-    ///      fresh across the warp (via the per-kernel `_refreshOraclesAfterWarp` seam). Without this, the 2-day warp
-    ///      staleness-invalidates the real feed and the setter's `withSyncedAccounting` sync reverts.
+    /// @dev Runs an accountant setter through its AccessManager execution delay while keeping the base->NAV feed
+    ///      fresh across the warp (via the per-kernel `_refreshOraclesAfterWarp` seam). Without this, the warp
+    ///      staleness-invalidates the real feed and the setter's `withSyncedAccounting` sync reverts. The delay is
+    ///      read live from the AccessManager so the helper tracks the roles configuration instead of a baked value.
     function _execAccountantSetterFresh(bytes memory _data) internal {
         _pinOracleFresh(); // freeze the feed's live value into the mock while it is still fresh (before the warp)
 
+        (, uint32 executionDelay) = ACCESS_MANAGER.hasRole(ADMIN_ACCOUNTANT_ROLE, ACCOUNTANT_ADMIN_ADDRESS);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         ACCESS_MANAGER.schedule(address(ACCOUNTANT), _data, 0);
 
-        vm.warp(block.timestamp + 2 days + 1);
+        vm.warp(block.timestamp + uint256(executionDelay) + 1);
         _refreshOraclesAfterWarp(); // re-stamp the mocked feed at the warped time so the setter's sync clears staleness
 
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -132,8 +134,10 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
 
     /// @notice `previewDeposit` is linear in the deposited amount up to floor dust, so a depositor cannot
     ///         change its price by splitting or merging deposits.
-    function test_previewDeposit_proportionalToAmount() external view {
-        // Views on the un-mutated state: previewDeposit(2x) ~= 2 * previewDeposit(x) (floor split).
+    function test_previewDeposit_proportionalToAmount() external {
+        // Previews simulate the real deposit path, so JT coverage must exist for the quotes to clear the gate.
+        _seedJT(200_000e18);
+        // Each simulation unwinds, so both quotes price the same state: previewDeposit(2x) ~= 2 * previewDeposit(x) (floor split).
         uint256 x = 10_000e18;
         uint256 sx = ST.previewDeposit(toTrancheUnits(x));
         uint256 s2x = ST.previewDeposit(toTrancheUnits(2 * x));
@@ -150,7 +154,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         address lp = _stLp(0);
         uint256 amount = 40_000e18;
 
-        NAV_UNIT depositedValue = _toSTValue(toTrancheUnits(amount));
+        NAV_UNIT depositedValue = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(amount));
         uint256 shares = _depositST(lp, amount);
 
         // A fresh depositor's shares are worth ~what they deposited — no windfall, no theft (down to floor dust).
@@ -178,18 +182,18 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         assertApproxEqAbs(priceAfter, priceBefore, priceTolerance, "a deposit must not move the senior share price beyond floor dust");
     }
 
-    /// @notice A senior deposit raises the live senior raw NAV by exactly the quoted deposit value, and
-    ///         two-term conservation holds on the live marks.
-    function test_deposit_increasesRawNAVByValue() external {
+    /// @notice A senior deposit raises the live collateral NAV (the raw mark BOTH coinvested tranches report)
+    ///         by exactly the quoted deposit value, and conservation holds on the live marks.
+    function test_deposit_increasesCollateralNAVByValue() external {
         _seedJT(200_000e18);
         uint256 amount = 50_000e18;
-        NAV_UNIT value = _toSTValue(toTrancheUnits(amount));
+        NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(amount));
 
-        NAV_UNIT rawBefore = ST.getRawNAV();
+        NAV_UNIT rawBefore = _liveCollateralNAV();
         _depositST(_stLp(0), amount);
-        NAV_UNIT rawAfter = ST.getRawNAV();
+        NAV_UNIT rawAfter = _liveCollateralNAV();
 
-        assertApproxEqAbs(rawAfter, rawBefore + value, maxNAVDelta(), "stRawNAV must rise by the deposited value");
+        assertApproxEqAbs(rawAfter, rawBefore + value, maxNAVDelta(), "the collateral NAV must rise by the deposited value");
         _assertNAVConservation();
     }
 
@@ -237,7 +241,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         // Clearly over the coverage limit (well beyond maxDeposit's documented dust-tolerance under-report).
         vm.startPrank(_stLp(0));
         IERC20(testConfig.stAsset).approve(address(ST), max + 100_000e18);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(max + 100_000e18), _stLp(0));
         vm.stopPrank();
     }
@@ -256,7 +260,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         // A deposit sized to the OLD max now breaches the tighter coverage gate.
         vm.startPrank(_stLp(0));
         IERC20(testConfig.stAsset).approve(address(ST), maxBefore);
-        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.COVERAGE_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(maxBefore), _stLp(0));
         vm.stopPrank();
     }
@@ -273,7 +277,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
     }
 
     /**
-     * @notice With a liquidity requirement set against zero pooled depth (`ltRawNAV == 0`) the liquidity
+     * @notice With a liquidity requirement set against zero pooled depth (`lptRawNAV == 0`) the liquidity
      *         utilization is unbounded, so every senior deposit reverts on the liquidity gate — pinning
      *         that senior deposits ARE liquidity-gated.
      */
@@ -283,7 +287,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
 
         vm.startPrank(_stLp(0));
         IERC20(testConfig.stAsset).approve(address(ST), 50_000e18);
-        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        vm.expectRevert(IRoycoDayKernel.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(50_000e18), _stLp(0));
         vm.stopPrank();
     }
@@ -350,7 +354,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         // Exact pro-rata ceiling: floor(eff * shares / supply); the payout may only round DOWN from it
         uint256 proRata = (toUint256(effBefore) * redeemShares) / supplyBefore;
         assertLe(toUint256(claims.nav), proRata, "the redeemer can never be paid more than its exact pro-rata slice");
-        assertGe(toUint256(claims.nav) + toUint256(maxNAVDelta()), proRata, "the rounding loss must stay within quoter dust");
+        assertGe(toUint256(claims.nav) + toUint256(maxNAVDelta()), proRata, "the rounding loss must stay within pricing dust");
         assertEq(ST.totalSupply(), supplyBefore - redeemShares, "supply must drop by exactly the redeemed shares");
         assertEq(ST.balanceOf(lp), shares - redeemShares, "the redeemer must burn exactly the redeemed shares");
         _assertNAVConservation();
@@ -359,7 +363,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
     /**
      * @notice Literal pro-rata anchors on a sole senior holder: half the supply can claim at most half the NAV
      *         (a hand halving, not the scaling formula), and the two halves of a full exit sum back to the whole
-     *         pre-exit NAV within quoter dust — floor scaling neither leaks value to the exiter nor strands it.
+     *         pre-exit NAV within pricing dust — floor scaling neither leaks value to the exiter nor strands it.
      */
     function test_redeem_splitExitHalvesSumToWholeNAV() external {
         _seedJT(200_000e18);
@@ -378,11 +382,11 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         assertEq(ST.totalSupply(), 0, "the full exit must drain the senior supply");
 
         // Whole-equals-sum-of-parts: the two exits drain the entire tranche, so together they must recover the
-        // whole pre-exit NAV. Each leg's booked raw delta can drift from its claim NAV by one quoter round-trip
+        // whole pre-exit NAV. Each leg's booked raw delta can drift from its claim NAV by one pricing round-trip
         // in either direction, so allow one maxNAVDelta per leg plus a floor wei each way.
         uint256 recovered = toUint256(first.nav) + toUint256(second.nav);
-        assertLe(recovered, toUint256(wholeNAV) + toUint256(maxNAVDelta()) + 1, "the split exit cannot recover more than the whole NAV plus quoter dust");
-        assertGe(recovered + 2 * toUint256(maxNAVDelta()) + 2, toUint256(wholeNAV), "the split exit must recover the whole NAV up to quoter dust");
+        assertLe(recovered, toUint256(wholeNAV) + toUint256(maxNAVDelta()) + 1, "the split exit cannot recover more than the whole NAV plus pricing dust");
+        assertGe(recovered + 2 * toUint256(maxNAVDelta()) + 2, toUint256(wholeNAV), "the split exit must recover the whole NAV up to pricing dust");
     }
 
     /// @notice Senior exits are never utilization-gated: a redemption succeeds with coverage parked at the brink.
@@ -393,7 +397,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         uint256 shares = _depositSTRaw(lp, ST.maxDeposit(lp)); // deposit up to the coverage limit
         _sync();
         // Threshold derivation: maxDeposit under-reports the exact coverage boundary only by the configured NAV
-        // dust tolerances plus quoter conversion floors — wei-to-dust magnitudes against a deposit seeded in the
+        // dust tolerances plus pricing conversion floors — wei-to-dust magnitudes against a deposit seeded in the
         // 1e22+ range — so a max-size deposit parks utilization within a sliver of 100%. A 0.9e18 floor sits far
         // above anything a failed arrange could read and far below the boundary, cleanly detecting "near the limit".
         assertGt(_stSynced().coverageUtilizationWAD, 0.9e18, "coverage should be near its limit after a max deposit");
@@ -406,7 +410,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
     function test_redeem_fullExit() external {
         _seedJT(200_000e18);
         address lp = _stLp(0);
-        NAV_UNIT deposited = _toSTValue(toTrancheUnits(70_000e18));
+        NAV_UNIT deposited = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(70_000e18));
         uint256 shares = _depositST(lp, 70_000e18);
         _sync();
 
@@ -435,7 +439,8 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         uint256 shares = _depositSTRaw(lp, ST.maxDeposit(lp));
         _sync();
 
-        // Drop the liquidation threshold below the current coverage utilization so the self-liquidation regime engages.
+        // Arm the self-liquidation regime through losses: the config guard forbids setting the threshold at or below
+        // live utilization, so the threshold is lowered to just above it and the market is drawn down through it.
         uint256 coverageUtilizationWAD = _stSynced().coverageUtilizationWAD;
         if (coverageUtilizationWAD <= WAD) {
             // The deposit gate caps coverageUtilizationWAD at WAD, and the liquidation threshold must be > WAD, so the self-liquidation
@@ -444,10 +449,17 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
             vm.skip(true);
             return;
         }
-        _setLiquidationCoverageUtilization(coverageUtilizationWAD - 1);
+        _setLiquidationCoverageUtilization(coverageUtilizationWAD + 1);
+        _applySTLoss(0.02e18);
+        assertGe(_stSynced().coverageUtilizationWAD, coverageUtilizationWAD + 1, "arrange: the drawdown must arm the liquidation regime");
 
-        AssetClaims memory claims = _redeemST(lp, shares / 4);
-        assertGt(claims.jtAssets, toTrancheUnits(0), "redeemer should receive a JT-funded self-liquidation bonus above the threshold");
+        // The bonus leg no longer has its own claims field: it lands inside the single collateral leg. The
+        // base claim is the exact pro-rata effective-NAV slice, so a payout strictly above that hand-derived
+        // base is the JT-funded bonus.
+        uint256 redeemShares = shares / 4;
+        uint256 baseClaimNAV = (toUint256(ST.totalAssets().nav) * redeemShares) / ST.totalSupply();
+        AssetClaims memory claims = _redeemST(lp, redeemShares);
+        assertGt(toUint256(claims.nav), baseClaimNAV, "redeemer should receive a JT-funded self-liquidation bonus above the threshold");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -468,8 +480,10 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         AssetClaims memory executed = _redeemST(lp, redeemShares);
 
         assertEq(executed.nav, previewed.nav, "previewRedeem nav must equal executed nav");
-        assertEq(executed.stAssets, previewed.stAssets, "previewRedeem stAssets must equal executed");
-        assertEq(executed.jtAssets, previewed.jtAssets, "previewRedeem jtAssets must equal executed");
+        // The st/jt claim legs merged into the one collateral leg, so one field equality covers both.
+        assertEq(executed.collateralAssets, previewed.collateralAssets, "previewRedeem collateralAssets must equal executed");
+        assertEq(executed.lptAssets, previewed.lptAssets, "previewRedeem lptAssets must equal executed");
+        assertEq(executed.stShares, previewed.stShares, "previewRedeem stShares must equal executed");
     }
 
     /// @notice `convertToShares` then `convertToAssets` round-trips a senior value with bounded floor loss and
@@ -479,7 +493,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         _depositST(_stLp(0), 60_000e18);
         _sync();
 
-        NAV_UNIT v = _toSTValue(toTrancheUnits(25_000e18));
+        NAV_UNIT v = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(25_000e18));
         uint256 shares = ST.convertToShares(_navToTU(v));
         NAV_UNIT back = ST.convertToAssets(shares).nav;
         assertLe(back, v, "convert round-trip cannot inflate value");
@@ -513,8 +527,8 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         assertEq(ST.maxRedeem(lp), 0, "maxRedeem must be 0 while paused");
     }
 
-    /// @dev Convert a NAV_UNIT senior value back to TRANCHE_UNIT via the kernel (inverse of `_toSTValue`).
+    /// @dev Convert a NAV_UNIT value back to TRANCHE_UNIT via the kernel (inverse of `convertCollateralAssetsToValue`).
     function _navToTU(NAV_UNIT _value) internal view returns (TRANCHE_UNIT) {
-        return KERNEL.stConvertNAVUnitsToTrancheUnits(_value);
+        return KERNEL.convertValueToCollateralAssets(_value);
     }
 }

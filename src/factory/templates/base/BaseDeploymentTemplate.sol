@@ -1,44 +1,88 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
-import { Initializable } from "../../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import { SSTORE2 } from "../../../../lib/solady/src/utils/SSTORE2.sol";
+import { AccessManaged } from "../../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManaged.sol";
 import { RoycoDayAccountant } from "../../../accountant/RoycoDayAccountant.sol";
+import { IRoycoAuth } from "../../../interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
 import { IBaseTemplate } from "../../../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtocolTemplate.sol";
+import { MAX_PROTOCOL_FEE_WAD } from "../../../libraries/Constants.sol";
 import { RoycoSeniorTranche } from "../../../tranches/RoycoSeniorTranche.sol";
-import {
-    COMPONENT_ID_ACCOUNTANT_IMPL,
-    COMPONENT_ID_JUNIOR_TRANCHE_IMPL,
-    COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL,
-    COMPONENT_ID_SENIOR_TRANCHE_IMPL
-} from "./Components.sol";
+import { _resolveMarketAuthority } from "./Utils.sol";
 
 /**
  * @title BaseDeploymentTemplate
- * @author Ankur Dubey, Shivaansh Kapoor
+ * @author Ankur Dubey, Shivaansh Kapoor, Tomer Ganor
  * @notice Abstract base every Royco protocol template inherits from, standardizing:
  *           - Component param shapes (ST / JT / Accountant / YDM) so concrete templates
  *             share a vocabulary for the bits that don't vary across recipes
- *           - SSTORE2-backed bytecode storage loaded once via the deployer-driven `initialize` before factory registration
- *           - Salt-derivation helper (`_marketComponentSalt`)
- *           - Internal deployment helpers that call back into the factory's primitives
+ *           - A proxy-deployment helper that calls back into the factory's primitives
+ *           - Init-data builders that force the market authority
  *           - A declarative role-bindings struct + a generic `_applyRoleBindings` loop
+ * @dev Market implementations (tranches, accountant, kernel, YDMs, hook) are deployed externally by the deployer and
+ *      passed into the template via the params blob. The template deploys only proxies (via the factory) and wires and
+ *      verifies the market
  */
-abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
+abstract contract BaseDeploymentTemplate is IBaseTemplate, AccessManaged {
     // ═══════════════════════════════════════════════════════════════════════════
     // ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * @notice Thrown when a market component (everything except YDM) was already deployed at
-     *         its CREATE3 address, signals a `marketId` collision that would re-use the
-     *         pre-existing contract instead of producing a fresh market
-     */
+    /// @notice Thrown when a market proxy was already deployed at its CREATE3 address, signals a `marketId`
+    ///         collision that would re-use the pre-existing contract instead of producing a fresh market
     error MARKET_COMPONENT_ALREADY_DEPLOYED(address deployedAt, bytes32 salt);
+
+    /// @notice Thrown when a protocol fee exceeds the maximum the accountant would accept
+    error INVALID_PROTOCOL_FEE_CONFIG();
+
+    /// @notice Thrown when a junior and a liquidity provider yield distribution model share an instance, which the accountant rejects
+    error YIELD_DISTRIBUTION_MODELS_NOT_DISTINCT();
+
+    /// @notice Thrown when a market selects a yield distribution model shape this template has no instances for
+    error YDM_NOT_REGISTERED(string ydmType);
+
+    /// @notice Thrown when registering a model shape under an empty name
+    error INVALID_YDM_TYPE();
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // EVENTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Emitted when the protocol fee set every future market is deployed with changes
+    event ProtocolFeeConfigUpdated(ProtocolFeeConfig config);
+
+    /// @notice Emitted when the recipient every future market pays its protocol fees to changes
+    event ProtocolFeeRecipientUpdated(address protocolFeeRecipient);
+
+    /**
+     * @notice Emitted when a model shape's instances are registered or replaced
+     * @param ydmType The model shape's name
+     * @param jtYdm The junior tranche's model instance for this shape
+     * @param lptYdm The liquidity provider tranche's model instance for this shape
+     */
+    event YieldDistributionModelsRegistered(string ydmType, address jtYdm, address lptYdm);
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PROTOCOL POLICY
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice The protocol fee set every market this template deploys is initialized with
+     * @dev Packs into one slot: each fee is bounded by `MAX_PROTOCOL_FEE_WAD` (1e18), well inside a uint64
+     * @custom:field stProtocolFeeWAD - The share of senior yield taken as protocol fee, scaled to WAD
+     * @custom:field jtProtocolFeeWAD - The share of junior yield taken as protocol fee, scaled to WAD
+     * @custom:field jtYieldShareProtocolFeeWAD - The share of the junior risk premium taken as protocol fee, scaled to WAD
+     * @custom:field lptYieldShareProtocolFeeWAD - The share of the liquidity premium taken as protocol fee, scaled to WAD
+     */
+    struct ProtocolFeeConfig {
+        uint64 stProtocolFeeWAD;
+        uint64 jtProtocolFeeWAD;
+        uint64 jtYieldShareProtocolFeeWAD;
+        uint64 lptYieldShareProtocolFeeWAD;
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // DECLARATIVE ROLE BINDINGS
@@ -57,28 +101,6 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         uint64[] roleIds;
     }
 
-    /**
-     * @notice A role grant applied after deployment (e.g. SYNC_ROLE → accountant)
-     * @custom:field roleId - The role id to grant
-     * @custom:field account - The account receiving the role
-     * @custom:field executionDelay - The access-manager execution delay in seconds applied to the grant
-     */
-    struct RoleGrant {
-        uint64 roleId;
-        address account;
-        uint32 executionDelay;
-    }
-
-    /**
-     * @notice The full role-wiring config a template applies via `_applyRoleBindings`
-     * @custom:field targetBindings - The per-target selector→role maps to install
-     * @custom:field postInitGrants - The role grants to apply after deployment and initialization
-     */
-    struct RoleBindings {
-        TargetBinding[] targetBindings;
-        RoleGrant[] postInitGrants;
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // IMMUTABLE STATE
     // ═══════════════════════════════════════════════════════════════════════════
@@ -87,11 +109,20 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     IRoycoFactory public immutable override(IBaseTemplate) ROYCO_FACTORY;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // STORAGE
+    // CONFIGURATION STATE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev SSTORE2 pointer table, one pointer per component ID, set during `initialize`
-    mapping(bytes32 componentId => address sstore2Pointer) private _bytecodePointers;
+    /// @notice The protocol fees every future market is deployed with
+    ProtocolFeeConfig public protocolFeeConfig;
+
+    /// @notice The address every future market remits its protocol fee shares to
+    address public protocolFeeRecipient;
+
+    /// @notice The junior tranche's yield distribution model instance for each registered model shape
+    mapping(string ydmType => address ydm) public jtYdms;
+
+    /// @notice The liquidity provider tranche's model instance for each registered model shape
+    mapping(string ydmType => address ydm) public lptYdms;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // MODIFIERS
@@ -104,41 +135,103 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // CONSTRUCTOR + INITIALIZATION
+    // CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @param _factory The Royco factory this template will be registered with
-    constructor(IRoycoFactory _factory) {
-        require(address(_factory) != address(0), ROYCO_FACTORY_CANNOT_BE_ZERO_ADDRESS());
+    /// @param _factory The Royco factory this template will be registered with, and the source of the market authority
+    /// @param _protocolFeeConfig The protocol fees every market this template deploys starts with
+    /// @param _protocolFeeRecipient The address every market this template deploys remits its protocol fees to
+    /// @dev Both configuration values run through the same internal setters the admin path uses, so construction and
+    ///      mutation can never validate differently
+    constructor(
+        IRoycoFactory _factory,
+        ProtocolFeeConfig memory _protocolFeeConfig,
+        address _protocolFeeRecipient
+    )
+        AccessManaged(_resolveMarketAuthority(_factory))
+    {
         ROYCO_FACTORY = _factory;
+        _setProtocolFeeConfig(_protocolFeeConfig);
+        _setProtocolFeeRecipient(_protocolFeeRecipient);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CONFIGURATION ADMIN
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Sets the protocol fees every FUTURE market is deployed with
+     * @param _config The new fee set, each bounded by `MAX_PROTOCOL_FEE_WAD`
+     */
+    function setProtocolFeeConfig(ProtocolFeeConfig calldata _config) external restricted {
+        _setProtocolFeeConfig(_config);
+    }
+
+    /**
+     * @notice Sets the address every FUTURE market remits its protocol fee shares to
+     * @param _protocolFeeRecipient The new recipient
+     */
+    function setProtocolFeeRecipient(address _protocolFeeRecipient) external restricted {
+        _setProtocolFeeRecipient(_protocolFeeRecipient);
+    }
+
+    /**
+     * @notice Registers the junior and liquidity provider model instances for one model shape
+     * @param _ydmType The model shape's name, which markets select by
+     * @param _jtYdm The junior tranche's model instance for this shape
+     * @param _lptYdm The liquidity provider tranche's model instance for this shape
+     */
+    function setYieldDistributionModels(string calldata _ydmType, address _jtYdm, address _lptYdm) external restricted {
+        require(bytes(_ydmType).length != 0, INVALID_YDM_TYPE());
+        require(_jtYdm != address(0) && _lptYdm != address(0), IRoycoAuth.NULL_ADDRESS());
+        require(_jtYdm != _lptYdm, YIELD_DISTRIBUTION_MODELS_NOT_DISTINCT());
+
+        jtYdms[_ydmType] = _jtYdm;
+        lptYdms[_ydmType] = _lptYdm;
+        emit YieldDistributionModelsRegistered(_ydmType, _jtYdm, _lptYdm);
+    }
+
+    /**
+     * @notice Returns the junior tranche's yield distribution model instance for a shape
+     * @dev Reverts on an unregistered YDM
+     * @param _ydmType The model shape the market selected
+     * @return ydm The junior tranche model instance this template deploys markets against
+     */
+    function jtYdmFor(string memory _ydmType) public view returns (address ydm) {
+        require((ydm = jtYdms[_ydmType]) != address(0), YDM_NOT_REGISTERED(_ydmType));
+    }
+
+    /**
+     * @notice Returns the liquidity provider tranche's yield distribution model instance for a shape
+     * @dev Reverts on an unregistered YDM
+     * @param _ydmType The model shape the market selected
+     * @return ydm The liquidity provider tranche model instance this template deploys markets against
+     */
+    function lptYdmFor(string memory _ydmType) public view returns (address ydm) {
+        require((ydm = lptYdms[_ydmType]) != address(0), YDM_NOT_REGISTERED(_ydmType));
+    }
+
+    /// @dev The one place the fee set is validated and written, shared by construction and the admin setter
+    function _setProtocolFeeConfig(ProtocolFeeConfig memory _config) internal {
+        require(
+            _config.stProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _config.jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD
+                && _config.jtYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _config.lptYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD,
+            INVALID_PROTOCOL_FEE_CONFIG()
+        );
+        protocolFeeConfig = _config;
+        emit ProtocolFeeConfigUpdated(_config);
+    }
+
+    /// @dev The one place the recipient is validated and written, shared by construction and the admin setter
+    function _setProtocolFeeRecipient(address _protocolFeeRecipient) internal {
+        require(_protocolFeeRecipient != address(0), IRoycoAuth.NULL_ADDRESS());
+        protocolFeeRecipient = _protocolFeeRecipient;
+        emit ProtocolFeeRecipientUpdated(_protocolFeeRecipient);
     }
 
     /// @inheritdoc IRoycoProtocolTemplate
-    function initialize(bytes32[] calldata _componentIds, bytes[] calldata _creationCodes) external override(IRoycoProtocolTemplate) initializer {
-        require(_componentIds.length == _creationCodes.length, LENGTH_MISMATCH());
-
-        uint256 n = _componentIds.length;
-        for (uint256 i; i < n; ++i) {
-            bytes32 id = _componentIds[i];
-            require(_bytecodePointers[id] == address(0), CREATION_CODE_ALREADY_SET(id));
-            require(_creationCodes[i].length > 0, CREATION_CODE_CANNOT_BE_EMPTY(id));
-            _bytecodePointers[id] = SSTORE2.write(_creationCodes[i]);
-        }
-    }
-
-    /// @inheritdoc IBaseTemplate
-    function bytecodePointer(bytes32 _componentId) external view override(IBaseTemplate) returns (address) {
-        return _bytecodePointers[_componentId];
-    }
-
-    /// @inheritdoc IBaseTemplate
-    function isInitialized() external view override(IBaseTemplate) returns (bool) {
-        return _getInitializedVersion() > 0;
-    }
-
-    /// @inheritdoc IRoycoProtocolTemplate
-    function configureMarketPeriphery(DeploymentResult calldata _result, bytes calldata _params) external override(IRoycoProtocolTemplate) onlyRoycoFactory {
-        _configureMarketPeriphery(_result, _params);
+    function postMarketRegistration(DeploymentResult calldata _result, bytes calldata _params) external override(IRoycoProtocolTemplate) onlyRoycoFactory {
+        _postMarketRegistration(_result, _params);
     }
 
     /**
@@ -146,7 +239,7 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
      * @param _result The market's deployment result, as returned by `deployMarket`
      * @param _params The same ABI-encoded template-specific params passed to `deployMarket`
      */
-    function _configureMarketPeriphery(DeploymentResult calldata _result, bytes calldata _params) internal virtual;
+    function _postMarketRegistration(DeploymentResult calldata _result, bytes calldata _params) internal virtual;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // SALT DERIVATION
@@ -155,130 +248,85 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     /**
      * @notice Per-market component salt, same `(marketId, componentTag)` always produces the
      *         same address regardless of template
-     * @param _marketId Caller-supplied stable identifier for the market
+     * @param _baseSalt The base salt for the market
      * @param _componentTag E.g. `bytes32("ST")`, `bytes32("JT")`, `bytes32("KERNEL")`,
      *        `bytes32("ACCOUNTANT")`, `bytes32("BALANCER_HOOK")`
      */
-    function _marketComponentSalt(bytes32 _marketId, bytes32 _componentTag) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked("ROYCO_MARKET_", _marketId, _componentTag));
-    }
-
-    /**
-     * @notice Market-agnostic YDM salt: one shared instance per `(roleTag, model)` pair
-     * @param _componentTag The YDM role tag, `bytes32("YDM")` for the JT YDM or `bytes32("LDM")` for the LT LDM
-     * @param _ydmComponentId The component id of the YDM creation code, selecting the YDM model
-     * @return salt The market-agnostic CREATE3 salt for the `(roleTag, model)` pair's shared YDM instance
-     */
-    function _ydmSalt(bytes32 _componentTag, bytes32 _ydmComponentId) internal pure returns (bytes32 salt) {
-        return keccak256(abi.encodePacked("ROYCO_YDM_", _componentTag, _ydmComponentId));
+    function _marketComponentSalt(bytes32 _baseSalt, bytes32 _componentTag) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked("ROYCO_MARKET_", _baseSalt, _componentTag));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Reads a previously-loaded creation code via SSTORE2
-    function _readCreationCode(bytes32 _componentId) internal view returns (bytes memory) {
-        address ptr = _bytecodePointers[_componentId];
-        require(ptr != address(0), CREATION_CODE_NOT_SET(_componentId));
-        return SSTORE2.read(ptr);
-    }
-
-    /**
-     * @notice Deploys an impl whose creation code lives at `_componentId`, with no constructor args
-     * @dev Reverts if a contract already exists at the CREATE3 address, every market component
-     *      must be a fresh deployment, the YDM is the only exception and uses `_deployYDM`
-     */
-    function _deployImpl(bytes32 _componentId, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(_componentId, "", _salt);
-    }
-
-    /// @notice Deploys an impl whose creation code lives at `_componentId`, with ABI-encoded constructor args appended
-    /// @dev Reverts if a contract already exists at the CREATE3 address
-    function _deployImpl(bytes32 _componentId, bytes memory _ctorArgs, bytes32 _salt) internal returns (address impl) {
-        bytes memory creationCode = abi.encodePacked(_readCreationCode(_componentId), _ctorArgs);
+    /// @notice Deploys a beacon proxy reading from `_beacon` with `_initData`, via the factory's active-template primitive
+    /// @dev Reverts if a contract already exists at the CREATE3 address, every market proxy must be a fresh deployment
+    function _deployProxy(address _beacon, bytes memory _initData, bytes32 _salt) internal returns (address proxy) {
         bool alreadyDeployed;
-        (impl, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicContract(creationCode, _salt);
-        require(!alreadyDeployed, MARKET_COMPONENT_ALREADY_DEPLOYED(impl, _salt));
-    }
-
-    /// @notice Deploys an ERC1967 proxy pointing at `_impl` with `_initData`
-    /// @dev Reverts if a contract already exists at the CREATE3 address
-    function _deployProxy(address _impl, bytes memory _initData, bytes32 _salt) internal returns (address proxy) {
-        bool alreadyDeployed;
-        (proxy, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicProxy(_impl, _initData, _salt);
+        (proxy, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicProxyFromTemplate(_beacon, _initData, _salt);
         require(!alreadyDeployed, MARKET_COMPONENT_ALREADY_DEPLOYED(proxy, _salt));
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // INIT DATA BUILDERS (standard Constants)
+    // ═══════════════════════════════════════════════════════════════════════════
+
     /**
-     * @notice Deploys (or reuses) a YDM instance of the selected component type at the caller-supplied salt, pinning its model-specific constructor params
-     * @dev The registered creation code is the bare YDM bytecode for `_ydmComponentId`, the constructor args are appended here
-     *      rather than baked into the registered creation code, ABI-encoded per the selected model's constructor
-     *      (the static curve takes its target utilization, and the adaptive curves additionally take their adaptation bounds and speed)
-     * @dev Unlike every other market component, an already-deployed YDM is reused rather than rejected: YDMs are
-     *      market-agnostic singletons (curve state keyed per accountant), so any market whose `_ydmSalt` matches a
-     *      previously deployed instance shares it
-     * @dev An unregistered YDM component id reverts loud in `_readCreationCode` (CREATION_CODE_NOT_SET), so an unsupported type can never silently deploy the wrong model
-     * @param _salt The CREATE3 salt for this YDM instance, derived market-agnostically via `_ydmSalt`
-     * @param _ydmConstructorArgs The ABI-encoded constructor args for the selected YDM model
-     * @param _ydmComponentId The component id of the YDM creation code to deploy, selecting the market's YDM model
+     * @notice Builds `initialize(...)` calldata for a tranche proxy from the deployer's params
+     * @param _params The tranche's deployer-supplied params
+     * @param _kernel The market's kernel, which the tranche routes every operation through
+     * @param _asset The tranche's underlying asset
      */
-    function _deployYDM(bytes32 _salt, bytes memory _ydmConstructorArgs, bytes32 _ydmComponentId) internal returns (address ydm, bool alreadyDeployed) {
-        bytes memory creationCode = _readCreationCode(_ydmComponentId);
-        (ydm, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicContract(abi.encodePacked(creationCode, _ydmConstructorArgs), _salt);
-    }
-
-    /// @notice Deploys the senior-tranche impl, pinning its (asset, kernel) immutables
-    function _deploySeniorTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_SENIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
-    }
-
-    /// @notice Deploys the junior-tranche impl, pinning its (asset, kernel) immutables
-    function _deployJuniorTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_JUNIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
-    }
-
-    /// @notice Deploys the liquidity-tranche impl, pinning its (asset, kernel) immutables
-    function _deployLiquidityTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
-    }
-
-    /// @notice Deploys the accountant impl for a given kernel
-    function _deployAccountantImpl(address _kernel, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_ACCOUNTANT_IMPL, abi.encode(_kernel), _salt);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // INIT DATA BUILDERS (standard components)
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Builds `initialize(...)` calldata for a tranche proxy from its canonical init params, forcing the market authority
-    /// @dev The caller-supplied `initialAuthority` is ignored/overwritten, the market's authority is always the factory's authority
-    function _encodeTrancheInitData(IRoycoVaultTranche.RoycoTrancheInitParams memory _params) internal view returns (bytes memory) {
-        _params.initialAuthority = ROYCO_FACTORY.ROYCO_AUTHORITY();
-        return abi.encodeCall(RoycoSeniorTranche.initialize, (_params));
+    function _encodeTrancheInitData(TrancheDeploymentParams memory _params, address _kernel, address _asset) internal view returns (bytes memory) {
+        return abi.encodeCall(
+            RoycoSeniorTranche.initialize,
+            (IRoycoVaultTranche.RoycoTrancheInitParams({
+                    name: _params.name, symbol: _params.symbol, initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY(), kernel: _kernel, asset: _asset
+                }))
+        );
     }
 
     /**
-     * @notice Builds `initialize(...)` calldata for an accountant proxy from its canonical init params
-     * @dev The caller supplies the full accountant configuration (including both the JT and LT YDM initialization data, so
-     *      both YDMs are initialized), the template injects only the deployment-derived YDM addresses and the market authority
-     * @param _params The accountant's canonical init params (its `jtYDM`/`ltYDM` fields are overwritten with the deployed instances)
+     * @notice Builds `initialize(...)` calldata for an accountant proxy from the deployer's params
+     * @param _params The accountant's deployer-supplied params
+     * @param _kernel The market's kernel, the only caller permitted to drive the accountant's synchronization
      * @param _jtYdm The JT YDM (risk-premium model) instance
-     * @param _ltYdm The LT YDM (liquidity-premium model / LDM) instance, a distinct instance from `_jtYdm`
+     * @param _lptYdm The LPT YDM (liquidity-premium model / LDM) instance, a distinct instance from `_jtYdm`
      */
     function _encodeAccountantInitData(
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params,
+        AccountantDeploymentParams memory _params,
+        address _kernel,
         address _jtYdm,
-        address _ltYdm
+        address _lptYdm
     )
         internal
         view
         returns (bytes memory)
     {
-        _params.jtYDM = _jtYdm;
-        _params.ltYDM = _ltYdm;
-        return abi.encodeCall(RoycoDayAccountant.initialize, (_params, ROYCO_FACTORY.ROYCO_AUTHORITY()));
+        return abi.encodeCall(
+            RoycoDayAccountant.initialize,
+            (IRoycoDayAccountant.RoycoDayAccountantInitParams({
+                    kernel: _kernel,
+                    initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY(),
+                    fixedTermGracePeriodSeconds: _params.fixedTermGracePeriodSeconds,
+                    minCoverageWAD: _params.minCoverageWAD,
+                    coverageLiquidationUtilizationWAD: _params.coverageLiquidationUtilizationWAD,
+                    minLiquidityWAD: _params.minLiquidityWAD,
+                    jtYDM: _jtYdm,
+                    jtYDMInitializationData: _params.jtYDMInitializationData,
+                    lptYDM: _lptYdm,
+                    lptYDMInitializationData: _params.lptYDMInitializationData,
+                    maxJTYieldShareWAD: _params.maxJTYieldShareWAD,
+                    maxLPTYieldShareWAD: _params.maxLPTYieldShareWAD,
+                    fixedTermDurationSeconds: _params.fixedTermDurationSeconds,
+                    dustTolerance: _params.dustTolerance,
+                    stProtocolFeeWAD: protocolFeeConfig.stProtocolFeeWAD,
+                    jtProtocolFeeWAD: protocolFeeConfig.jtProtocolFeeWAD,
+                    jtYieldShareProtocolFeeWAD: protocolFeeConfig.jtYieldShareProtocolFeeWAD,
+                    lptYieldShareProtocolFeeWAD: protocolFeeConfig.lptYieldShareProtocolFeeWAD
+                }))
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -286,23 +334,14 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Applies every binding in `_bindings` by calling back into the factory
-    function _applyRoleBindings(RoleBindings memory _bindings) internal {
-        // Go through each target binding and apply the selectors to the target
-        uint256 nTargets = _bindings.targetBindings.length;
-        for (uint256 i; i < nTargets; ++i) {
-            TargetBinding memory tb = _bindings.targetBindings[i];
-            require(tb.selectors.length == tb.roleIds.length, LENGTH_MISMATCH());
-            uint256 m = tb.selectors.length;
-            for (uint256 j; j < m; ++j) {
-                ROYCO_FACTORY.setMarketTargetFunctionRole(tb.target, tb.selectors[j], tb.roleIds[j]);
-            }
-        }
-
-        // Go through each post-init grant and apply the role to the account
-        uint256 nGrants = _bindings.postInitGrants.length;
-        for (uint256 i; i < nGrants; ++i) {
-            RoleGrant memory g = _bindings.postInitGrants[i];
-            ROYCO_FACTORY.grantMarketRole(g.roleId, g.account, g.executionDelay);
+    function _applyRoleBindings(TargetBinding[] memory _targetBindings) internal {
+        uint256 numTargets = _targetBindings.length;
+        for (uint256 i; i < numTargets; ++i) {
+            TargetBinding memory binding = _targetBindings[i];
+            uint256 numSelectors = binding.selectors.length;
+            require(numSelectors == binding.roleIds.length, LENGTH_MISMATCH());
+            if (numSelectors == 0) continue;
+            ROYCO_FACTORY.setMarketTargetFunctionRole(binding.target, binding.selectors, binding.roleIds);
         }
     }
 }

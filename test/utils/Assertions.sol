@@ -112,16 +112,14 @@ contract Assertions is Test {
     // Protocol invariants
     // ─────────────────────────────────────────────────────────────────────────────
 
-    /// @notice Asserts the two-term NAV conservation identity `stRawNAV + jtRawNAV == stEffectiveNAV + jtEffectiveNAV`
+    /// @notice Asserts the collateral NAV conservation identity `collateralNAV == stEffectiveNAV + jtEffectiveNAV`
     ///         at WEI precision, the same identity src guards with `NAV_CONSERVATION_VIOLATION` in RoycoDayAccountant.
     /// @dev The suite asserts it exactly rather than with a tolerance so a one-wei attribution leak cannot hide.
     ///      Use `assertNAVConservationApprox` only where a documented, quantified rounding term makes exactness
     ///      provably unattainable.
-    function assertNAVConservation(NAV_UNIT stRaw, NAV_UNIT jtRaw, NAV_UNIT stEff, NAV_UNIT jtEff, string memory ctx) internal pure {
+    function assertNAVConservation(NAV_UNIT collateralNAV, NAV_UNIT stEff, NAV_UNIT jtEff, string memory ctx) internal pure {
         assertEq(
-            toUint256(stRaw) + toUint256(jtRaw),
-            toUint256(stEff) + toUint256(jtEff),
-            string.concat(ctx, ": NAV conservation violated (stRaw + jtRaw != stEff + jtEff)")
+            toUint256(collateralNAV), toUint256(stEff) + toUint256(jtEff), string.concat(ctx, ": NAV conservation violated (collateralNAV != stEff + jtEff)")
         );
     }
 

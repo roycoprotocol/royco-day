@@ -28,7 +28,7 @@ abstract contract UpdateConfig {
     address internal constant ROYCO_FACTORY = address(0);
 
     /// @dev The Day entry point proxy (CREATE3 — same address on every chain).
-    /// @dev TODO: set the deployed Day entry point address once the market deployment script (Deploy.s.sol) has run.
+    /// @dev TODO: set the deployed Day entry point address once the chain bootstrap (script/deploy/BootstrapChain.s.sol) has run.
     address internal constant ROYCO_ENTRY_POINT = address(0);
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -109,9 +109,9 @@ abstract contract UpdateConfig {
         require(addrs.kernel != address(0), MarketNotFound(_marketName, block.chainid));
 
         IRoycoDayKernel kernel = IRoycoDayKernel(addrs.kernel);
-        addrs.accountant = kernel.ACCOUNTANT();
-        addrs.seniorTranche = kernel.SENIOR_TRANCHE();
-        addrs.juniorTranche = kernel.JUNIOR_TRANCHE();
+        addrs.accountant = kernel.accountant();
+        addrs.seniorTranche = kernel.seniorTranche();
+        addrs.juniorTranche = kernel.juniorTranche();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

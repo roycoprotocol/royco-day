@@ -8,7 +8,7 @@ import { ValuationLogic } from "../../src/libraries/logic/ValuationLogic.sol";
 
 /**
  * @title CarveOutWrapper
- * @notice Thin external wrapper over the pure senior-share carve-out sizing (the LT liquidity premium and the
+ * @notice Thin external wrapper over the pure senior-share carve-out sizing (the LPT liquidity premium and the
  *         ST protocol fee split) and the share-conversion primitive it prices each carve-out with
  * @dev External entrypoints let a test observe reverts anywhere in the sizing math through try/catch
  */
@@ -28,7 +28,7 @@ contract CarveOutWrapper {
     /// @notice Compact overload over the three NAV legs the carve-out sizing actually reads from the synced state
     function computeSTFeeAndLiquidityPremiumSharesToMint(
         uint256 _stEffectiveNAV,
-        uint256 _ltLiquidityPremium,
+        uint256 _lptLiquidityPremium,
         uint256 _stProtocolFee,
         uint256 _stTotalSupply
     )
@@ -38,7 +38,7 @@ contract CarveOutWrapper {
     {
         SyncedAccountingState memory state;
         state.stEffectiveNAV = toNAVUnits(_stEffectiveNAV);
-        state.ltLiquidityPremium = toNAVUnits(_ltLiquidityPremium);
+        state.lptLiquidityPremium = toNAVUnits(_lptLiquidityPremium);
         state.stProtocolFee = toNAVUnits(_stProtocolFee);
         return FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, _stTotalSupply);
     }

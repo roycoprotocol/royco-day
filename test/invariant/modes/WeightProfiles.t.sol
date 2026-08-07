@@ -28,7 +28,7 @@ abstract contract WeightProfileBase is Invariant_DayMarket {
  * @title Invariant_CalmMarket
  * @notice A healthy, flow-dominated market: deposits, redemptions, reinvestments, and time passing dominate,
  *         with only occasional small rate moves and a clean venue throughout
- * @dev This regime maximizes successful executions of every production flow (including both multi-asset LT
+ * @dev This regime maximizes successful executions of every production flow (including both multi-asset LPT
  *      flows and the premium mint-and-reinvest loop), so share pricing, claim scaling, and the fee and
  *      liquidity premium share mint get the deepest coverage of states where the gates are far from binding
  */
@@ -43,13 +43,13 @@ contract Invariant_CalmMarket is WeightProfileBase {
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtRedeem.selector,
-            DayMarketHandler.op_ltDeposit.selector,
-            DayMarketHandler.op_ltDeposit.selector,
-            DayMarketHandler.op_ltDepositMultiAsset.selector,
-            DayMarketHandler.op_ltDepositMultiAsset.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeemMultiAsset.selector,
+            DayMarketHandler.op_lptDeposit.selector,
+            DayMarketHandler.op_lptDeposit.selector,
+            DayMarketHandler.op_lptDepositMultiAsset.selector,
+            DayMarketHandler.op_lptDepositMultiAsset.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeemMultiAsset.selector,
             DayMarketHandler.op_sync.selector,
             DayMarketHandler.op_reinvest.selector,
             DayMarketHandler.op_reinvest.selector,
@@ -57,7 +57,7 @@ contract Invariant_CalmMarket is WeightProfileBase {
             DayMarketHandler.op_warp.selector,
             DayMarketHandler.op_warp.selector,
             DayMarketHandler.op_stPnL.selector,
-            DayMarketHandler.op_ltPnL.selector,
+            DayMarketHandler.op_lptPnL.selector,
             DayMarketHandler.aimed_depositExactlyMaxST.selector
         ];
         sels = new bytes4[](weighted.length);
@@ -72,7 +72,7 @@ contract Invariant_CalmMarket is WeightProfileBase {
  * @notice A market under sustained stress: rate moves on every feed dominate, the venue's slippage flaps so
  *         the premium repeatedly sits idle and then deploys, and external pool activity drifts the composition
  * @dev This regime concentrates on the tranche accounting sync's loss and recovery arms, the
- *      jtCoverageImpermanentLoss ledger, the idle liquidity premium senior shares under a hostile venue,
+ *      jtImpermanentLoss ledger, the idle liquidity premium senior shares under a hostile venue,
  *      and pool marks that move underneath the liquidity gate, while a thin stream of flows keeps every
  *      gate prediction exercised against the shifting state
  */
@@ -84,8 +84,8 @@ contract Invariant_StressedMarket is WeightProfileBase {
             DayMarketHandler.op_stPnL.selector,
             DayMarketHandler.op_jtPnL.selector,
             DayMarketHandler.op_jtPnL.selector,
-            DayMarketHandler.op_ltPnL.selector,
-            DayMarketHandler.op_ltPnL.selector,
+            DayMarketHandler.op_lptPnL.selector,
+            DayMarketHandler.op_lptPnL.selector,
             DayMarketHandler.aimed_coveredDrawdown.selector,
             DayMarketHandler.aimed_coveredDrawdown.selector,
             DayMarketHandler.aimed_toggleVenueSlippage.selector,
@@ -99,9 +99,9 @@ contract Invariant_StressedMarket is WeightProfileBase {
             DayMarketHandler.op_stRedeem.selector,
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtRedeem.selector,
-            DayMarketHandler.op_ltDeposit.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeemMultiAsset.selector,
+            DayMarketHandler.op_lptDeposit.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeemMultiAsset.selector,
             DayMarketHandler.op_sync.selector,
             DayMarketHandler.op_adminParamNudge.selector
         ];
@@ -117,7 +117,7 @@ contract Invariant_StressedMarket is WeightProfileBase {
  * @notice A market repeatedly driven to and past the liquidation coverage threshold, then wound down and
  *         recapitalized: closed-form losses to the threshold, full exits, and heavy redemption pressure
  * @dev This regime concentrates on the breached-coverage regime the default mix only touches: the liquidity
- *      gate standing down in liquidation, the senior tranche self-liquidation bonus, the coverage-loss
+ *      gate standing down in liquidation, the senior tranche self-liquidation bonus, the impermanent-loss
  *      erasure on forced-perpetual transitions, zero-supply edges after full exits, and junior recapitalization
  */
 contract Invariant_LiquidationMarket is WeightProfileBase {
@@ -132,9 +132,9 @@ contract Invariant_LiquidationMarket is WeightProfileBase {
             DayMarketHandler.op_stRedeem.selector,
             DayMarketHandler.op_jtRedeem.selector,
             DayMarketHandler.op_jtRedeem.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeem.selector,
-            DayMarketHandler.op_ltRedeemMultiAsset.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeem.selector,
+            DayMarketHandler.op_lptRedeemMultiAsset.selector,
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_jtDeposit.selector,
             DayMarketHandler.op_stDeposit.selector,

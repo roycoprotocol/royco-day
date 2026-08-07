@@ -3,33 +3,37 @@ pragma solidity ^0.8.28;
 
 import { IERC20, SafeERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { RoycoBase } from "../base/RoycoBase.sol";
-import { IOracleClock } from "../interfaces/IOracleClock.sol";
+import { SafeCast } from "../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
+import { RoycoUUPSBase } from "../base/RoycoUUPSBase.sol";
 import { IRoycoDayEntryPoint } from "../interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
-import { IRoycoLiquidityTranche } from "../interfaces/IRoycoLiquidityTranche.sol";
+import { IRoycoLiquidityProviderTranche } from "../interfaces/IRoycoLiquidityProviderTranche.sol";
+import { IRoycoPriceOracle } from "../interfaces/IRoycoPriceOracle.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims, TrancheType } from "../libraries/Types.sol";
 import { NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
-import { TrancheClaimsLogic } from "../libraries/logic/TrancheClaimsLogic.sol";
+import { AssetLedgerLogic } from "../libraries/logic/AssetLedgerLogic.sol";
+import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
+import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
 
 /**
  * @title RoycoDayEntryPoint
- * @author Shivaansh Kapoor, Ankur Dubey
+ * @author Shivaansh Kapoor, Ankur Dubey, Aman Raj, Tomer Ganor
  * @notice Periphery contract enabling asynchronous deposit and redemption flows on Royco Tranches
  * @dev Enforces configurable delays between request and execution to prevent oracle front-running attacks
- *      Tranches configured with an oracle clock additionally gate execution on at least one observed oracle update
- *      after the request, so any information known at request time is priced into the mark before execution
- *      Requests are yield-neutral: any yield accrued on escrowed assets or shares during the delay period is
- *      forfeited to the protocol as fee shares, so a queued request can never gain value over its request-time NAV
- *      Supports third-party executors (keepers) with configurable bonus incentives
- *      Partial execution is supported, allowing requests to be fulfilled incrementally as tranche capacity is freed up
- *      Screens interacting addresses against the market's blacklist through the tranche's kernel, covering the request
- *      operators and every value flow that settles outside the kernel's own screened paths
+ * @dev Tranches configured with an oracle clock additionally gate execution on at least one observed oracle update after the request, so any information known at request time is priced into the mark before execution
+ * @dev A queued request can never capture favorable price movement during its delay:
+ *          1. A deposit is pinned to the tranche shares it would have minted at request time: any shares minted in excess at execution are forfeited on a share basis
+ *          2. A redemption is pinned to the value its shares were worth at request time: any value accrued in excess is forfeited on a value basis
+ * @dev Each tranche also carries an expiry window for it requests: once it elapses the request is terminal and may only be cancelled
+ * @dev Supports third-party executors (keepers) with configurable bonus incentives for executing the request
+ * @dev Partial execution is supported, allowing requests to be fulfilled incrementally as tranche capacity is freed up
+ * @dev Screens interacting accounts against the market's blacklist, covering the request operators and every value flow that settles outside the kernel's own screened paths
  */
-contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
+contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
+    using SafeCast for uint256;
     using SafeERC20 for IERC20;
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for TRANCHE_UNIT;
@@ -37,7 +41,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
     /// @dev Storage slot for RoycoDayEntryPointState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayEntryPoint")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ROYCO_DAY_ENTRY_POINT_STORAGE_SLOT = 0x03bd8d6176ab6e234086d98500389a8f80bf2cd4515f169be97ae2e0d147ef00;
+    bytes32 private constant _ROYCO_DAY_ENTRY_POINT_STORAGE_SLOT = 0x03bd8d6176ab6e234086d98500389a8f80bf2cd4515f169be97ae2e0d147ef00;
 
     /// @inheritdoc IRoycoDayEntryPoint
     address public immutable override(IRoycoDayEntryPoint) ROYCO_FACTORY;
@@ -63,9 +67,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         _modifyTrancheConfigs(_tranches, _configs);
     }
 
-    /// =============================
-    /// Entry Point Deposit Functions
-    /// =============================
+    /**
+     * =============================
+     * Entry Point Deposit Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoDayEntryPoint
     function requestDeposit(
@@ -78,7 +84,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         override(IRoycoDayEntryPoint)
         whenNotPaused
         restricted
-        returns (uint256 requestNonce, uint32 executableAtTimestamp)
+        returns (uint256 requestNonce, uint32 executableAtTimestamp, uint32 expiresAtTimestamp)
     {
         // Validate the deposit request
         require(_assets != ZERO_TRANCHE_UNITS, MUST_EXECUTE_NON_ZERO_AMOUNT());
@@ -87,31 +93,39 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
         // Ensure that the tranche is enabled on this entry point and the caller and receiver are not blacklisted
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
-        EnrichedTrancheConfig memory config = $.trancheToConfig[_tranche];
+        EnrichedTrancheConfig storage config = $.trancheToConfig[_tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
         _enforceNotBlacklisted(config.kernel, msg.sender, _receiver);
 
-        // Poke the tranche's oracle clock so that a source update that predates this request can never open its execution gate
-        _pokeOracleClock(_tranche, config.baseConfig.oracleClock);
+        // Sync the market before the request is registered, the reference below prices against this one accounting state
+        // The sync pokes the collateral asset oracle as its first action, so the request registers against a fresh mark or reverts on a circuit-broken oracle
+        (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(config.kernel).syncTrancheAccountingFor(config.trancheType);
 
-        // Register the user's deposit request with a fresh nonce
-        DepositRequest storage request = $.userToNonceToDepositRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)];
-        request.assets = _assets;
-        request.baseRequest = BaseRequest({
-            tranche: _tranche,
-            queuedAtTimestamp: uint32(block.timestamp),
-            // Snapshot the NAV of the escrowed assets, used to forfeit any yield they accrue during the request lifecycle
-            navAtRequestTime: _convertAssetsToNAV(config.kernel, config.trancheType, _assets),
-            receiver: _receiver,
-            executableAtTimestamp: (executableAtTimestamp = uint32(block.timestamp + config.baseConfig.depositDelaySeconds)),
-            executorBonusWAD: _executorBonusWAD
+        // Resolve the request's executable and expiry timestamps: the expiry is a saturating add, so a maximal window
+        // pins it at type(uint32).max and the request effectively never expires
+        executableAtTimestamp = uint32(block.timestamp + config.baseConfig.depositDelaySeconds);
+        expiresAtTimestamp = uint32(Math.min(uint256(executableAtTimestamp) + config.baseConfig.depositExpirySeconds, type(uint32).max));
+
+        // Populate the user's deposit request in memory before registering it
+        DepositRequest memory request = DepositRequest({
+            assets: _assets,
+            // Snapshot the shares this deposit would mint at request-time pricing
+            equivalentSharesAtRequestTime: _depositSharesReference(config.kernel, config.trancheType, _assets, trancheClaims, totalTrancheShares),
+            baseRequest: BaseRequest({
+                tranche: _tranche,
+                queuedAtTimestamp: uint32(block.timestamp),
+                receiver: _receiver,
+                executableAtTimestamp: executableAtTimestamp,
+                expiresAtTimestamp: expiresAtTimestamp,
+                executorBonusWAD: _executorBonusWAD
+            })
         });
+        $.userToNonceToDepositRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)] = request;
 
         // Transfer the requested amount of tranche assets into the entry point to queue the deposit
         IERC20(config.asset).safeTransferFrom(msg.sender, address(this), toUint256(_assets));
 
-        // Emit the deposit request event
-        emit DepositRequested(msg.sender, requestNonce, _tranche, _assets, executableAtTimestamp, _executorBonusWAD);
+        emit DepositRequested(msg.sender, requestNonce, _tranche, request);
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
@@ -122,8 +136,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     )
         external
         override(IRoycoDayEntryPoint)
-        whenNotPaused
-        restricted
         returns (uint256[] memory trancheSharesMinted)
     {
         // Execute the user specified deposit requests
@@ -131,7 +143,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         require(numRequestsToExecute == _users.length && numRequestsToExecute == _assetsToDeposit.length, ARRAY_LENGTH_MISMATCH());
         trancheSharesMinted = new uint256[](numRequestsToExecute);
         for (uint256 i = 0; i < numRequestsToExecute; ++i) {
-            trancheSharesMinted[i] = _executeDeposit(_users[i], _requestNonces[i], _assetsToDeposit[i]);
+            // Route each request through a self-delegatecall so a reverting request doesn't revert the batch
+            // NOTE: The delegatecall preserves this call context for execution
+            (bool executed, bytes memory result) =
+                address(this).delegatecall(abi.encodeCall(IRoycoDayEntryPoint.executeDeposit, (_users[i], _requestNonces[i], _assetsToDeposit[i])));
+            if (executed) trancheSharesMinted[i] = abi.decode(result, (uint256));
         }
     }
 
@@ -147,7 +163,65 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         restricted
         returns (uint256 trancheSharesMinted)
     {
-        return _executeDeposit(_user, _requestNonce, _assetsToDeposit);
+        require(_assetsToDeposit != ZERO_TRANCHE_UNITS, MUST_EXECUTE_NON_ZERO_AMOUNT());
+
+        // Retrieve the user's specified deposit request and its tranche's config
+        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
+        DepositRequest memory request = $.userToNonceToDepositRequest[_user][_requestNonce];
+        address tranche = request.baseRequest.tranche;
+        EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
+
+        // Assert the validity of the request
+        _validateRequestExecution(_requestNonce, request.baseRequest, config);
+        require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
+
+        // Screen the executor and request owner through the market's kernel so a flagged party can never operate the request (the tranche deposit below screens the receiver)
+        _enforceNotBlacklisted(config.kernel, msg.sender, _user);
+
+        // Sync the market before the deposit is executed
+        IRoycoDayKernel(config.kernel).syncTrancheAccountingFor(config.trancheType);
+
+        // Resolve the actual amount of assets to deposit
+        _assetsToDeposit = (_assetsToDeposit == MAX_TRANCHE_UNITS)
+            ? toTrancheUnits(Math.min(toUint256(IRoycoVaultTranche(tranche).maxDeposit(request.baseRequest.receiver)), toUint256(request.assets)))
+            : _assetsToDeposit;
+        // Return early without reverting if maxDeposit is 0 due to market conditions
+        if (_assetsToDeposit == ZERO_TRANCHE_UNITS) return 0;
+
+        // Ensure the resolved amount is not greater than the request's assets
+        require(request.assets >= _assetsToDeposit, INVALID_REQUEST(_requestNonce));
+        TRANCHE_UNIT assetsLeftToDeposit = request.assets - _assetsToDeposit;
+
+        // Mark the assets as deposited
+        if (assetsLeftToDeposit == ZERO_TRANCHE_UNITS) {
+            delete $.userToNonceToDepositRequest[_user][_requestNonce];
+        } else {
+            $.userToNonceToDepositRequest[_user][_requestNonce].assets = assetsLeftToDeposit;
+            // Scale the request-time share reference by the assets left to deposit
+            $.userToNonceToDepositRequest[_user][_requestNonce].equivalentSharesAtRequestTime =
+                request.equivalentSharesAtRequestTime.mulDiv(assetsLeftToDeposit, request.assets, Math.Rounding.Floor);
+            request.equivalentSharesAtRequestTime = request.equivalentSharesAtRequestTime.mulDiv(_assetsToDeposit, request.assets, Math.Rounding.Floor);
+        }
+
+        // A third party execution requires the user to have opted in (checked before the deposit mutates anything)
+        bool remitExecutorBonus = (_user != msg.sender && request.baseRequest.executorBonusWAD != 0);
+        require(!remitExecutorBonus || request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
+
+        // Deposit the full asset amount, forfeiting the shares minted in excess of the request-time reference as protocol fees
+        uint256 protocolFeeShares;
+        (trancheSharesMinted, protocolFeeShares) = _depositWithShareForfeiture(tranche, config, _assetsToDeposit, request.equivalentSharesAtRequestTime);
+
+        // Pay the executor bonus in freshly minted tranche shares
+        uint256 bonusShares;
+        if (remitExecutorBonus) {
+            bonusShares = Math.mulDiv(trancheSharesMinted, request.baseRequest.executorBonusWAD, WAD, Math.Rounding.Floor);
+            if (bonusShares != 0) IERC20(tranche).safeTransfer(msg.sender, bonusShares);
+        }
+        // The receiver keeps the remainder of the user's minted shares
+        uint256 receiverShares = trancheSharesMinted - bonusShares;
+        if (receiverShares != 0) IERC20(tranche).safeTransfer(request.baseRequest.receiver, receiverShares);
+
+        emit DepositExecuted(_user, _requestNonce, msg.sender, _assetsToDeposit, trancheSharesMinted, protocolFeeShares, bonusShares);
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
@@ -164,55 +238,71 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         _cancelDepositRequest(_requestNonce, _receiver);
     }
 
-    /// =============================
-    /// Entry Point Redemption Functions
-    /// =============================
+    /**
+     * =============================
+     * Entry Point Redemption Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoDayEntryPoint
     function requestRedemption(
         address _tranche,
         uint256 _shares,
         address _receiver,
-        uint64 _executorBonusWAD
+        uint64 _executorBonusWAD,
+        RedemptionMode _mode
     )
         external
         override(IRoycoDayEntryPoint)
         whenNotPaused
         restricted
-        returns (uint256 requestNonce, uint32 executableAtTimestamp)
+        returns (uint256 requestNonce, uint32 executableAtTimestamp, uint32 expiresAtTimestamp)
     {
         // Validate the redemption request
         require(_shares != 0, MUST_EXECUTE_NON_ZERO_AMOUNT());
         require(_tranche != address(0) && _receiver != address(0), NULL_ADDRESS());
         require(_executorBonusWAD < WAD || _executorBonusWAD == type(uint64).max, INVALID_EXECUTOR_BONUS());
 
-        // Ensure that the tranche is enabled on this entry point and the receiver is not blacklisted (the share escrow transfer below screens the caller)
+        // Ensure that the tranche is enabled on this entry point (the share escrow transfer below screens the caller,
+        // and both execution paths screen the receiver where its value settles)
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
-        EnrichedTrancheConfig memory config = $.trancheToConfig[_tranche];
+        EnrichedTrancheConfig storage config = $.trancheToConfig[_tranche];
+
+        // Ensure that the tranche is enabled
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
-        _enforceNotBlacklisted(config.kernel, _receiver);
+        // The senior and junior tranches must redeem in-kind
+        require(_mode == RedemptionMode.INKIND || config.trancheType == TrancheType.LIQUIDITY_PROVIDER, UNSUPPORTED_REDEMPTION_MODE());
 
-        // Poke the tranche's oracle clock so that a source update that predates this request can never open its execution gate
-        _pokeOracleClock(_tranche, config.baseConfig.oracleClock);
+        // Sync the market before the request is registered, the reference below prices against this one accounting state
+        // The sync pokes the collateral asset oracle as its first action, so the request registers against a fresh mark or reverts on a circuit-broken oracle
+        (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(config.kernel).syncTrancheAccountingFor(config.trancheType);
 
-        // Register the user's redemption request with a fresh nonce
-        RedemptionRequest storage request = $.userToNonceToRedemptionRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)];
-        request.shares = _shares;
-        request.baseRequest = BaseRequest({
-            tranche: _tranche,
-            queuedAtTimestamp: uint32(block.timestamp),
-            // Snapshot the NAV of the escrowed shares, used to forfeit any yield they accrue during the request lifecycle
-            navAtRequestTime: IRoycoVaultTranche(_tranche).convertToAssets(_shares).nav,
-            receiver: _receiver,
-            executableAtTimestamp: (executableAtTimestamp = uint32(block.timestamp + config.baseConfig.redemptionDelaySeconds)),
-            executorBonusWAD: _executorBonusWAD
+        // Resolve the request's executable and expiry timestamps: the expiry is a saturating add, so a maximal window
+        // pins it at type(uint32).max and the request effectively never expires
+        executableAtTimestamp = uint32(block.timestamp + config.baseConfig.redemptionDelaySeconds);
+        expiresAtTimestamp = uint32(Math.min(uint256(executableAtTimestamp) + config.baseConfig.redemptionExpirySeconds, type(uint32).max));
+
+        // Populate the user's redemption request in memory before registering it
+        RedemptionRequest memory request = RedemptionRequest({
+            shares: _shares,
+            // Snapshot the value of the escrowed shares
+            valueAtRequestTime: _redemptionValueReference(_shares, trancheClaims, totalTrancheShares),
+            mode: _mode,
+            baseRequest: BaseRequest({
+                tranche: _tranche,
+                queuedAtTimestamp: uint32(block.timestamp),
+                receiver: _receiver,
+                executableAtTimestamp: executableAtTimestamp,
+                expiresAtTimestamp: expiresAtTimestamp,
+                executorBonusWAD: _executorBonusWAD
+            })
         });
+        $.userToNonceToRedemptionRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)] = request;
 
         // Transfer the requested amount of tranche shares into the entry point to queue the redemption
         IERC20(_tranche).safeTransferFrom(msg.sender, address(this), _shares);
 
-        // Emit the redemption request event
-        emit RedemptionRequested(msg.sender, requestNonce, _tranche, _shares, executableAtTimestamp, _executorBonusWAD);
+        emit RedemptionRequested(msg.sender, requestNonce, _tranche, request);
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
@@ -223,8 +313,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     )
         external
         override(IRoycoDayEntryPoint)
-        whenNotPaused
-        restricted
         returns (AssetClaims[] memory userClaims, uint256[] memory quoteAssets)
     {
         // Execute the user specified redemption requests
@@ -233,7 +321,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         userClaims = new AssetClaims[](numRequestsToExecute);
         quoteAssets = new uint256[](numRequestsToExecute);
         for (uint256 i = 0; i < numRequestsToExecute; ++i) {
-            (userClaims[i], quoteAssets[i]) = _executeRedemption(_users[i], _requestNonces[i], _sharesToRedeem[i]);
+            // Route each request through a self-delegatecall so a reverting request doesn't revert the batch
+            // NOTE: The delegatecall preserves this call context for execution
+            (bool executed, bytes memory result) =
+                address(this).delegatecall(abi.encodeCall(IRoycoDayEntryPoint.executeRedemption, (_users[i], _requestNonces[i], _sharesToRedeem[i])));
+            if (executed) (userClaims[i], quoteAssets[i]) = abi.decode(result, (AssetClaims, uint256));
         }
     }
 
@@ -249,7 +341,101 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         restricted
         returns (AssetClaims memory userClaims, uint256 quoteAssets)
     {
-        return _executeRedemption(_user, _requestNonce, _sharesToRedeem);
+        require(_sharesToRedeem != 0, MUST_EXECUTE_NON_ZERO_AMOUNT());
+
+        // Retrieve the user's specified redemption request and its tranche's config
+        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
+        RedemptionRequest memory request = $.userToNonceToRedemptionRequest[_user][_requestNonce];
+        address tranche = request.baseRequest.tranche;
+        EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
+
+        // Assert the validity of the request
+        _validateRequestExecution(_requestNonce, request.baseRequest, config);
+        require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
+
+        // Screen the executor, request owner, and receiver through the market's kernel so a flagged party can never operate the request or receive its proceeds
+        _enforceNotBlacklisted(config.kernel, msg.sender, _user, request.baseRequest.receiver);
+
+        // Sync the market before the redemption is executed, the execution-time value below is measured against this one accounting state
+        (, AssetClaims memory trancheClaims, uint256 totalTrancheShares) = IRoycoDayKernel(config.kernel).syncTrancheAccountingFor(config.trancheType);
+
+        // Resolve the actual amount of shares to redeem and the exit route from the request's redemption mode
+        bool executeMultiAssetRedemption;
+        if (request.mode == RedemptionMode.OPTIMIZED) {
+            (_sharesToRedeem, executeMultiAssetRedemption) =
+                _resolveOptimizedRedemption(tranche, (_sharesToRedeem == type(uint256).max) ? request.shares : _sharesToRedeem);
+        } else {
+            executeMultiAssetRedemption = (request.mode == RedemptionMode.MULTIASSET);
+            if (_sharesToRedeem == type(uint256).max) {
+                _sharesToRedeem = Math.min(
+                    (executeMultiAssetRedemption ? _maxRedeemMultiAsset(tranche) : IRoycoVaultTranche(tranche).maxRedeem(address(this))), request.shares
+                );
+            }
+        }
+        // Return early without reverting if the resolved amount is 0 due to market conditions
+        if (_sharesToRedeem == 0) return (AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS), 0);
+
+        // Ensure the resolved amount is not greater than the request's shares
+        require(request.shares >= _sharesToRedeem, INVALID_REQUEST(_requestNonce));
+        uint256 sharesLeftToRedeem = request.shares - _sharesToRedeem;
+
+        // Mark the shares as redeemed
+        if (sharesLeftToRedeem == 0) {
+            delete $.userToNonceToRedemptionRequest[_user][_requestNonce];
+        } else {
+            $.userToNonceToRedemptionRequest[_user][_requestNonce].shares = sharesLeftToRedeem;
+            // Scale the request-time value reference by the shares left to redeem
+            $.userToNonceToRedemptionRequest[_user][_requestNonce].valueAtRequestTime =
+                request.valueAtRequestTime.mulDiv(sharesLeftToRedeem, request.shares, Math.Rounding.Floor);
+            request.valueAtRequestTime = request.valueAtRequestTime.mulDiv(_sharesToRedeem, request.shares, Math.Rounding.Floor);
+        }
+
+        // If this is a self-redemption or there is no executor bonus configured, withdraw assets directly to the specified recipient
+        uint256 userSharesRedeemed;
+        uint256 protocolFeeShares;
+        AssetClaims memory bonusClaims;
+        uint256 bonusQuoteAssets;
+        if (_user == msg.sender || request.baseRequest.executorBonusWAD == 0) {
+            // Redeem shares directly to the receiver, forfeiting the value accrued during the queue as protocol fees
+            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) = _redeemWithValueForfeiture(
+                tranche,
+                _sharesToRedeem,
+                request.valueAtRequestTime,
+                request.baseRequest.receiver,
+                executeMultiAssetRedemption,
+                trancheClaims,
+                totalTrancheShares
+            );
+        }
+        // Else, if this is a third party execution, withdraw the assets, forfeit the value accrued during the queue as protocol fees, and remit the executor bonus
+        else {
+            // Ensure that the user has opted into third party execution
+            // The receiver was screened at the execution entry above, covering the remittance legs below that settle outside the kernel's screened flows
+            require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
+
+            // Redeem shares to this contract for bonus calculation, forfeiting the value accrued during the queue as protocol fees
+            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) = _redeemWithValueForfeiture(
+                tranche, _sharesToRedeem, request.valueAtRequestTime, address(this), executeMultiAssetRedemption, trancheClaims, totalTrancheShares
+            );
+
+            // Split the redeemed claims and quote into the executor's bonus and the receiver's portion, then remit both
+            (bonusClaims, bonusQuoteAssets) =
+                _remitRedemptionAndBonusClaims(config.kernel, userClaims, quoteAssets, request.baseRequest.executorBonusWAD, request.baseRequest.receiver);
+            quoteAssets -= bonusQuoteAssets;
+        }
+
+        emit RedemptionExecuted(
+            _user,
+            _requestNonce,
+            msg.sender,
+            userSharesRedeemed,
+            (executeMultiAssetRedemption ? RedemptionMode.MULTIASSET : RedemptionMode.INKIND),
+            protocolFeeShares,
+            userClaims,
+            quoteAssets,
+            bonusClaims,
+            bonusQuoteAssets
+        );
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
@@ -266,14 +452,16 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         _cancelRedemptionRequest(_requestNonce, _receiver);
     }
 
-    /// =============================
-    /// Admin Functions
-    /// =============================
-
     /// @inheritdoc IRoycoDayEntryPoint
-    function pokeOracleClock(address _tranche) external override(IRoycoDayEntryPoint) whenNotPaused restricted returns (uint32 lastUpdatedAtTimestamp) {
-        return _pokeOracleClock(_tranche, _getRoycoDayEntryPointStorage().trancheToConfig[_tranche].baseConfig.oracleClock);
+    function pokeCollateralAssetOracle(address _tranche) external override(IRoycoDayEntryPoint) whenNotPaused returns (uint32 lastUpdatedAtTimestamp) {
+        return _pokeOracle(_tranche, _getRoycoDayEntryPointStorage().trancheToConfig[_tranche]);
     }
+
+    /**
+     * =============================
+     * Admin Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoDayEntryPoint
     function modifyTrancheConfigs(address[] calldata _tranches, TrancheConfig[] calldata _configs) external override(IRoycoDayEntryPoint) restricted {
@@ -307,9 +495,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         }
     }
 
-    /// =============================
-    /// State Accessor Functions
-    /// =============================
+    /**
+     * =============================
+     * State Accessor Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoDayEntryPoint
     function getLastRequestNonce() external view override(IRoycoDayEntryPoint) returns (uint256 nonce) {
@@ -336,81 +526,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         return _getRoycoDayEntryPointStorage().trancheToProtocolFeeShares[_tranche];
     }
 
-    /// =============================
-    /// Internal Utility Functions
-    /// =============================
-
     /**
-     * @notice Executes a pending deposit request for the specified user
-     * @dev The request must exist and the configured delay period must have elapsed
-     *      If executed by a third party, the executor bonus is paid in assets before depositing the remainder
-     * @param _user The user whose deposit request should be executed
-     * @param _requestNonce The nonce of the deposit request to execute
-     * @param _assetsToDeposit The amount of assets to deposit (use MAX_TRANCHE_UNITS to deposit the maximum possible)
-     * @return trancheSharesMinted The amount of tranche shares minted to the receiver
+     * =============================
+     * Internal Utility Functions
+     * =============================
      */
-    function _executeDeposit(address _user, uint256 _requestNonce, TRANCHE_UNIT _assetsToDeposit) internal returns (uint256 trancheSharesMinted) {
-        require(_assetsToDeposit != ZERO_TRANCHE_UNITS, MUST_EXECUTE_NON_ZERO_AMOUNT());
-
-        // Retrieve the user's specified deposit request and its tranche's config
-        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
-        DepositRequest memory request = $.userToNonceToDepositRequest[_user][_requestNonce];
-        address tranche = request.baseRequest.tranche;
-        EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
-
-        // Assert the validity of the request
-        _validateRequestExecution(_requestNonce, request.baseRequest, config.baseConfig.oracleClock);
-        require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
-
-        // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request (the tranche deposit below screens the receiver)
-        _enforceNotBlacklisted(config.kernel, msg.sender, _user);
-
-        // Resolve the actual amount of assets to deposit
-        _assetsToDeposit = (_assetsToDeposit == MAX_TRANCHE_UNITS)
-            ? toTrancheUnits(Math.min(toUint256(IRoycoVaultTranche(tranche).maxDeposit(request.baseRequest.receiver)), toUint256(request.assets)))
-            : _assetsToDeposit;
-        // Return early without reverting if maxDeposit is 0 due to market conditions
-        if (_assetsToDeposit == ZERO_TRANCHE_UNITS) return 0;
-
-        // Mark the assets as deposited
-        TRANCHE_UNIT assetsLeftToDeposit = request.assets - _assetsToDeposit;
-        if (assetsLeftToDeposit == ZERO_TRANCHE_UNITS) {
-            delete $.userToNonceToDepositRequest[_user][_requestNonce];
-        } else {
-            $.userToNonceToDepositRequest[_user][_requestNonce].assets = assetsLeftToDeposit;
-            // Scale the NAV of the remaining assets in the request by the assets left to deposit
-            NAV_UNIT navOfAssetsLeftToDeposit = request.baseRequest.navAtRequestTime.mulDiv(assetsLeftToDeposit, request.assets, Math.Rounding.Floor);
-            $.userToNonceToDepositRequest[_user][_requestNonce].baseRequest.navAtRequestTime = navOfAssetsLeftToDeposit;
-            request.baseRequest.navAtRequestTime = request.baseRequest.navAtRequestTime - navOfAssetsLeftToDeposit;
-        }
-
-        // Execute the deposit on the underlying tranche
-        TRANCHE_UNIT bonusAssets;
-        uint256 protocolFeeShares;
-        // If this is a self-deposit or there is no executor bonus configured, deposit the assets, forfeiting accrued yield as protocol fees
-        if (_user == msg.sender || request.baseRequest.executorBonusWAD == 0) {
-            (trancheSharesMinted, protocolFeeShares) =
-                _depositWithYieldForfeiture(tranche, config, _assetsToDeposit, request.baseRequest.navAtRequestTime, request.baseRequest.receiver);
-        }
-        // If this is a third party execution, remit the executor bonus and deposit the remaining assets
-        else {
-            // Ensure that the user has opted into third party execution
-            require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
-            // Compute and transfer bonus assets to the executor
-            bonusAssets = _assetsToDeposit.mulDiv(request.baseRequest.executorBonusWAD, WAD, Math.Rounding.Floor);
-            if (bonusAssets != ZERO_TRANCHE_UNITS) IERC20(config.asset).safeTransfer(msg.sender, toUint256(bonusAssets));
-            // Scale the NAV at request time to the assets being deposited after remitting the bonus
-            request.baseRequest.navAtRequestTime =
-                request.baseRequest.navAtRequestTime.mulDiv((_assetsToDeposit - bonusAssets), _assetsToDeposit, Math.Rounding.Floor);
-            // Deposit the remaining assets, forfeiting accrued yield as protocol fees
-            _assetsToDeposit = _assetsToDeposit - bonusAssets;
-            (trancheSharesMinted, protocolFeeShares) =
-                _depositWithYieldForfeiture(tranche, config, _assetsToDeposit, request.baseRequest.navAtRequestTime, request.baseRequest.receiver);
-        }
-
-        // Emit the deposit execution event
-        emit DepositExecuted(_user, _requestNonce, msg.sender, _assetsToDeposit, trancheSharesMinted, protocolFeeShares, bonusAssets);
-    }
 
     /**
      * @dev Cancels the caller's specified deposit request and returns its assets to the specified receiver
@@ -424,7 +544,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
         DepositRequest memory request = $.userToNonceToDepositRequest[msg.sender][_requestNonce];
         require(request.assets != ZERO_TRANCHE_UNITS, INVALID_REQUEST(_requestNonce));
-        // Screen the canceller and receiver against the market's blacklist, the returned escrow settles outside the kernel's screened flows
+        // Screen the canceller and receiver through the market's kernel, the returned escrow settles outside the kernel's screened flows
         _enforceNotBlacklisted($.trancheToConfig[request.baseRequest.tranche].kernel, msg.sender, _receiver);
 
         // Mark the request as cancelled
@@ -434,117 +554,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         address asset = $.trancheToConfig[request.baseRequest.tranche].asset;
         IERC20(asset).safeTransfer(_receiver, toUint256(request.assets));
 
-        // Emit the deposit request cancellation event
         emit DepositRequestCancelled(msg.sender, _requestNonce, _receiver, request.assets);
-    }
-
-    /**
-     * @notice Executes a pending redemption request for the specified user
-     * @dev The request must exist and the configured delay period must have elapsed
-     *      A maximal liquidity tranche redemption exits in-kind whenever the in-kind bound serves the entire
-     *      remaining request, and otherwise fills up to the dominant bound capped at the remaining request,
-     *      exiting to the LP token's constituents only when the multi-asset bound is strictly wider (equal bounds
-     *      stay in-kind), so a redemption the market can serve is never left behind by the in-kind gate. Explicit
-     *      amounts always exit in-kind
-     * @param _user The user whose redemption request should be executed
-     * @param _requestNonce The nonce of the redemption request to execute
-     * @param _sharesToRedeem The amount of shares to redeem (use type(uint256).max to redeem the maximum possible)
-     * @return userClaims The assets withdrawn to the request-specific receiver upon executing this redemption request
-     * @return quoteAssets The quote withdrawn to the request-specific receiver (zero unless the redemption exits multi-asset)
-     */
-    function _executeRedemption(
-        address _user,
-        uint256 _requestNonce,
-        uint256 _sharesToRedeem
-    )
-        internal
-        returns (AssetClaims memory userClaims, uint256 quoteAssets)
-    {
-        require(_sharesToRedeem != 0, MUST_EXECUTE_NON_ZERO_AMOUNT());
-
-        // Retrieve the user's specified redemption request and its tranche's config
-        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
-        RedemptionRequest memory request = $.userToNonceToRedemptionRequest[_user][_requestNonce];
-        address tranche = request.baseRequest.tranche;
-        EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
-
-        // Assert the validity of the request
-        _validateRequestExecution(_requestNonce, request.baseRequest, config.baseConfig.oracleClock);
-        require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
-
-        // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request
-        _enforceNotBlacklisted(config.kernel, msg.sender, _user);
-
-        // Resolve the actual amount of shares to redeem and the exit route for liquidity tranche redemptions specifically
-        bool isMultiAssetRedemption;
-        if (_sharesToRedeem == type(uint256).max) {
-            // If the tranche being redeemed from is a LT, default to the in-kind mode if it satisfies the redemption, and fallback to the multiasset flow if it provides a higher redeemable amount
-            if (config.trancheType == TrancheType.LIQUIDITY) {
-                // Use the in-kind flow if it is sufficient for this redemption
-                uint256 maxRedeemInKind = IRoycoVaultTranche(tranche).maxRedeem(address(this));
-                if (maxRedeemInKind >= request.shares) {
-                    _sharesToRedeem = request.shares;
-                } else {
-                    // Probe the multi-asset bound through a low-level call: the multi-asset preview can revert on venue constraints, but must not revert the redemption from utilizing the in-kind flow
-                    (bool multiAssetProbeSucceeded, bytes memory multiAssetProbeReturnData) =
-                        tranche.call(abi.encodeCall(IRoycoLiquidityTranche.maxRedeemMultiAsset, (address(this))));
-                    // A reverted probe leaves the multi-asset route unavailable, fall back to the in-kind bound so the portion the market can serve is never left behind
-                    uint256 maxRedeemMultiAsset;
-                    assembly ("memory-safe") { if multiAssetProbeSucceeded { maxRedeemMultiAsset := mload(add(multiAssetProbeReturnData, 0x20)) } }
-                    _sharesToRedeem = Math.min(Math.max(maxRedeemInKind, maxRedeemMultiAsset), request.shares);
-                    isMultiAssetRedemption = (maxRedeemMultiAsset > maxRedeemInKind);
-                }
-            }
-            // If the tranche being redeemed from is not a LT, redeem the maximum amount that can be redeemed in-kind, up to the requested amount
-            else {
-                _sharesToRedeem = Math.min(IRoycoVaultTranche(tranche).maxRedeem(address(this)), request.shares);
-            }
-        }
-        // Return early without reverting if the maximum redeemable is 0 due to market conditions
-        if (_sharesToRedeem == 0) return (AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS), 0);
-
-        // Mark the shares as redeemed
-        uint256 sharesLeftToRedeem = request.shares - _sharesToRedeem;
-        if (sharesLeftToRedeem == 0) {
-            delete $.userToNonceToRedemptionRequest[_user][_requestNonce];
-        } else {
-            $.userToNonceToRedemptionRequest[_user][_requestNonce].shares = sharesLeftToRedeem;
-            // Scale the NAV of the remaining shares in the request by the shares left to redeem
-            NAV_UNIT navOfSharesLeftToRedeem = request.baseRequest.navAtRequestTime.mulDiv(sharesLeftToRedeem, request.shares, Math.Rounding.Floor);
-            $.userToNonceToRedemptionRequest[_user][_requestNonce].baseRequest.navAtRequestTime = navOfSharesLeftToRedeem;
-            request.baseRequest.navAtRequestTime = request.baseRequest.navAtRequestTime - navOfSharesLeftToRedeem;
-        }
-
-        // If this is a self-redemption or there is no executor bonus configured, withdraw assets directly to the specified recipient
-        uint256 userSharesRedeemed;
-        uint256 protocolFeeShares;
-        AssetClaims memory bonusClaims;
-        uint256 bonusQuoteAssets;
-        if (_user == msg.sender || request.baseRequest.executorBonusWAD == 0) {
-            // Redeem shares directly to the receiver, forfeiting accrued yield as protocol fees
-            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) = _redeemWithYieldForfeiture(
-                tranche, _sharesToRedeem, request.baseRequest.navAtRequestTime, request.baseRequest.receiver, isMultiAssetRedemption
-            );
-        }
-        // Else, if this is a third party execution, withdraw the assets, forfeit any accrued yield as protocol fees, and remit the executor bonus
-        else {
-            // Ensure that the user has opted into third party execution
-            require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
-            // Screen the receiver against the market's blacklist, the asset and quote remittance legs below settle outside the kernel's screened flows (the self path's redemption screens the receiver)
-            _enforceNotBlacklisted(config.kernel, request.baseRequest.receiver);
-
-            // Redeem shares to this contract for bonus calculation, forfeiting accrued yield as protocol fees
-            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) =
-                _redeemWithYieldForfeiture(tranche, _sharesToRedeem, request.baseRequest.navAtRequestTime, address(this), isMultiAssetRedemption);
-
-            // Split the redeemed claims and quote into the executor's bonus and the receiver's portion, then remit both
-            (bonusClaims, bonusQuoteAssets) =
-                _remitRedemptionAndBonusClaims(config.kernel, userClaims, quoteAssets, request.baseRequest.executorBonusWAD, request.baseRequest.receiver);
-            quoteAssets -= bonusQuoteAssets;
-        }
-
-        // Emit the redemption execution event
-        emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets, bonusClaims, bonusQuoteAssets);
     }
 
     /**
@@ -559,8 +569,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
         RedemptionRequest memory request = $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
         require(request.shares != 0, INVALID_REQUEST(_requestNonce));
-        // Screen the canceller against the market's blacklist, the share escrow return below screens the receiver through the kernel's balance update hook
-        _enforceNotBlacklisted($.trancheToConfig[request.baseRequest.tranche].kernel, msg.sender);
+        // Screen the canceller and receiver through the market's kernel, the share escrow return below only screens the receiver through the kernel's balance update hook
+        _enforceNotBlacklisted($.trancheToConfig[request.baseRequest.tranche].kernel, msg.sender, _receiver);
 
         // Mark the request as cancelled
         delete $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
@@ -568,116 +578,120 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Return the shares from the cancelled request to the specified receiver
         IERC20(request.baseRequest.tranche).safeTransfer(_receiver, request.shares);
 
-        // Emit the redemption request cancellation event
         emit RedemptionRequestCancelled(msg.sender, _requestNonce, _receiver, request.shares);
     }
 
     /**
-     * @dev Asserts that a request exists and is executable: not executed already or cancelled, past its delay, and
-     *      the tranche's oracle clock has observed at least one oracle update strictly after the request was queued,
-     *      so any information known at request time is priced into the mark before execution
-     *      A clock reporting no update yet (a zero timestamp) conservatively holds the gate shut
+     * @dev Asserts that a request exists and is executable: not executed already or cancelled, past its delay, not yet
+     *      expired, and the market's collateral asset oracle has observed at least one update strictly after the request
+     *      was queued, so any information known at request time is priced into the mark before execution
+     *      An oracle reporting no update yet (a zero timestamp) conservatively holds the gate shut
      * @param _requestNonce The nonce of the request being validated
      * @param _baseRequest The base request data shared across request types
-     * @param _oracleClock The tranche's oracle clock (the null address disables the gate)
+     * @param _config The tranche's enriched configuration
      */
-    function _validateRequestExecution(uint256 _requestNonce, BaseRequest memory _baseRequest, address _oracleClock) internal {
+    function _validateRequestExecution(uint256 _requestNonce, BaseRequest memory _baseRequest, EnrichedTrancheConfig memory _config) internal {
         // Ensure the request exists and the configured delay period has elapsed
         require(_baseRequest.executableAtTimestamp != 0 && _baseRequest.executableAtTimestamp <= block.timestamp, INVALID_REQUEST(_requestNonce));
-        // Ensure the tranche's oracle clock has observed an oracle update strictly after the request was queued
+        // Ensure the request's execution window has not elapsed (a saturated type(uint32).max expiry never arrives)
+        require(block.timestamp < _baseRequest.expiresAtTimestamp, REQUEST_EXPIRED(_requestNonce));
+        // Ensure the market's collateral asset oracle has observed an update strictly after the request was queued
         require(
-            _oracleClock == address(0) || (_pokeOracleClock(_baseRequest.tranche, _oracleClock) > _baseRequest.queuedAtTimestamp),
-            ORACLE_CLOCK_NOT_ADVANCED(_requestNonce)
+            !_config.baseConfig.gateByOracleUpdate || (_pokeOracle(_baseRequest.tranche, _config) > _baseRequest.queuedAtTimestamp),
+            COLLATERAL_ASSET_ORACLE_NOT_ADVANCED(_requestNonce)
         );
     }
 
     /**
-     * @dev Pokes the tranche's oracle clock
-     * @param _tranche The tranche whose oracle clock is being poked
-     * @param _oracleClock The tranche's oracle clock (the null address disables the gate and makes the poke a no-op)
-     * @return lastUpdatedAtTimestamp The clock's last update timestamp after the poke (zero when the tranche has no clock or it has observed no update yet)
+     * @dev Pokes the collateral asset oracle of the tranche's market
+     * @dev The oracle is resolved live from the kernel since an admin can replace it at any time
+     * @param _tranche The tranche whose market's collateral asset oracle is being poked
+     * @param _config The tranche's enriched configuration
+     * @return lastUpdatedAtTimestamp The oracle's last update timestamp after the poke (zero when the gate is disabled or no update has been observed yet)
      */
-    function _pokeOracleClock(address _tranche, address _oracleClock) internal returns (uint32 lastUpdatedAtTimestamp) {
-        if (_oracleClock == address(0)) return 0;
-        // The clock must never report a future update timestamp: it would satisfy the execution gate without a genuine update
-        require((lastUpdatedAtTimestamp = IOracleClock(_oracleClock).poke()) <= block.timestamp, ORACLE_CLOCK_IN_THE_FUTURE());
-        emit OracleClockTick(_tranche, lastUpdatedAtTimestamp);
+    function _pokeOracle(address _tranche, EnrichedTrancheConfig memory _config) internal returns (uint32 lastUpdatedAtTimestamp) {
+        if (!_config.baseConfig.gateByOracleUpdate) return 0;
+        // The oracle must never report a future update timestamp: it would satisfy the execution gate without a genuine update
+        require(
+            (lastUpdatedAtTimestamp = IRoycoPriceOracle(IRoycoDayKernel(_config.kernel).getCollateralAssetOracle()).poke().toUint32()) <= block.timestamp,
+            COLLATERAL_ASSET_ORACLE_IN_THE_FUTURE()
+        );
+        emit CollateralAssetOraclePoked(_tranche, lastUpdatedAtTimestamp);
     }
 
     /**
-     * @dev Deposits assets, forfeiting any yield accrued during the request lifecycle as protocol fees
+     * @dev Deposits assets, forfeiting the shares minted in excess of the request-time reference to the protocol
+     * @dev The user is left with min(shares minted now, shares the deposit would have minted at request time).
      * @param _tranche The tranche to deposit assets into
      * @param _config The enriched tranche configuration
      * @param _assets The amount of assets to deposit into the tranche
-     * @param _navAtRequestTime The NAV of the assets being deposited at the time the deposit was requested
-     * @param _receiver The address to receive the minted tranche shares
-     * @return userTrancheShares The shares actually minted for the user (total minus forfeited)
-     * @return protocolFeeShares The shares forfeited to the protocol equating to the yield accrued during the request lifecycle (zero if NAV decreased)
+     * @param _equivalentSharesAtRequestTime The shares this deposit would have minted at request-time pricing (the forfeiture reference)
+     * @return userTrancheShares The shares minted for the user (total minus forfeited), held by the entry point for the caller to distribute
+     * @return protocolFeeShares The shares minted in excess of the request-time reference, forfeited to the protocol (zero if the tranche's share price did not fall during the request lifecycle)
      */
-    function _depositWithYieldForfeiture(
+    function _depositWithShareForfeiture(
         address _tranche,
         EnrichedTrancheConfig memory _config,
         TRANCHE_UNIT _assets,
-        NAV_UNIT _navAtRequestTime,
-        address _receiver
+        uint256 _equivalentSharesAtRequestTime
     )
         internal
         returns (uint256 userTrancheShares, uint256 protocolFeeShares)
     {
         // Approve the tranche to pull the assets being deposited
         IERC20(_config.asset).forceApprove(_tranche, toUint256(_assets));
-        // Compute the NAV of the assets being deposited at execution time
-        NAV_UNIT navAtExecutionTime = _convertAssetsToNAV(_config.kernel, _config.trancheType, _assets);
-        // If no yield accrued on the escrowed assets since placing the request, mint shares directly to the specified receiver
-        if (navAtExecutionTime <= _navAtRequestTime) {
-            userTrancheShares = IRoycoVaultTranche(_tranche).deposit(_assets, _receiver);
-        } else {
-            // Mint the shares to the entry point and compute the tranche shares to forfeit for the yield accrued since placing the request
-            // The forfeited shares are retained as protocol fee shares, leaving the receiver with shares worth exactly the NAV at request time
-            userTrancheShares = IRoycoVaultTranche(_tranche).deposit(_assets, address(this));
-            protocolFeeShares = userTrancheShares.mulDiv((navAtExecutionTime - _navAtRequestTime), navAtExecutionTime, Math.Rounding.Floor);
-            // Transfer the shares the user is entitled to after deducting the protocol fee shares
-            if ((userTrancheShares -= protocolFeeShares) != 0) IERC20(_tranche).safeTransfer(_receiver, userTrancheShares);
-            // Accrue the forfeited shares as protocol fees
-            if (protocolFeeShares != 0) _getRoycoDayEntryPointStorage().trancheToProtocolFeeShares[_tranche] += protocolFeeShares;
+        // Deposit to the entry point and take the shares actually minted
+        uint256 sharesAtExecutionTime = IRoycoVaultTranche(_tranche).deposit(_assets, address(this));
+        // Forfeit the shares minted in excess of the request-time reference (retained as protocol fee shares), so the
+        // user keeps the lower of the request-time and execution-time share counts
+        if (sharesAtExecutionTime > _equivalentSharesAtRequestTime) {
+            protocolFeeShares = sharesAtExecutionTime - _equivalentSharesAtRequestTime;
+            _getRoycoDayEntryPointStorage().trancheToProtocolFeeShares[_tranche] += protocolFeeShares;
         }
+        userTrancheShares = sharesAtExecutionTime - protocolFeeShares;
     }
 
     /**
-     * @dev Redeems shares, forfeiting any yield accrued during the request lifecycle as protocol fees
+     * @dev Redeems shares on a VALUE basis, forfeiting the value the escrowed shares accrued during the queue to the protocol
+     * @dev The escrowed shares are pinned to their request-time value: any value they gained by execution is skimmed as
+     *      protocol fee shares before the redemption settles, so the redeemer receives the request-time value, never more
      * @param _tranche The tranche to redeem shares from
      * @param _shares The amount of shares to redeem from the tranche
-     * @param _navAtRequestTime The NAV of the shares being redeemed at the time the redemption was requested
+     * @param _valueAtRequestTime The value of the shares being redeemed at the time the redemption was requested
      * @param _receiver The address to receive the redeemed assets
-     * @param _isMultiAssetRedemption Whether to exit a liquidity tranche redemption to the LP token's constituents instead of in-kind
+     * @param _executeMultiAssetRedemption Whether to exit a liquidity provider tranche redemption to the LP token's constituents instead of in-kind
+     * @param _trancheClaims The tranche's post-sync claims the execution-time value is measured against
+     * @param _totalTrancheShares The tranche's post-sync share supply
      * @return userSharesRedeemed The shares actually redeemed for the user (total minus forfeited)
-     * @return protocolFeeShares The shares forfeited to the protocol equating to the yield accrued during the request lifecycle (zero if NAV decreased)
-     * @return userClaims The assets withdrawn from the tranche for the user after forfeiting accrued yield
+     * @return protocolFeeShares The shares forfeited to the protocol equating to the value the escrowed shares accrued during the request lifecycle (zero if their value did not increase)
+     * @return userClaims The assets withdrawn from the tranche for the user after forfeiting the accrued value
      * @return quoteAssets The quote withdrawn from the tranche for the user (zero unless the redemption exits multi-asset)
      */
-    function _redeemWithYieldForfeiture(
+    function _redeemWithValueForfeiture(
         address _tranche,
         uint256 _shares,
-        NAV_UNIT _navAtRequestTime,
+        NAV_UNIT _valueAtRequestTime,
         address _receiver,
-        bool _isMultiAssetRedemption
+        bool _executeMultiAssetRedemption,
+        AssetClaims memory _trancheClaims,
+        uint256 _totalTrancheShares
     )
         internal
         returns (uint256 userSharesRedeemed, uint256 protocolFeeShares, AssetClaims memory userClaims, uint256 quoteAssets)
     {
         // Initialize the user's shares redeemed as the input
         userSharesRedeemed = _shares;
-        // Compute the tranche shares equivalent to the value of the yield accrued since placing the request
-        NAV_UNIT navAtExecutionTime = IRoycoVaultTranche(_tranche).convertToAssets(_shares).nav;
-        if (navAtExecutionTime > _navAtRequestTime) {
-            protocolFeeShares = _shares.mulDiv((navAtExecutionTime - _navAtRequestTime), navAtExecutionTime, Math.Rounding.Floor);
+        // Compute the value of the shares at execution against the caller's synced claims, without any self-liquidation bonus applied
+        NAV_UNIT valueAtExecutionTime = _redemptionValueReference(_shares, _trancheClaims, _totalTrancheShares);
+        if (valueAtExecutionTime > _valueAtRequestTime) {
+            protocolFeeShares = _shares.mulDiv((valueAtExecutionTime - _valueAtRequestTime), valueAtExecutionTime, Math.Rounding.Floor);
         }
         // Redeem the shares the user is entitled to after deducting the protocol fee shares
-        // A fully forfeited redemption (a zero-NAV snapshot) settles without a redeem call, mirroring the deposit path
+        // A fully forfeited redemption (a zero-value snapshot) settles without a redeem call, mirroring the deposit path
         if ((userSharesRedeemed -= protocolFeeShares) != 0) {
-            if (_isMultiAssetRedemption) {
+            if (_executeMultiAssetRedemption) {
                 // Multi-asset redemptions mandate that liquidity is removed in a way that cannot render less value than promised at present NAV values
-                (userClaims, quoteAssets) = IRoycoLiquidityTranche(_tranche).redeemMultiAsset(userSharesRedeemed, 0, 0, _receiver, address(this));
+                (userClaims, quoteAssets) = IRoycoLiquidityProviderTranche(_tranche).redeemMultiAsset(userSharesRedeemed, 0, 0, _receiver, address(this));
             } else {
                 userClaims = IRoycoVaultTranche(_tranche).redeem(userSharesRedeemed, _receiver, address(this));
             }
@@ -687,52 +701,92 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     }
 
     /**
-     * @dev Converts an amount of a tranche's assets to NAV units using the market kernel's asset quoter for that tranche
-     * @param _kernel The kernel of the market that the tranche belongs to
-     * @param _trancheType The type of the tranche (senior, junior, or liquidity)
-     * @param _assets The amount of assets to convert, denominated in the tranche's base asset units
-     * @return nav The NAV of the specified assets, denominated in the kernel's NAV units
+     * @dev Resolves the request-time SHARE reference for a deposit: the shares the deposit would mint at request-time pricing, the basis the execution-time forfeiture is measured against
+     * @dev Priced against the caller's synced claims, so the NAV basis and the supply come from the one accounting state the call already resolved
+     * @param _kernel The kernel of the market the deposit is priced against
+     * @param _trancheType The type of the tranche being deposited into
+     * @param _assets The amount of tranche assets the reference is priced for
+     * @param _trancheClaims The tranche's post-sync claims, the mint's NAV basis
+     * @param _totalTrancheShares The tranche's post-sync share supply
+     * @return shares The shares the deposit would mint at the synced pricing
      */
-    function _convertAssetsToNAV(address _kernel, TrancheType _trancheType, TRANCHE_UNIT _assets) internal view returns (NAV_UNIT nav) {
-        if (_trancheType == TrancheType.SENIOR) return IRoycoDayKernel(_kernel).stConvertTrancheUnitsToNAVUnits(_assets);
-        else if (_trancheType == TrancheType.JUNIOR) return IRoycoDayKernel(_kernel).jtConvertTrancheUnitsToNAVUnits(_assets);
-        else return IRoycoDayKernel(_kernel).ltConvertTrancheUnitsToNAVUnits(_assets);
+    function _depositSharesReference(
+        address _kernel,
+        TrancheType _trancheType,
+        TRANCHE_UNIT _assets,
+        AssetClaims memory _trancheClaims,
+        uint256 _totalTrancheShares
+    )
+        internal
+        view
+        returns (uint256 shares)
+    {
+        // Convert the assets to NAV units
+        NAV_UNIT depositValue = (_trancheType == TrancheType.LIQUIDITY_PROVIDER)
+            ? IRoycoDayKernel(_kernel).convertLPTAssetsToValue(_assets)
+            : IRoycoDayKernel(_kernel).convertCollateralAssetsToValue(_assets);
+        // Use the clamp-free conversion so the dilution clamp never manufactures forfeiture, the real mint at execution is still clamped
+        return ValuationLogic._convertToSharesUnclamped(depositValue, _trancheClaims.nav, _totalTrancheShares, Math.Rounding.Floor);
     }
 
     /**
-     * @dev Screens an account against the market's blacklist through the tranche's kernel
-     *      Covers the addresses the kernel's own screened flows never reach: request operators, asset escrow movements,
-     *      executor bonuses, and third party remittances all settle outside the tranche balance update hooks
-     * @param _kernel The kernel of the market that the tranche belongs to, consulted for the market's configured blacklist
-     * @param _account The address of the account to screen
+     * @dev Resolves the redemption value reference: the escrowed shares' pro-rata claim on the tranche's full post-sync claims
+     * @dev The full claims basis mirrors execution, an LPT redemption claims both effective-NAV legs including the idle liquidity premium senior shares
+     * @dev The reference excludes any self-liquidation bonus applied when the redemption executes, so the bonus is never skimmed as queue-time accrual
+     * @param _shares The amount of escrowed shares the reference is priced for
+     * @param _trancheClaims The tranche's post-sync claims the shares are scaled against
+     * @param _totalTrancheShares The tranche's post-sync share supply
+     * @return value The escrowed shares' pro-rata claim on the synced claims
      */
-    function _enforceNotBlacklisted(address _kernel, address _account) internal view {
-        address[] memory accountsToScreen = new address[](1);
-        accountsToScreen[0] = _account;
-        IRoycoDayKernel(_kernel).enforceNotBlacklisted(accountsToScreen);
+    function _redemptionValueReference(uint256 _shares, AssetClaims memory _trancheClaims, uint256 _totalTrancheShares) internal pure returns (NAV_UNIT value) {
+        return AssetLedgerLogic._scaleAssetClaims(_trancheClaims, _shares, _totalTrancheShares, true).nav;
     }
 
     /**
-     * @dev Batch-screens two accounts against the market's blacklist through the tranche's kernel
-     * @param _kernel The kernel of the market that the tranche belongs to, consulted for the market's configured blacklist
-     * @param _account0 The address of the first account to screen
-     * @param _account1 The address of the second account to screen
+     * @dev Resolves an OPTIMIZED liquidity provider tranche redemption: in-kind when the in-kind bound serves the
+     *      whole target, otherwise fills up to whichever of the in-kind or multi-asset bound redeems more shares,
+     *      exiting multi-asset only when its bound is strictly wider (equal bounds stay in-kind), so a redemption the
+     *      market can serve is never left behind by the in-kind gate
+     * @param _tranche The liquidity provider tranche being redeemed from
+     * @param _targetSharesToRedeem The share count the execution targets (the whole remaining request under the MAX sentinel)
+     * @return sharesToRedeem The resolved share count: the target when in-kind serves it whole, else the dominant bound capped at the target
+     * @return executeMultiAssetRedemption Whether the redemption exits multi-asset (the multi-asset bound is strictly wider)
      */
-    function _enforceNotBlacklisted(address _kernel, address _account0, address _account1) internal view {
-        address[] memory accountsToScreen = new address[](2);
-        accountsToScreen[0] = _account0;
-        accountsToScreen[1] = _account1;
-        IRoycoDayKernel(_kernel).enforceNotBlacklisted(accountsToScreen);
+    function _resolveOptimizedRedemption(
+        address _tranche,
+        uint256 _targetSharesToRedeem
+    )
+        internal
+        returns (uint256 sharesToRedeem, bool executeMultiAssetRedemption)
+    {
+        // In-kind whenever it can serve the entire target
+        uint256 maxRedeemInKind = IRoycoVaultTranche(_tranche).maxRedeem(address(this));
+        if (maxRedeemInKind >= _targetSharesToRedeem) return (_targetSharesToRedeem, false);
+        // Otherwise fill up to the dominant bound, exiting multi-asset only when its bound is strictly wider
+        uint256 maxRedeemMultiAsset = _maxRedeemMultiAsset(_tranche);
+        return (Math.min(Math.max(maxRedeemInKind, maxRedeemMultiAsset), _targetSharesToRedeem), maxRedeemMultiAsset > maxRedeemInKind);
+    }
+
+    /**
+     * @dev Probes the liquidity provider tranche's multi-asset redeemable bound through a low-level call: the
+     *      multi-asset preview can revert on venue constraints, and a reverted probe must not revert the redemption
+     *      (the caller falls back to the in-kind bound). A failed probe reports zero
+     * @param _tranche The liquidity provider tranche to probe
+     * @return maxRedeemMultiAsset The shares redeemable via the multi-asset exit (zero if the probe reverted)
+     */
+    function _maxRedeemMultiAsset(address _tranche) internal returns (uint256 maxRedeemMultiAsset) {
+        (bool probeSucceeded, bytes memory probeReturnData) =
+            DispatchLogic._tryExecute(_tranche, abi.encodeCall(IRoycoLiquidityProviderTranche.maxRedeemMultiAsset, (address(this))));
+        assembly ("memory-safe") {
+            if probeSucceeded { maxRedeemMultiAsset := mload(add(probeReturnData, 0x20)) }
+        }
     }
 
     /**
      * @dev Splits a redemption's claims into the executor's bonus and the receiver's portion, then remits both
-     *      Transfers are gated on the receiver's post-bonus legs alone: the bonus floors every leg and the bonus
-     *      percentage is strictly under WAD, so a nonzero bonus leg implies a nonzero receiver leg, and a zero
-     *      receiver leg proves the whole leg is empty, so no bonus can be stranded behind the gate
      * @param _kernel The kernel of the market that the redeemed tranche belongs to, used to resolve the claim assets
      * @param _userClaims The redemption's total asset claims, reduced in place to the receiver's post-bonus portion
-     * @param _quoteAssets The redemption's total quote leg (zero unless a liquidity tranche redemption exits multi-asset)
+     * @param _quoteAssets The redemption's total quote leg (zero unless a liquidity provider tranche redemption exits multi-asset)
      * @param _executorBonusWAD The bonus percentage (0-100%) paid to the executor (the caller), scaled to WAD precision
      * @param _receiver The address to receive the user's claims
      * @return bonusClaims The asset claims remitted to the executor (the caller)
@@ -749,50 +803,24 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         returns (AssetClaims memory bonusClaims, uint256 bonusQuoteAssets)
     {
         // Scale the asset claims to compute the executor bonus and the receiver's portion
-        bonusClaims = TrancheClaimsLogic._scaleAssetClaims(_userClaims, _executorBonusWAD, WAD);
+        bonusClaims = AssetLedgerLogic._scaleAssetClaims(_userClaims, _executorBonusWAD, WAD, false);
         // Deduct the NAV of the bonus claims from the user's claims
-        _userClaims.stAssets = _userClaims.stAssets - bonusClaims.stAssets;
-        _userClaims.jtAssets = _userClaims.jtAssets - bonusClaims.jtAssets;
-        _userClaims.ltAssets = _userClaims.ltAssets - bonusClaims.ltAssets;
+        _userClaims.collateralAssets = _userClaims.collateralAssets - bonusClaims.collateralAssets;
+        _userClaims.lptAssets = _userClaims.lptAssets - bonusClaims.lptAssets;
         _userClaims.stShares = _userClaims.stShares - bonusClaims.stShares;
         _userClaims.nav = _userClaims.nav - bonusClaims.nav;
 
-        // Transfer the ST and JT asset claims to the executor and receiver respectively
-        if (_userClaims.stAssets != ZERO_TRANCHE_UNITS || _userClaims.jtAssets != ZERO_TRANCHE_UNITS) {
-            // Transfer the ST and JT asset claims to the executor and receiver respectively
-            address stAsset = IRoycoDayKernel(_kernel).ST_ASSET();
-            address jtAsset = IRoycoDayKernel(_kernel).JT_ASSET();
-            // If ST and JT have the same asset, do a batch transfer, else, transfer them separately
-            if (stAsset == jtAsset) {
-                TRANCHE_UNIT totalUserAssets = _userClaims.stAssets + _userClaims.jtAssets;
-                TRANCHE_UNIT totalBonus = bonusClaims.stAssets + bonusClaims.jtAssets;
-                IERC20(stAsset).safeTransfer(_receiver, toUint256(totalUserAssets));
-                if (totalBonus != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(msg.sender, toUint256(totalBonus));
-            } else {
-                if (_userClaims.stAssets != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(_receiver, toUint256(_userClaims.stAssets));
-                if (_userClaims.jtAssets != ZERO_TRANCHE_UNITS) IERC20(jtAsset).safeTransfer(_receiver, toUint256(_userClaims.jtAssets));
-                if (bonusClaims.stAssets != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(msg.sender, toUint256(bonusClaims.stAssets));
-                if (bonusClaims.jtAssets != ZERO_TRANCHE_UNITS) IERC20(jtAsset).safeTransfer(msg.sender, toUint256(bonusClaims.jtAssets));
-            }
-        }
-        // Transfer the LT asset claims to the executor and receiver respectively
-        if (_userClaims.ltAssets != ZERO_TRANCHE_UNITS) {
-            address ltAsset = IRoycoDayKernel(_kernel).LT_ASSET();
-            IERC20(ltAsset).safeTransfer(_receiver, toUint256(_userClaims.ltAssets));
-            if (bonusClaims.ltAssets != ZERO_TRANCHE_UNITS) IERC20(ltAsset).safeTransfer(msg.sender, toUint256(bonusClaims.ltAssets));
-        }
-        // Transfer the senior tranche share claims to the executor and receiver respectively
-        if (_userClaims.stShares != 0) {
-            address seniorTranche = IRoycoDayKernel(_kernel).SENIOR_TRANCHE();
-            IERC20(seniorTranche).safeTransfer(_receiver, _userClaims.stShares);
-            if (bonusClaims.stShares != 0) IERC20(seniorTranche).safeTransfer(msg.sender, bonusClaims.stShares);
-        }
+        // Resolve the market's assets from the kernel's immutables carrier
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory immutables = IRoycoDayKernel(_kernel).getImmutableState();
+
+        // Remit the receiver's and the executor's asset claims respectively
+        AssetLedgerLogic._remitClaims(immutables, _userClaims, _receiver);
+        AssetLedgerLogic._remitClaims(immutables, bonusClaims, msg.sender);
         // Transfer the quote leg to the executor and receiver respectively
         if (_quoteAssets != 0) {
             bonusQuoteAssets = Math.mulDiv(_quoteAssets, _executorBonusWAD, WAD, Math.Rounding.Floor);
-            address quoteAsset = IRoycoDayKernel(_kernel).QUOTE_ASSET();
-            IERC20(quoteAsset).safeTransfer(_receiver, (_quoteAssets - bonusQuoteAssets));
-            if (bonusQuoteAssets != 0) IERC20(quoteAsset).safeTransfer(msg.sender, bonusQuoteAssets);
+            IERC20(immutables.quoteAsset).safeTransfer(_receiver, (_quoteAssets - bonusQuoteAssets));
+            if (bonusQuoteAssets != 0) IERC20(immutables.quoteAsset).safeTransfer(msg.sender, bonusQuoteAssets);
         }
     }
 
@@ -817,15 +845,45 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             address kernel = IRoycoFactory(ROYCO_FACTORY).trancheToKernel(tranche);
             require(kernel != address(0), INVALID_TRANCHE());
 
-            // A configured oracle clock must never report a future update timestamp
-            _pokeOracleClock(tranche, _configs[i].oracleClock);
-
             // Set the tranche configuration
-            $.trancheToConfig[tranche] = EnrichedTrancheConfig({
+            EnrichedTrancheConfig memory enrichedConfig = EnrichedTrancheConfig({
                 asset: IRoycoVaultTranche(tranche).asset(), kernel: kernel, trancheType: IRoycoVaultTranche(tranche).TRANCHE_TYPE(), baseConfig: _configs[i]
             });
+            $.trancheToConfig[tranche] = enrichedConfig;
+
+            // Poke the market's collateral asset oracle to validate it
+            _pokeOracle(tranche, enrichedConfig);
+
             emit TrancheConfigUpdated(tranche, _configs[i]);
         }
+    }
+
+    /**
+     * @dev Batch-screens two accounts against the market's blacklist
+     * @param _kernel The kernel routing to the market's configured blacklist, never itself screened
+     * @param _account0 The address of the first account to screen
+     * @param _account1 The address of the second account to screen
+     */
+    function _enforceNotBlacklisted(address _kernel, address _account0, address _account1) internal view {
+        address[] memory accountsToScreen = new address[](2);
+        accountsToScreen[0] = _account0;
+        accountsToScreen[1] = _account1;
+        IRoycoDayKernel(_kernel).enforceNotBlacklisted(accountsToScreen);
+    }
+
+    /**
+     * @dev Batch-screens three accounts against the market's blacklist
+     * @param _kernel The kernel routing to the market's configured blacklist, never itself screened
+     * @param _account0 The address of the first account to screen
+     * @param _account1 The address of the second account to screen
+     * @param _account2 The address of the third account to screen
+     */
+    function _enforceNotBlacklisted(address _kernel, address _account0, address _account1, address _account2) internal view {
+        address[] memory accountsToScreen = new address[](3);
+        accountsToScreen[0] = _account0;
+        accountsToScreen[1] = _account1;
+        accountsToScreen[2] = _account2;
+        IRoycoDayKernel(_kernel).enforceNotBlacklisted(accountsToScreen);
     }
 
     /**
@@ -835,7 +893,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      */
     function _getRoycoDayEntryPointStorage() internal pure returns (RoycoDayEntryPointState storage $) {
         assembly ("memory-safe") {
-            $.slot := ROYCO_DAY_ENTRY_POINT_STORAGE_SLOT
+            $.slot := _ROYCO_DAY_ENTRY_POINT_STORAGE_SLOT
         }
     }
 }

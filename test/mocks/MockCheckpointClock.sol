@@ -1,28 +1,27 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { OracleCheckpointClockBase } from "../../src/entrypoint/clock/base/OracleCheckpointClockBase.sol";
+import { OracleClockBase } from "../../src/oracle/base/clock/OracleClockBase.sol";
 import { MockValueSource } from "./MockValueSource.sol";
 
 /// @notice Minimal concrete checkpoint clock over a settable value source, exercising the base contract's
-///         change-detection semantics and its initialization-time seeding
-contract MockCheckpointClock is OracleCheckpointClockBase {
+///         change-detection semantics and its construction-time baseline seeding
+/// @dev Mirrors the production shape: the constructor body assigns the source then checkpoints the baseline
+///      through the same _getSourcePrice read every poke uses, so a broken source fails the deployment loudly
+contract MockCheckpointClock is OracleClockBase {
     MockValueSource public immutable SOURCE;
 
-    constructor(address _source) {
+    constructor(address _source, uint32 _lastUpdate, uint256 _minDeviationWAD) OracleClockBase(_lastUpdate, _minDeviationWAD) {
         SOURCE = MockValueSource(_source);
+        _initializeOracleClock(_getSourcePrice());
     }
 
-    function initialize(address _initialAuthority, uint256 _minDeviationWAD) external initializer {
-        __RoycoBase_init(_initialAuthority);
-        __OracleCheckpointClockBase_init_unchained(_minDeviationWAD);
+    /// @notice Attempts to rewrite the clock baseline after construction, exercising the construction-only guard
+    function attemptRuntimeBaselineRewrite(uint256 _initialOraclePrice) external {
+        _initializeOracleClock(_initialOraclePrice);
     }
 
-    function _readSource() internal view override returns (uint256 value) {
+    function _getSourcePrice() internal view override returns (uint256 value) {
         return SOURCE.getValue();
-    }
-
-    function description() external pure override returns (string memory clockDescription) {
-        return "Checkpoint clock over a mock value source";
     }
 }

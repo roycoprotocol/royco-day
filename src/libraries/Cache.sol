@@ -6,19 +6,25 @@ import { TransientSlot } from "../../lib/openzeppelin-contracts/contracts/utils/
 
 /**
  * @notice Indexes a slot in the unified transient cache: each key occupies the transient slot at the cache base slot offset by the key's ordinal
- * @custom:type IDENTICAL_ST_JT_TRANCHE_TO_NAV_UNIT_RATE - The identical senior and junior tranche unit to NAV unit conversion rate (only used if ST and JT are invested in the same asset)
- * @custom:type ST_SHARE_RATE - The senior tranche share rate (senior NAV per share)
+ * @custom:type COLLATERAL_ASSET_PRICE - The collateral asset's price in NAV units shared by the coinvested senior and junior tranches
+ * @custom:type LPT_ASSET_PRICE - The NAV value of one whole LPT asset, cached only by the multi-asset deposit and redemption previews at their venue operation's frame mark
+ * @custom:type ST_SHARE_PRICE - The senior tranche share price (senior NAV per share), written by each sync and scoped to the operation: the kernel's price frame clears it on exit so later frames price the settled state live
+ * @custom:type IN_MULTI_ASSET_FLOW - Marks a multi-asset composite flow's span: a worsening leg's post-op records a pending liquidity violation instead of reverting and a satisfied final leg clears it
+ * @custom:type PENDING_LIQUIDITY_VIOLATION - A liquidity violation a worsening in-flow leg recorded instead of reverting, cleared by a final leg whose settled state satisfies the requirement and enforced at the flow's exit
  * @dev The ordinal is the key's transient slot offset from the cache base slot, so the enum is bounded to 256 members by the reserved ERC-7201 slot window
  * @dev Ordering is unconstrained: the cache is transient and auto-clears every transaction, so no persistent layout depends on the ordinals
  */
 enum CacheKey {
-    IDENTICAL_ST_JT_TRANCHE_TO_NAV_UNIT_RATE,
-    ST_SHARE_RATE
+    COLLATERAL_ASSET_PRICE,
+    LPT_ASSET_PRICE,
+    ST_SHARE_PRICE,
+    IN_MULTI_ASSET_FLOW,
+    PENDING_LIQUIDITY_VIOLATION
 }
 
 /**
  * @title Cache
- * @author Waymont
+ * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice A unified keyed transient cache usable by any contract: one transient slot per CacheKey derived from a single ERC-7201 base slot, with a top-bit populated marker so a cached zero is distinguishable from an unset slot
  */
 library Cache {
@@ -31,17 +37,17 @@ library Cache {
      * @dev Each cache key occupies its ordinal slot at this base offset
      * @dev keccak256(abi.encode(uint256(keccak256("Royco.transient.Cache")) - 1)) & ~bytes32(uint256(0xff))
      */
-    bytes32 private constant TRANSIENT_CACHE_BASE_STORAGE_SLOT = 0x70d6b292032d8753f59a7cdffcb7469958b18c62ee56cf41848217b8027ee200;
+    bytes32 private constant _CACHE_BASE_STORAGE_SLOT = 0x70d6b292032d8753f59a7cdffcb7469958b18c62ee56cf41848217b8027ee200;
 
     /// @dev The top bit set on a transient cache slot to mark it populated, so a set slot is distinguishable from an unset one
-    uint256 private constant CACHE_SET_MASK = (1 << 255);
+    uint256 private constant _CACHE_SET_MASK = (1 << 255);
 
     /// @notice Thrown when a value to cache is not strictly less than 2^255, which would collide with the populated marker and read back corrupted
     error CACHE_VALUE_OUT_OF_DOMAIN();
 
     /**
      * @notice Reads a value from the unified transient cache
-     * @dev The top bit (CACHE_SET_MASK) marks a populated slot, so an unset (zero) slot reads as a miss
+     * @dev The top bit (_CACHE_SET_MASK) marks a populated slot, so an unset (zero) slot reads as a miss
      * @dev View-safe: it never writes, so it is callable on the static read path
      * @param _key The key in this cache to read from
      * @return cacheHit Whether the slot holds a populated value
@@ -49,20 +55,28 @@ library Cache {
      */
     function _read(CacheKey _key) internal view returns (bool cacheHit, uint256 value) {
         uint256 slotValue = _getTransientStorageSlot(_key).asUint256().tload();
-        if ((slotValue & CACHE_SET_MASK) != 0) return (true, (slotValue ^ CACHE_SET_MASK));
+        if ((slotValue & _CACHE_SET_MASK) != 0) return (true, (slotValue ^ _CACHE_SET_MASK));
     }
 
     /**
      * @notice Writes a value to the unified transient cache for the remainder of the transaction
-     * @dev The value is stored as `_value | CACHE_SET_MASK`, re-callable to overwrite
+     * @dev The value is stored as `_value | _CACHE_SET_MASK`, re-callable to overwrite
      * @dev The value must be strictly less than 2^255 so the populated marker is unambiguous
      * @param _key The key in this cache to write to
      * @param _value The value to cache
      */
     function _write(CacheKey _key, uint256 _value) internal {
-        // The value must be strictly less than 2^255 so it cannot collide with the populated marker, reject an out-of-domain value loudly rather than reading it back corrupted
-        require(_value < CACHE_SET_MASK, CACHE_VALUE_OUT_OF_DOMAIN());
-        _getTransientStorageSlot(_key).asUint256().tstore((_value | CACHE_SET_MASK));
+        require(_value < _CACHE_SET_MASK, CACHE_VALUE_OUT_OF_DOMAIN());
+        _getTransientStorageSlot(_key).asUint256().tstore((_value | _CACHE_SET_MASK));
+    }
+
+    /**
+     * @notice Deletes a key from the unified transient cache
+     * @dev Resets the slot to the unset state, so a subsequent read is a miss until the next write
+     * @param _key The key in this cache to delete
+     */
+    function _delete(CacheKey _key) internal {
+        _getTransientStorageSlot(_key).asUint256().tstore(0);
     }
 
     /**
@@ -72,6 +86,6 @@ library Cache {
      * @return The transient slot for the specified cache key
      */
     function _getTransientStorageSlot(CacheKey _key) private pure returns (bytes32) {
-        return TRANSIENT_CACHE_BASE_STORAGE_SLOT.offset(uint256(_key));
+        return _CACHE_BASE_STORAGE_SLOT.offset(uint256(_key));
     }
 }

@@ -1,0 +1,15 @@
+[package]
+name = "mine-market-id"
+version = "0.1.0"
+edition = "2021"
+description = "Mines a Royco Day marketId whose senior-tranche CREATE3 proxy sorts below the quote asset (ST is pool token0)"
+
+[[bin]]
+name = "mine-market-id"
+path = "src/main.rs"
+
+[dependencies]
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+
+[profile.release]
+opt-level = 3
