@@ -248,18 +248,20 @@ contract Test_DmgMarketDeployment is MakinaSheetMarketDeploymentBase {
         return 0x761C3B16a5Afdd7A1869C4B979cFF3383d5Fe98B;
     }
 
-    /// @notice The DMG economics land on-chain: NO fixed term and the 1% senior self-liquidation bonus
+    /// @notice The DMG economics (mirroring the FalconX sheet row) land on-chain
     function test_ExecuteMarketDeployment_DmgEconomicsConfigured() external {
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
-        assertEq(a.fixedTermDurationSeconds, 0, "DMG runs with no fixed term");
-        assertEq(a.maxLPTYieldShareWAD, 0, "LPT liquidity premium must be disabled");
+        assertEq(a.minCoverageWAD, 0.03e18, "DMG min coverage");
+        assertEq(a.minLiquidityWAD, 0.1e18, "DMG min liquidity");
+        assertEq(a.fixedTermDurationSeconds, 7 days, "DMG fixed term");
+        assertEq(a.maxLPTYieldShareWAD, 0.5e18, "DMG LPT yield share cap");
         assertEq(IRoycoDayKernel(r.kernel).getState().stSelfLiquidationBonusWAD, 0.01e18, "DMG self-liquidation bonus");
     }
 }
 
 /// @title Test_DusdMarketDeployment
-/// @notice DUSD: the dUSD machine market — 2-day fixed term, 3% self-liquidation bonus (dawn values, TODO-flagged there)
+/// @notice DUSD: the dUSD machine market — economics mirror the FalconX sheet row (no dedicated sheet row yet)
 contract Test_DusdMarketDeployment is MakinaSheetMarketDeploymentBase {
     function _marketName() internal pure override returns (string memory) {
         return "DUSD";
@@ -273,12 +275,14 @@ contract Test_DusdMarketDeployment is MakinaSheetMarketDeploymentBase {
         return 0x1e33E98aF620F1D563fcD3cfd3C75acE841204ef;
     }
 
-    /// @notice The DUSD economics land on-chain: the 2-day fixed term and the 3% senior self-liquidation bonus
+    /// @notice The DUSD economics (mirroring the FalconX sheet row) land on-chain
     function test_ExecuteMarketDeployment_DusdEconomicsConfigured() external {
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
-        assertEq(a.fixedTermDurationSeconds, 2 days, "DUSD fixed term");
-        assertEq(a.maxLPTYieldShareWAD, 0, "LPT liquidity premium must be disabled");
-        assertEq(IRoycoDayKernel(r.kernel).getState().stSelfLiquidationBonusWAD, 0.03e18, "DUSD self-liquidation bonus");
+        assertEq(a.minCoverageWAD, 0.03e18, "DUSD min coverage");
+        assertEq(a.minLiquidityWAD, 0.1e18, "DUSD min liquidity");
+        assertEq(a.fixedTermDurationSeconds, 7 days, "DUSD fixed term");
+        assertEq(a.maxLPTYieldShareWAD, 0.5e18, "DUSD LPT yield share cap");
+        assertEq(IRoycoDayKernel(r.kernel).getState().stSelfLiquidationBonusWAD, 0.01e18, "DUSD self-liquidation bonus");
     }
 }

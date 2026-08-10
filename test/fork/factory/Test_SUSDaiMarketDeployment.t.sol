@@ -157,12 +157,16 @@ contract Test_SUSDaiMarketDeployment is Test {
         assertEq(NAV_UNIT.unwrap(price), IERC4626(SUSDAI).convertToAssets(1e18), "composed NAV must equal the raw share price");
     }
 
-    /// @notice The sUSDai economics land on-chain: the 7-day fixed term, and the LPT liquidity premium disabled
+    /// @notice The sUSDai market-sheet economics land on-chain: 7% min coverage, 10% min liquidity, the 7-day fixed
+    ///         term (observation period), and the 1% self-liquidation bonus
     function test_ExecuteMarketDeployment_SUsdaiEconomicsConfigured() external {
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
+        assertEq(a.minCoverageWAD, 0.07e18, "sUSDai min coverage");
+        assertEq(a.minLiquidityWAD, 0.1e18, "sUSDai min liquidity");
+        assertEq(a.coverageLiquidationUtilizationWAD, 1.4e18, "sUSDai protected exit at 5% coverage remaining");
         assertEq(a.fixedTermDurationSeconds, 7 days, "sUSDai fixed term");
-        assertEq(a.maxLPTYieldShareWAD, 0, "LPT liquidity premium must be disabled");
+        assertEq(a.maxLPTYieldShareWAD, 0.5e18, "sUSDai LPT yield share cap");
         assertEq(IRoycoDayKernel(r.kernel).getState().stSelfLiquidationBonusWAD, 0.01e18, "sUSDai self-liquidation bonus");
     }
 

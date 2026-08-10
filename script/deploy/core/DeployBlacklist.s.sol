@@ -11,13 +11,7 @@ import { BlacklistConfig } from "../config/BlacklistConfig.sol";
 import { RoycoDeterministic } from "../utils/RoycoDeterministic.sol";
 import { DeployScriptBase } from "./DeployScriptBase.sol";
 
-/**
- * @title DeployBlacklistComponent
- * @notice Deploys (or reuses) the chain's shared RoycoBlacklist (impl + ERC1967 proxy) and binds its full gated
- *         surface on first deployment
- * @dev The sanctions list initializes NULL and is wired later by the ops script from `getChainalysisSanctionsList` —
- *      a deliberate two-step so the deployment carries no live-screening dependency.
- */
+/// @title DeployBlacklistComponent
 contract DeployBlacklistComponent is DeployScriptBase, BlacklistConfig {
     address internal ACCESS_MANAGER;
 
@@ -38,7 +32,8 @@ contract DeployBlacklistComponent is DeployScriptBase, BlacklistConfig {
             deployWithSanityChecks(_singletonSalt("ROYCO_BLACKLIST_IMPLEMENTATION"), type(RoycoBlacklist).creationCode, false);
         _logDeploy("Blacklist (impl)   ", implAddr, implExisted);
         address[] memory initialBlacklistedAccounts = new address[](0);
-        bytes memory initData = abi.encodeCall(RoycoBlacklist.initialize, (ACCESS_MANAGER, address(0), initialBlacklistedAccounts));
+        bytes memory initData =
+            abi.encodeCall(RoycoBlacklist.initialize, (ACCESS_MANAGER, getChainalysisSanctionsList(block.chainid), initialBlacklistedAccounts));
         bool blacklistExisted;
         (blacklist, blacklistExisted) = deployWithSanityChecks(_singletonSalt("ROYCO_BLACKLIST_PROXY"), getERC1967ProxyCreationCode(implAddr, initData), false);
         _logDeploy("Blacklist (proxy)  ", blacklist, blacklistExisted);

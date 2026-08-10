@@ -397,6 +397,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     ///         out of the blacklist entirely
     function test_Auth_BlacklistFullSurfaceBound() public view {
         address bl = address(BLACKLIST);
+        // The deployment initializes the sanctions list to mainnet's canonical Chainalysis oracle
+        assertEq(RoycoBlacklist(bl).getSanctionsList(), 0x40C57923924B5c5c5455c48D93317139ADDaC8fb, "sanctions list must be wired at deployment");
         assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, RoycoBlacklist.blacklistAccounts.selector), ADMIN_BLACKLIST_ROLE, "blacklistAccounts role");
         assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, RoycoBlacklist.unblacklistAccounts.selector), ADMIN_BLACKLIST_ROLE, "unblacklistAccounts role");
         assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, RoycoBlacklist.setSanctionsList.selector), ADMIN_BLACKLIST_ROLE, "setSanctionsList role");

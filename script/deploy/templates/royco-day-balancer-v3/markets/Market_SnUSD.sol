@@ -80,8 +80,8 @@ abstract contract Market_SnUSD is DayMarketRegistryBase {
             pool: GyroECLPPoolParams({
                 name: "Senior Staked NUSD / USDC",
                 symbol: "srsNUSD/USDC",
-                eclpParams: _srRoyUsdcEclpParams(),
-                derivedEclpParams: _srRoyUsdcDerivedEclpParams(),
+                eclpParams: _exitLiquidityPrioritizedEclpParams(),
+                derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
                 quoteAsset: USDC[block.chainid],
                 quoteAssetRateProvider: address(0)
             }),

@@ -8,9 +8,9 @@ import { AccountantEconomics, CollateralOracleConfig, DayMarketConfig, KernelSet
 import { DayMarketRegistryBase } from "./DayMarketRegistryBase.sol";
 
 /// @title Market_DUSD
-/// @notice DUSD, the Makina dUSD market. Economics come from the dawn MakinaDUSD market, where they are still marked
-///         TODO — treat every number here as provisional until the market sheet finalizes: min coverage 10%, JT yield
-///         share 7% at target, 2-day fixed term, 3% self-liquidation bonus, LPT liquidity premium disabled.
+/// @notice DUSD, the Makina dUSD market. Economics MIRROR THE FALCONX SHEET ROW (DUSD has no dedicated sheet row
+///         yet): min coverage 3%, min liquidity 10%, JT yield share 4.5% at target, LP yield share 9.1% at target,
+///         7-day fixed term, protected exit at 2.99% coverage remaining, 1% self-liquidation bonus.
 ///         Collateral is the dUSD machine share, priced machine->USDC via the machine's own accounting and USDC->NAV
 ///         via the Chainlink USDC/USD feed; the pool quotes in the srRoyUSDC senior tranche with the srRoyUSDC kernel
 ///         as the leg's rate provider.
@@ -34,37 +34,36 @@ abstract contract Market_DUSD is DayMarketRegistryBase {
                         // Chainlink USDC/USD (https://data.chain.link/feeds/ethereum/mainnet/usdc-usd)
                         accountingAssetToNavAssetFeed: 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6,
                         chainlinkOracleStalenessThresholdSeconds: 48 hours, // USDC/USD heartbeat is 24h; doubled for safety
-                        // Machines account periodically rather than per-block; 8 days covers any plausible flat
-                        // stretch, mirroring the other discretely-updating source hops
-                        makinaAccountingStalenessThresholdSeconds: 8 days
+                        // Machines account periodically
+                        makinaAccountingStalenessThresholdSeconds: 7 days
                     })
                 )
             }),
             accountant: AccountantEconomics({
-                fixedTermGracePeriodSeconds: 1 days,
-                minCoverageWAD: 0.1e18, // dawn value, marked TODO there
-                coverageLiquidationUtilizationWAD: 1.1111e18, // dawn literal, marked TODO there
-                minLiquidityWAD: 0, // LPT liquidity premium disabled until the market sheet specifies otherwise
+                fixedTermGracePeriodSeconds: 7 days,
+                minCoverageWAD: 0.03e18,
+                coverageLiquidationUtilizationWAD: calculateCoverageLiquidationUtilizationWAD(0.03e18, 0.0299e18),
+                minLiquidityWAD: 0.1e18,
                 jtYdm: YDMSelection({
                     ydmType: YDMType.AdaptiveCurve_V2,
-                    // dawn curve, marked TODO there
                     curveParams: abi.encode(
-                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.07e18, yieldShareAtTargetUtilWAD: 0.07e18, yieldShareAtFullUtilWAD: 0.45e18 })
+                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.005e18, yieldShareAtTargetUtilWAD: 0.045e18, yieldShareAtFullUtilWAD: 0.31e18 })
                     )
                 }),
                 lptYdm: YDMSelection({
                     ydmType: YDMType.AdaptiveCurve_V2,
                     curveParams: abi.encode(
-                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.07e18, yieldShareAtTargetUtilWAD: 0.07e18, yieldShareAtFullUtilWAD: 0.45e18 })
+                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.051e18, yieldShareAtTargetUtilWAD: 0.091e18, yieldShareAtFullUtilWAD: 0.31e18 })
                     )
                 }),
-                maxJTYieldShareWAD: 1e18, // uncapped at the WAD ceiling; the real JT cap comes from the JT YDM curve
-                maxLPTYieldShareWAD: 0, // LPT liquidity premium disabled
-                fixedTermDurationSeconds: 2 days, // dawn value, marked TODO there
+                // The caps must SUM to at most WAD; an even split never binds, both V2 curves top out at 0.31
+                maxJTYieldShareWAD: 0.5e18,
+                maxLPTYieldShareWAD: 0.5e18,
+                fixedTermDurationSeconds: 7 days,
                 dustTolerance: 5 * 10 ** 12 // the machine accounts in USDC (6 decimals): 5 * 10^(18-6), mirrors dawn
             }),
             kernel: KernelSettings({
-                stSelfLiquidationBonusWAD: 0.03e18, // dawn value, marked TODO there
+                stSelfLiquidationBonusWAD: 0.01e18,
                 // Ethereum mainnet has no L2 sequencer, so the sequencer-uptime check is disabled
                 sequencerUptimeFeed: address(0),
                 gracePeriodSeconds: 0,
@@ -77,8 +76,8 @@ abstract contract Market_DUSD is DayMarketRegistryBase {
             pool: GyroECLPPoolParams({
                 name: "Senior Makina DUSD / Senior SrRoyUSDC",
                 symbol: "srDUSD/srsrRoyUSDC",
-                eclpParams: _srRoyUsdcEclpParams(),
-                derivedEclpParams: _srRoyUsdcDerivedEclpParams(),
+                eclpParams: _exitLiquidityPrioritizedEclpParams(),
+                derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
                 quoteAsset: SRROYUSDC_SENIOR_TRANCHE,
                 quoteAssetRateProvider: SRROYUSDC_KERNEL
             }),

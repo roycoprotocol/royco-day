@@ -13,18 +13,11 @@ import { CREATE2_FACTORY_ADDRESS } from "../../utils/Create2DeployUtils.sol";
 
 /**
  * @title RoycoDeterministic
- * @notice THE single source of truth for every deterministic derivation the deployment pipeline relies on: singleton
+ * @notice The single source of truth for every deterministic derivation the deployment pipeline relies on: singleton
  *         salts, the factory-proxy prediction, the periphery predictions, and the market-id mining derivation.
- * @dev Every prediction here must stay byte-for-byte in lockstep with the deployment that realizes it — that lockstep
- *      used to be maintained across three separate copies (the deploy script, the config registry, and the mining
- *      guard test); consolidating them here is what makes drift structurally impossible. Any change to a salt
- *      preimage or a predicted contract's creation code moves EVERY downstream address: the address-canary suite
- *      (Test_DeterministicAddresses) trips on unintentional changes.
  */
 library RoycoDeterministic {
-    /// @notice The environment salt suffixes: a test deployment and a production deployment never collide on a
-    ///         deterministic address. Bumping the test suffix forces a fresh test namespace, and every derived
-    ///         address (and market-id registry key) follows automatically.
+    /// @notice The environment salt suffixes: a test deployment and a production deployment never collide on a deterministic address.
     string internal constant PROD_SALT_SUFFIX = "_PROD";
     string internal constant TEST_SALT_SUFFIX = "_TEST_3243241421";
 
@@ -44,8 +37,6 @@ library RoycoDeterministic {
     }
 
     /// @notice Predicts the factory proxy `_deployer` stands up under the environment's salts
-    /// @dev Mirrors the deployment path exactly: the CREATE3 deployer namespaces its salt by the calling deployer
-    ///      (`RoycoCreate3Deployer.predict`), so each deployer gets its own deterministic factory
     function predictFactoryProxy(address _deployer, bool _isTest) internal pure returns (address) {
         return
             CREATE3.predictDeterministicAddress(
@@ -68,12 +59,7 @@ library RoycoDeterministic {
         return abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(_implementation, _initData));
     }
 
-    /**
-     * @notice Predicts both periphery singletons' CREATE2 addresses, which the gatekeeper is built against before
-     *         either can be deployed (an entry point initializes against the factory, which is built against the gatekeeper)
-     * @dev The ONE derivation both sides of the circular dependency use: the core script builds the gatekeeper against
-     *      these predictions, and the periphery script asserts its deployments landed on them
-     */
+    /// @notice Predicts both periphery singletons' CREATE2 addresses, which the gatekeeper is built against before either can be deployed
     function predictPeripherySingletons(
         address _accessManager,
         address _factory,

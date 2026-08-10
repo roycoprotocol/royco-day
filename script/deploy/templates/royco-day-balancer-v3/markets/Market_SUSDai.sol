@@ -9,9 +9,10 @@ import { AccountantEconomics, CollateralOracleConfig, DayMarketConfig, KernelSet
 import { DayMarketRegistryBase } from "./DayMarketRegistryBase.sol";
 
 /// @title Market_SUSDai
-/// @notice sUSDai, the USD.ai staked-USDai market on ARBITRUM (economics from the dawn sUSDai market): min coverage
-///         10%, JT yield share 11% at target, 7-day fixed term, 1% self-liquidation bonus, LPT liquidity premium
-///         disabled. Collateral is sUSDai (18-decimal ERC4626 over USDai) priced share->USDai via `convertToAssets`
+/// @notice sUSDai, the USD.ai staked-USDai market on ARBITRUM, per the market sheet: underlying 7.5%, min coverage
+///         7%, min liquidity 10%, JT yield share 7% at target, LP yield share 8% at target, 7-day observation
+///         period, protected exit at 5% coverage remaining, 1% self-liquidation bonus. 30-day redemption epoch.
+///         Collateral is sUSDai (18-decimal ERC4626 over USDai) priced share->USDai via `convertToAssets`
 ///         — sUSDai's `previewRedeem` REVERTS (async redemption queue), so the redeem query is unusable — and
 ///         USDai->NAV via the $1 identity recipe (a zero feed address; dawn attested USDai at 1e18 through its admin
 ///         oracle the same way). The pool quotes in Arbitrum frxUSD, a plain stablecoin STANDARD leg.
@@ -23,76 +24,63 @@ abstract contract Market_SUSDai is DayMarketRegistryBase {
             stParams: IBaseTemplate.TrancheDeploymentParams({ name: "Senior Staked USDai", symbol: "srsUSDai" }),
             jtParams: IBaseTemplate.TrancheDeploymentParams({ name: "Junior Staked USDai", symbol: "jrsUSDai" }),
             lptParams: IBaseTemplate.TrancheDeploymentParams({ name: "Senior Liquidity Staked USDai", symbol: "slsUSDai" }),
-            // sUSDai (18 decimals), USD.ai's ERC4626 over USDai, per the dawn sUSDai market
             collateralAsset: 0x0B2b2B2076d95dda7817e785989fE353fe955ef9,
             oracle: CollateralOracleConfig({
                 deployed: address(0),
                 oracleType: OracleType.ERC4626SharePrice,
                 specificParams: abi.encode(
                     ERC4626SharePriceOracleParams({
-                        // previewRedeem reverts on sUSDai (async redemption queue), so the nominal rate is the only
-                        // readable share price
                         queryMode: ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS,
-                        // The $1 identity recipe: USDai is attested at one NAV unit, composed with the always-fresh
-                        // constant-1.0 feed the oracle deployer stands up (see CollateralOracleDeployer)
-                        baseAssetToNavAssetFeed: address(0),
-                        // The vault accrues periodically; any observed share-price change counts as an update
+                        baseAssetToNavAssetFeed: address(0), // Replaced with a constant feed
                         minDeviationWAD: 0,
-                        // Attested share-price update timestamp as of deployment (2026-08-08; re-attest when deploying)
                         lastUpdate: 1_786_200_000,
                         chainlinkOracleStalenessThresholdSeconds: 48 hours, // moot for the constant feed (always fresh)
-                        // Yield accrual moves the share price regularly; 8 days covers any plausible flat stretch
-                        vaultSharePriceStalenessThresholdSeconds: 8 days
+                        vaultSharePriceStalenessThresholdSeconds: 7 days
                     })
                 )
             }),
             accountant: AccountantEconomics({
                 fixedTermGracePeriodSeconds: 1 days,
-                minCoverageWAD: 0.1e18,
-                coverageLiquidationUtilizationWAD: 1.1e18, // dawn literal
-                minLiquidityWAD: 0, // LPT liquidity premium disabled until the market sheet specifies otherwise
+                minCoverageWAD: 0.07e18,
+                coverageLiquidationUtilizationWAD: calculateCoverageLiquidationUtilizationWAD(0.07e18, 0.05e18),
+                minLiquidityWAD: 0.1e18,
                 jtYdm: YDMSelection({
                     ydmType: YDMType.AdaptiveCurve_V2,
                     curveParams: abi.encode(
-                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })
+                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.03e18, yieldShareAtTargetUtilWAD: 0.07e18, yieldShareAtFullUtilWAD: 0.31e18 })
                     )
                 }),
                 lptYdm: YDMSelection({
                     ydmType: YDMType.AdaptiveCurve_V2,
                     curveParams: abi.encode(
-                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })
+                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.04e18, yieldShareAtTargetUtilWAD: 0.08e18, yieldShareAtFullUtilWAD: 0.31e18 })
                     )
                 }),
-                maxJTYieldShareWAD: 1e18, // uncapped at the WAD ceiling; the real JT cap comes from the JT YDM curve
-                maxLPTYieldShareWAD: 0, // LPT liquidity premium disabled
+                maxJTYieldShareWAD: 0.5e18,
+                maxLPTYieldShareWAD: 0.5e18,
                 fixedTermDurationSeconds: 7 days,
-                dustTolerance: 5 // 18-decimal collateral over an 18-decimal base, mirrors dawn
+                dustTolerance: 5
             }),
             kernel: KernelSettings({
                 stSelfLiquidationBonusWAD: 0.01e18,
-                // Chainlink's Arbitrum sequencer uptime feed; pricing holds shut for the grace period after a restart
                 sequencerUptimeFeed: 0xFdB631F5EE196F0ed6FAa767959853A9F217697D,
                 gracePeriodSeconds: 1 hours,
                 kernelSpecificParams: abi.encode(
                     RoycoDayBalancerV3MarketDeploymentTemplate.BalancerV3LiquidityVenueDeploymentParams({
-                        maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
-                    })
+                            maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
+                        })
                 )
             }),
             pool: GyroECLPPoolParams({
                 name: "Senior Staked USDai / frxUSD",
                 symbol: "srsUSDai/frxUSD",
-                eclpParams: _srRoyUsdcEclpParams(),
-                derivedEclpParams: _srRoyUsdcDerivedEclpParams(),
-                // frxUSD on Arbitrum (Frax's LayerZero OFT deployment — a DIFFERENT address than mainnet frxUSD).
-                // A plain stablecoin: the leg registers STANDARD, there is no redemption rate to provide
+                eclpParams: _exitLiquidityPrioritizedEclpParams(),
+                derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
                 quoteAsset: 0x80Eede496655FB9047dd39d9f418d5483ED600df,
                 quoteAssetRateProvider: address(0)
             }),
             poolInitialization: RoycoDayBalancerV3MarketDeploymentTemplate.PoolInitializationParams({
-                collateralAmount: 0, // no collateral leg: the genesis liquidity is quote-only
-                quoteAmount: 1e18, // 1 frxUSD ($1): the quote is 18 decimals, and the seed must cover the 1e12 dead-share lock
-                minLPTAssetsOut: 0
+                collateralAmount: 0, quoteAmount: 1e18, minLPTAssetsOut: 0
             }),
             stEntryPointConfig: _defaultEntryPointTrancheConfig(),
             jtEntryPointConfig: _defaultEntryPointTrancheConfig(),

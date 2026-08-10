@@ -65,10 +65,7 @@ contract DeployCoreComponent is DeployScriptBase, EnvConfig {
         bytes32 factoryProxySalt = _singletonSalt("ROYCO_FACTORY_PROXY");
         core.factory = RoycoCreate3Deployer(core.create3Deployer).predict(_deployer, factoryProxySalt);
 
-        // The gatekeeper pins both periphery singletons as immutables, but neither can exist yet: an entry point's
-        // initializer reads its authority off the factory, and the factory in turn is built against this gatekeeper.
-        // All three addresses are deterministic though, so the gatekeeper takes the periphery predicted and the
-        // periphery deployment asserts each one landed where it was promised
+        // Predict the periphery singletons
         (core.entryPoint, core.marketSyncer) = RoycoDeterministic.predictPeripherySingletons(core.accessManager, core.factory, isTestEnv);
 
         // Deploy the factory gatekeeper against the factory address the CREATE3 salt has already fixed
@@ -80,7 +77,7 @@ contract DeployCoreComponent is DeployScriptBase, EnvConfig {
         core.gatekeeper = gatekeeper;
         _logDeploy("Gatekeeper         ", gatekeeper, gatekeeperExisted);
 
-        // Hand it the ADMIN_ROLE the factory used to hold
+        // Wire the gatekeeper roles
         if (!gatekeeperExisted) {
             RoycoAccessManager am = RoycoAccessManager(core.accessManager);
             am.grantRole(ADMIN_ROLE, gatekeeper, 0);
@@ -106,13 +103,7 @@ contract DeployCoreComponent is DeployScriptBase, EnvConfig {
     }
 
     /// @notice Binds the factory's own gated selectors and grants it the narrow role set it retains.
-    /// @dev Moved out of `RoycoFactory.initialize`, which can no longer perform these writes now that the factory does
-    ///      not hold ADMIN_ROLE. MUST run before the role graph, whose second pass re-points SYNC_ROLE's admin away
-    ///      from ADMIN_ROLE and would leave the deployer unable to make the SYNC_ROLE grant below.
     function _wireFactoryRoles(RoycoAccessManager _accessManager, address _factory) internal {
-        // Market deployment is PERMISSIONLESS: the deployer supplies only tightened per-market params (protocol
-        // policy lives on the template), funds the genesis seed from their own balance, and every component lands in
-        // a salt namespaced by their address — so an open entrypoint cannot grief or misprice another deployer
         bytes4[] memory deployerSelectors = new bytes4[](1);
         deployerSelectors[0] = IRoycoFactory.executeMarketDeployment.selector;
         _accessManager.setTargetFunctionRole(_factory, deployerSelectors, PUBLIC_ROLE);
