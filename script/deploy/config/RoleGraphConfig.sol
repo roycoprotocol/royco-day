@@ -157,7 +157,9 @@ abstract contract RoleGraphConfig is EnvConfig {
         if (role == ADMIN_FACTORY_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_ROOT });
         if (role == ADMIN_UNPAUSER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_IMMEDIATE });
         if (role == LPT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_IMMEDIATE });
-        if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_ROOT });
+        if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) {
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_IMMEDIATE });
+        }
         if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_ROOT });
         if (role == ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_IMMEDIATE });

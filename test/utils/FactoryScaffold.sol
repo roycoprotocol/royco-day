@@ -2,16 +2,26 @@
 pragma solidity ^0.8.28;
 
 import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import { RoycoBlacklist } from "../../src/auth/RoycoBlacklist.sol";
-import { RoycoAccessManager } from "../../src/factory/RoycoAccessManager.sol";
-import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { RoycoCreate3Deployer } from "../../src/factory/RoycoCreate3Deployer.sol";
-import { RoycoFactoryGatekeeper } from "../../src/factory/RoycoFactoryGatekeeper.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_PAUSER_ROLE, ADMIN_ROLE, ADMIN_UNPAUSER_ROLE, ADMIN_UPGRADER_ROLE, LPT_LP_ROLE, PUBLIC_ROLE, SYNC_ROLE } from "../../src/factory/Roles.sol";
-import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { RoycoMarketSyncer } from "../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
+import { RoycoBlacklist } from "../../src/auth/RoycoBlacklist.sol";
 import { RoycoDayEntryPoint } from "../../src/entrypoint/RoycoDayEntryPoint.sol";
+import {
+    ADMIN_ENTRY_POINT_ROLE,
+    ADMIN_FACTORY_ROLE,
+    ADMIN_PAUSER_ROLE,
+    ADMIN_ROLE,
+    ADMIN_UNPAUSER_ROLE,
+    ADMIN_UPGRADER_ROLE,
+    LPT_LP_ROLE,
+    PUBLIC_ROLE,
+    SYNC_ROLE
+} from "../../src/factory/Roles.sol";
+import { RoycoAccessManager } from "../../src/factory/RoycoAccessManager.sol";
+import { RoycoCreate3Deployer } from "../../src/factory/RoycoCreate3Deployer.sol";
+import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
+import { RoycoFactoryGatekeeper } from "../../src/factory/RoycoFactoryGatekeeper.sol";
+import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoFactory } from "../../src/interfaces/factory/IRoycoFactory.sol";
 
@@ -69,7 +79,9 @@ library FactoryScaffold {
         wireFactoryRoles(_accessManager, predictedFactory);
 
         factory = RoycoFactory(
-            create3Deployer.deploy(_salt, abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(impl, abi.encodeCall(RoycoFactory.initialize, (address(_accessManager))))))
+            create3Deployer.deploy(
+                _salt, abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(impl, abi.encodeCall(RoycoFactory.initialize, (address(_accessManager)))))
+            )
         );
         require(address(factory) == predictedFactory, "FactoryScaffold: factory address mismatch");
 
@@ -92,9 +104,7 @@ library FactoryScaffold {
                 keccak256(abi.encodePacked(_salt, "MARKET_SYNCER")),
                 abi.encodePacked(
                     type(ERC1967Proxy).creationCode,
-                    abi.encode(
-                        address(new RoycoMarketSyncer()), abi.encodeCall(RoycoMarketSyncer.initialize, (address(_accessManager), new address[](0)))
-                    )
+                    abi.encode(address(new RoycoMarketSyncer()), abi.encodeCall(RoycoMarketSyncer.initialize, (address(_accessManager), new address[](0))))
                 )
             )
         );
@@ -121,9 +131,7 @@ library FactoryScaffold {
         );
         marketSyncer = RoycoMarketSyncer(
             address(
-                new ERC1967Proxy(
-                    address(new RoycoMarketSyncer()), abi.encodeCall(RoycoMarketSyncer.initialize, (address(_accessManager), new address[](0)))
-                )
+                new ERC1967Proxy(address(new RoycoMarketSyncer()), abi.encodeCall(RoycoMarketSyncer.initialize, (address(_accessManager), new address[](0))))
             )
         );
     }
@@ -158,10 +166,12 @@ library FactoryScaffold {
      */
     function deployBlacklist(RoycoAccessManager _accessManager) internal returns (address blacklist) {
         blacklist = address(
-            new ERC1967Proxy(
-                address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(_accessManager), address(0), new address[](0)))
-            )
+            new ERC1967Proxy(address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(_accessManager), address(0), new address[](0))))
         );
+
+        _accessManager.setTargetFunctionRole(blacklist, _one(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
+        _accessManager.setTargetFunctionRole(blacklist, _one(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
+        _accessManager.setTargetFunctionRole(blacklist, _one(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
     }
 
     function _one(bytes4 _selector) private pure returns (bytes4[] memory selectors) {

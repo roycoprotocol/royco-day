@@ -27,6 +27,9 @@ abstract contract DayMarketRegistryBase is EnvConfig {
     string public constant SRROYUSDC = "srRoyUSDC";
     string public constant FALCONX = "FalconX";
     string public constant APYX = "APYX";
+    string public constant DMG = "DMG";
+    string public constant DUSD = "DUSD";
+    string public constant SUSDAI = "sUSDai";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STORAGE

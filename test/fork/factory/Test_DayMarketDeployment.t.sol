@@ -22,6 +22,7 @@ import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-bala
 import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
+    ADMIN_BLACKLIST_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
     ADMIN_FACTORY_ROLE,
@@ -42,6 +43,7 @@ import {
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
+import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -387,6 +389,24 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
             ACCESS_MANAGER.getTargetFunctionRole(address(MARKET_SYNCER), RoycoMarketSyncer.addMarketKernels.selector),
             SYNC_ROLE,
             "addMarketKernels bound to SYNC_ROLE"
+        );
+    }
+
+    /// @notice The blacklist proxy carries the full gated surface every AM-managed proxy does: its admin functions
+    ///         on ADMIN_BLACKLIST_ROLE, and the protocol-wide pause/unpause/upgrade trio — without which those
+    ///         selectors would fall through to ADMIN_ROLE only, cutting the pause multisig and the upgrade pipeline
+    ///         out of the blacklist entirely
+    function test_Auth_BlacklistFullSurfaceBound() public view {
+        address bl = address(BLACKLIST);
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, RoycoBlacklist.blacklistAccounts.selector), ADMIN_BLACKLIST_ROLE, "blacklistAccounts role");
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, RoycoBlacklist.unblacklistAccounts.selector), ADMIN_BLACKLIST_ROLE, "unblacklistAccounts role");
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, RoycoBlacklist.setSanctionsList.selector), ADMIN_BLACKLIST_ROLE, "setSanctionsList role");
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE, "blacklist pause must answer to the pauser");
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE, "blacklist unpause must answer to the unpauser");
+        assertEq(
+            ACCESS_MANAGER.getTargetFunctionRole(bl, UUPSUpgradeable.upgradeToAndCall.selector),
+            ADMIN_UPGRADER_ROLE,
+            "blacklist upgrade must ride the standard upgrade pipeline"
         );
     }
 
