@@ -1,0 +1,15 @@
+[package]
+name = "mine-factory-salt"
+version = "0.1.0"
+edition = "2021"
+description = "Mines a RoycoCreate3Deployer salt maximizing the number of leading 'a' nibbles in the factory proxy address"
+
+[[bin]]
+name = "mine-factory-salt"
+path = "src/main.rs"
+
+[dependencies]
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+
+[profile.release]
+opt-level = 3
