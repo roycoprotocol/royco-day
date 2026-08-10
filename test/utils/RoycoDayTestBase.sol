@@ -68,6 +68,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     Vm.Wallet internal ORACLE_EMERGENCY_ADMIN;
     address internal ORACLE_EMERGENCY_ADMIN_ADDRESS;
 
+    /// @dev Historic name: reinvestLiquidityPremium is PERMISSIONLESS (slippage-gated), this actor holds no role
     Vm.Wallet internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
     address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS;
 
@@ -476,7 +477,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 lpRoleHolderAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
                 balancerPoolManagerAddress: KERNEL_ADMIN_ADDRESS,
                 marketOpsAddress: KERNEL_ADMIN_ADDRESS,
-                marketReinvestLiquidityPremiumAddress: MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS,
                 adminEntryPointAddress: KERNEL_ADMIN_ADDRESS,
                 entryPointFeeCollectorAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
             }));

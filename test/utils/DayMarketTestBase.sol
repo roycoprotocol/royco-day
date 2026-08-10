@@ -14,8 +14,8 @@ import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
-    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_ROLE,
+    PUBLIC_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_UNPAUSER_ROLE,
@@ -796,8 +796,9 @@ abstract contract DayMarketTestBase is Assertions {
         accessManager.setTargetFunctionRole(
             k, _sels(IRoycoDayKernel.syncTrancheAccounting.selector, IRoycoDayKernel.syncTrancheAccountingFor.selector), SYNC_ROLE
         );
-        accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.reinvestLiquidityPremium.selector), ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.setRoycoBlacklist.selector), ADMIN_MARKET_OPS_ROLE);
+        // Reinvestment is deliberately PUBLIC (slippage-gated), mirroring the template binding
+        accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.reinvestLiquidityPremium.selector), PUBLIC_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
 
@@ -898,7 +899,9 @@ abstract contract DayMarketTestBase is Assertions {
         ACCOUNTANT_ADMIN = _generateActor("ACCOUNTANT_ADMIN", ADMIN_ACCOUNTANT_ROLE);
         PROTOCOL_FEE_SETTER = _generateActor("PROTOCOL_FEE_SETTER", ADMIN_PROTOCOL_FEE_SETTER_ROLE);
         ORACLE_ADMIN = _generateActor("ORACLE_ADMIN", ADMIN_ORACLE_ROLE);
-        MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = _generateActor("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN", ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
+        // Reinvest is bound to PUBLIC_ROLE (slippage-gated); the actor keeps its historic name but holds no role
+        MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = makeAddr("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN");
+        vm.deal(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN, 100 ether);
 
         // LP actors
         ST_PROVIDER = _generateActor("ST_PROVIDER", ST_LP_ROLE);

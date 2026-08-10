@@ -20,6 +20,7 @@ import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/Royco
 import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
+import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_BLACKLIST_ROLE,
@@ -28,7 +29,6 @@ import {
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
-    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
@@ -43,7 +43,6 @@ import {
     SYNC_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
-import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -475,8 +474,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(KERNEL), IRoycoDayKernel.syncTrancheAccountingFor.selector, SYNC_ROLE);
         _assertRole(address(KERNEL), IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
 
-        // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE.
-        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
+        // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE; reinvestment is deliberately PUBLIC
+        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, PUBLIC_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setRoycoBlacklist.selector, ADMIN_MARKET_OPS_ROLE);
         _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
 

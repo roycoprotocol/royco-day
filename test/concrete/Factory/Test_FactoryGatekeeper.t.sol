@@ -181,13 +181,14 @@ contract Test_FactoryGatekeeper is Test {
     // ---------------------------------------------------------------------
 
     /**
-     * @notice A market's bindings gate admin surfaces, so PUBLIC_ROLE is never legitimate: it would leave the selector
-     *         callable by anyone. Enforced here rather than only in a template, so no template can bind around it
+     * @notice PUBLIC_ROLE is a legitimate template decision (e.g. permissionless reinvestment): the fresh-target
+     *         rule already confines template bindings to contracts the deployment itself authored, so opening a
+     *         selector there escalates nothing
      */
-    function test_RevertIf_configureFreshTargetBindsPublicRole() public {
+    function test_ConfigureFreshTargetBindsPublicRole() public {
         (bytes4[] memory selectors, uint64[] memory roleIds) = _one(PUBLIC_ROLE);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, PUBLIC_ROLE));
         _bind(FRESH_TARGET, selectors, roleIds);
+        assertEq(am.getTargetFunctionRole(FRESH_TARGET, selectors[0]), PUBLIC_ROLE, "the selector must be publicly callable");
     }
 
     /// @notice ADMIN_ROLE is the access manager's super-admin, equally never a gate a market deployment should install
@@ -202,9 +203,9 @@ contract Test_FactoryGatekeeper is Test {
         bytes4[] memory selectors = new bytes4[](2);
         uint64[] memory roleIds = new uint64[](2);
         (selectors[0], roleIds[0]) = (SELECTOR_A, SYNC_ROLE);
-        (selectors[1], roleIds[1]) = (SELECTOR_B, PUBLIC_ROLE);
+        (selectors[1], roleIds[1]) = (SELECTOR_B, ADMIN_ROLE);
 
-        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, PUBLIC_ROLE));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, ADMIN_ROLE));
         _bind(FRESH_TARGET, selectors, roleIds);
 
         assertFalse(am.wasEverConfigured(FRESH_TARGET), "a rejected binding must not consume the target's one-time freshness");

@@ -142,15 +142,15 @@ contract Test_FactoryDeploymentWiring is Test {
     }
 
     /**
-     * @notice `PUBLIC_ROLE` is refused: it would leave the bound selector callable by anyone
-     * @dev The filter is on the gatekeeper, which is non-upgradeable, so no template can bind around it
+     * @notice `PUBLIC_ROLE` binds successfully: opening a selector on a contract the deployment itself authored is a
+     *         legitimate template decision (e.g. permissionless reinvestment) — the fresh-target rule is the containment
      */
-    function test_RevertIf_SetMarketTargetFunctionRoleBindsPublicRole() public {
+    function test_SetMarketTargetFunctionRoleBindsPublicRole() public {
         template.setMode(template.MODE_WIRE());
         template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, PUBLIC_ROLE, WIRE_ACCOUNT);
 
-        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, PUBLIC_ROLE));
         factory.executeMarketDeployment(address(template), "");
+        assertEq(am.getTargetFunctionRole(WIRE_TARGET, WIRE_SELECTOR), PUBLIC_ROLE, "the selector must be publicly callable");
     }
 
     /// @notice And the access manager's root-admin role, the escalation the filter most directly denies
