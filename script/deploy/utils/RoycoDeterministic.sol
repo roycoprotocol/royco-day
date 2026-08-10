@@ -36,12 +36,12 @@ library RoycoDeterministic {
         return create2Address(singletonSalt("ROYCO_CREATE3_DEPLOYER", _isTest), keccak256(type(RoycoCreate3Deployer).creationCode));
     }
 
+    /// @notice The salt for the factory proxy
+    bytes32 internal constant FACTORY_PROXY_SALT = hex"18ca7fd2b42a32780000000000000002000000000942129a0000000000000000";
+
     /// @notice Predicts the factory proxy `_deployer` stands up under the environment's salts
     function predictFactoryProxy(address _deployer, bool _isTest) internal pure returns (address) {
-        return
-            CREATE3.predictDeterministicAddress(
-                keccak256(abi.encode(_deployer, singletonSalt("ROYCO_FACTORY_PROXY", _isTest))), predictCreate3Deployer(_isTest)
-            );
+        return CREATE3.predictDeterministicAddress(keccak256(abi.encode(_deployer, FACTORY_PROXY_SALT)), predictCreate3Deployer(_isTest));
     }
 
     /// @dev The entry point initializes with no tranche configs: every market's flow through the factory at deployment

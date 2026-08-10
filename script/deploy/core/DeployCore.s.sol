@@ -62,7 +62,7 @@ contract DeployCoreComponent is DeployScriptBase, EnvConfig {
             deployWithSanityChecks(_singletonSalt("ROYCO_CREATE3_DEPLOYER"), type(RoycoCreate3Deployer).creationCode, false);
         _logDeploy("CREATE3 deployer   ", core.create3Deployer, create3DeployerExisted);
 
-        bytes32 factoryProxySalt = hex"18ca7fd2b42a32780000000000000002000000000942129a0000000000000000";
+        bytes32 factoryProxySalt = RoycoDeterministic.FACTORY_PROXY_SALT;
         core.factory = RoycoCreate3Deployer(core.create3Deployer).predict(_deployer, factoryProxySalt);
 
         // Predict the periphery singletons
