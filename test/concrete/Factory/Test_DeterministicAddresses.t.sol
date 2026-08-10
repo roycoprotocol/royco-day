@@ -22,12 +22,15 @@ contract Test_DeterministicAddresses is Test {
     /// @dev The test harness deployer, `vm.createWallet("DEPLOYER")` (private key keccak256("DEPLOYER")).
     address internal constant TEST_HARNESS_DEPLOYER = 0x3A383B39c10856a75B9E3f6eda6fCC8fC3334050;
 
-    // Captured 2026-08-06 from the pre-split monolith (TEST_SALT_SUFFIX = "_TEST_3243241421")
-    address internal constant PROD_FACTORY = 0xa093c0EbD81d1350a8bb8cD11d273A38cF45f390;
-    address internal constant LOCAL_HARNESS_FACTORY = 0xDed778B5bB6B3a3bA77F93220188d660D711Bf65;
-    address internal constant TEST_ENV_FACTORY = 0xD1FC1d1502f4ad42f0E7a508485C04e91a1bF76c;
+    // Recaptured 2026-08-10: the factory-proxy salt became the vanity-mined `RoycoDeterministic.FACTORY_PROXY_SALT`
+    // (leading-`a` prod factory), which moved every factory prediction and the entry point (its impl embeds the
+    // factory). The AccessManager and market syncer derive without the factory, so they did not move.
+    // (TEST_SALT_SUFFIX = "_TEST_3243241421")
+    address internal constant PROD_FACTORY = 0xaaaaaAAAb6550bdC14C45B40cF37dd29E75691E2;
+    address internal constant LOCAL_HARNESS_FACTORY = 0x612D1aa4a6156C7735B1A219BbCEA9417Db8d316;
+    address internal constant TEST_ENV_FACTORY = 0x751156E1522D8F1f61A31aA43aE3Dac842B1c688;
     address internal constant PROD_ACCESS_MANAGER = 0xeF31d0A3a178f575380bA2e72494a41A9B44a0F4;
-    address internal constant PROD_ENTRY_POINT = 0x4E29Cf4C21503D54BA271Dc016d63f2954800B49;
+    address internal constant PROD_ENTRY_POINT = 0x74Af69cbB2Aa3aD942AeCa9D42487E6A09a5248d;
     address internal constant PROD_MARKET_SYNCER = 0x538f9993F8719BfaF3c1bc2351c209b99f2319A2;
 
     function test_Canary_FactoryPredictionsUnchanged() public view {

@@ -27,6 +27,9 @@ abstract contract DayMarketRegistryBase is EnvConfig {
     string public constant SRROYUSDC = "srRoyUSDC";
     string public constant FALCONX = "FalconX";
     string public constant APYX = "APYX";
+    string public constant DMG = "DMG";
+    string public constant DUSD = "DUSD";
+    string public constant SUSDAI = "sUSDai";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STORAGE
@@ -50,7 +53,7 @@ abstract contract DayMarketRegistryBase is EnvConfig {
     mapping(bytes32 marketNameHash => mapping(address factory => bytes32 marketId)) internal _marketIds;
 
     /// @notice The production factory the pre-mined seeds were mined against (pinned by Test_DeterministicAddresses)
-    address internal constant PROD_FACTORY = 0xa093c0EbD81d1350a8bb8cD11d273A38cF45f390;
+    address internal constant PROD_FACTORY = 0xaaaaaAAAb6550bdC14C45B40cF37dd29E75691E2;
 
     /// @notice Registers the pre-mined marketId seeds, keyed by the factory address each was mined against
     function _initializeMinedMarketIds() internal {
@@ -92,45 +95,42 @@ abstract contract DayMarketRegistryBase is EnvConfig {
         return _minCoverageWAD.mulDiv(WAD, _coverageRemainingWAD, Math.Rounding.Floor);
     }
 
-    /// @dev The srRoyUSDC pool's E-CLP curve (price band [0.9795, 1.0001], 45° rotation, lambda 300), which the sheet
-    ///      markets deliberately share.
-    function _srRoyUsdcEclpParams() internal pure returns (IGyroECLPPool.EclpParams memory) {
+    /// @dev The exit-liquidity-prioritized E-CLP curve (price band [0.98, 1.0003], 45° rotation, lambda 250): the tight
+    ///      band caps the discount at which senior shares can exit through the pool. Every market deliberately
+    ///      shares it.
+    function _exitLiquidityPrioritizedEclpParams() internal pure returns (IGyroECLPPool.EclpParams memory) {
         return IGyroECLPPool.EclpParams({
-            alpha: 979_500_000_000_000_000,
-            beta: 1_000_100_000_000_000_000,
+            alpha: 980_000_000_000_000_000,
+            beta: 1_000_300_000_000_000_000,
             c: 707_106_781_186_547_524,
             s: 707_106_781_186_547_524,
-            lambda: 300_000_000_000_000_000_000
+            lambda: 250_000_000_000_000_000_000
         });
     }
 
-    /// @dev The high-precision derived params matching `_srRoyUsdcEclpParams`.
-    function _srRoyUsdcDerivedEclpParams() internal pure returns (IGyroECLPPool.DerivedEclpParams memory) {
+    /// @dev The high-precision derived params matching `_exitLiquidityPrioritizedEclpParams`.
+    function _exitLiquidityPrioritizedDerivedEclpParams() internal pure returns (IGyroECLPPool.DerivedEclpParams memory) {
         return IGyroECLPPool.DerivedEclpParams({
-            tauAlpha: IGyroECLPPool.Vector2({ x: -95_190_609_145_778_628_634_003_067_669_167_913_840, y: 30_638_993_626_677_852_907_481_149_992_051_688_690 }),
-            tauBeta: IGyroECLPPool.Vector2({ x: 1_499_756_307_523_889_459_999_505_839_090_567_732, y: 99_988_753_022_617_710_298_167_054_292_168_150_721 }),
-            u: 48_345_182_726_651_258_992_189_497_512_372_871_627,
-            v: 65_313_873_324_647_781_528_773_906_086_902_197_476,
-            w: 34_674_879_697_969_928_656_029_992_909_950_847_655,
-            z: -46_845_426_419_127_369_533_890_353_984_596_464_770,
+            tauAlpha: IGyroECLPPool.Vector2({ x: -92_975_357_432_315_416_605_491_371_255_356_493_443, y: 36_818_241_543_196_904_975_774_583_017_121_171_403 }),
+            tauBeta: IGyroECLPPool.Vector2({ x: 3_746_804_827_358_009_532_998_249_894_673_148_143, y: 99_929_782_615_523_019_584_751_990_190_862_643_080 }),
+            u: 48_361_081_129_836_713_014_414_996_374_502_815_654,
+            v: 68_374_012_079_359_962_202_743_630_490_639_666_742,
+            w: 31_555_770_536_163_057_268_712_062_638_611_327_323,
+            z: -44_614_276_302_478_703_485_664_720_423_548_546_517,
             dSq: 99_999_999_999_999_999_886_624_093_342_106_115_200
         });
     }
 
-    /// @dev The srRoyUSDC market's senior tranche and kernel under the CURRENT test-salt deployment: the sheet
-    ///      markets pair against this ST with the srRoyUSDC KERNEL as the leg's rate provider. RE-DERIVE both for
-    ///      any other environment or salt — they are deployment-specific addresses.
-    address internal constant SRROYUSDC_SENIOR_TRANCHE = 0x8246872B500ac07eD372aE4df9389687aA018853;
-    address internal constant SRROYUSDC_KERNEL = 0x5ab0d3845b937C136DE156981C80811159C0fD7a;
+    /// @dev The srRoyUSDC market's senior tranche and kernel
+    address internal constant SRROYUSDC_SENIOR_TRANCHE = address(0); // TODO
+    address internal constant SRROYUSDC_KERNEL = address(0); // TODO
 
     /// @notice The default entry point config a tranche is enabled with at market deployment
-    /// @dev The collateral asset oracle gate starts disabled and is armed post-deployment; requests get a finite
-    ///      execution window (one delay-length each) after which they may only be cancelled
     function _defaultEntryPointTrancheConfig() internal pure returns (IRoycoDayEntryPoint.TrancheConfig memory) {
         return IRoycoDayEntryPoint.TrancheConfig({
             enabled: true,
             depositDelaySeconds: 5 minutes,
-            depositExpirySeconds: 5 minutes,
+            depositExpirySeconds: 24 hours,
             redemptionDelaySeconds: 24 hours,
             redemptionExpirySeconds: 24 hours,
             gateByOracleUpdate: false

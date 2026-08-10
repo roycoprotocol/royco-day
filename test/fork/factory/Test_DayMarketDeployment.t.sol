@@ -20,14 +20,15 @@ import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/Royco
 import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
+import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
+    ADMIN_BLACKLIST_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
-    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
@@ -390,6 +391,26 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         );
     }
 
+    /// @notice The blacklist proxy carries the full gated surface every AM-managed proxy does: its admin functions
+    ///         on ADMIN_BLACKLIST_ROLE, and the protocol-wide pause/unpause/upgrade trio — without which those
+    ///         selectors would fall through to ADMIN_ROLE only, cutting the pause multisig and the upgrade pipeline
+    ///         out of the blacklist entirely
+    function test_Auth_BlacklistFullSurfaceBound() public view {
+        address bl = address(BLACKLIST);
+        // The deployment initializes the sanctions list to mainnet's canonical Chainalysis oracle
+        assertEq(RoycoBlacklist(bl).getSanctionsList(), 0x40C57923924B5c5c5455c48D93317139ADDaC8fb, "sanctions list must be wired at deployment");
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, RoycoBlacklist.blacklistAccounts.selector), ADMIN_BLACKLIST_ROLE, "blacklistAccounts role");
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, RoycoBlacklist.unblacklistAccounts.selector), ADMIN_BLACKLIST_ROLE, "unblacklistAccounts role");
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, RoycoBlacklist.setSanctionsList.selector), ADMIN_BLACKLIST_ROLE, "setSanctionsList role");
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE, "blacklist pause must answer to the pauser");
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(bl, IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE, "blacklist unpause must answer to the unpauser");
+        assertEq(
+            ACCESS_MANAGER.getTargetFunctionRole(bl, UUPSUpgradeable.upgradeToAndCall.selector),
+            ADMIN_UPGRADER_ROLE,
+            "blacklist upgrade must ride the standard upgrade pipeline"
+        );
+    }
+
     /// @notice The deploy script wires the entry point's full access model (previously the standalone entry point
     ///         deployment's Safe batch): public LP surface, role-gated config/fee/pause/upgrade selectors, and the
     ///         LP role grants the entry point needs to transact with the tranches
@@ -455,8 +476,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(KERNEL), IRoycoDayKernel.syncTrancheAccountingFor.selector, SYNC_ROLE);
         _assertRole(address(KERNEL), IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
 
-        // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE.
-        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
+        // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE; reinvestment is deliberately PUBLIC
+        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, PUBLIC_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setRoycoBlacklist.selector, ADMIN_MARKET_OPS_ROLE);
         _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
 

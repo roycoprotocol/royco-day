@@ -192,7 +192,8 @@ contract DeployMarket is DeployMarketComponent, DayMarketRegistry {
         deployMarket(cfg, getMarketId(marketName, UP.factory), vm.envUint("DEPLOYER_PRIVATE_KEY"));
     }
 
-    /// @dev The chain has ONE enabled Day template at a time; resolve it from the factory's registry
+    /// @dev The chain has ONE enabled Day template at a time; a standalone run pins it via the TEMPLATE_ADDRESS env
+    ///      var (the factory keeps no enumerable template registry to resolve it from)
     function _resolveEnabledTemplate() internal view returns (address) {
         return vm.envAddress("TEMPLATE_ADDRESS");
     }

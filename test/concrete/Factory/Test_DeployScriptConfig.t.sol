@@ -13,7 +13,6 @@ import {
     ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
-    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
@@ -63,10 +62,10 @@ contract Test_DeployScriptConfig is Test {
      *         after grants have already landed. This test guarantees pass 2 can never hit that revert
      */
     function test_GetRoleConfig_ResolvesEveryGeneratedRoleAssignment() public view {
-        // 19 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
+        // 18 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
         // The LP-role holder deliberately carries three LP roles (ST/JT/LPT), market ops carries the blacklist
         // admin role alongside its own, and the three co-hold fields (guardian veto, emergency oracle admin, LP
-        // operator) each add a second holder to an already-emitted role — 19 addresses fan out to 22 assignments.
+        // operator) each add a second holder to an already-emitted role — 18 addresses fan out to 21 assignments.
         RoleAssignmentAddresses memory addresses = RoleAssignmentAddresses({
             pauserAddress: address(0x1001),
             unpauserAddress: address(0x1002),
@@ -84,17 +83,16 @@ contract Test_DeployScriptConfig is Test {
             lpRoleHolderAddress: address(0x100D),
             balancerPoolManagerAddress: address(0x100E),
             marketOpsAddress: address(0x100F),
-            marketReinvestLiquidityPremiumAddress: address(0x1012),
             adminEntryPointAddress: address(0x1010),
             entryPointFeeCollectorAddress: address(0x1011)
         });
 
         RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
 
-        // Independently derived count: the address surface is 19 fields, of which the LP-role holder maps to the
+        // Independently derived count: the address surface is 18 fields, of which the LP-role holder maps to the
         // three LP roles, market ops maps to its own role plus the blacklist admin role, the three co-hold fields
-        // append one entry each, and the other 14 map one-to-one, so 14 + 3 + 2 + 3 = 22 assignments.
-        assertEq(assignments.length, 22, "one assignment per (role, assignee) pair: 14 one-to-one + 3 LP roles on the holder + 2 on market ops + 3 co-holds");
+        // append one entry each, and the other 13 map one-to-one, so 13 + 3 + 2 + 3 = 21 assignments.
+        assertEq(assignments.length, 21, "one assignment per (role, assignee) pair: 13 one-to-one + 3 LP roles on the holder + 2 on market ops + 3 co-holds");
 
         for (uint256 i; i < assignments.length; ++i) {
             uint64 role = assignments[i].role;
@@ -119,9 +117,9 @@ contract Test_DeployScriptConfig is Test {
             // pass 2 disagree about who administers the role.
             assertEq(assignments[i].roleAdminRole, cfg.adminRole, "assignment admin must match the resolved role config");
 
-            // Every assignment carries the role table's delay, except the emergency oracle co-hold (index 20),
+            // Every assignment carries the role table's delay, except the emergency oracle co-hold (index 19),
             // which is deliberately IMMEDIATE while WAY's parameter path stays at the table's 72h.
-            uint32 expectedDelay = i == 20 ? 0 : cfg.executionDelay;
+            uint32 expectedDelay = i == 19 ? 0 : cfg.executionDelay;
             assertEq(assignments[i].executionDelay, expectedDelay, "assignment delay must match the role table (or the co-hold exception)");
 
             // Hand-derived admin per role: the three LP roles sit under LP_ROLE_ADMIN_ROLE, and every other role
@@ -140,7 +138,7 @@ contract Test_DeployScriptConfig is Test {
         // pool manager, market ops + blacklist admin, entry point config + fee collection, liquidity-premium
         // reinvestment, plus the three kerchkoffs co-holds). Market deployment is PUBLIC, so no deployer role
         // appears. Order-pinned so a silent drop or reorder is loud.
-        uint64[22] memory expectedRoles = [
+        uint64[21] memory expectedRoles = [
             ADMIN_PAUSER_ROLE,
             ADMIN_UPGRADER_ROLE,
             SYNC_ROLE,
@@ -159,8 +157,7 @@ contract Test_DeployScriptConfig is Test {
             ADMIN_BLACKLIST_ROLE,
             ADMIN_ENTRY_POINT_ROLE,
             ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
-            ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
-            // The kerchkoffs co-holds, appended at the tail: a second guardian (the veto multisig), the immediate
+                    // The kerchkoffs co-holds, appended at the tail: a second guardian (the veto multisig), the immediate
             // emergency oracle admin, and the LP-role operator
             GUARDIAN_ROLE,
             ADMIN_ORACLE_ROLE,
@@ -190,7 +187,6 @@ contract Test_DeployScriptConfig is Test {
         assertEq(a.adminEntryPointAddress, way, "entry point admin must be the proposer");
         assertEq(a.balancerPoolManagerAddress, way, "balancer pool manager must be the proposer");
         assertEq(a.marketOpsAddress, way, "market ops must be the proposer");
-        assertEq(a.marketReinvestLiquidityPremiumAddress, way, "reinvest retry knob must be the proposer");
         assertEq(a.syncRoleAddress, way, "sync must be the proposer");
 
         // ...but the proposer holds neither the pause lever nor either guardian seat

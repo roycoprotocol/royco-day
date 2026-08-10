@@ -45,7 +45,7 @@ abstract contract TemplateConfig is EnvConfig {
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18, // 45%
             lptYieldShareProtocolFeeWAD: 0.45e18, // 45%
-            poolSwapFeePercentage: 5e14, // 5 bps
+            poolSwapFeePercentage: 10e14, // 10 bps
             chargeYieldFeeOnSeniorTrancheShares: false,
             chargeYieldFeeOnQuoteAsset: false
         });

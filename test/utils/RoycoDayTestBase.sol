@@ -68,6 +68,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     Vm.Wallet internal ORACLE_EMERGENCY_ADMIN;
     address internal ORACLE_EMERGENCY_ADMIN_ADDRESS;
 
+    /// @dev Historic name: reinvestLiquidityPremium is PERMISSIONLESS (slippage-gated), this actor holds no role
     Vm.Wallet internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
     address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS;
 
@@ -159,10 +160,16 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         _setupFork();
         _setupWallets();
 
-        // Stand up the deployment pipeline components
-        BOOTSTRAP = new BootstrapChainComponent(false, address(0));
-        MARKET_REGISTRY = new DayMarketRegistry();
+        (BOOTSTRAP, MARKET_REGISTRY) = _deployPipelineComponents();
         _pinChainPolicyForTests();
+    }
+
+    /// @notice Stands up the pipeline components from build artifacts. `deployCode` keeps their creation code OUT
+    ///         of the test contract's own bytecode — embedding the orchestrator (which embeds every component
+    ///         script) plus the full market registry in each leaf overruns solc's per-contract tag budget
+    function _deployPipelineComponents() internal returns (BootstrapChainComponent bootstrap, DayMarketRegistry registry) {
+        bootstrap = BootstrapChainComponent(deployCode("BootstrapChain.s.sol:BootstrapChainComponent", abi.encode(false, address(0))));
+        registry = DayMarketRegistry(deployCode("DayMarketRegistry.sol:DayMarketRegistry"));
     }
 
     /// @notice Pins the chain-level policy these suites' reference math and actors assume, without touching the
@@ -223,17 +230,23 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     function _marketComponent() internal returns (DeployMarketComponent market) {
         CHAIN = BOOTSTRAP.bootstrap(DEPLOYER.privateKey);
 
-        new RenounceDeployerRolesComponent(CHAIN.accessManager).execute(BOOTSTRAP.factoryAdmin(false), !CHAIN.amExisted, DEPLOYER.privateKey);
+        RenounceDeployerRolesComponent(deployCode("RenounceDeployerRoles.s.sol:RenounceDeployerRolesComponent", abi.encode(CHAIN.accessManager)))
+            .execute(BOOTSTRAP.factoryAdmin(false), !CHAIN.amExisted, DEPLOYER.privateKey);
 
-        market = new DeployMarketComponent(
-            MarketUpstream({
-                accessManager: CHAIN.accessManager,
-                factory: CHAIN.factory,
-                entryPoint: CHAIN.entryPoint,
-                marketSyncer: CHAIN.marketSyncer,
-                roycoBlacklist: CHAIN.roycoBlacklist,
-                template: CHAIN.template
-            })
+        market = DeployMarketComponent(
+            deployCode(
+                "DeployMarket.s.sol:DeployMarketComponent",
+                abi.encode(
+                    MarketUpstream({
+                        accessManager: CHAIN.accessManager,
+                        factory: CHAIN.factory,
+                        entryPoint: CHAIN.entryPoint,
+                        marketSyncer: CHAIN.marketSyncer,
+                        roycoBlacklist: CHAIN.roycoBlacklist,
+                        template: CHAIN.template
+                    })
+                )
+            )
         );
     }
 
@@ -476,7 +489,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 lpRoleHolderAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
                 balancerPoolManagerAddress: KERNEL_ADMIN_ADDRESS,
                 marketOpsAddress: KERNEL_ADMIN_ADDRESS,
-                marketReinvestLiquidityPremiumAddress: MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS,
                 adminEntryPointAddress: KERNEL_ADMIN_ADDRESS,
                 entryPointFeeCollectorAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
             }));
