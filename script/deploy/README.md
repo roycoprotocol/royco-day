@@ -63,6 +63,13 @@ The role graph mirrors the kerchkoffs four-multisig model (canonical spec: the k
 
 No party can both schedule and cancel: WAY proposes, FNDN/FNDN_VETO veto, WAY_PAUSE pauses, only FNDN unpauses.
 
+## Live-chain remediation
+
+Chains bootstrapped BEFORE the blacklist's pause/unpause/upgrade bindings were added carry only its
+ADMIN_BLACKLIST_ROLE surface — those three selectors fall through to ADMIN_ROLE. On such chains, FNDN must
+execute three `setTargetFunctionRole` calls on the AccessManager (blacklist -> pause/PAUSER, unpause/UNPAUSER,
+upgradeToAndCall/UPGRADER) to bring the live topology in line with what `DeployBlacklist` now wires.
+
 ## Invariants
 
 - **Addresses are sacred.** Every salt preimage and prediction lives in `utils/RoycoDeterministic.sol` — the single

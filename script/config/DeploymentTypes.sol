@@ -66,7 +66,6 @@ struct RoleAssignmentAddresses {
     address lpRoleHolderAddress;
     address balancerPoolManagerAddress;
     address marketOpsAddress;
-    address marketReinvestLiquidityPremiumAddress;
     address adminEntryPointAddress;
     address entryPointFeeCollectorAddress;
 }

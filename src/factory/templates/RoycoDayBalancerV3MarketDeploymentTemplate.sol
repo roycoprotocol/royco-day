@@ -28,7 +28,6 @@ import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
-    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
@@ -36,6 +35,7 @@ import {
     BURNER_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
+    PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../Roles.sol";
@@ -684,7 +684,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         selectors[4] = IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector;
         roleIds[4] = ADMIN_KERNEL_ROLE;
         selectors[5] = IRoycoDayKernel.reinvestLiquidityPremium.selector;
-        roleIds[5] = ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE;
+        roleIds[5] = PUBLIC_ROLE;
         selectors[6] = IRoycoDayKernel.setRoycoBlacklist.selector;
         roleIds[6] = ADMIN_MARKET_OPS_ROLE;
         selectors[7] = IRoycoDayKernel.syncTrancheAccountingFor.selector;

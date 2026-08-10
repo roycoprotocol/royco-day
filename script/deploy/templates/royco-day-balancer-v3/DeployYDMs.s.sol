@@ -62,7 +62,7 @@ contract DeployYDMsComponent is DeployScriptBase {
 
         bool existed;
         (model, existed) = deployWithSanityChecks(
-            keccak256(abi.encodePacked("ROYCO_YDM_", _slotTag, uint8(_ydmType))),
+            keccak256(abi.encodePacked("ROYCO_YDM__", _slotTag, uint8(_ydmType))),
             abi.encodePacked(creationCode, YDMLib.ydmConstructorArgs(_ydmType, _targetUtilizationWAD)),
             false
         );

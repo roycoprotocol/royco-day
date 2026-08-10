@@ -3,39 +3,41 @@ pragma solidity ^0.8.28;
 
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IBaseTemplate } from "../../../../../src/interfaces/factory/IBaseTemplate.sol";
-import { AdaptiveCurveYDM_V2_Params, GyroECLPPoolParams, IdleCDOTranchePriceOracleParams, OracleType, YDMType } from "../../../../config/DeploymentTypes.sol";
+import { AdaptiveCurveYDM_V2_Params, GyroECLPPoolParams, MakinaSharePriceOracleParams, OracleType, YDMType } from "../../../../config/DeploymentTypes.sol";
 import { AccountantEconomics, CollateralOracleConfig, DayMarketConfig, KernelSettings, YDMSelection } from "../DayMarketTypes.sol";
 import { DayMarketRegistryBase } from "./DayMarketRegistryBase.sol";
 
-/// @title Market_FalconX
-/// @notice FalconX, per the market sheet: underlying 7.68%, min coverage 3%, min liquidity 10%, JT yield share 4.5%
-///         at target, LP yield share 9.1% at target, 7-day observation period, protected exit at 2.99% coverage
-///         remaining, 1% self-liquidation bonus. Monthly redemptions with 1-month notice. Collateral is the Pareto
-///         FalconX Prime Brokerage Vault AA tranche behind the composed virtual-price x USDC/USD oracle; the pool
-///         quotes in the srRoyUSDC senior tranche with the srRoyUSDC kernel as the leg's rate provider.
-abstract contract Market_FalconX is DayMarketRegistryBase {
-    function _initializeFalconXMarket() internal {
-        _dayMarketConfigs[FALCONX] = DayMarketConfig({
-            marketName: FALCONX,
+/// @title Market_DMG
+/// @notice DMG, the Makina mGLOBAL market. Economics MIRROR THE FALCONX SHEET ROW (DMG has no dedicated sheet row
+///         yet): min coverage 3%, min liquidity 10%, JT yield share 4.5% at target, LP yield share 9.1% at target,
+///         7-day fixed term, protected exit at 2.99% coverage remaining, 1% self-liquidation bonus. Collateral is the
+///         mGLOBAL machine share, priced machine->USDC via the machine's own accounting and USDC->NAV via the
+///         Chainlink USDC/USD feed; the pool quotes in the srRoyUSDC senior tranche with the srRoyUSDC kernel as the
+///         leg's rate provider.
+abstract contract Market_DMG is DayMarketRegistryBase {
+    function _initializeDmgMarket() internal {
+        _dayMarketConfigs[DMG] = DayMarketConfig({
+            marketName: DMG,
             chainId: 1,
-            stParams: IBaseTemplate.TrancheDeploymentParams({ name: "Senior FalconX", symbol: "srFalconX" }),
-            jtParams: IBaseTemplate.TrancheDeploymentParams({ name: "Junior FalconX", symbol: "jrFalconX" }),
-            lptParams: IBaseTemplate.TrancheDeploymentParams({ name: "Senior Liquidity FalconX", symbol: "slFalconX" }),
-            collateralAsset: 0xC26A6Fa2C37b38E549a4a1807543801Db684f99C,
+            stParams: IBaseTemplate.TrancheDeploymentParams({ name: "Senior Makina mGLOBAL", symbol: "srDMG" }),
+            jtParams: IBaseTemplate.TrancheDeploymentParams({ name: "Junior Makina mGLOBAL", symbol: "jrDMG" }),
+            lptParams: IBaseTemplate.TrancheDeploymentParams({ name: "Senior Liquidity Makina mGLOBAL", symbol: "slDMG" }),
+            // The mGLOBAL machine share token (18 decimals), per the dawn DMG market
+            collateralAsset: 0x761C3B16a5Afdd7A1869C4B979cFF3383d5Fe98B,
             oracle: CollateralOracleConfig({
                 deployed: address(0),
-                oracleType: OracleType.IdleCDOTranchePrice,
+                oracleType: OracleType.MakinaSharePrice,
                 specificParams: abi.encode(
-                    IdleCDOTranchePriceOracleParams({
-                        idleCDO: 0x433D5B175148dA32Ffe1e1A37a939E1b7e79be4d,
-                        underlyingTokenToNavAssetFeed: 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6,
-                        minDeviationWAD: 0.001e18,
-                        lastUpdate: 1_785_769_583,
-                        // Per-hop thresholds, each sized to ITS source: the Chainlink USDC/USD leg keeps its tight 48h
-                        // gate (24h heartbeat, doubled), while the virtual-price clock gets 8 days for Pareto's ~WEEKLY
-                        // cadence — the slow CDO no longer loosens the feed
-                        chainlinkOracleStalenessThresholdSeconds: 48 hours,
-                        cdoPriceStalenessThresholdSeconds: 8 days
+                    MakinaSharePriceOracleParams({
+                        // The mGLOBAL Makina machine; its convertToAssets() quotes in USDC (6 decimals)
+                        makinaMachine: 0xC4fFab8540AC27E40D4e2930517aA711e9C00c5b,
+                        // Chainlink USDC/USD (https://data.chain.link/feeds/ethereum/mainnet/usdc-usd)
+                        accountingAssetToNavAssetFeed: 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6,
+                        chainlinkOracleStalenessThresholdSeconds: 48 hours, // USDC/USD heartbeat is 24h; doubled for safety
+                        // The mGLOBAL machine runs global accounting roughly MONTHLY (observed 33-day gap between
+                        // updates on-chain); 45 days covers that cadence with margin. Pricing therefore tolerates
+                        // month-old machine NAV — inherent to this collateral's accounting rhythm
+                        makinaAccountingStalenessThresholdSeconds: 45 days
                     })
                 )
             }),
@@ -60,10 +62,11 @@ abstract contract Market_FalconX is DayMarketRegistryBase {
                 maxJTYieldShareWAD: 0.5e18,
                 maxLPTYieldShareWAD: 0.5e18,
                 fixedTermDurationSeconds: 7 days,
-                dustTolerance: 5 * 10 ** 12
+                dustTolerance: 5 * 10 ** 12 // the machine accounts in USDC (6 decimals): 5 * 10^(18-6), mirrors dawn
             }),
             kernel: KernelSettings({
                 stSelfLiquidationBonusWAD: 0.01e18,
+                // Ethereum mainnet has no L2 sequencer, so the sequencer-uptime check is disabled
                 sequencerUptimeFeed: address(0),
                 gracePeriodSeconds: 0,
                 kernelSpecificParams: abi.encode(
@@ -73,8 +76,8 @@ abstract contract Market_FalconX is DayMarketRegistryBase {
                 )
             }),
             pool: GyroECLPPoolParams({
-                name: "Senior FalconX / Senior SrRoyUSDC",
-                symbol: "srFalconX/srsrRoyUSDC",
+                name: "Senior Makina mGLOBAL / Senior SrRoyUSDC",
+                symbol: "srDMG/srsrRoyUSDC",
                 eclpParams: _exitLiquidityPrioritizedEclpParams(),
                 derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
                 quoteAsset: SRROYUSDC_SENIOR_TRANCHE,

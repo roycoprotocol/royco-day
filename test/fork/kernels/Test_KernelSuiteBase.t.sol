@@ -11,9 +11,9 @@ import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/inte
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import { BootstrapChainComponent } from "../../../script/deploy/BootstrapChain.s.sol";
 import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
-import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BLACKLIST_ROLE,
@@ -149,8 +149,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         }
 
         _setupWallets();
-        BOOTSTRAP = new BootstrapChainComponent(false, address(0));
-        MARKET_REGISTRY = new DayMarketRegistry();
+        (BOOTSTRAP, MARKET_REGISTRY) = _deployPipelineComponents();
         _pinChainPolicyForTests();
 
         // Deploy the market end-to-end through the real script (concrete test selects the config by name).
@@ -4605,8 +4604,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         JT.redeem(1, outsider, outsider);
         vm.expectRevert(unauthorizedError);
         KERNEL.syncTrancheAccounting();
-        vm.expectRevert(unauthorizedError);
-        KERNEL.reinvestLiquidityPremium(1);
+        // reinvestLiquidityPremium is deliberately absent: it is bound to PUBLIC_ROLE (the slippage gate is the defense)
         vm.expectRevert(unauthorizedError);
         KERNEL.setProtocolFeeRecipient(outsider);
         vm.expectRevert(unauthorizedError);

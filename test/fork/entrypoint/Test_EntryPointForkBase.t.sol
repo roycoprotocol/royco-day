@@ -7,10 +7,10 @@ import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import { BootstrapChainComponent } from "../../../script/deploy/BootstrapChain.s.sol";
 import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
 import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
-import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import { ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, JT_LP_ROLE, LPT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
@@ -95,8 +95,7 @@ abstract contract Test_EntryPointForkBase is RoycoDayTestBase {
         vm.createSelectFork(rpc, _forkBlockNumber());
 
         _setupWallets();
-        BOOTSTRAP = new BootstrapChainComponent(false, address(0));
-        MARKET_REGISTRY = new DayMarketRegistry();
+        (BOOTSTRAP, MARKET_REGISTRY) = _deployPipelineComponents();
         _pinChainPolicyForTests();
 
         // The template pulls the genesis pool seed from the configured funder. Repoint the funder at the broadcasting
