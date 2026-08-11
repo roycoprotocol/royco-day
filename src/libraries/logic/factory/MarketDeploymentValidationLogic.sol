@@ -119,8 +119,8 @@ library MarketDeploymentValidationLogic {
         // The collateral asset oracle is mandatory; the kernel separately pins that it prices THIS collateral asset
         _requireContract(params.collateralAssetOracle);
 
-        // The blacklist is mandatory and per-market: every deployer supplies their own pre-deployed instance
-        _requireContract(params.roycoBlacklist);
+        // The blacklist is optional and per-market: every deployer supplies their own pre-deployed instance
+        if (params.roycoBlacklist != address(0)) _requireContract(params.roycoBlacklist);
 
         // Balancer rejects a leg that pays yield fees without a rate provider to measure them against.
         require(!_chargeYieldFeeOnQuoteAsset || params.poolCreationParams.quoteAssetRateProvider != address(0), QUOTE_RATE_PROVIDER_REQUIRED_FOR_YIELD_FEE());

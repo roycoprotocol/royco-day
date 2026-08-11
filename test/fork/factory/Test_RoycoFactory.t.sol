@@ -1037,6 +1037,29 @@ contract Test_RoycoFactory is Test {
         _expectParamsRevert(p, MarketDeploymentValidationLogic.MARKET_PARAMETER_HAS_NO_CODE.selector);
     }
 
+    /// The per-market blacklist is OPTIONAL (a null address disables screening), but a NON-null one must be a live contract
+    function test_RevertIf_RoycoBlacklistIsNonNullButHasNoCode() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.roycoBlacklist = makeAddr("NOT_A_BLACKLIST");
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.MARKET_PARAMETER_HAS_NO_CODE.selector);
+    }
+
+    /// The per-market blacklist is optional: a market may deploy with none, in which case the kernel wires the null
+    /// address and screening is simply disabled for that market (the kernel's BlacklistLogic null-guards every screen)
+    function test_ExecuteMarketDeployment_BlacklistIsOptional() external {
+        _register();
+
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
+        cfg.roycoBlacklist = address(0); // deploy with no blacklist
+        _fundPoolSeed(cfg);
+        bytes memory p = abi.encode(marketBuilder.buildMarketParams(cfg, MARKET_ID_A, address(factory), DEPLOYER));
+
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
+        assertEq(IRoycoDayKernel(r.kernel).getState().roycoBlacklist, address(0), "a market with no blacklist wires the null address");
+    }
+
 
     function test_RevertIf_TrancheNameIsEmpty() external {
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
