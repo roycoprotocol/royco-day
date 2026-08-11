@@ -22,16 +22,16 @@ contract Test_DeterministicAddresses is Test {
     /// @dev The test harness deployer, `vm.createWallet("DEPLOYER")` (private key keccak256("DEPLOYER")).
     address internal constant TEST_HARNESS_DEPLOYER = 0x3A383B39c10856a75B9E3f6eda6fCC8fC3334050;
 
-    // Recaptured 2026-08-10: the factory-proxy salt became the vanity-mined `RoycoDeterministic.FACTORY_PROXY_SALT`
-    // (leading-`a` prod factory), which moved every factory prediction and the entry point (its impl embeds the
-    // factory). The AccessManager and market syncer derive without the factory, so they did not move.
+    // Recaptured 2026-08-11: the prod namespace bumped to PROD_SALT_SUFFIX = "_PROD_V1.0.1" AND the factory-proxy
+    // salt was re-mined to the vanity `RoycoDeterministic.FACTORY_PROXY_SALT` (leading-`a` prod factory). The suffix
+    // bump moves the AccessManager/create3-deployer/periphery too, so every prod address here is fresh.
     // (TEST_SALT_SUFFIX = "_TEST_3243241421")
-    address internal constant PROD_FACTORY = 0xaaaaaAAAb6550bdC14C45B40cF37dd29E75691E2;
-    address internal constant LOCAL_HARNESS_FACTORY = 0x612D1aa4a6156C7735B1A219BbCEA9417Db8d316;
-    address internal constant TEST_ENV_FACTORY = 0x751156E1522D8F1f61A31aA43aE3Dac842B1c688;
-    address internal constant PROD_ACCESS_MANAGER = 0xeF31d0A3a178f575380bA2e72494a41A9B44a0F4;
-    address internal constant PROD_ENTRY_POINT = 0x74Af69cbB2Aa3aD942AeCa9D42487E6A09a5248d;
-    address internal constant PROD_MARKET_SYNCER = 0x538f9993F8719BfaF3c1bc2351c209b99f2319A2;
+    address internal constant PROD_FACTORY = 0xaaAaaaaa01Af9426C2eB6FeBc61DcD7C302cc45F;
+    address internal constant LOCAL_HARNESS_FACTORY = 0x7C2329FC234D01bF780d060120b7F0a028B604C6;
+    address internal constant TEST_ENV_FACTORY = 0x446481e730375410d1D9367B47D3eB07db300B27;
+    address internal constant PROD_ACCESS_MANAGER = 0x87aED46566cb28c8375cfcC9971090882A0fB12e;
+    address internal constant PROD_ENTRY_POINT = 0x1e4B6f20377272CfCAE002b94E896105cB48F372;
+    address internal constant PROD_MARKET_SYNCER = 0x6776ae9C857bAD5d012d7e085579d0a2DA504e7a;
 
     function test_Canary_FactoryPredictionsUnchanged() public view {
         assertEq(RoycoDeterministic.predictFactoryProxy(DEPLOYER, false), PROD_FACTORY, "prod factory prediction drifted");

@@ -20,7 +20,7 @@
 //!
 //! The create3 deployer for an environment can be computed without a chain:
 //!   cast create2 --deployer 0x4e59b44847b379578588920cA78FbF26c0B4956C \
-//!     --salt $(cast keccak "ROYCO_CREATE3_DEPLOYER_PROD") \
+//!     --salt $(cast keccak "ROYCO_CREATE3_DEPLOYER_PROD_V1.0.1") \   // suffix = RoycoDeterministic.PROD_SALT_SUFFIX
 //!     --init-code $(forge inspect src/factory/RoycoCreate3Deployer.sol:RoycoCreate3Deployer bytecode)
 
 use std::process::exit;

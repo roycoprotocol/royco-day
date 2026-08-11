@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
+import { ReentrancyGuard } from "../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import { IERC20, SafeERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { SafeCast } from "../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
@@ -32,7 +33,7 @@ import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
  * @dev Partial execution is supported, allowing requests to be fulfilled incrementally as tranche capacity is freed up
  * @dev Screens interacting accounts against the market's blacklist, covering the request operators and every value flow that settles outside the kernel's own screened paths
  */
-contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
+contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint, ReentrancyGuard {
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
     using RoycoUnitsMath for NAV_UNIT;
@@ -82,6 +83,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
     )
         external
         override(IRoycoDayEntryPoint)
+        nonReentrant
         whenNotPaused
         restricted
         returns (uint256 requestNonce, uint32 executableAtTimestamp, uint32 expiresAtTimestamp)
@@ -159,6 +161,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
     )
         external
         override(IRoycoDayEntryPoint)
+        nonReentrant
         whenNotPaused
         restricted
         returns (uint256 trancheSharesMinted)
@@ -225,7 +228,16 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
-    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoDayEntryPoint) whenNotPaused restricted {
+    function cancelDepositRequests(
+        uint256[] calldata _requestNonces,
+        address _receiver
+    )
+        external
+        override(IRoycoDayEntryPoint)
+        nonReentrant
+        whenNotPaused
+        restricted
+    {
         // Execute the user specified deposit request cancellations
         uint256 numRequestsToCancel = _requestNonces.length;
         for (uint256 i = 0; i < numRequestsToCancel; ++i) {
@@ -234,7 +246,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
-    function cancelDepositRequest(uint256 _requestNonce, address _receiver) external override(IRoycoDayEntryPoint) whenNotPaused restricted {
+    function cancelDepositRequest(uint256 _requestNonce, address _receiver) external override(IRoycoDayEntryPoint) nonReentrant whenNotPaused restricted {
         _cancelDepositRequest(_requestNonce, _receiver);
     }
 
@@ -256,6 +268,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
         override(IRoycoDayEntryPoint)
         whenNotPaused
         restricted
+        nonReentrant
         returns (uint256 requestNonce, uint32 executableAtTimestamp, uint32 expiresAtTimestamp)
     {
         // Validate the redemption request
@@ -337,6 +350,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
     )
         external
         override(IRoycoDayEntryPoint)
+        nonReentrant
         whenNotPaused
         restricted
         returns (AssetClaims memory userClaims, uint256 quoteAssets)
@@ -439,7 +453,16 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
-    function cancelRedemptionRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoDayEntryPoint) whenNotPaused restricted {
+    function cancelRedemptionRequests(
+        uint256[] calldata _requestNonces,
+        address _receiver
+    )
+        external
+        override(IRoycoDayEntryPoint)
+        nonReentrant
+        whenNotPaused
+        restricted
+    {
         // Execute the user specified redemption request cancellations
         uint256 numRequestsToCancel = _requestNonces.length;
         for (uint256 i = 0; i < numRequestsToCancel; ++i) {
@@ -448,12 +471,18 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
-    function cancelRedemptionRequest(uint256 _requestNonce, address _receiver) external override(IRoycoDayEntryPoint) whenNotPaused restricted {
+    function cancelRedemptionRequest(uint256 _requestNonce, address _receiver) external override(IRoycoDayEntryPoint) nonReentrant whenNotPaused restricted {
         _cancelRedemptionRequest(_requestNonce, _receiver);
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
-    function pokeCollateralAssetOracle(address _tranche) external override(IRoycoDayEntryPoint) whenNotPaused returns (uint32 lastUpdatedAtTimestamp) {
+    function pokeCollateralAssetOracle(address _tranche)
+        external
+        override(IRoycoDayEntryPoint)
+        nonReentrant
+        whenNotPaused
+        returns (uint32 lastUpdatedAtTimestamp)
+    {
         return _pokeOracle(_tranche, _getRoycoDayEntryPointStorage().trancheToConfig[_tranche]);
     }
 
@@ -464,7 +493,15 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
      */
 
     /// @inheritdoc IRoycoDayEntryPoint
-    function modifyTrancheConfigs(address[] calldata _tranches, TrancheConfig[] calldata _configs) external override(IRoycoDayEntryPoint) restricted {
+    function modifyTrancheConfigs(
+        address[] calldata _tranches,
+        TrancheConfig[] calldata _configs
+    )
+        external
+        override(IRoycoDayEntryPoint)
+        nonReentrant
+        restricted
+    {
         _modifyTrancheConfigs(_tranches, _configs);
     }
 
@@ -476,6 +513,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint {
     )
         external
         override(IRoycoDayEntryPoint)
+        nonReentrant
         restricted
     {
         require(_receiver != address(0), NULL_ADDRESS());

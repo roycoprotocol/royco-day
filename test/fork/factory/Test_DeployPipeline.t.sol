@@ -23,7 +23,7 @@ contract Test_DeployPipeline is Test {
     uint256 internal constant FORK_BLOCK = 25_400_000;
 
     /// @dev The local test-harness deployer — its predicted factory is pinned by Test_DeterministicAddresses
-    address internal constant LOCAL_HARNESS_FACTORY = 0x612D1aa4a6156C7735B1A219BbCEA9417Db8d316;
+    address internal constant LOCAL_HARNESS_FACTORY = 0x7C2329FC234D01bF780d060120b7F0a028B604C6;
 
     Vm.Wallet internal DEPLOYER;
 
