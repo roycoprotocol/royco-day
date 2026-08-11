@@ -490,6 +490,26 @@ contract Test_RoycoFactory is Test {
         assertEq(stored.baseConfig.gateByOracleUpdate, _expected.gateByOracleUpdate, string.concat(_ctx, ": oracle enabled"));
     }
 
+    /// @notice The template enforces a fixed 24h entry-point redemption-delay floor and REVERTS any market whose
+    ///         per-tranche redemption delay is below it — so a permissionless deployer cannot register a faster-settling market
+    function test_MinRedemptionDelay_RejectsConfigsBelowTheConstantFloor() external {
+        _register();
+        assertEq(template.MIN_REDEMPTION_DELAY_SECONDS(), 24 hours, "the redemption-delay floor constant must be 24h");
+
+        // Ask for a 1h redemption delay on the senior tranche — below the floor
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
+        cfg.stEntryPointConfig.redemptionDelaySeconds = 1 hours;
+        _fundPoolSeed(cfg);
+        bytes memory p = abi.encode(marketBuilder.buildMarketParams(cfg, MARKET_ID_A, address(factory), DEPLOYER));
+
+        vm.prank(DEPLOYER);
+        vm.expectRevert(
+            abi.encodeWithSelector(RoycoDayBalancerV3MarketDeploymentTemplate.REDEMPTION_DELAY_BELOW_MIN.selector, uint24(1 hours), uint24(24 hours))
+        );
+        factory.executeMarketDeployment(address(template), p);
+    }
+
     /// @notice Only the factory may drive the periphery configuration hook
     function test_RevertIf_StrangerCallspostMarketRegistration() external {
         _register();

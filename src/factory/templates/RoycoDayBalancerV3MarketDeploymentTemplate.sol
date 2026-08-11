@@ -211,6 +211,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     /// @notice Thrown when the configured pool swap fee falls outside the band the Gyro E-CLP pool accepts
     error INVALID_SWAP_FEE(uint256 swapFeePercentage);
 
+    /// @notice Thrown when a market's per-tranche entry-point redemption delay is below the template's floor
+    error REDEMPTION_DELAY_BELOW_MIN(uint24 suppliedRedemptionDelaySeconds, uint24 minRedemptionDelaySeconds);
+
     /// @notice Emitted when the Balancer pool policy every future market is created with changes
     event BalancerPoolConfigUpdated(BalancerPoolConfig config);
 
@@ -223,6 +226,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
 
     /// @notice The address the dead shares are locked at
     address public constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+
+    /// @notice The minimum redemption delay every market's tranches must meet at deployment
+    uint24 public constant MIN_REDEMPTION_DELAY_SECONDS = 24 hours;
 
     /// @notice The lowest swap fee a Gyro E-CLP pool accepts
     uint64 internal constant MIN_POOL_SWAP_FEE_WAD = 1e12;
@@ -443,6 +449,14 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         (tranches[0], configs[0]) = (_result.seniorTranche, params.entryPointTrancheConfigs.st);
         (tranches[1], configs[1]) = (_result.juniorTranche, params.entryPointTrancheConfigs.jt);
         (tranches[2], configs[2]) = (_result.liquidityProviderTranche, params.entryPointTrancheConfigs.lpt);
+
+        // Enforce the minimum redemption delay for every tranche.
+        for (uint256 i; i < configs.length; ++i) {
+            require(
+                configs[i].redemptionDelaySeconds >= MIN_REDEMPTION_DELAY_SECONDS,
+                REDEMPTION_DELAY_BELOW_MIN(configs[i].redemptionDelaySeconds, MIN_REDEMPTION_DELAY_SECONDS)
+            );
+        }
 
         // Configure the market's tranches on the entry point and register its kernel on the syncer
         ROYCO_FACTORY.configureMarketPeriphery(tranches, configs, _result.kernel);
