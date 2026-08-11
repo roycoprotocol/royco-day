@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IERC20, SafeERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
-import { ReentrancyGuard } from "../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import { ReentrancyGuardTransient } from "../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { SafeCast } from "../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
 import { RoycoUUPSBase } from "../base/RoycoUUPSBase.sol";
@@ -33,7 +33,7 @@ import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
  * @dev Partial execution is supported, allowing requests to be fulfilled incrementally as tranche capacity is freed up
  * @dev Screens interacting accounts against the market's blacklist, covering the request operators and every value flow that settles outside the kernel's own screened paths
  */
-contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint, ReentrancyGuard {
+contract RoycoDayEntryPoint is RoycoUUPSBase, ReentrancyGuardTransient, IRoycoDayEntryPoint {
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
     using RoycoUnitsMath for NAV_UNIT;
