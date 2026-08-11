@@ -481,6 +481,7 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, ReentrancyGuardTransient, IRoycoDa
         override(IRoycoDayEntryPoint)
         nonReentrant
         whenNotPaused
+        restricted
         returns (uint32 lastUpdatedAtTimestamp)
     {
         return _pokeOracle(_tranche, _getRoycoDayEntryPointStorage().trancheToConfig[_tranche]);

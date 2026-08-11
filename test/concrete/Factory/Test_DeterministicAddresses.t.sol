@@ -30,7 +30,7 @@ contract Test_DeterministicAddresses is Test {
     address internal constant LOCAL_HARNESS_FACTORY = 0x7C2329FC234D01bF780d060120b7F0a028B604C6;
     address internal constant TEST_ENV_FACTORY = 0x446481e730375410d1D9367B47D3eB07db300B27;
     address internal constant PROD_ACCESS_MANAGER = 0x87aED46566cb28c8375cfcC9971090882A0fB12e;
-    address internal constant PROD_ENTRY_POINT = 0xFcD773255335a719C69b56f87a9Dd59B1C78892A;
+    address internal constant PROD_ENTRY_POINT = 0x30a4D4C600b043d3358B861ff690B3c1dD3FED02;
     address internal constant PROD_MARKET_SYNCER = 0x6776ae9C857bAD5d012d7e085579d0a2DA504e7a;
 
     function test_Canary_FactoryPredictionsUnchanged() public view {

@@ -12,7 +12,7 @@ import { ISanctionsList } from "../interfaces/external/chainalysis/ISanctionsLis
  * @notice Manages account blacklisting and Chainalysis sanctions screening for a Royco market
  * @notice Queried by the market's kernel for any operations involving preview or state-mutating asset transfers between accounts
  */
-contract RoycoBlacklist is IRoycoBlacklist, Ownable2Step {
+contract RoycoBlacklist is Ownable2Step, IRoycoBlacklist {
     /// @notice The Chainalysis maintained sanctions list used to screen accounts (the null address if unused)
     address private _chainalysisSanctionsList;
 
