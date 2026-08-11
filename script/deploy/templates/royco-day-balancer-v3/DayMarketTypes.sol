@@ -72,6 +72,8 @@ struct DayMarketConfig {
     // Collateral + its pricing stack
     address collateralAsset;
     CollateralOracleConfig oracle;
+    // The market's pre-deployed blacklist
+    address roycoBlacklist;
     // Economics
     AccountantEconomics accountant;
     KernelSettings kernel;

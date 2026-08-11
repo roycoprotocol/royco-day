@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -43,9 +42,7 @@ contract Test_EntryPointBlacklistScreening is EntryPointTestBase {
     /// @dev External self-call so the proxy construction gets its own call frame, keeping setUp under via-ir's stack limit
     function deployBlacklistProxyForFixture() external {
         require(msg.sender == address(this), "fixture-internal helper");
-        address blacklistImpl = address(new RoycoBlacklist());
-        bytes memory blacklistInitData = abi.encodeCall(RoycoBlacklist.initialize, (address(accessManager), address(0), new address[](0)));
-        roycoBlacklist = RoycoBlacklist(address(new ERC1967Proxy(blacklistImpl, blacklistInitData)));
+        roycoBlacklist = new RoycoBlacklist(address(this), address(0), new address[](0));
     }
 
     /// @dev Wires the blacklist into the market's kernel, the entry point resolves it live through the kernel on every screen

@@ -28,7 +28,6 @@ uint64 constant BURNER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_BURNER_
 // KERNEL ROLES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-uint64 constant SYNC_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_SYNC_ROLE"))));
 uint64 constant ADMIN_KERNEL_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_KERNEL_ROLE"))));
 uint64 constant ADMIN_MARKET_OPS_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_MARKET_OPS_ROLE"))));
 
@@ -69,12 +68,6 @@ uint64 constant ADMIN_FACTORY_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_
 // ═══════════════════════════════════════════════════════════════════════════════
 
 uint64 constant LP_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LP_ROLE_ADMIN_ROLE"))));
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// BLACKLIST ROLE
-// ═══════════════════════════════════════════════════════════════════════════
-
-uint64 constant ADMIN_BLACKLIST_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_BLACKLIST_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GUARDIAN ROLE

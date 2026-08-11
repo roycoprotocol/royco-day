@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
-import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { Ownable } from "../../../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
-import { RoycoUUPSBase } from "../../../src/base/RoycoUUPSBase.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -37,13 +34,7 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
         sanctionsList = new MockSanctionsList();
-        roycoBlacklist = RoycoBlacklist(
-            address(
-                new ERC1967Proxy(
-                    address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(accessManager), address(0), new address[](0)))
-                )
-            )
-        );
+        roycoBlacklist = new RoycoBlacklist(address(this), address(0), new address[](0));
         FLAGGED = makeAddr("FLAGGED_ACCOUNT");
         CLEAN = makeAddr("CLEAN_ACCOUNT");
     }
@@ -89,22 +80,14 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
     function test_Initialize_FlagsInitialAccounts() public {
         address[] memory initialAccounts = new address[](2);
         (initialAccounts[0], initialAccounts[1]) = (FLAGGED, CLEAN);
-        RoycoBlacklist seeded = RoycoBlacklist(
-            address(
-                new ERC1967Proxy(
-                    address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(accessManager), address(0), initialAccounts))
-                )
-            )
-        );
+        RoycoBlacklist seeded = new RoycoBlacklist(address(this), address(0), initialAccounts);
         assertTrue(seeded.isBlacklisted(FLAGGED) && seeded.isBlacklisted(CLEAN), "every genesis-listed account must be flagged");
     }
 
-    /// @notice Initializing with a null authority is rejected, an authority-less blacklist could never be administered
+    /// @notice Deploying with a null owner is rejected, an ownerless blacklist could never be administered
     function test_RevertIf_InitializedWithNullAuthority() public {
-        address freshImpl = address(new RoycoBlacklist());
-        bytes memory initData = abi.encodeCall(RoycoBlacklist.initialize, (address(0), address(0), new address[](0)));
-        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new ERC1967Proxy(freshImpl, initData);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+        new RoycoBlacklist(address(0), address(0), new address[](0));
     }
 
     // =============================
@@ -428,7 +411,7 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
      */
     function test_RevertIf_UnauthorizedCallerMutatesBlacklistOrSanctionsList() public {
         address attacker = makeAddr("BLACKLIST_ATTACKER");
-        bytes memory unauthorized = abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, attacker);
+        bytes memory unauthorized = abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker);
 
         vm.startPrank(attacker);
         vm.expectRevert(unauthorized);
@@ -455,39 +438,5 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
 
         roycoBlacklist.unblacklistAccounts(_one(CLEAN));
         assertFalse(roycoBlacklist.isBlacklisted(CLEAN), "clearing a never-flagged account must be a no-op");
-    }
-
-    // =============================
-    // Upgrade gate
-    // =============================
-
-    /**
-     * @notice The blacklist's UUPS upgrade path enforces the restricted gate and the code-existence check, and a
-     *         legitimate upgrade preserves the flagged set
-     * @dev A hijacked or state-losing upgrade would silently unflag every account, so all three legs are pinned
-     */
-    function test_Upgrade_AuthGateCodeCheckAndStatePreservation() public {
-        roycoBlacklist.blacklistAccounts(_one(FLAGGED));
-        roycoBlacklist.setSanctionsList(address(sanctionsList));
-
-        // A roleless caller cannot upgrade
-        address attacker = makeAddr("UPGRADE_ATTACKER");
-        address newImpl = address(new RoycoBlacklist());
-        vm.prank(attacker);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, attacker));
-        UUPSUpgradeable(address(roycoBlacklist)).upgradeToAndCall(newImpl, "");
-
-        // An authorized upgrade to a codeless target is refused, it would brick the proxy
-        vm.expectRevert(RoycoUUPSBase.INVALID_IMPLEMENTATION.selector);
-        UUPSUpgradeable(address(roycoBlacklist)).upgradeToAndCall(makeAddr("CODELESS_IMPL"), "");
-
-        // A legitimate upgrade lands and every piece of blacklist state survives the implementation swap
-        UUPSUpgradeable(address(roycoBlacklist)).upgradeToAndCall(newImpl, "");
-        assertTrue(roycoBlacklist.isBlacklisted(FLAGGED), "the flagged set must survive the upgrade");
-        assertEq(roycoBlacklist.getSanctionsList(), address(sanctionsList), "the sanctions overlay must survive the upgrade");
-
-        // The upgraded proxy cannot be re-initialized into a takeover
-        vm.expectRevert();
-        roycoBlacklist.initialize(attacker, address(0), new address[](0));
     }
 }

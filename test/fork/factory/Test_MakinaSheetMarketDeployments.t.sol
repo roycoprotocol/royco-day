@@ -11,7 +11,7 @@ import { ERC4626SharePriceOracleParams, MakinaSharePriceOracleParams } from "../
 import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
 import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, JT_LP_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, JT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
@@ -75,7 +75,7 @@ abstract contract MakinaSheetMarketDeploymentBase is Test {
 
         am = new RoycoAccessManager(address(this));
         (factory,, entryPoint, syncer) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
-        roycoBlacklist = FactoryScaffold.deployBlacklist(am);
+        roycoBlacklist = FactoryScaffold.deployBlacklist(address(this));
 
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
 
@@ -84,9 +84,9 @@ abstract contract MakinaSheetMarketDeploymentBase is Test {
         am.setTargetFunctionRole(address(entryPoint), entryPointSelectors, ADMIN_ENTRY_POINT_ROLE);
         bytes4[] memory syncerSelectors = new bytes4[](1);
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
-        am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
+        am.setTargetFunctionRole(address(syncer), syncerSelectors, ADMIN_ENTRY_POINT_ROLE);
 
-        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory, roycoBlacklist);
+        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory);
         registry = scaffold.registry;
         marketBuilder = scaffold.market;
         template = scaffold.template;
@@ -128,6 +128,7 @@ abstract contract MakinaSheetMarketDeploymentBase is Test {
                 op.vaultSharePriceStalenessThresholdSeconds
             )
         );
+        cfg.roycoBlacklist = roycoBlacklist;
         deal(cfg.pool.quoteAsset, DEPLOYER, cfg.poolInitialization.quoteAmount);
         vm.prank(DEPLOYER);
         IERC20(cfg.pool.quoteAsset).approve(address(template), cfg.poolInitialization.quoteAmount);
@@ -167,6 +168,7 @@ abstract contract MakinaSheetMarketDeploymentBase is Test {
         cfg.pool.quoteAsset = upstreamSt;
         cfg.pool.quoteAssetRateProvider = upstreamKernel;
         cfg.oracle.deployed = marketBuilder.deployCollateralOracle(cfg, _marketIdSeed());
+        cfg.roycoBlacklist = roycoBlacklist;
         vm.prank(DEPLOYER);
         IERC20(upstreamSt).approve(address(template), cfg.poolInitialization.quoteAmount);
     }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -34,13 +33,7 @@ contract Test_EntryPointComplianceGating is EntryPointTestBase {
 
     /// @dev Deploys the production blacklist, wires it into the kernel, and flags the specified account
     function _wireBlacklistAndFlag(address _account) internal {
-        RoycoBlacklist blacklist = RoycoBlacklist(
-            address(
-                new ERC1967Proxy(
-                    address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(accessManager), address(0), new address[](0)))
-                )
-            )
-        );
+        RoycoBlacklist blacklist = new RoycoBlacklist(address(this), address(0), new address[](0));
         vm.prank(MARKET_OPS_ADMIN);
         kernel.setRoycoBlacklist(address(blacklist));
         address[] memory accounts = new address[](1);

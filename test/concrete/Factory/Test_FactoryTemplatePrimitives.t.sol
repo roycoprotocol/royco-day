@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { UpgradeableBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
-import { ADMIN_FACTORY_ROLE, BURNER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_FACTORY_ROLE, BURNER_ROLE, ADMIN_ORACLE_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
@@ -121,7 +121,7 @@ contract Test_FactoryTemplatePrimitives is Test {
         bytes4[] memory selectors = new bytes4[](2);
         (selectors[0], selectors[1]) = (bytes4(0xaaaaaaaa), bytes4(0xbbbbbbbb));
         uint64[] memory roleIds = new uint64[](2);
-        (roleIds[0], roleIds[1]) = (SYNC_ROLE, BURNER_ROLE);
+        (roleIds[0], roleIds[1]) = (ADMIN_ORACLE_ROLE, BURNER_ROLE);
         bindings[0] = BaseDeploymentTemplate.TargetBinding({ target: boundTarget, selectors: selectors, roleIds: roleIds });
         bindings[1] = BaseDeploymentTemplate.TargetBinding({ target: skippedTarget, selectors: new bytes4[](0), roleIds: new uint64[](0) });
 
@@ -129,7 +129,7 @@ contract Test_FactoryTemplatePrimitives is Test {
         probeTemplate.setEncodedRoleBindings(abi.encode(bindings));
         _deploy();
 
-        assertEq(am.getTargetFunctionRole(boundTarget, bytes4(0xaaaaaaaa)), SYNC_ROLE, "the first selector must be bound");
+        assertEq(am.getTargetFunctionRole(boundTarget, bytes4(0xaaaaaaaa)), ADMIN_ORACLE_ROLE, "the first selector must be bound");
         assertEq(am.getTargetFunctionRole(boundTarget, bytes4(0xbbbbbbbb)), BURNER_ROLE, "the second selector must be bound");
         assertTrue(am.wasEverConfigured(boundTarget), "the bound target must be recorded as configured");
         assertFalse(am.wasEverConfigured(skippedTarget), "an empty-selector target must be skipped entirely");

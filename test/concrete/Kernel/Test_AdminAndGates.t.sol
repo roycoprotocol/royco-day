@@ -175,13 +175,12 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
     }
 
     /**
-     * @notice An attacker cannot drive a tranche accounting sync directly, the entrypoint is SYNC_ROLE gated
-     * @dev Direct sync access is the setup step of a sync-then-swap sandwich, so the gate forces every sync
-     *      through an authorized operator or the pool hook
+     * @notice Tranche accounting sync is public, so any caller can drive it directly
+     * @dev Sync no longer carries an access-managed gate; it is exposed to every caller because it only refreshes
+     *      accounting state, so an arbitrary account may invoke it without a role
      */
-    function test_RevertIf_SyncTrancheAccountingCalledByNonSyncRole() public {
+    function test_SyncTrancheAccountingIsPublicForAnyCaller() public {
         vm.prank(ATTACKER);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, ATTACKER));
         kernel.syncTrancheAccounting();
     }
 

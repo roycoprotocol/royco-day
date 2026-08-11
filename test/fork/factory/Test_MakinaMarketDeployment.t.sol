@@ -15,7 +15,7 @@ import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/Royco
 import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
 import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
@@ -95,7 +95,7 @@ contract Test_MakinaMarketDeployment is Test {
         (factory, gatekeeper, entryPoint, syncer) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         // Every market the template deploys screens against this one blacklist, and the template rejects a null one
-        roycoBlacklist = FactoryScaffold.deployBlacklist(am);
+        roycoBlacklist = FactoryScaffold.deployBlacklist(address(this));
 
         // Grant the factory-facing roles the initialize() call bound to selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
@@ -109,11 +109,11 @@ contract Test_MakinaMarketDeployment is Test {
         am.setTargetFunctionRole(address(entryPoint), entryPointSelectors, ADMIN_ENTRY_POINT_ROLE);
         bytes4[] memory syncerSelectors = new bytes4[](1);
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
-        am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
+        am.setTargetFunctionRole(address(syncer), syncerSelectors, ADMIN_ENTRY_POINT_ROLE);
 
         // The real Day template, bound to this factory, stood up through the real per-component deploy scripts.
         // The template deploys every market contract itself, so the script only builds the params (`buildMarketParams`).
-        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory, roycoBlacklist);
+        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory);
         registry = scaffold.registry;
         marketBuilder = scaffold.market;
         template = scaffold.template;
@@ -148,6 +148,7 @@ contract Test_MakinaMarketDeployment is Test {
         cfg = registry.getDayMarketConfig("snUSD");
         cfg.collateralAsset = _collateralAsset;
         cfg.oracle.deployed = address(new MakinaSharePriceOracle(_machine, USDC_USD_FEED, 48 hours, 24 hours));
+        cfg.roycoBlacklist = roycoBlacklist;
         _fundPoolSeed(cfg);
     }
 

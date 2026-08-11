@@ -29,6 +29,10 @@ abstract contract TemplateConfig is EnvConfig {
         // https://docs.balancer.fi/developer-reference/contracts/deployment-addresses/arbitrum.html
         GYRO_ECLP_POOL_FACTORY[42_161] = 0xe31715e75207acC8bfadd96902FF522058928479;
         ECLP_LP_ORACLE_FACTORY[42_161] = 0xD9E91f7aD501929b089992842a3f193795E6479e;
+
+        // https://docs.balancer.fi/developer-reference/contracts/deployment-addresses/base.html
+        GYRO_ECLP_POOL_FACTORY[8453] = 0x86a0E97eC0D5dB8DAE106D3067358d41968fD12c;
+        ECLP_LP_ORACLE_FACTORY[8453] = 0x2cf8e145Bdfe7c52b49AD9bB3c294a31B2736c59;
     }
 
     /// @notice The Balancer venue factories the template is constructed against on `_chainId`

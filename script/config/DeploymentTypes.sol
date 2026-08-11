@@ -212,7 +212,6 @@ struct ImplementationSet {
 struct TemplateUpstream {
     address accessManager;
     address factory;
-    address roycoBlacklist;
     ImplementationSet impls;
 }
 
@@ -222,7 +221,6 @@ struct MarketUpstream {
     address factory;
     address entryPoint;
     address marketSyncer;
-    address roycoBlacklist;
     address template;
 }
 
@@ -233,7 +231,6 @@ struct ChainDeployment {
     address factory;
     address entryPoint;
     address marketSyncer;
-    address roycoBlacklist;
     address template;
     ImplementationSet impls;
     bool amExisted;

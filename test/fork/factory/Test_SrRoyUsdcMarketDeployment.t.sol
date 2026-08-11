@@ -14,7 +14,7 @@ import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
@@ -68,7 +68,7 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
 
         am = new RoycoAccessManager(address(this));
         (factory, gatekeeper, entryPoint, syncer) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
-        roycoBlacklist = FactoryScaffold.deployBlacklist(am);
+        roycoBlacklist = FactoryScaffold.deployBlacklist(address(this));
 
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
 
@@ -77,9 +77,9 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         am.setTargetFunctionRole(address(entryPoint), entryPointSelectors, ADMIN_ENTRY_POINT_ROLE);
         bytes4[] memory syncerSelectors = new bytes4[](1);
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
-        am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
+        am.setTargetFunctionRole(address(syncer), syncerSelectors, ADMIN_ENTRY_POINT_ROLE);
 
-        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory, roycoBlacklist);
+        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory);
         registry = scaffold.registry;
         marketBuilder = scaffold.market;
         template = scaffold.template;
@@ -113,6 +113,7 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         cfg.oracle.deployed = address(
             _newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams)
         );
+        cfg.roycoBlacklist = roycoBlacklist;
         _fundPoolSeed(cfg);
     }
 

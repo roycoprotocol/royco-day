@@ -23,8 +23,8 @@ import {
     BURNER_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
-    ST_LP_ROLE,
-    SYNC_ROLE
+    PUBLIC_ROLE,
+    ST_LP_ROLE
 } from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
@@ -794,7 +794,7 @@ abstract contract DayMarketTestBase is Assertions {
             k, _sels(IRoycoDayKernel.setProtocolFeeRecipient.selector, IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector), ADMIN_KERNEL_ROLE
         );
         accessManager.setTargetFunctionRole(
-            k, _sels(IRoycoDayKernel.syncTrancheAccounting.selector, IRoycoDayKernel.syncTrancheAccountingFor.selector), SYNC_ROLE
+            k, _sels(IRoycoDayKernel.syncTrancheAccounting.selector, IRoycoDayKernel.syncTrancheAccountingFor.selector), PUBLIC_ROLE
         );
         accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.setRoycoBlacklist.selector), ADMIN_MARKET_OPS_ROLE);
         // Reinvestment is deliberately PUBLIC (slippage-gated), mirroring the template binding
@@ -881,8 +881,8 @@ abstract contract DayMarketTestBase is Assertions {
     }
 
     function _wireRoleGrants() internal {
-        // Post-init contract grants
-        accessManager.grantRole(SYNC_ROLE, address(accountant), 0);
+        // Post-init contract grants. The kernel sync surface is PUBLIC now, so the accountant needs no sync role for
+        // its withSyncedAccounting path.
         accessManager.grantRole(BURNER_ROLE, address(kernel), 0);
 
         // The kernel (premium senior-share mint recipient) and the protocol fee recipient (fee-share mint
@@ -893,7 +893,8 @@ abstract contract DayMarketTestBase is Assertions {
         PAUSER = _generateActor("PAUSER", ADMIN_PAUSER_ROLE);
         UNPAUSER = _generateActor("UNPAUSER", ADMIN_UNPAUSER_ROLE);
         UPGRADER = _generateActor("UPGRADER", ADMIN_UPGRADER_ROLE);
-        SYNC_OPERATOR = _generateActor("SYNC_OPERATOR", SYNC_ROLE);
+        // Sync is PUBLIC now — the operator needs no role, just an address to prank
+        SYNC_OPERATOR = makeAddr("SYNC_OPERATOR");
         KERNEL_ADMIN = _generateActor("KERNEL_ADMIN", ADMIN_KERNEL_ROLE);
         MARKET_OPS_ADMIN = _generateActor("MARKET_OPS_ADMIN", ADMIN_MARKET_OPS_ROLE);
         ACCOUNTANT_ADMIN = _generateActor("ACCOUNTANT_ADMIN", ADMIN_ACCOUNTANT_ROLE);

@@ -13,6 +13,7 @@ import { DayMarketConfig } from "../../script/deploy/templates/royco-day-balance
 import { DeployMarketComponent } from "../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, LP_ROLE_ADMIN_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
+import { RoycoBlacklist } from "../../src/auth/RoycoBlacklist.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
@@ -127,6 +128,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     IRoycoDayKernel internal KERNEL;
     IRoycoDayAccountant internal ACCOUNTANT;
     IRoycoBlacklist internal BLACKLIST;
+    /// @dev Owner of every per-market blacklist the base deploys — prank this to blacklist/unblacklist in tests
+    address internal BLACKLIST_OWNER = makeAddr("BLACKLIST_OWNER");
 
     // -----------------------------------------
     // Royco Deployments Parameters
@@ -222,6 +225,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     ///         admin-gated setup ends before any market lands), then deploy the market from its config struct
     function _deployMarketThroughPipeline(DayMarketConfig memory _cfg) internal returns (DeploymentResult memory result) {
         DeployMarketComponent market = _marketComponent();
+        // The blacklist is per-market and deployer-supplied now: stand up a fresh one owned by BLACKLIST_OWNER
+        if (_cfg.roycoBlacklist == address(0)) _cfg.roycoBlacklist = address(new RoycoBlacklist(BLACKLIST_OWNER, address(0), new address[](0)));
         result = market.deployMarket(_cfg, MARKET_REGISTRY.getMarketId(_cfg.marketName, CHAIN.factory), DEPLOYER.privateKey);
     }
 
@@ -242,7 +247,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                         factory: CHAIN.factory,
                         entryPoint: CHAIN.entryPoint,
                         marketSyncer: CHAIN.marketSyncer,
-                        roycoBlacklist: CHAIN.roycoBlacklist,
                         template: CHAIN.template
                     })
                 )

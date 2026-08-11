@@ -18,7 +18,7 @@ import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
 import { TemplateScaffold } from "../../utils/TemplateScaffold.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { TAG_KERNEL_PROXY } from "../../../src/factory/templates/base/Constants.sol";
 import {
@@ -84,7 +84,7 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
         (factory, gatekeeper, entryPoint, syncer) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         // Every market the template deploys screens against this one blacklist, and the template rejects a null one
-        roycoBlacklist = FactoryScaffold.deployBlacklist(am);
+        roycoBlacklist = FactoryScaffold.deployBlacklist(address(this));
 
         // Grant the factory-facing roles the initialize() call bound to selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
@@ -92,17 +92,17 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
         // The scaffold deployed the REAL periphery singletons alongside the gatekeeper that pins them
 
         // Bind the config selectors the factory drives during deployments (the factory self-granted
-        // ADMIN_ENTRY_POINT_ROLE + SYNC_ROLE in its initialize).
+        // ADMIN_ENTRY_POINT_ROLE in its initialize).
         bytes4[] memory entryPointSelectors = new bytes4[](1);
         entryPointSelectors[0] = IRoycoDayEntryPoint.modifyTrancheConfigs.selector;
         am.setTargetFunctionRole(address(entryPoint), entryPointSelectors, ADMIN_ENTRY_POINT_ROLE);
         bytes4[] memory syncerSelectors = new bytes4[](1);
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
-        am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
+        am.setTargetFunctionRole(address(syncer), syncerSelectors, ADMIN_ENTRY_POINT_ROLE);
 
         // The real Day template, bound to this factory, stood up through the real per-component deploy scripts.
         // The template deploys every market contract itself, so the script only builds the params (`buildMarketParams`).
-        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory, roycoBlacklist);
+        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory);
         registry = scaffold.registry;
         marketBuilder = scaffold.market;
         template = scaffold.template;
@@ -129,6 +129,7 @@ contract Test_ChainlinkOracleMarketDeployment is Test {
     function _marketConfig(address _oracleCollateralAsset) internal returns (DayMarketConfig memory cfg) {
         cfg = registry.getDayMarketConfig("snUSD");
         cfg.oracle.deployed = address(new ChainlinkPriceOracle(_oracleCollateralAsset, NUSD_REDSTONE_ORACLE, 48 hours));
+        cfg.roycoBlacklist = roycoBlacklist;
             _fundPoolSeed(cfg);
     }
 

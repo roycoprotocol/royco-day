@@ -18,8 +18,7 @@ import {
     JT_LP_ROLE,
     LPT_LP_ROLE,
     PUBLIC_ROLE,
-    ST_LP_ROLE,
-    SYNC_ROLE
+    ST_LP_ROLE
 } from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -144,7 +143,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     /// @dev Registers the minimal real template: canned result naming the fixture's externally deployed components,
     ///      real BaseDeploymentTemplate registration path, real factory + gatekeeper periphery configuration
     function _deploySyncerAndRegistrationTemplate() internal {
-        accessManager.setTargetFunctionRole(address(marketSyncer), _sels(RoycoMarketSyncer.addMarketKernels.selector), SYNC_ROLE);
+        accessManager.setTargetFunctionRole(address(marketSyncer), _sels(RoycoMarketSyncer.addMarketKernels.selector), ADMIN_ENTRY_POINT_ROLE);
 
         registrationTemplate = new MockMarketRegistrationTemplate(IRoycoFactory(address(entryPointFactory)));
         vm.label(address(registrationTemplate), "MockMarketRegistrationTemplate");
@@ -199,8 +198,6 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         accessManager.grantRole(ST_LP_ROLE, ep, 0);
         accessManager.grantRole(JT_LP_ROLE, ep, 0);
         accessManager.grantRole(LPT_LP_ROLE, ep, 0);
-        // The entry point syncs the kernel to price its request-time references, mirroring the template's entry point SYNC grant
-        accessManager.grantRole(SYNC_ROLE, ep, 0);
     }
 
     /// @notice Applies tranche configs on the entry point through the factory's real deployment pipeline

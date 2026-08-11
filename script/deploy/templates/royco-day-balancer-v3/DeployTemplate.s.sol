@@ -68,7 +68,6 @@ contract DeployTemplateComponent is DeployScriptBase, TemplateConfig {
         cp.factory = IRoycoFactory(UP.factory);
         cp.balancerV3PoolFactory = GyroECLPPoolFactory(gyroFactory);
         cp.eclpLPOracleFactory = ILPOracleFactoryBase(eclpOracleFactory);
-        cp.roycoBlacklist = UP.roycoBlacklist;
 
         cp.protocolFeeRecipient = policy.protocolFeeRecipient;
         cp.protocolFeeConfig = BaseDeploymentTemplate.ProtocolFeeConfig({

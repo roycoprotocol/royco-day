@@ -35,7 +35,7 @@ contract Test_MineMarketId is Test {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), vm.envOr("FORK_BLOCK", uint256(25_400_000)));
         registry = new DayMarketRegistry();
         marketBuilder = new DeployMarketComponent(
-            MarketUpstream({ accessManager: address(0), factory: address(0), entryPoint: address(0), marketSyncer: address(0), roycoBlacklist: address(0), template: address(0) })
+            MarketUpstream({ accessManager: address(0), factory: address(0), entryPoint: address(0), marketSyncer: address(0), template: address(0) })
         );
     }
 

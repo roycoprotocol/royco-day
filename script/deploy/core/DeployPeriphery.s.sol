@@ -14,8 +14,7 @@ import {
     JT_LP_ROLE,
     LPT_LP_ROLE,
     PUBLIC_ROLE,
-    ST_LP_ROLE,
-    SYNC_ROLE
+    ST_LP_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
@@ -105,27 +104,23 @@ contract DeployPeripheryComponent is DeployScriptBase, EnvConfig {
         _accessManager.grantRole(ST_LP_ROLE, _entryPoint, 0);
         _accessManager.grantRole(JT_LP_ROLE, _entryPoint, 0);
         _accessManager.grantRole(LPT_LP_ROLE, _entryPoint, 0);
-
-        // The entry point syncs each market before it acts on it. Granted here rather than per market deployment: the
-        // role is market-agnostic and the entry point is an existing singleton, which a deployment may never touch.
-        _accessManager.grantRole(SYNC_ROLE, _entryPoint, 0);
     }
 
-    /// @notice Binds the syncer's selectors to their roles and grants it SYNC_ROLE.
+    /// @notice Binds the syncer's selectors to their roles.
     function _wireSyncerRoles(AccessManager _accessManager, address _marketSyncer) internal {
-        bytes4[] memory syncerSelectors = new bytes4[](4);
-        syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
-        syncerSelectors[1] = RoycoMarketSyncer.removeMarketKernels.selector;
-        syncerSelectors[2] = RoycoMarketSyncer.executeBatchAccountingSync.selector;
-        syncerSelectors[3] = RoycoMarketSyncer.executeBatchAccountingSyncFor.selector;
-        _accessManager.setTargetFunctionRole(_marketSyncer, syncerSelectors, SYNC_ROLE);
+        bytes4[] memory kernelRegistrationSelectors = new bytes4[](2);
+        kernelRegistrationSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
+        kernelRegistrationSelectors[1] = RoycoMarketSyncer.removeMarketKernels.selector;
+        _accessManager.setTargetFunctionRole(_marketSyncer, kernelRegistrationSelectors, ADMIN_ENTRY_POINT_ROLE);
+
+        bytes4[] memory batchSyncSelectors = new bytes4[](2);
+        batchSyncSelectors[0] = RoycoMarketSyncer.executeBatchAccountingSync.selector;
+        batchSyncSelectors[1] = RoycoMarketSyncer.executeBatchAccountingSyncFor.selector;
+        _accessManager.setTargetFunctionRole(_marketSyncer, batchSyncSelectors, PUBLIC_ROLE);
 
         _accessManager.setTargetFunctionRole(_marketSyncer, _sel(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         _accessManager.setTargetFunctionRole(_marketSyncer, _sel(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
         _accessManager.setTargetFunctionRole(_marketSyncer, _sel(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
-
-        // The syncer drives each registered kernel's SYNC_ROLE-gated syncTrancheAccounting
-        _accessManager.grantRole(SYNC_ROLE, _marketSyncer, 0);
     }
 }
 

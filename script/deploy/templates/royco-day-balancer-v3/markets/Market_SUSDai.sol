@@ -39,6 +39,7 @@ abstract contract Market_SUSDai is DayMarketRegistryBase {
                     })
                 )
             }),
+            roycoBlacklist: address(0),
             accountant: AccountantEconomics({
                 fixedTermGracePeriodSeconds: 1 days,
                 minCoverageWAD: 0.07e18,

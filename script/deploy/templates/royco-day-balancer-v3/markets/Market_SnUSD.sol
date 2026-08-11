@@ -44,6 +44,7 @@ abstract contract Market_SnUSD is DayMarketRegistryBase {
                     })
                 )
             }),
+            roycoBlacklist: address(0),
             accountant: AccountantEconomics({
                 fixedTermGracePeriodSeconds: 0,
                 minCoverageWAD: 0.1e18,
