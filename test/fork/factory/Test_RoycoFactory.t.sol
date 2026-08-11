@@ -26,8 +26,7 @@ import {
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
-    PUBLIC_ROLE,
-    SYNC_ROLE
+    PUBLIC_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
@@ -112,7 +111,7 @@ contract Test_RoycoFactory is Test {
         (factory, gatekeeper, entryPoint, syncer) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         // Every market the template deploys screens against this one blacklist, and the template rejects a null one
-        roycoBlacklist = FactoryScaffold.deployBlacklist(am);
+        roycoBlacklist = FactoryScaffold.deployBlacklist(address(this));
 
         // Grant the factory-facing roles the scaffold bound to the factory's selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
@@ -131,11 +130,11 @@ contract Test_RoycoFactory is Test {
         am.setTargetFunctionRole(address(entryPoint), entryPointSelectors, ADMIN_ENTRY_POINT_ROLE);
         bytes4[] memory syncerSelectors = new bytes4[](1);
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
-        am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
+        am.setTargetFunctionRole(address(syncer), syncerSelectors, ADMIN_ENTRY_POINT_ROLE);
 
         // The real Day template, bound to this factory, stood up through the real per-component deploy scripts.
         // The template deploys every market contract itself, so the script only builds the params (`buildMarketParams`).
-        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory, roycoBlacklist);
+        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory);
         registry = scaffold.registry;
         marketBuilder = scaffold.market;
         implementationSet = scaffold.impls;
@@ -205,6 +204,8 @@ contract Test_RoycoFactory is Test {
     /// @dev The `deploy()` flow resolves an unset config oracle itself; the direct-template path must supply it, so
     ///      deploy the config's ERC4626 share-price adapter over the market's collateral vault + base->NAV feed.
     function _resolveCollateralOracle(DayMarketConfig memory _cfg) internal {
+        // Every market this suite deploys by hand pins the suite's per-market blacklist into its params
+        _cfg.roycoBlacklist = roycoBlacklist;
         if (_cfg.oracle.deployed != address(0)) return;
         _cfg.oracle.deployed = address(
             _newErc4626Oracle(_cfg.collateralAsset, _cfg.oracle.specificParams)
@@ -378,7 +379,7 @@ contract Test_RoycoFactory is Test {
         (RoycoFactory otherFactory,,,) = FactoryScaffold.deployFactory(am, keccak256("FOREIGN_FACTORY_PROXY"));
         new RoycoDayEntryPoint(address(otherFactory));
         RoycoDayBalancerV3MarketDeploymentTemplate foreign =
-            RoycoDayBalancerV3MarketDeploymentTemplate(TemplateScaffold.deployTemplateFor(am, otherFactory, roycoBlacklist, implementationSet));
+            RoycoDayBalancerV3MarketDeploymentTemplate(TemplateScaffold.deployTemplateFor(am, otherFactory, implementationSet));
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(IRoycoFactory.TEMPLATE_BOUND_TO_DIFFERENT_FACTORY.selector);
         factory.registerTemplate(address(foreign));
@@ -1241,28 +1242,11 @@ contract Test_RoycoFactory is Test {
     // BLACKLIST
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// The blacklist is the template's, not the market's: every market it deploys reads back exactly the pinned one
-    function test_ExecuteMarketDeployment_KernelReadsBackTheTemplatesBlacklist() external {
+    /// The blacklist is per-market: the kernel reads back exactly the blacklist pinned into the market's params
+    function test_ExecuteMarketDeployment_KernelReadsBackTheMarketsBlacklist() external {
         _register();
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(MARKET_ID_A);
-        assertEq(template.ROYCO_BLACKLIST(), roycoBlacklist, "the template must pin the blacklist it was constructed with");
-        assertEq(IRoycoDayKernel(r.kernel).getState().roycoBlacklist, roycoBlacklist, "the market's kernel must screen against the template's blacklist");
-    }
-
-    /// Screening is mandatory: a template cannot be constructed without a blacklist, so no market can opt out of it
-    function test_RevertIf_TemplateConstructedWithNullBlacklist() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _templateConstructionParams();
-        cp.roycoBlacklist = address(0);
-        vm.expectRevert(RoycoDayBalancerV3MarketDeploymentTemplate.NULL_CONSTRUCTION_PARAMETER.selector);
-        new RoycoDayBalancerV3MarketDeploymentTemplate(cp);
-    }
-
-    /// An EOA passes the non-null check but could never screen anything, so it is rejected separately
-    function test_RevertIf_TemplateConstructedWithCodelessBlacklist() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _templateConstructionParams();
-        cp.roycoBlacklist = makeAddr("NOT_A_BLACKLIST");
-        vm.expectRevert(abi.encodeWithSelector(RoycoDayBalancerV3MarketDeploymentTemplate.CONSTRUCTION_PARAMETER_HAS_NO_CODE.selector, cp.roycoBlacklist));
-        new RoycoDayBalancerV3MarketDeploymentTemplate(cp);
+        assertEq(IRoycoDayKernel(r.kernel).getState().roycoBlacklist, roycoBlacklist, "the market's kernel must screen against the market's blacklist");
     }
 
     // ─── internal ───
@@ -1275,7 +1259,6 @@ contract Test_RoycoFactory is Test {
             balancerV3PoolFactory: template.BALANCER_V3_POOL_FACTORY(),
             eclpLPOracleFactory: template.ECLP_LP_ORACLE_FACTORY(),
             bptOracleConstantPriceFeed: template.BPT_ORACLE_CONSTANT_PRICE_FEED(),
-            roycoBlacklist: template.ROYCO_BLACKLIST(),
             seniorTrancheBeacon: template.SENIOR_TRANCHE_BEACON(),
             juniorTrancheBeacon: template.JUNIOR_TRANCHE_BEACON(),
             liquidityProviderTrancheBeacon: template.LIQUIDITY_PROVIDER_TRANCHE_BEACON(),

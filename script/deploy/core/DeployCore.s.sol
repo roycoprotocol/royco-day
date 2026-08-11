@@ -10,8 +10,7 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     LPT_LP_ROLE,
-    PUBLIC_ROLE,
-    SYNC_ROLE
+    PUBLIC_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoCreate3Deployer } from "../../../src/factory/RoycoCreate3Deployer.sol";
@@ -82,7 +81,6 @@ contract DeployCoreComponent is DeployScriptBase, EnvConfig {
             RoycoAccessManager am = RoycoAccessManager(core.accessManager);
             am.grantRole(ADMIN_ROLE, gatekeeper, 0);
             am.grantRole(ADMIN_ENTRY_POINT_ROLE, gatekeeper, 0);
-            am.grantRole(SYNC_ROLE, gatekeeper, 0);
         }
 
         (address factoryImpl, bool factoryImplExisted) = deployWithSanityChecks(

@@ -20,8 +20,7 @@ import {
     JT_LP_ROLE,
     LPT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
-    ST_LP_ROLE,
-    SYNC_ROLE
+    ST_LP_ROLE
 } from "../../../src/factory/Roles.sol";
 
 /**
@@ -51,7 +50,6 @@ abstract contract RoleConfigUtils {
      * @return config The role configuration
      */
     function getRoleConfig(uint64 role) public pure returns (RoleConfig memory config) {
-        // TODO: Update these configurations
         if (role == ADMIN_PAUSER_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == ADMIN_UPGRADER_ROLE) {
@@ -59,8 +57,6 @@ abstract contract RoleConfigUtils {
         } else if (role == ST_LP_ROLE || role == JT_LP_ROLE || role == LPT_LP_ROLE) {
             return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == LP_ROLE_ADMIN_ROLE) {
-            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        } else if (role == SYNC_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == ADMIN_KERNEL_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
@@ -83,7 +79,6 @@ abstract contract RoleConfigUtils {
         } else if (role == ADMIN_MARKET_OPS_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         } else if (role == ADMIN_ENTRY_POINT_ROLE) {
-            // The delay lives on the member grant (FNDN 24h, WCE + factory immediate), not the role itself
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });

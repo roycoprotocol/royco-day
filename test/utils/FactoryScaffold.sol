@@ -14,8 +14,7 @@ import {
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     LPT_LP_ROLE,
-    PUBLIC_ROLE,
-    SYNC_ROLE
+    PUBLIC_ROLE
 } from "../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../src/factory/RoycoAccessManager.sol";
 import { RoycoCreate3Deployer } from "../../src/factory/RoycoCreate3Deployer.sol";
@@ -30,8 +29,8 @@ import { IRoycoFactory } from "../../src/interfaces/factory/IRoycoFactory.sol";
  * @notice Stands up the access manager / gatekeeper / factory triangle the way `DeployCoreComponent` does, for the hand-rolled
  *         fixtures that build a factory without running the deployment script
  * @dev The factory does NOT hold `ADMIN_ROLE`. The gatekeeper holds it, admits only never-before-configured targets,
- *      and applies the two role grants a deployment makes; the factory keeps only `ADMIN_ENTRY_POINT_ROLE` and
- *      `SYNC_ROLE`, purely so `executeAsFactory` can forward periphery configuration. The factory also
+ *      and applies the two role grants a deployment makes; the factory keeps only `ADMIN_ENTRY_POINT_ROLE`,
+ *      purely so `executeAsFactory` can forward periphery configuration. The factory also
  *      no longer binds its own selectors during `initialize`, so this helper applies them exactly as
  *      `DeployCoreComponent._wireFactoryRoles` does. A fixture that skips this leaves the factory's selectors unbound, which
  *      resolves to `ADMIN_ROLE` and makes `registerTemplate` / `executeMarketDeployment` callable only by root
@@ -73,7 +72,6 @@ library FactoryScaffold {
         _accessManager.grantRole(ADMIN_ROLE, address(gatekeeper), 0);
         // The gatekeeper, not the factory, drives the periphery, so it carries both periphery roles
         _accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, address(gatekeeper), 0);
-        _accessManager.grantRole(SYNC_ROLE, address(gatekeeper), 0);
 
         RoycoFactory impl = new RoycoFactory(address(gatekeeper));
         wireFactoryRoles(_accessManager, predictedFactory);
@@ -157,21 +155,15 @@ library FactoryScaffold {
     }
 
     /**
-     * @notice Stands up the chain's blacklist singleton the way `DeployBlacklistComponent` does
-     * @dev The template pins one blacklist for every market it deploys and rejects the null address, so a fixture that
-     *      builds a template by hand needs a real one. Deployed with no sanctions list and an empty initial set, which
-     *      is what the script does too: the Chainalysis list is wired later by an ops script
-     * @param _accessManager The access manager governing the blacklist's admin surface
-     * @return blacklist The initialized blacklist proxy
+     * @notice Deploys a per-market blacklist the way a market deployer does: a standalone, non-upgradeable
+     *         `Ownable2Step` `RoycoBlacklist` owned by `_owner`, with no sanctions list and an empty initial set
+     * @dev The template requires a pre-deployed blacklist per market (mandatory `MarketParams.roycoBlacklist`), so a
+     *      fixture that deploys a market by hand stands one up here and passes its address through the market params
+     * @param _owner The account that owns the blacklist's mutation surface (blacklist/unblacklist/sanctions)
+     * @return blacklist The deployed blacklist
      */
-    function deployBlacklist(RoycoAccessManager _accessManager) internal returns (address blacklist) {
-        blacklist = address(
-            new ERC1967Proxy(address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(_accessManager), address(0), new address[](0))))
-        );
-
-        _accessManager.setTargetFunctionRole(blacklist, _one(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
-        _accessManager.setTargetFunctionRole(blacklist, _one(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
-        _accessManager.setTargetFunctionRole(blacklist, _one(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
+    function deployBlacklist(address _owner) internal returns (address blacklist) {
+        blacklist = address(new RoycoBlacklist(_owner, address(0), new address[](0)));
     }
 
     function _one(bytes4 _selector) private pure returns (bytes4[] memory selectors) {

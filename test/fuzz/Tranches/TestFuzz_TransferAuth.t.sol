@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
@@ -56,13 +55,7 @@ contract TestFuzz_TransferAuth_Tranches is DayMarketTestBase {
 
     /// @notice Deploys the production blacklist behind a proxy, wires it into the kernel, and blacklists one account per set flag
     function _configureBlacklist(bool _flagCaller, bool _flagFrom, bool _flagTo, address _caller, address _from, address _to) internal {
-        RoycoBlacklist blacklist = RoycoBlacklist(
-            address(
-                new ERC1967Proxy(
-                    address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(accessManager), address(0), new address[](0)))
-                )
-            )
-        );
+        RoycoBlacklist blacklist = new RoycoBlacklist(address(this), address(0), new address[](0));
         vm.prank(MARKET_OPS_ADMIN);
         kernel.setRoycoBlacklist(address(blacklist));
 

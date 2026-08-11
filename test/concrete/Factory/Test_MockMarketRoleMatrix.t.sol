@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
-import { ADMIN_ROLE, BURNER_ROLE, JT_LP_ROLE, LPT_LP_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ROLE, BURNER_ROLE, JT_LP_ROLE, LPT_LP_ROLE, PUBLIC_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
@@ -54,8 +54,8 @@ contract Test_MockMarketRoleMatrix is DayMarketTestBase {
     }
 
     function test_KernelSync_boundToSyncRole_and_TrancheBurn_boundToBurnerRole() public view {
-        assertEq(_role(address(kernel), IRoycoDayKernel.syncTrancheAccounting.selector), SYNC_ROLE, "kernel sync -> SYNC_ROLE");
-        assertEq(_role(address(kernel), IRoycoDayKernel.syncTrancheAccountingFor.selector), SYNC_ROLE, "kernel tranche-scoped sync -> SYNC_ROLE");
+        assertEq(_role(address(kernel), IRoycoDayKernel.syncTrancheAccounting.selector), PUBLIC_ROLE, "kernel sync -> PUBLIC_ROLE");
+        assertEq(_role(address(kernel), IRoycoDayKernel.syncTrancheAccountingFor.selector), PUBLIC_ROLE, "kernel tranche-scoped sync -> PUBLIC_ROLE");
         assertEq(_role(address(seniorTranche), ERC20BurnableUpgradeable.burn.selector), BURNER_ROLE, "ST burn -> BURNER_ROLE");
         assertEq(_role(address(juniorTranche), ERC20BurnableUpgradeable.burnFrom.selector), BURNER_ROLE, "JT burnFrom -> BURNER_ROLE");
     }
@@ -65,7 +65,6 @@ contract Test_MockMarketRoleMatrix is DayMarketTestBase {
     // ---------------------------------------------------------------------
 
     function test_PostInitGrants_syncToAccountant_burnerToKernel() public view {
-        assertTrue(_holds(SYNC_ROLE, address(accountant)), "accountant must hold SYNC_ROLE");
         assertTrue(_holds(BURNER_ROLE, address(kernel)), "kernel must hold BURNER_ROLE");
     }
 

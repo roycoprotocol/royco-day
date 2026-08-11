@@ -36,6 +36,7 @@ abstract contract Market_SrRoyUSDC is DayMarketRegistryBase {
                     })
                 )
             }),
+            roycoBlacklist: address(0),
             accountant: AccountantEconomics({
                 fixedTermGracePeriodSeconds: 1 days,
                 minCoverageWAD: 0.2e18,

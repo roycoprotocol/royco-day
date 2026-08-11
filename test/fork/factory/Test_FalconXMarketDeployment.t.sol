@@ -14,7 +14,7 @@ import { ERC4626SharePriceOracleParams, IdleCDOTranchePriceOracleParams } from "
 import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
 import { DayMarketConfig } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { DeployMarketComponent } from "../../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, JT_LP_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, JT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
@@ -90,7 +90,7 @@ contract Test_FalconXMarketDeployment is Test {
 
         am = new RoycoAccessManager(address(this));
         (factory, gatekeeper, entryPoint, syncer) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
-        roycoBlacklist = FactoryScaffold.deployBlacklist(am);
+        roycoBlacklist = FactoryScaffold.deployBlacklist(address(this));
 
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
 
@@ -99,9 +99,9 @@ contract Test_FalconXMarketDeployment is Test {
         am.setTargetFunctionRole(address(entryPoint), entryPointSelectors, ADMIN_ENTRY_POINT_ROLE);
         bytes4[] memory syncerSelectors = new bytes4[](1);
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
-        am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
+        am.setTargetFunctionRole(address(syncer), syncerSelectors, ADMIN_ENTRY_POINT_ROLE);
 
-        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory, roycoBlacklist);
+        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory);
         registry = scaffold.registry;
         marketBuilder = scaffold.market;
         template = scaffold.template;
@@ -138,6 +138,7 @@ contract Test_FalconXMarketDeployment is Test {
     function _deployUpstreamSrRoyUsdc() internal {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
         cfg.oracle.deployed = address(_newErc4626Oracle(cfg.collateralAsset, cfg.oracle.specificParams));
+        cfg.roycoBlacklist = roycoBlacklist;
         deal(cfg.pool.quoteAsset, DEPLOYER, cfg.poolInitialization.quoteAmount);
         vm.prank(DEPLOYER);
         IERC20(cfg.pool.quoteAsset).approve(address(template), cfg.poolInitialization.quoteAmount);
@@ -183,6 +184,7 @@ contract Test_FalconXMarketDeployment is Test {
         cfg.pool.quoteAsset = upstreamSt;
         cfg.pool.quoteAssetRateProvider = upstreamKernel;
         cfg.oracle.deployed = _deployCollateralOracle(cfg, uint32(block.timestamp));
+        cfg.roycoBlacklist = roycoBlacklist;
         _fundPoolSeed(cfg);
     }
 
@@ -314,6 +316,7 @@ contract Test_FalconXMarketDeployment is Test {
         cfg.pool.quoteAsset = upstreamSt;
         cfg.pool.quoteAssetRateProvider = upstreamKernel;
         cfg.oracle.deployed = _deployCollateralOracle(cfg, 0); // unattested: pricing held shut
+        cfg.roycoBlacklist = roycoBlacklist;
         _fundPoolSeed(cfg);
 
         bytes memory params = abi.encode(marketBuilder.buildMarketParams(cfg, FALCONX_MARKET_ID_SEED, address(factory), DEPLOYER));

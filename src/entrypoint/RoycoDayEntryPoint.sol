@@ -266,9 +266,9 @@ contract RoycoDayEntryPoint is RoycoUUPSBase, IRoycoDayEntryPoint, ReentrancyGua
     )
         external
         override(IRoycoDayEntryPoint)
+        nonReentrant
         whenNotPaused
         restricted
-        nonReentrant
         returns (uint256 requestNonce, uint32 executableAtTimestamp, uint32 expiresAtTimestamp)
     {
         // Validate the redemption request

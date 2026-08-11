@@ -5,7 +5,7 @@ import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { FactoryScaffold } from "../../utils/FactoryScaffold.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, BURNER_ROLE, PUBLIC_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, BURNER_ROLE, PUBLIC_ROLE, ADMIN_ORACLE_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
@@ -65,17 +65,13 @@ contract Test_FactoryDeploymentWiring is Test {
 
     /// @dev The factory holds no authority of its own beyond the LP role the genesis pool seed needs: the periphery
     ///      roles sit on the gatekeeper, which drives modifyTrancheConfigs (ADMIN_ENTRY_POINT_ROLE) and
-    ///      addMarketKernels (SYNC_ROLE) itself, and the factory only forwards into its fresh-only entrypoint
+    ///      addMarketKernels (ADMIN_ENTRY_POINT_ROLE) itself, and the factory only forwards into its fresh-only entrypoint
     function test_PeripheryAndAdminRolesSitOnTheGatekeeperNotTheFactory() public view {
         (bool factoryHoldsEntryPointRole,) = am.hasRole(ADMIN_ENTRY_POINT_ROLE, address(factory));
         assertFalse(factoryHoldsEntryPointRole, "the factory must NOT hold ADMIN_ENTRY_POINT_ROLE");
-        (bool factoryHoldsSyncRole,) = am.hasRole(SYNC_ROLE, address(factory));
-        assertFalse(factoryHoldsSyncRole, "the factory must NOT hold SYNC_ROLE");
 
         (bool gatekeeperHoldsEntryPointRole,) = am.hasRole(ADMIN_ENTRY_POINT_ROLE, address(gatekeeper));
         assertTrue(gatekeeperHoldsEntryPointRole, "the gatekeeper must hold ADMIN_ENTRY_POINT_ROLE instead");
-        (bool gatekeeperHoldsSyncRole,) = am.hasRole(SYNC_ROLE, address(gatekeeper));
-        assertTrue(gatekeeperHoldsSyncRole, "the gatekeeper must hold SYNC_ROLE instead");
 
         // The containment property: ADMIN_ROLE sits on the gatekeeper, never on the factory
         (bool holdsAdmin,) = am.hasRole(ADMIN_ROLE, address(factory));
@@ -92,7 +88,7 @@ contract Test_FactoryDeploymentWiring is Test {
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = WIRE_SELECTOR;
         uint64[] memory roleIds = new uint64[](1);
-        roleIds[0] = SYNC_ROLE;
+        roleIds[0] = ADMIN_ORACLE_ROLE;
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
         factory.setMarketTargetFunctionRole(WIRE_TARGET, selectors, roleIds);
     }
@@ -116,11 +112,11 @@ contract Test_FactoryDeploymentWiring is Test {
 
     function test_WiringPrimitives_installBindingThroughActiveTemplate() public {
         template.setMode(template.MODE_WIRE());
-        template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, SYNC_ROLE, WIRE_ACCOUNT);
+        template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, ADMIN_ORACLE_ROLE, WIRE_ACCOUNT);
 
         factory.executeMarketDeployment(address(template), "");
 
-        assertEq(am.getTargetFunctionRole(WIRE_TARGET, WIRE_SELECTOR), SYNC_ROLE, "the selector must be bound to SYNC_ROLE");
+        assertEq(am.getTargetFunctionRole(WIRE_TARGET, WIRE_SELECTOR), ADMIN_ORACLE_ROLE, "the selector must be bound to ADMIN_ORACLE_ROLE");
 
         // The registry write landed for all three tranches.
         assertEq(factory.trancheToKernel(makeAddr("ST")), makeAddr("KERNEL"), "ST -> kernel registry write");
@@ -168,12 +164,12 @@ contract Test_FactoryDeploymentWiring is Test {
 
     function test_Hook_wiringPrimitivesWorkInpostMarketRegistration_afterRegistryWrite() public {
         template.setMode(template.MODE_WIRE_IN_HOOK());
-        template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, SYNC_ROLE, WIRE_ACCOUNT);
+        template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, ADMIN_ORACLE_ROLE, WIRE_ACCOUNT);
 
         factory.executeMarketDeployment(address(template), "");
 
         // The hook ran with the window still open (the primitive succeeded) ...
-        assertEq(am.getTargetFunctionRole(WIRE_TARGET, WIRE_SELECTOR), SYNC_ROLE, "the hook must be able to bind selectors through the factory");
+        assertEq(am.getTargetFunctionRole(WIRE_TARGET, WIRE_SELECTOR), ADMIN_ORACLE_ROLE, "the hook must be able to bind selectors through the factory");
         // ... and after the registry write, so hook-phase periphery config can validate tranche provenance.
         assertEq(factory.trancheToKernel(makeAddr("ST")), makeAddr("KERNEL"), "the registry write must precede the hook");
 

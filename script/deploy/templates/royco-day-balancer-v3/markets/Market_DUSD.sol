@@ -39,6 +39,7 @@ abstract contract Market_DUSD is DayMarketRegistryBase {
                     })
                 )
             }),
+            roycoBlacklist: address(0),
             accountant: AccountantEconomics({
                 fixedTermGracePeriodSeconds: 7 days,
                 minCoverageWAD: 0.03e18,

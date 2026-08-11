@@ -35,6 +35,7 @@ abstract contract Market_APYX is DayMarketRegistryBase {
                     })
                 )
             }),
+            roycoBlacklist: address(0),
             accountant: AccountantEconomics({
                 fixedTermGracePeriodSeconds: 1 days,
                 minCoverageWAD: 0.15e18,
