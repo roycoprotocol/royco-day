@@ -246,8 +246,8 @@ struct TemplatePolicy {
     uint64 jtProtocolFeeWAD;
     uint64 jtYieldShareProtocolFeeWAD;
     uint64 lptYieldShareProtocolFeeWAD;
-    bool chargeYieldFeeOnSeniorTrancheShares;
-    bool chargeYieldFeeOnQuoteAsset;
+    bool chargeYieldFeeOnSTShares;
+    bool chargeYieldFeeOnQuoteAssets;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

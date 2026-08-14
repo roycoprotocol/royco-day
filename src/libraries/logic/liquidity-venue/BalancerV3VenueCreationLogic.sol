@@ -82,8 +82,8 @@ library BalancerV3VenueCreationLogic {
         require(uint160(_seniorTranche) < uint160(_quoteAsset), SENIOR_TRANCHE_NOT_FIRST_POOL_TOKEN(_seniorTranche, _quoteAsset));
 
         BalancerV3TokenConfig[] memory tokens = new BalancerV3TokenConfig[](2);
-        tokens[0] = _buildTokenConfig(_seniorTranche, _seniorRateProvider, _poolYieldFeeConfig.chargeYieldFeeOnSeniorTrancheShares);
-        tokens[1] = _buildTokenConfig(_quoteAsset, _poolCreationParams.quoteAssetRateProvider, _poolYieldFeeConfig.chargeYieldFeeOnQuoteAsset);
+        tokens[0] = _buildTokenConfig(_seniorTranche, _seniorRateProvider, _poolYieldFeeConfig.chargeYieldFeeOnSTShares);
+        tokens[1] = _buildTokenConfig(_quoteAsset, _poolCreationParams.quoteAssetRateProvider, _poolYieldFeeConfig.chargeYieldFeeOnQuoteAssets);
 
         pool = _poolFactory.create({
             name: _poolCreationParams.name,

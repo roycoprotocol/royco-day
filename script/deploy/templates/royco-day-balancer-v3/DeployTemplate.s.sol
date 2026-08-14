@@ -77,8 +77,7 @@ contract DeployTemplateComponent is DeployScriptBase, TemplateConfig {
             lptYieldShareProtocolFeeWAD: policy.lptYieldShareProtocolFeeWAD
         });
         cp.balancerPoolYieldFeeConfig = RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig({
-            chargeYieldFeeOnSeniorTrancheShares: policy.chargeYieldFeeOnSeniorTrancheShares,
-            chargeYieldFeeOnQuoteAsset: policy.chargeYieldFeeOnQuoteAsset
+            chargeYieldFeeOnSTShares: policy.chargeYieldFeeOnSTShares, chargeYieldFeeOnQuoteAssets: policy.chargeYieldFeeOnQuoteAssets
         });
 
         (template, existed) = deployWithSanityChecks(

@@ -88,12 +88,12 @@ library MarketDeploymentValidationLogic {
 
     /// @notice Validates the deployer-supplied params before any of the market's contracts exist
     /// @param _rawParams The ABI-encoded `MarketParams` the deployer passed to `deployMarket`
-    /// @param _chargeYieldFeeOnQuoteAsset The template's pool policy for the quote leg, passed in rather than read
+    /// @param _chargeYieldFeeOnQuoteAssets The template's pool policy for the quote leg, passed in rather than read
     ///        from storage so this library holds no assumption about the template's layout
     /// @return params The validated market params
     function validateMarketParams(
         bytes calldata _rawParams,
-        bool _chargeYieldFeeOnQuoteAsset
+        bool _chargeYieldFeeOnQuoteAssets
     )
         external
         view
@@ -136,7 +136,7 @@ library MarketDeploymentValidationLogic {
         if (params.roycoBlacklist != address(0)) _requireContract(params.roycoBlacklist);
 
         // Balancer rejects a leg that pays yield fees without a rate provider to measure them against.
-        require(!_chargeYieldFeeOnQuoteAsset || params.poolCreationParams.quoteAssetRateProvider != address(0), QUOTE_RATE_PROVIDER_REQUIRED_FOR_YIELD_FEE());
+        require(!_chargeYieldFeeOnQuoteAssets || params.poolCreationParams.quoteAssetRateProvider != address(0), QUOTE_RATE_PROVIDER_REQUIRED_FOR_YIELD_FEE());
 
         // Optional feeds: null is the documented "not applicable" case, but a non-null one must be live
         if (params.sequencerUptimeFeed != address(0)) _requireCode(params.sequencerUptimeFeed);

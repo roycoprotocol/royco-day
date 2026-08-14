@@ -171,12 +171,12 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
 
     /**
      * @notice The Balancer pool yield fee policy every market this template creates its pool with
-     * @custom:field chargeYieldFeeOnSeniorTrancheShares - Whether Balancer charges yield fees on the senior leg's rate growth
-     * @custom:field chargeYieldFeeOnQuoteAsset - Whether Balancer charges yield fees on the quote leg's rate growth
+     * @custom:field chargeYieldFeeOnSTShares - Whether Balancer charges yield fees on the senior leg's rate growth
+     * @custom:field chargeYieldFeeOnQuoteAssets - Whether Balancer charges yield fees on the quote leg's rate growth
      */
     struct BalancerPoolYieldFeeConfig {
-        bool chargeYieldFeeOnSeniorTrancheShares;
-        bool chargeYieldFeeOnQuoteAsset;
+        bool chargeYieldFeeOnSTShares;
+        bool chargeYieldFeeOnQuoteAssets;
     }
 
     /**
@@ -355,7 +355,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     /// @inheritdoc IRoycoProtocolTemplate
     function deployMarket(bytes calldata _params) external override(IRoycoProtocolTemplate) onlyRoycoFactory returns (DeploymentResult memory result) {
         // Validate the deployer's params
-        MarketParams memory params = MarketDeploymentValidationLogic.validateMarketParams(_params, balancerPoolYieldFeeConfig.chargeYieldFeeOnQuoteAsset);
+        MarketParams memory params = MarketDeploymentValidationLogic.validateMarketParams(_params, balancerPoolYieldFeeConfig.chargeYieldFeeOnQuoteAssets);
 
         // The base salt is the hash of the params and the deployer's address.
         bytes32 baseSalt = keccak256(abi.encode(params, ROYCO_FACTORY.marketDeployer()));

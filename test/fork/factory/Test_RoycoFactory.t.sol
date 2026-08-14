@@ -1250,7 +1250,7 @@ contract Test_RoycoFactory is Test {
     ///         rather than inside pool creation, which runs after the senior tranche proxy already exists
     function test_RevertIf_QuoteYieldFeeChargedWithoutAQuoteRateProvider() external {
         RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig memory cfg = _templateBalancerPoolYieldFeeConfig();
-        cfg.chargeYieldFeeOnQuoteAsset = true;
+        cfg.chargeYieldFeeOnQuoteAssets = true;
         vm.prank(FACTORY_ADMIN);
         template.setBalancerPoolYieldFeeConfig(cfg);
 
@@ -1304,7 +1304,7 @@ contract Test_RoycoFactory is Test {
     function _templateBalancerPoolYieldFeeConfig() internal view returns (RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig memory) {
         (bool chargeSenior, bool chargeQuote) = template.balancerPoolYieldFeeConfig();
         return RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig({
-            chargeYieldFeeOnSeniorTrancheShares: chargeSenior, chargeYieldFeeOnQuoteAsset: chargeQuote
+            chargeYieldFeeOnSTShares: chargeSenior, chargeYieldFeeOnQuoteAssets: chargeQuote
         });
     }
 

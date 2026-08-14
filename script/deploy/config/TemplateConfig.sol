@@ -47,10 +47,10 @@ abstract contract TemplateConfig is EnvConfig {
             protocolFeeRecipient: _isTest ? testDeploymentAdmin : PROTOCOL_FEE_RECIPIENT,
             stProtocolFeeWAD: 0,
             jtProtocolFeeWAD: 0,
-            jtYieldShareProtocolFeeWAD: 0.45e18, // 45%
-            lptYieldShareProtocolFeeWAD: 0.45e18, // 45%
-            chargeYieldFeeOnSeniorTrancheShares: false,
-            chargeYieldFeeOnQuoteAsset: false
+            jtYieldShareProtocolFeeWAD: 0.05e18, // 5%
+            lptYieldShareProtocolFeeWAD: 0.05e18, // 5%
+            chargeYieldFeeOnSTShares: false,
+            chargeYieldFeeOnQuoteAssets: false
         });
     }
 
