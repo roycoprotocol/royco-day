@@ -125,6 +125,7 @@ contract DeployMarketComponent is CollateralOracleDeployer {
             symbol: _config.pool.symbol,
             eclpParams: _config.pool.eclpParams,
             derivedEclpParams: _config.pool.derivedEclpParams,
+            swapFeePercentage: _config.pool.swapFeePercentage,
             quoteAssetRateProvider: _config.pool.quoteAssetRateProvider
         });
 

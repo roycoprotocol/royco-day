@@ -77,6 +77,7 @@ abstract contract Market_SUSDai is DayMarketRegistryBase {
                 symbol: "srsUSDai/frxUSD",
                 eclpParams: _exitLiquidityPrioritizedEclpParams(),
                 derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
+                swapFeePercentage: 10e14, // 10 bps, the pool swap fee every market previously inherited from the template policy
                 quoteAsset: 0x80Eede496655FB9047dd39d9f418d5483ED600df,
                 quoteAssetRateProvider: address(0)
             }),

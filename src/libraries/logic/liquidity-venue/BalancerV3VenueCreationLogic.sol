@@ -23,6 +23,7 @@ import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../factory/tem
  * @custom:field symbol - The pool token's symbol
  * @custom:field eclpParams - The E-CLP curve parameters
  * @custom:field derivedEclpParams - The high-precision derived E-CLP parameters computed off-chain from `eclpParams`
+ * @custom:field swapFeePercentage - The pool's static swap fee, scaled to WAD precision
  * @custom:field quoteAssetRateProvider - The rate provider supplying the quote leg's rate (the null address makes the leg STANDARD)
  */
 struct BalancerV3PoolCreationParams {
@@ -30,6 +31,7 @@ struct BalancerV3PoolCreationParams {
     string symbol;
     IGyroECLPPool.EclpParams eclpParams;
     IGyroECLPPool.DerivedEclpParams derivedEclpParams;
+    uint64 swapFeePercentage;
     address quoteAssetRateProvider;
 }
 
@@ -50,7 +52,8 @@ library BalancerV3VenueCreationLogic {
      * @param _poolFactory The Balancer V3 Gyro E-CLP pool factory
      * @param _lpOracleFactory The Balancer E-CLP LP oracle factory
      * @param _constantPriceFeed The shared stateless constant-1.0 price feed used for both pool legs
-     * @param _p The market's pool creation parameters
+     * @param _poolCreationParams The market's pool creation parameters
+     * @param _poolYieldFeeConfig The template's pool policy, read for the two yield-fee flags
      * @param _seniorTranche The senior tranche share, which must sort below the quote asset so it is pool token0
      * @param _quoteAsset The quote asset paired against the senior share
      * @param _seniorRateProvider The senior leg's rate provider (the market's kernel)
@@ -63,8 +66,8 @@ library BalancerV3VenueCreationLogic {
         GyroECLPPoolFactory _poolFactory,
         ILPOracleFactoryBase _lpOracleFactory,
         address _constantPriceFeed,
-        BalancerV3PoolCreationParams memory _p,
-        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory _poolConfig,
+        BalancerV3PoolCreationParams memory _poolCreationParams,
+        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig memory _poolYieldFeeConfig,
         address _seniorTranche,
         address _quoteAsset,
         address _seniorRateProvider,
@@ -79,17 +82,17 @@ library BalancerV3VenueCreationLogic {
         require(uint160(_seniorTranche) < uint160(_quoteAsset), SENIOR_TRANCHE_NOT_FIRST_POOL_TOKEN(_seniorTranche, _quoteAsset));
 
         BalancerV3TokenConfig[] memory tokens = new BalancerV3TokenConfig[](2);
-        tokens[0] = _buildTokenConfig(_seniorTranche, _seniorRateProvider, _poolConfig.chargeYieldFeeOnSeniorTrancheShares);
-        tokens[1] = _buildTokenConfig(_quoteAsset, _p.quoteAssetRateProvider, _poolConfig.chargeYieldFeeOnQuoteAsset);
+        tokens[0] = _buildTokenConfig(_seniorTranche, _seniorRateProvider, _poolYieldFeeConfig.chargeYieldFeeOnSeniorTrancheShares);
+        tokens[1] = _buildTokenConfig(_quoteAsset, _poolCreationParams.quoteAssetRateProvider, _poolYieldFeeConfig.chargeYieldFeeOnQuoteAsset);
 
         pool = _poolFactory.create({
-            name: _p.name,
-            symbol: _p.symbol,
+            name: _poolCreationParams.name,
+            symbol: _poolCreationParams.symbol,
             tokens: tokens,
-            eclpParams: _p.eclpParams,
-            derivedEclpParams: _p.derivedEclpParams,
+            eclpParams: _poolCreationParams.eclpParams,
+            derivedEclpParams: _poolCreationParams.derivedEclpParams,
             roleAccounts: BalancerV3PoolRoleAccounts({ pauseManager: _authority, swapFeeManager: _authority, poolCreator: _authority }),
-            swapFeePercentage: _poolConfig.swapFeePercentage,
+            swapFeePercentage: _poolCreationParams.swapFeePercentage,
             poolHooksContract: address(0),
             enableDonation: false,
             disableUnbalancedLiquidity: false,
