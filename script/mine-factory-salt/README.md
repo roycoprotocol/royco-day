@@ -10,7 +10,7 @@ whenever the best-so-far is good enough.
 ```bash
 # 1. The create3 deployer for the target environment (no chain needed — pure CREATE2 math):
 C3=$(cast create2 --deployer 0x4e59b44847b379578588920cA78FbF26c0B4956C \
-  --salt $(cast keccak "ROYCO_CREATE3_DEPLOYER_PROD_V1.0.1") \   # suffix = RoycoDeterministic.PROD_SALT_SUFFIX
+  --salt $(cast keccak "ROYCO_CREATE3_DEPLOYER_PROD_V1.0.2") \   # suffix = RoycoDeterministic.PROD_SALT_SUFFIX
   --init-code $(forge inspect src/factory/RoycoCreate3Deployer.sol:RoycoCreate3Deployer bytecode) | tail -1)
 
 # 2. Mine (all cores, runs forever, prints improvements):

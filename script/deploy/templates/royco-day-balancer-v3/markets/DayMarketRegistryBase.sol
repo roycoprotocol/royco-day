@@ -53,7 +53,7 @@ abstract contract DayMarketRegistryBase is EnvConfig {
     mapping(bytes32 marketNameHash => mapping(address factory => bytes32 marketId)) internal _marketIds;
 
     /// @notice The production factory the pre-mined seeds were mined against (pinned by Test_DeterministicAddresses)
-    address internal constant PROD_FACTORY = 0xaaAaaaaa01Af9426C2eB6FeBc61DcD7C302cc45F;
+    address internal constant PROD_FACTORY = 0xaAAaaAAAaE46cA12Bf3810DF8C13c5E8A4400812;
 
     /// @notice Registers the pre-mined marketId seeds, keyed by the factory address each was mined against
     function _initializeMinedMarketIds() internal {
