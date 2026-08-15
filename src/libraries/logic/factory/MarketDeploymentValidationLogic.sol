@@ -54,6 +54,9 @@ library MarketDeploymentValidationLogic {
     /// @notice Thrown when the E-CLP's price range is not a real interval
     error INVALID_ECLP_PRICE_RANGE();
 
+    /// @notice Thrown when the configured pool swap fee falls outside the band the Gyro E-CLP pool accepts
+    error INVALID_SWAP_FEE(uint256 swapFeePercentage);
+
     /// @notice Thrown when a genesis seed carries a collateral leg on a market that requires junior coverage
     error COLLATERAL_SEED_REQUIRES_ZERO_MIN_COVERAGE();
 
@@ -70,17 +73,27 @@ library MarketDeploymentValidationLogic {
     error MARKET_WIRING_VERIFICATION_FAILED(address subject);
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // CONSTANTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice The lowest swap fee a Gyro E-CLP pool accepts
+    uint64 internal constant MIN_POOL_SWAP_FEE_WAD = 1e12;
+
+    /// @notice The highest swap fee a Gyro E-CLP pool accepts
+    uint64 internal constant MAX_POOL_SWAP_FEE_WAD = 1e18;
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // PARAM VALIDATION
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Validates the deployer-supplied params before any of the market's contracts exist
     /// @param _rawParams The ABI-encoded `MarketParams` the deployer passed to `deployMarket`
-    /// @param _chargeYieldFeeOnQuoteAsset The template's pool policy for the quote leg, passed in rather than read
+    /// @param _chargeYieldFeeOnQuoteAssets The template's pool policy for the quote leg, passed in rather than read
     ///        from storage so this library holds no assumption about the template's layout
     /// @return params The validated market params
     function validateMarketParams(
         bytes calldata _rawParams,
-        bool _chargeYieldFeeOnQuoteAsset
+        bool _chargeYieldFeeOnQuoteAssets
     )
         external
         view
@@ -123,7 +136,7 @@ library MarketDeploymentValidationLogic {
         if (params.roycoBlacklist != address(0)) _requireContract(params.roycoBlacklist);
 
         // Balancer rejects a leg that pays yield fees without a rate provider to measure them against.
-        require(!_chargeYieldFeeOnQuoteAsset || params.poolCreationParams.quoteAssetRateProvider != address(0), QUOTE_RATE_PROVIDER_REQUIRED_FOR_YIELD_FEE());
+        require(!_chargeYieldFeeOnQuoteAssets || params.poolCreationParams.quoteAssetRateProvider != address(0), QUOTE_RATE_PROVIDER_REQUIRED_FOR_YIELD_FEE());
 
         // Optional feeds: null is the documented "not applicable" case, but a non-null one must be live
         if (params.sequencerUptimeFeed != address(0)) _requireCode(params.sequencerUptimeFeed);
@@ -143,6 +156,12 @@ library MarketDeploymentValidationLogic {
         // The E-CLP's price range must be a real interval. Gyro validates the full curve at pool construction, but an
         // inverted range is the one mistake worth catching before a pool is created against it
         require(_params.eclpParams.alpha < _params.eclpParams.beta, INVALID_ECLP_PRICE_RANGE());
+
+        // The swap fee is held to Gyro's own band, so the Vault cannot reject the pool after the senior tranche proxy already exists
+        require(
+            _params.swapFeePercentage >= MIN_POOL_SWAP_FEE_WAD && _params.swapFeePercentage <= MAX_POOL_SWAP_FEE_WAD,
+            INVALID_SWAP_FEE(_params.swapFeePercentage)
+        );
     }
 
     /**

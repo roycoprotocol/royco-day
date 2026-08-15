@@ -354,14 +354,13 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev Executes an accounting sync after (and optionally before) the update so the fresh oracle's price is committed immediately
+    /// @dev Optionally executes an accounting sync before the update so the PNL up to this point is committed at the outgoing oracle's price
+    /// @dev No sync is executed after the update: the incoming oracle's price is first committed by the next accounting sync
     function setCollateralAssetOracle(address _collateralAssetOracle, bool _syncBeforeUpdate) external override(IRoycoDayKernel) restricted {
         // If specified, sync the tranche accounting to reflect the PNL up to this point in time at the outgoing oracle's price
         if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCache();
         // Update the collateral asset oracle
         _setCollateralAssetOracle(_collateralAssetOracle);
-        // Sync the tranche accounting to reflect the PNL from the updated oracle's price (the sync re-initializes the price cache to the new price)
-        _preOpSyncTrancheAccountingWithPriceCache();
     }
 
     /// @inheritdoc IRoycoDayKernel

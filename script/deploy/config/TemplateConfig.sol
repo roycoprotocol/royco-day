@@ -7,7 +7,7 @@ import { EnvConfig } from "./EnvConfig.sol";
 /**
  * @title TemplateConfig
  * @notice The template deployment's own configuration: the SYSTEM policy the template is constructed with (protocol
- *         fees, fee recipient, pool swap-fee and yield-fee flags) plus the per-chain Balancer venue factories.
+ *         fees, fee recipient, and pool yield-fee flags) plus the per-chain Balancer venue factories.
  * @dev The policy is template construction state — no market deployer chooses it — and the template's CREATE2 salt
  *      hashes it, so changing any field here moves the template address (a deliberate redeploy).
  */
@@ -17,7 +17,7 @@ abstract contract TemplateConfig is EnvConfig {
     mapping(uint256 chainId => address) internal ECLP_LP_ORACLE_FACTORY;
 
     /// @dev When set, `templatePolicy` returns this instead of the canonical values. Test-only: fork fixtures pin the
-    ///      fee/swap-fee policy their reference math assumes without editing the production config
+    ///      fee policy their reference math assumes without editing the production config
     bool internal templatePolicyOverridden;
     TemplatePolicy internal templatePolicyOverride;
 
@@ -47,15 +47,14 @@ abstract contract TemplateConfig is EnvConfig {
             protocolFeeRecipient: _isTest ? testDeploymentAdmin : PROTOCOL_FEE_RECIPIENT,
             stProtocolFeeWAD: 0,
             jtProtocolFeeWAD: 0,
-            jtYieldShareProtocolFeeWAD: 0.45e18, // 45%
-            lptYieldShareProtocolFeeWAD: 0.45e18, // 45%
-            poolSwapFeePercentage: 10e14, // 10 bps
-            chargeYieldFeeOnSeniorTrancheShares: false,
-            chargeYieldFeeOnQuoteAsset: false
+            jtYieldShareProtocolFeeWAD: 0.05e18, // 5%
+            lptYieldShareProtocolFeeWAD: 0.05e18, // 5%
+            chargeYieldFeeOnSTShares: false,
+            chargeYieldFeeOnQuoteAssets: false
         });
     }
 
-    /// @notice Overrides the template policy, for tests that need a pinned fee/swap-fee set
+    /// @notice Overrides the template policy, for tests that need a pinned fee set
     function overrideTemplatePolicyForTest(TemplatePolicy memory _policy) public {
         templatePolicyOverridden = true;
         templatePolicyOverride = _policy;

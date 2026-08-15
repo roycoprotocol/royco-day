@@ -76,7 +76,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
      * @custom:field kernelBeacon - The Day kernel beacon for this template's kernel family
      * @custom:field accountantBeacon - The accountant beacon
      * @custom:field protocolFeeConfig - The protocol fees every market this template deploys starts with
-     * @custom:field balancerPoolConfig - The Balancer pool policy every market's pool is created with
+     * @custom:field balancerPoolYieldFeeConfig - The Balancer pool yield fee policy every market's pool is created with
      */
     struct TemplateConstructionParams {
         IRoycoFactory factory;
@@ -90,7 +90,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         address accountantBeacon;
         ProtocolFeeConfig protocolFeeConfig;
         address protocolFeeRecipient;
-        BalancerPoolConfig balancerPoolConfig;
+        BalancerPoolYieldFeeConfig balancerPoolYieldFeeConfig;
     }
 
     /**
@@ -170,15 +170,13 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     }
 
     /**
-     * @notice The Balancer pool policy every market this template creates its pool with
-     * @custom:field swapFeePercentage - The pool's static swap fee, scaled to WAD
-     * @custom:field chargeYieldFeeOnSeniorTrancheShares - Whether Balancer charges yield fees on the senior leg's rate growth
-     * @custom:field chargeYieldFeeOnQuoteAsset - Whether Balancer charges yield fees on the quote leg's rate growth
+     * @notice The Balancer pool yield fee policy every market this template creates its pool with
+     * @custom:field chargeYieldFeeOnSTShares - Whether Balancer charges yield fees on the senior leg's rate growth
+     * @custom:field chargeYieldFeeOnQuoteAssets - Whether Balancer charges yield fees on the quote leg's rate growth
      */
-    struct BalancerPoolConfig {
-        uint64 swapFeePercentage;
-        bool chargeYieldFeeOnSeniorTrancheShares;
-        bool chargeYieldFeeOnQuoteAsset;
+    struct BalancerPoolYieldFeeConfig {
+        bool chargeYieldFeeOnSTShares;
+        bool chargeYieldFeeOnQuoteAssets;
     }
 
     /**
@@ -207,14 +205,11 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     /// @notice Thrown when the genesis deposit mints too few shares to cover the dead-share lock
     error INSUFFICIENT_GENESIS_SHARES(uint256 shares);
 
-    /// @notice Thrown when the configured pool swap fee falls outside the band the Gyro E-CLP pool accepts
-    error INVALID_SWAP_FEE(uint256 swapFeePercentage);
-
     /// @notice Thrown when a market's per-tranche entry-point redemption delay is below the template's floor
     error REDEMPTION_DELAY_BELOW_MIN(uint24 suppliedRedemptionDelaySeconds, uint24 minRedemptionDelaySeconds);
 
-    /// @notice Emitted when the Balancer pool policy every future market is created with changes
-    event BalancerPoolConfigUpdated(BalancerPoolConfig config);
+    /// @notice Emitted when the Balancer pool yield fee policy every future market is created with changes
+    event BalancerPoolYieldFeeConfigUpdated(BalancerPoolYieldFeeConfig config);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTANTS
@@ -228,12 +223,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
 
     /// @notice The minimum redemption delay every market's tranches must meet at deployment
     uint24 public constant MIN_REDEMPTION_DELAY_SECONDS = 24 hours;
-
-    /// @notice The lowest swap fee a Gyro E-CLP pool accepts
-    uint64 internal constant MIN_POOL_SWAP_FEE_WAD = 1e12;
-
-    /// @notice The highest swap fee a Gyro E-CLP pool accepts
-    uint64 internal constant MAX_POOL_SWAP_FEE_WAD = 1e18;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // IMMUTABLES
@@ -270,8 +259,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     // CONFIGURATION STATE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice The Balancer pool policy every future market's pool is created with
-    BalancerPoolConfig public balancerPoolConfig;
+    /// @notice The Balancer pool's yield fee policy every future market's pool is created with
+    BalancerPoolYieldFeeConfig public balancerPoolYieldFeeConfig;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // YIELD DISTRIBUTION MODEL REGISTRY
@@ -310,23 +299,19 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         KERNEL_BEACON = _params.kernelBeacon;
         ACCOUNTANT_BEACON = _params.accountantBeacon;
 
-        _setBalancerPoolConfig(_params.balancerPoolConfig);
+        _setBalancerPoolYieldFeeConfig(_params.balancerPoolYieldFeeConfig);
     }
 
-    /// @notice Sets the Balancer pool policy every FUTURE market's pool is created with
-    /// @param _config The new pool policy
-    function setBalancerPoolConfig(BalancerPoolConfig calldata _config) external restricted {
-        _setBalancerPoolConfig(_config);
+    /// @notice Sets the Balancer pool yield fee policy every FUTURE market's pool is created with
+    /// @param _config The new pool yield fee policy
+    function setBalancerPoolYieldFeeConfig(BalancerPoolYieldFeeConfig calldata _config) external restricted {
+        _setBalancerPoolYieldFeeConfig(_config);
     }
 
-    /// @dev The one place the pool policy is validated and written, shared by construction and the admin setter
-    function _setBalancerPoolConfig(BalancerPoolConfig memory _config) internal {
-        require(
-            _config.swapFeePercentage >= MIN_POOL_SWAP_FEE_WAD && _config.swapFeePercentage <= MAX_POOL_SWAP_FEE_WAD,
-            INVALID_SWAP_FEE(_config.swapFeePercentage)
-        );
-        balancerPoolConfig = _config;
-        emit BalancerPoolConfigUpdated(_config);
+    /// @dev The one place the pool yield fee policy is written, shared by construction and the admin setter
+    function _setBalancerPoolYieldFeeConfig(BalancerPoolYieldFeeConfig memory _config) internal {
+        balancerPoolYieldFeeConfig = _config;
+        emit BalancerPoolYieldFeeConfigUpdated(_config);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -370,7 +355,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     /// @inheritdoc IRoycoProtocolTemplate
     function deployMarket(bytes calldata _params) external override(IRoycoProtocolTemplate) onlyRoycoFactory returns (DeploymentResult memory result) {
         // Validate the deployer's params
-        MarketParams memory params = MarketDeploymentValidationLogic.validateMarketParams(_params, balancerPoolConfig.chargeYieldFeeOnQuoteAsset);
+        MarketParams memory params = MarketDeploymentValidationLogic.validateMarketParams(_params, balancerPoolYieldFeeConfig.chargeYieldFeeOnQuoteAssets);
 
         // The base salt is the hash of the params and the deployer's address.
         bytes32 baseSalt = keccak256(abi.encode(params, ROYCO_FACTORY.marketDeployer()));
@@ -393,7 +378,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
             ECLP_LP_ORACLE_FACTORY,
             BPT_ORACLE_CONSTANT_PRICE_FEED,
             params.poolCreationParams,
-            balancerPoolConfig,
+            balancerPoolYieldFeeConfig,
             result.seniorTranche,
             params.quoteAsset,
             kernel,
