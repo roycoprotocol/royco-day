@@ -153,7 +153,7 @@ contract Test_RoycoFactory is Test {
         // protocol fee setters
         bytes4[] memory configSelectors = new bytes4[](2);
         configSelectors[0] = BaseDeploymentTemplate.setProtocolFeeRecipient.selector;
-        configSelectors[1] = RoycoDayBalancerV3MarketDeploymentTemplate.setBalancerPoolYieldFeeConfig.selector;
+        configSelectors[1] = RoycoDayBalancerV3MarketDeploymentTemplate.setBalancerPoolConfig.selector;
         am.setTargetFunctionRole(address(template), configSelectors, ADMIN_FACTORY_ROLE);
 
         bytes4[] memory feeSelectors = new bytes4[](1);
@@ -1104,21 +1104,6 @@ contract Test_RoycoFactory is Test {
         _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_ECLP_PRICE_RANGE.selector);
     }
 
-    /// The market's swap fee is held to Gyro's own band. Below it, Balancer would reject the pool mid-deployment,
-    /// after the senior tranche proxy already exists, so the floor belongs in the params validation
-    function test_RevertIf_SwapFeeBelowGyrosBand() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
-        p.poolCreationParams.swapFeePercentage = 1e12 - 1;
-        _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_SWAP_FEE.selector);
-    }
-
-    /// The band's ceiling is a 100% swap fee, Gyro's own maximum
-    function test_RevertIf_SwapFeeAboveGyrosBand() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
-        p.poolCreationParams.swapFeePercentage = uint64(1e18) + 1;
-        _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_SWAP_FEE.selector);
-    }
-
 
     /// Coverage must demand less than the whole senior exposure
     function test_RevertIf_MinCoverageIsNotBelowWad() external {
@@ -1207,7 +1192,7 @@ contract Test_RoycoFactory is Test {
     /// Each configuration setter is admin-only: a market deployer needs no role at all, never the config surface
     function test_RevertIf_ConfigSettersCalledByNonAdmin() external {
         // Read the pool config BEFORE pranking: a view call would otherwise consume the prank before the setter runs
-        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig memory poolConfig = _templateBalancerPoolYieldFeeConfig();
+        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory poolConfig = _templateBalancerPoolConfig();
 
         vm.prank(DEPLOYER);
         vm.expectPartialRevert(IAccessManaged.AccessManagedUnauthorized.selector);
@@ -1219,7 +1204,7 @@ contract Test_RoycoFactory is Test {
 
         vm.prank(DEPLOYER);
         vm.expectPartialRevert(IAccessManaged.AccessManagedUnauthorized.selector);
-        template.setBalancerPoolYieldFeeConfig(poolConfig);
+        template.setBalancerPoolConfig(poolConfig);
     }
 
     /// A protocol fee above 100% is refused, matching the bound the accountant itself enforces
@@ -1237,6 +1222,22 @@ contract Test_RoycoFactory is Test {
         template.setProtocolFeeRecipient(address(0));
     }
 
+    /// The swap fee is held to Gyro's own band. Below it, Balancer would reject the pool mid-deployment and every
+    /// market this template deploys would fail, so the floor belongs at configuration time
+    function test_RevertIf_SwapFeeOutsideGyrosBand() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory tooLow = _templateBalancerPoolConfig();
+        tooLow.swapFeePercentage = 1e12 - 1;
+        vm.expectPartialRevert(RoycoDayBalancerV3MarketDeploymentTemplate.INVALID_SWAP_FEE.selector);
+        vm.prank(FACTORY_ADMIN);
+        template.setBalancerPoolConfig(tooLow);
+
+        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory tooHigh = _templateBalancerPoolConfig();
+        tooHigh.swapFeePercentage = uint64(1e18) + 1;
+        vm.expectPartialRevert(RoycoDayBalancerV3MarketDeploymentTemplate.INVALID_SWAP_FEE.selector);
+        vm.prank(FACTORY_ADMIN);
+        template.setBalancerPoolConfig(tooHigh);
+    }
+
     /// The constructor runs the same validator as the setter, so a template can never be born out of bounds
     function test_RevertIf_TemplateConstructedWithAnInvalidFeeConfig() external {
         RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _templateConstructionParams();
@@ -1249,10 +1250,10 @@ contract Test_RoycoFactory is Test {
     ///         template policy and the rate provider is the deployer's, so the clash is caught before anything deploys
     ///         rather than inside pool creation, which runs after the senior tranche proxy already exists
     function test_RevertIf_QuoteYieldFeeChargedWithoutAQuoteRateProvider() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig memory cfg = _templateBalancerPoolYieldFeeConfig();
-        cfg.chargeYieldFeeOnQuoteAssets = true;
+        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory cfg = _templateBalancerPoolConfig();
+        cfg.chargeYieldFeeOnQuoteAsset = true;
         vm.prank(FACTORY_ADMIN);
-        template.setBalancerPoolYieldFeeConfig(cfg);
+        template.setBalancerPoolConfig(cfg);
 
         // The snUSD config leaves the quote leg's rate provider null, so the pool policy and the market disagree
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
@@ -1288,7 +1289,7 @@ contract Test_RoycoFactory is Test {
             accountantBeacon: template.ACCOUNTANT_BEACON(),
             protocolFeeConfig: _templateProtocolFeeConfig(),
             protocolFeeRecipient: template.protocolFeeRecipient(),
-            balancerPoolYieldFeeConfig: _templateBalancerPoolYieldFeeConfig()
+            balancerPoolConfig: _templateBalancerPoolConfig()
         });
     }
 
@@ -1300,11 +1301,11 @@ contract Test_RoycoFactory is Test {
         });
     }
 
-    /// @dev The live template's pool yield fee policy, read back through its auto-getter
-    function _templateBalancerPoolYieldFeeConfig() internal view returns (RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig memory) {
-        (bool chargeSenior, bool chargeQuote) = template.balancerPoolYieldFeeConfig();
-        return RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig({
-            chargeYieldFeeOnSTShares: chargeSenior, chargeYieldFeeOnQuoteAssets: chargeQuote
+    /// @dev The live template's pool policy, read back through its auto-getter
+    function _templateBalancerPoolConfig() internal view returns (RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory) {
+        (uint64 swapFee, bool chargeSenior, bool chargeQuote) = template.balancerPoolConfig();
+        return RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig({
+            swapFeePercentage: swapFee, chargeYieldFeeOnSeniorTrancheShares: chargeSenior, chargeYieldFeeOnQuoteAsset: chargeQuote
         });
     }
 

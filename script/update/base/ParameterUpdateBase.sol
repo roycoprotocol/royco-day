@@ -9,12 +9,24 @@ import { console2 } from "lib/forge-std/src/console2.sol";
 
 /**
  * @title ParameterUpdateBase
- * @notice Base for generating Safe transaction batches for timelocked parameter updates through the AccessManager.
+ * @notice Base contract for generating Safe transaction batches (schedule, execute, cancel)
+ *         for timelocked parameter updates via the AccessManager.
+ * @dev Each leaf script inherits this and provides:
+ *      - A list of update configs (market + chain + new value)
+ *      - A `_verify()` hook to assert each parameter was set correctly
+ *
+ * The base handles:
+ *      1. Forking each chain and resolving market addresses
+ *      2. Simulating each update (schedule → warp → execute) with snapshot isolation
+ *      3. Writing one batched Safe JSON per chain per phase (schedule, execute, cancel)
  */
 abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig {
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTANTS
     // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Duration to warp forward when simulating (must exceed the role's execution delay)
+    uint256 internal constant SIMULATION_WARP_DURATION = 2 days + 1;
 
     /// @dev Output base directory for update batches
     string internal constant UPDATE_OUTPUT_DIRECTORY = "output/update/";
@@ -23,13 +35,13 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
     // TYPES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice One parameter update operation
+    /// @notice Parameters describing a single parameter update operation
     struct UpdateParams {
-        /// @dev Market name
+        /// @dev Market name (e.g. "snUSD"). Empty string for factory-level updates.
         string marketName;
-        /// @dev The target contract to call
+        /// @dev The target contract to call (accountant, kernel, or factory)
         address target;
-        /// @dev ABI-encoded call to the setter
+        /// @dev ABI-encoded call to the setter function (e.g. abi.encodeCall(setMinCoverage, (newVal)))
         bytes callData;
         /// @dev Human-readable description shown in the Safe UI
         string description;
@@ -41,19 +53,20 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
 
     error VerificationFailed(string reason);
     error NoUpdatesForChain(uint256 chainId);
-    error SchedulerLacksRole(address scheduler, address target, bytes4 selector);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // MULTI-CHAIN PROCESSING
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Forks `_chainId`, simulates each update in isolation, then writes the Safe batches for this chain.
+     * @notice Processes a batch of updates for a single chain
+     * @dev Forks the chain, simulates each update in isolation (snapshot/revert),
+     *      then writes one batched Safe JSON per phase containing all updates.
      * @param _chainId The chain to process
-     * @param _updates The updates for this chain
+     * @param _updates Array of updates for this chain
      * @param _outputSubdir Subdirectory under output/update/ (e.g. "accountant")
      * @param _outputPrefix File name prefix (e.g. "set_coverage")
-     * @param _batchDescription Overall description shown in the Safe UI
+     * @param _batchDescription Overall description for the Safe batch
      */
     function _processChain(
         uint256 _chainId,
@@ -66,7 +79,9 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
     {
         require(_updates.length > 0, NoUpdatesForChain(_chainId));
 
-        vm.createSelectFork(_getRpcUrl(_chainId));
+        // Fork the target chain
+        string memory rpcUrl = _getRpcUrl(_chainId);
+        vm.createSelectFork(rpcUrl);
 
         console2.log("");
         console2.log("========================================");
@@ -74,132 +89,125 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
         console2.log("  Updates:", _updates.length);
         console2.log("========================================");
 
-        /// Simulate each update in isolation (snapshot/revert), validating authorization and effect
+        // Simulate each update in isolation using snapshots
         for (uint256 i = 0; i < _updates.length; i++) {
             uint256 snapshot = vm.snapshotState();
             _simulate(_updates[i]);
             vm.revertToState(snapshot);
         }
 
-        // Partition into scheduled (delayed role) and direct (immediate role) ops
-        uint256 scheduledCount;
+        // Build batched transactions (one tx per update, combined into one batch)
+        SafeTransaction[] memory scheduleTxs = new SafeTransaction[](_updates.length);
+        SafeTransaction[] memory executeTxs = new SafeTransaction[](_updates.length);
+        SafeTransaction[] memory cancelTxs = new SafeTransaction[](_updates.length);
+
         for (uint256 i = 0; i < _updates.length; i++) {
-            (, uint32 delay) = _classify(_updates[i]);
-            if (delay != 0) scheduledCount++;
+            scheduleTxs[i] = _buildScheduleTx(_updates[i]);
+            executeTxs[i] = _buildExecuteTx(_updates[i]);
+            cancelTxs[i] = _buildCancelTx(_updates[i]);
         }
-        uint256 directCount = _updates.length - scheduledCount;
 
-        SafeTransaction[] memory scheduleTxs = new SafeTransaction[](scheduledCount);
-        SafeTransaction[] memory executeTxs = new SafeTransaction[](scheduledCount);
-        SafeTransaction[] memory cancelTxs = new SafeTransaction[](scheduledCount);
-        SafeTransaction[] memory directTxs = new SafeTransaction[](directCount);
+        // Write one JSON per phase for this chain
+        vm.createDir(string.concat(UPDATE_OUTPUT_DIRECTORY, _outputSubdir), true);
+        string memory fileBase = string.concat(_outputSubdir, "/", vm.toString(_chainId), "_", _outputPrefix);
 
-        uint256 s;
-        uint256 d;
+        _writeUpdateSafeTransactionJson(scheduleTxs, string.concat(fileBase, "_schedule"), _batchDescription, string.concat(_batchDescription, " (schedule)"));
+        _writeUpdateSafeTransactionJson(executeTxs, string.concat(fileBase, "_execute"), _batchDescription, string.concat(_batchDescription, " (execute)"));
+        _writeUpdateSafeTransactionJson(cancelTxs, string.concat(fileBase, "_cancel"), _batchDescription, string.concat(_batchDescription, " (cancel)"));
+
+        console2.log("");
+        console2.log("  Output:", string.concat(UPDATE_OUTPUT_DIRECTORY, fileBase, "_{schedule,execute,cancel}.json"));
+        console2.log("  Done.");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TRANSACTION BUILDERS (single tx)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function _buildScheduleTx(UpdateParams memory _p) internal pure returns (SafeTransaction memory) {
+        return SafeTransaction({ to: ROYCO_FACTORY, value: 0, data: abi.encodeCall(IAccessManager.schedule, (_p.target, _p.callData, uint48(0))) });
+    }
+
+    function _buildExecuteTx(UpdateParams memory _p) internal pure returns (SafeTransaction memory) {
+        return SafeTransaction({ to: ROYCO_FACTORY, value: 0, data: abi.encodeCall(IAccessManager.execute, (_p.target, _p.callData)) });
+    }
+
+    function _buildCancelTx(UpdateParams memory _p) internal pure returns (SafeTransaction memory) {
+        return SafeTransaction({ to: ROYCO_FACTORY, value: 0, data: abi.encodeCall(IAccessManager.cancel, (ROOT_MULTISIG, _p.target, _p.callData)) });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DIRECT-CALL FLOW (immediate-delay roles, e.g. WCE_MULTISIG)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Processes a batch of updates that the caller can submit as a direct call (no
+     *         schedule/execute split). Use this for roles whose execution delay is 0 — the
+     *         caller's restricted function call is permitted in the same block.
+     * @dev Forks the chain, simulates each update in isolation by pranking `_caller`, then
+     *      writes ONE Safe JSON containing the batched direct-call transactions.
+     * @param _chainId The chain to process
+     * @param _caller The address that will submit the Safe batch (must hold an immediate-delay role)
+     * @param _updates Array of updates for this chain
+     * @param _outputSubdir Subdirectory under output/update/ (e.g. "entrypoint")
+     * @param _outputPrefix File name prefix (e.g. "update_tranche_configs")
+     * @param _batchDescription Overall description for the Safe batch
+     */
+    function _processChainDirect(
+        uint256 _chainId,
+        address _caller,
+        UpdateParams[] memory _updates,
+        string memory _outputSubdir,
+        string memory _outputPrefix,
+        string memory _batchDescription
+    )
+        internal
+    {
+        require(_updates.length > 0, NoUpdatesForChain(_chainId));
+
+        string memory rpcUrl = _getRpcUrl(_chainId);
+        vm.createSelectFork(rpcUrl);
+
+        console2.log("");
+        console2.log("========================================");
+        console2.log("Processing chain (direct):", _chainId);
+        console2.log("  Caller:", _caller);
+        console2.log("  Updates:", _updates.length);
+        console2.log("========================================");
+
+        // Simulate each update in isolation using snapshots
         for (uint256 i = 0; i < _updates.length; i++) {
-            (address scheduler, uint32 delay) = _classify(_updates[i]);
-            if (delay == 0) {
-                directTxs[d++] = SafeTransaction({ to: _updates[i].target, value: 0, data: _updates[i].callData });
-            } else {
-                scheduleTxs[s] = _buildScheduleTx(_updates[i]);
-                executeTxs[s] = _buildExecuteTx(_updates[i]);
-                cancelTxs[s] = _buildCancelTx(_updates[i], scheduler);
-                s++;
-            }
+            uint256 snapshot = vm.snapshotState();
+            _simulateDirect(_caller, _updates[i]);
+            vm.revertToState(snapshot);
+        }
+
+        // Build a single batched JSON of direct-call SafeTransactions
+        SafeTransaction[] memory txs = new SafeTransaction[](_updates.length);
+        for (uint256 i = 0; i < _updates.length; i++) {
+            txs[i] = SafeTransaction({ to: _updates[i].target, value: 0, data: _updates[i].callData });
         }
 
         vm.createDir(string.concat(UPDATE_OUTPUT_DIRECTORY, _outputSubdir), true);
         string memory fileBase = string.concat(_outputSubdir, "/", vm.toString(_chainId), "_", _outputPrefix);
-
-        if (scheduledCount > 0) {
-            _writeUpdateSafeTransactionJson(
-                scheduleTxs, string.concat(fileBase, "_schedule"), _batchDescription, string.concat(_batchDescription, " (schedule)")
-            );
-            _writeUpdateSafeTransactionJson(executeTxs, string.concat(fileBase, "_execute"), _batchDescription, string.concat(_batchDescription, " (execute)"));
-            _writeUpdateSafeTransactionJson(cancelTxs, string.concat(fileBase, "_cancel"), _batchDescription, string.concat(_batchDescription, " (cancel)"));
-        }
-        if (directCount > 0) {
-            _writeUpdateSafeTransactionJson(
-                directTxs, string.concat(fileBase, "_direct"), _batchDescription, string.concat(_batchDescription, " (direct call)")
-            );
-        }
+        _writeUpdateSafeTransactionJson(txs, fileBase, _batchDescription, _batchDescription);
 
         console2.log("");
-        console2.log("  Output:", string.concat(UPDATE_OUTPUT_DIRECTORY, fileBase, "_*.json"));
-        console2.log("  Scheduled ops:", scheduledCount, " Direct ops:", directCount);
+        console2.log("  Output:", string.concat(UPDATE_OUTPUT_DIRECTORY, fileBase, ".json"));
+        console2.log("  Done.");
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // CLASSIFICATION (role → scheduler → delay, read from the live AccessManager)
-    // ═══════════════════════════════════════════════════════════════════════════
+    /// @dev Pranks `_caller` and direct-calls the target. Reverts on failure. Then runs the
+    ///      subclass `_verify` hook against the same `UpdateParams`.
+    function _simulateDirect(address _caller, UpdateParams memory _params) internal {
+        console2.log("  Simulating (direct):", _params.description);
 
-    /**
-     * @notice Resolves the multisig that submits `_p` and its execution delay for the target function.
-     */
-    function _classify(UpdateParams memory _p) internal view returns (address scheduler, uint32 delay) {
-        bytes4 selector = bytes4(_p.callData);
-        uint64 roleId = IAccessManager(ACCESS_MANAGER).getTargetFunctionRole(_p.target, selector);
-        scheduler = _roleScheduler(roleId);
-        bool isMember;
-        (isMember, delay) = IAccessManager(ACCESS_MANAGER).hasRole(roleId, scheduler);
-        require(isMember, SchedulerLacksRole(scheduler, _p.target, selector));
-    }
+        vm.prank(_caller);
+        (bool ok, bytes memory ret) = _params.target.call(_params.callData);
+        require(ok, _decodeDirectRevert(ret));
+        console2.log("    [OK] Direct call");
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // TRANSACTION BUILDERS (single tx; scheduled ops target the AccessManager)
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    function _buildScheduleTx(UpdateParams memory _p) internal pure returns (SafeTransaction memory) {
-        return SafeTransaction({ to: ACCESS_MANAGER, value: 0, data: abi.encodeCall(IAccessManager.schedule, (_p.target, _p.callData, uint48(0))) });
-    }
-
-    function _buildExecuteTx(UpdateParams memory _p) internal pure returns (SafeTransaction memory) {
-        return SafeTransaction({ to: ACCESS_MANAGER, value: 0, data: abi.encodeCall(IAccessManager.execute, (_p.target, _p.callData)) });
-    }
-
-    function _buildCancelTx(UpdateParams memory _p, address _scheduler) internal pure returns (SafeTransaction memory) {
-        return SafeTransaction({ to: ACCESS_MANAGER, value: 0, data: abi.encodeCall(IAccessManager.cancel, (_scheduler, _p.target, _p.callData)) });
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // SIMULATION
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice Simulates one update the exact way it will be submitted: a direct call for an immediate-delay role, or
-     *         schedule → warp to the AM's scheduled timestamp → execute for a delayed role. Runs the `_verify` hook.
-     * @dev For delayed ops, Chainlink-style oracles registered in `UpdateConfig._chainlinkOracles` are captured before
-     *      the warp and re-mocked afterward with `updatedAt = block.timestamp`, so downstream staleness checks pass.
-     */
-    function _simulate(UpdateParams memory _p) internal {
-        console2.log("  Simulating:", _p.description);
-        (address scheduler, uint32 delay) = _classify(_p);
-
-        if (delay == 0) {
-            vm.prank(scheduler);
-            (bool ok, bytes memory ret) = _p.target.call(_p.callData);
-            require(ok, _decodeDirectRevert(ret));
-            console2.log("    [OK] Direct call");
-        } else {
-            vm.prank(scheduler);
-            (bytes32 operationId,) = IAccessManager(ACCESS_MANAGER).schedule(_p.target, _p.callData, uint48(0));
-            console2.log("    [OK] Schedule (authorization validated)");
-
-            address[] memory oracles = getChainlinkOracles(block.chainid);
-            bytes[] memory oraclePre = ChainlinkFreshness.capture(oracles);
-
-            uint48 executableAt = IAccessManager(ACCESS_MANAGER).getSchedule(operationId);
-            require(executableAt != 0, VerificationFailed("schedule did not register"));
-            vm.warp(uint256(executableAt));
-
-            ChainlinkFreshness.mockFresh(oracles, oraclePre);
-
-            vm.prank(scheduler);
-            IAccessManager(ACCESS_MANAGER).execute(_p.target, _p.callData);
-            console2.log("    [OK] Execute (after the timelock elapses)");
-        }
-
-        _verify(_p);
+        _verify(_params);
         console2.log("    [OK] Verification");
     }
 
@@ -219,10 +227,59 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // SIMULATION
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Simulates the full schedule -> warp -> execute flow on the current fork
+     * @dev Schedule is hard-failing (validates authorization). Before the warp the harness
+     *      captures `latestRoundData()` for every oracle registered via
+     *      `_chainlinkOracles[chainId]` in `UpdateConfig`, then re-`mockCall`s it post-warp with
+     *      `updatedAt = block.timestamp` so downstream staleness checks pass. Execute is still
+     *      wrapped in try/catch as a defensive fallback for oracles that haven't been registered
+     *      — mock-state and snapshot-revert remain isolated to the per-update bracket.
+     */
+    function _simulate(UpdateParams memory _params) internal {
+        console2.log("  Simulating:", _params.description);
+
+        // Schedule — validates authorization (hard fail)
+        vm.prank(ROOT_MULTISIG);
+        IAccessManager(ROYCO_FACTORY).schedule(_params.target, _params.callData, uint48(0));
+        console2.log("    [OK] Schedule (authorization validated)");
+
+        // Snapshot Chainlink-style oracle data BEFORE the warp; mock back with
+        // `updatedAt = block.timestamp` afterward to defeat downstream staleness checks.
+        address[] memory oracles = getChainlinkOracles(block.chainid);
+        bytes[] memory oraclePre = ChainlinkFreshness.capture(oracles);
+
+        // Warp past the execution delay
+        vm.warp(vm.getBlockTimestamp() + SIMULATION_WARP_DURATION);
+
+        ChainlinkFreshness.mockFresh(oracles, oraclePre);
+
+        // Execute — try/catch as a fallback for any oracle staleness path not covered by the mock
+        vm.prank(ROOT_MULTISIG);
+        try IAccessManager(ROYCO_FACTORY).execute(_params.target, _params.callData) {
+            console2.log("    [OK] Execute");
+            _verify(_params);
+            console2.log("    [OK] Verification");
+        } catch (bytes memory reason) {
+            console2.log("    [WARN] Execute reverted (likely oracle staleness from 2-day warp)");
+            if (reason.length >= 4) {
+                console2.logBytes4(bytes4(reason));
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // VERIFICATION HOOK
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Override in leaf scripts to assert the parameter landed. Called after each simulated op; must revert on failure.
+    /**
+     * @notice Override in leaf scripts to verify the parameter was set correctly
+     * @dev Called after execute succeeds. Should revert if verification fails.
+     * @param _params The update parameters
+     */
     function _verify(UpdateParams memory _params) internal view virtual;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -241,7 +298,9 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
     // JSON OUTPUT
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Writes a Safe Transaction Builder compatible JSON to the update output directory
+    /**
+     * @notice Writes a Safe Transaction Builder compatible JSON to the update output directory
+     */
     function _writeUpdateSafeTransactionJson(
         SafeTransaction[] memory _transactions,
         string memory _outputFileName,

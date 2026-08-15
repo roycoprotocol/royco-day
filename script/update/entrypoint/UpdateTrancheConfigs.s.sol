@@ -12,6 +12,16 @@ import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
  * @title UpdateTrancheConfigs
  * @notice Updates every configured market's entry-point tranche configurations (delays, oracle gate flags, enablement)
  *         in one batched `modifyTrancheConfigs` call per chain.
+ *
+ * @dev Hooks into `ParameterUpdateBase`'s direct-call harness:
+ *      - Resolves ST/JT addresses per market via `getMarketAddresses(name)` and the LPT via the kernel's
+ *        LIQUIDITY_PROVIDER_TRANCHE immutable.
+ *      - Sanity-checks each tranche's slot ordering (ST, JT, LPT) via `TRANCHE_TYPE()`.
+ *      - Encodes a single batched `modifyTrancheConfigs(tranches, configs)` call to the entry point per chain.
+ *      - Runs the call via `_processChainDirect` pranking `WCE_MULTISIG` (immediate role).
+ *      - Writes one Safe JSON per chain at `output/update/entrypoint/{chainId}_update_tranche_configs.json`.
+ *
+ *      No schedule/execute split: WCE holds `ADMIN_ENTRY_POINT_ROLE` with delay 0.
  */
 contract UpdateTrancheConfigs is ParameterUpdateBase {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -73,10 +83,10 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
     }
 
     /// @dev Forks the chain, resolves tranche addresses, encodes the batched call, and
-    ///      hands off to `_processChain` for classification, simulation, and JSON write.
+    ///      hands off to `_processChainDirect` for simulation + JSON write.
     function _processOneChain(ChainEntryPointConfig storage _cfg) internal {
         // Fork once up front so `getMarketAddresses` (which reads the kernel) works.
-        // `_processChain` re-forks the same chain — that's fine; calldata is in memory.
+        // `_processChainDirect` re-forks the same chain — that's fine; calldata is in memory.
         vm.createSelectFork(_getRpcUrl(_cfg.chainId));
 
         uint256 nMarkets = _cfg.markets.length;
@@ -121,7 +131,7 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
             description: string.concat("Update entry-point tranche configs (", vm.toString(nTranches), " tranches)")
         });
 
-        _processChain(_cfg.chainId, updates, OUTPUT_SUBDIR, OUTPUT_PREFIX, BATCH_DESCRIPTION);
+        _processChainDirect(_cfg.chainId, WCE_MULTISIG, updates, OUTPUT_SUBDIR, OUTPUT_PREFIX, BATCH_DESCRIPTION);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

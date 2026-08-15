@@ -9,6 +9,12 @@ import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
  * @notice Generates a Safe transaction batch for updating a kernel's collateral asset oracle
  *         address across multiple markets and chains. Staleness thresholds are the oracle's own
  *         construction immutables: retuning one means deploying a fresh adapter (with the new
+ *         thresholds baked in) and repointing the kernel at it here.
+ *
+ * @dev `setCollateralAssetOracle` on the kernel is gated by `ADMIN_ORACLE_ROLE`, which has an
+ *      execution delay of 0 (Immediate per `Roles`). So this uses the harness's
+ *      direct-call flow (`_processChainDirect`) — one Safe JSON per chain, no schedule/execute
+ *      split. `ROOT_MULTISIG` holds the role on production factories.
  *
  *      Usage:
  *      1. Add/update config entries in `_initializeConfigs()`.
@@ -119,7 +125,7 @@ contract SetCollateralAssetOracle is ParameterUpdateBase {
                 idx++;
             }
 
-            _processChain(chainId, updates, OUTPUT_SUBDIR, OUTPUT_PREFIX, BATCH_DESCRIPTION);
+            _processChainDirect(chainId, ROOT_MULTISIG, updates, OUTPUT_SUBDIR, OUTPUT_PREFIX, BATCH_DESCRIPTION);
         }
     }
 

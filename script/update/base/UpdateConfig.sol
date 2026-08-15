@@ -1,31 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import {
-    ADMIN_ACCOUNTANT_ROLE,
-    ADMIN_BALANCER_POOL_MANAGER_ROLE,
-    ADMIN_ENTRY_POINT_ROLE,
-    ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
-    ADMIN_KERNEL_ROLE,
-    ADMIN_MARKET_OPS_ROLE,
-    ADMIN_ORACLE_ROLE,
-    ADMIN_PAUSER_ROLE,
-    ADMIN_PROTOCOL_FEE_SETTER_ROLE,
-    ADMIN_UNPAUSER_ROLE,
-    ADMIN_UPGRADER_ROLE,
-    GUARDIAN_ROLE,
-    LP_ROLE_ADMIN_ROLE
-} from "../../../src/factory/Roles.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title UpdateConfig
- * @notice Shared address registry for the parameter-update scripts: the chain-agnostic protocol singletons, the
- *         governance multisigs (the kerchkoffs four-multisig model), the role -> scheduler mapping every update
- *         resolves its Safe submitter through, and the per-chain deployed-kernel registry markets are looked up in.
- * @dev The AccessManager, factory, and entry point are CREATE2/CREATE3 with no chain-specific input, so their
- *      addresses are identical on every chain for the prod deployer. Market kernels differ per chain and are
- *      registered in `_initializeDeployedMarkets()` as they ship.
+ * @notice Registry mapping market names to deployed kernel addresses per chain
+ * @dev All other addresses (accountant, tranches) are derived from the kernel at runtime.
+ *      Add new markets by extending `_initializeDeployedMarkets()`.
  */
 abstract contract UpdateConfig {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -38,42 +20,42 @@ abstract contract UpdateConfig {
     uint256 internal constant BASE = 8453;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // PROTOCOL SINGLETONS (chain-agnostic — same address on every chain)
+    // FACTORY ADDRESS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev The RoycoAccessManager — the target of every schedule/execute/cancel transaction
-    address internal constant ACCESS_MANAGER = 0x87aED46566cb28c8375cfcC9971090882A0fB12e;
+    /// @dev The Day factory (CREATE2 — same address on every chain).
+    /// @dev TODO: set the deployed Day factory address once the first Day market is live.
+    address internal constant ROYCO_FACTORY = address(0);
 
-    /// @dev The Day factory proxy (CREATE3 vanity address)
-    address internal constant ROYCO_FACTORY = 0xaaAaaaaa01Af9426C2eB6FeBc61DcD7C302cc45F;
-
-    /// @dev The Day entry point proxy
-    address internal constant ROYCO_ENTRY_POINT = 0x30a4D4C600b043d3358B861ff690B3c1dD3FED02;
+    /// @dev The Day entry point proxy (CREATE3 — same address on every chain).
+    /// @dev TODO: set the deployed Day entry point address once the chain bootstrap (script/deploy/BootstrapChain.s.sol) has run.
+    address internal constant ROYCO_ENTRY_POINT = address(0);
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // GOVERNANCE MULTISIGS (kerchkoffs four-multisig model)
+    // MULTISIG ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev FNDN — super-admin; unpauser; entry-point fee collection; guardian + emergency-oracle co-hold
-    address internal constant FNDN = 0x7c405bbD131e42af506d14e752f2e59B19D49997;
+    /// @dev Root multisig — holds the timelocked admin roles (ADMIN_ACCOUNTANT_ROLE, ADMIN_KERNEL_ROLE, etc.)
+    address internal constant ROOT_MULTISIG = 0x7c405bbD131e42af506d14e752f2e59B19D49997;
 
-    /// @dev WAY — holds every parameter-update role, scheduling all delayed ops
-    address internal constant WAY = 0x84d37A25e46029CE161111420E07cEb78880119e;
+    /// @dev Executor multisig — holds the GUARDIAN_ROLE (can cancel pending operations)
+    address internal constant EXECUTOR_MULTISIG = 0x84d37A25e46029CE161111420E07cEb78880119e;
 
-    /// @dev WAY_PAUSE — sole pauser (immediate)
-    address internal constant WAY_PAUSE = 0xC7605B1891B449B0051d55D083B49D6b46D164bb;
+    /// @dev WCE multisig — operations multisig holding immediate-delay admin roles
+    ///      (e.g. ADMIN_ENTRY_POINT_ROLE with 0 delay).
+    address internal constant WCE_MULTISIG = 0x84d37A25e46029CE161111420E07cEb78880119e;
 
-    /// @dev FNDN_VETO — guardian co-hold (immediate)
-    address internal constant FNDN_VETO = 0xc5Df006FA0647EFF1A55CCF5749ce17772F4d8CB;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARKET NAMES
+    // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev AUTO — LP-role-admin co-hold (immediate)
-    address internal constant AUTO = 0xb2B80EBcb7EE285806ddcB26E84a444032D1c244;
+    // Add Day market names here as they ship (e.g. `string internal constant SNUSD = "snUSD";`).
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TYPES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Resolved market addresses (derived from the kernel at runtime)
+    /// @notice Resolved market addresses (derived from kernel at runtime)
     struct MarketAddresses {
         address kernel;
         address accountant;
@@ -88,8 +70,10 @@ abstract contract UpdateConfig {
     /// @dev chainId → marketName → kernel address
     mapping(uint256 chainId => mapping(string marketName => address kernel)) internal _deployedKernels;
 
-    /// @dev Chainlink-style aggregators (`latestRoundData()`) kept "fresh" across the simulation warp (see
-    ///      `ParameterUpdateBase._simulate`): captured pre-warp, re-mocked post-warp with `updatedAt = block.timestamp`.
+    /// @dev Chainlink-style aggregators (`latestRoundData()`) that need to stay "fresh" through the
+    ///      2-day simulation warp. The harness captures `latestRoundData` for each entry pre-warp,
+    ///      then `vm.mockCall`s the oracle post-warp to keep the same `answer` but report
+    ///      `updatedAt = block.timestamp`, defeating downstream staleness checks.
     mapping(uint256 chainId => address[] oracles) internal _chainlinkOracles;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -97,7 +81,6 @@ abstract contract UpdateConfig {
     // ═══════════════════════════════════════════════════════════════════════════
 
     error MarketNotFound(string marketName, uint256 chainId);
-    error UnknownRoleScheduler(uint64 roleId);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTRUCTOR
@@ -105,31 +88,6 @@ abstract contract UpdateConfig {
 
     constructor() {
         _initializeDeployedMarkets();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // ROLE → SCHEDULER RESOLUTION
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice The multisig that submits (schedules + executes, or directly calls) an operation gated by `_roleId`.
-     * @dev Mirrors the kerchkoffs role distribution. The base reads the HOLDER'S execution delay from the live
-     *      AccessManager to decide whether the op is a direct call (0 delay) or a schedule/execute (non-zero delay),
-     *      so this map only needs the holder, not the delay.
-     */
-    function _roleScheduler(uint64 _roleId) internal pure returns (address scheduler) {
-        if (_roleId == ADMIN_PAUSER_ROLE) return WAY_PAUSE;
-        if (_roleId == ADMIN_UNPAUSER_ROLE) return FNDN;
-        if (_roleId == ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE) return FNDN;
-        if (_roleId == GUARDIAN_ROLE) return FNDN;
-        if (
-            _roleId == ADMIN_UPGRADER_ROLE || _roleId == ADMIN_KERNEL_ROLE || _roleId == ADMIN_ACCOUNTANT_ROLE || _roleId == ADMIN_PROTOCOL_FEE_SETTER_ROLE
-                || _roleId == ADMIN_ORACLE_ROLE || _roleId == ADMIN_MARKET_OPS_ROLE || _roleId == ADMIN_BALANCER_POOL_MANAGER_ROLE
-                || _roleId == ADMIN_ENTRY_POINT_ROLE || _roleId == LP_ROLE_ADMIN_ROLE
-        ) {
-            return WAY;
-        }
-        revert UnknownRoleScheduler(_roleId);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -163,7 +121,7 @@ abstract contract UpdateConfig {
     function _initializeDeployedMarkets() internal {
         // Register deployed Day markets here as they ship, e.g.:
         //   _deployedKernels[MAINNET][SNUSD] = 0x...;
-        // and push any Chainlink/RedStone aggregators that must stay fresh through the simulation warp:
+        // and push any Chainlink/RedStone aggregators that must stay fresh through the 2-day simulation warp:
         //   _chainlinkOracles[MAINNET].push(0x...);
     }
 }

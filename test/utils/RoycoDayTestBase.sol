@@ -189,6 +189,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         pinned.jtProtocolFeeWAD = 0;
         pinned.jtYieldShareProtocolFeeWAD = 0.45e18;
         pinned.lptYieldShareProtocolFeeWAD = 0;
+        // The venue suites' leak and slippage formulas are written against a 1 bp pool swap fee
+        pinned.poolSwapFeePercentage = 1e14;
         BOOTSTRAP.overrideTemplatePolicyForTest(pinned);
 
         // The fixtures act through role-specific prankable wallets, with OWNER as the AccessManager admin
@@ -215,8 +217,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
             z: -28_859_471_639_991_253_843_240_999_485_797_747_790,
             dSq: 99_999_999_999_999_999_886_624_093_342_106_115_200
         });
-        // The venue suites' leak and slippage formulas are written against a 1 bp pool swap fee
-        snUsd.pool.swapFeePercentage = 1e14;
         MARKET_REGISTRY.overrideDayMarketConfigForTest(snUsd);
     }
 

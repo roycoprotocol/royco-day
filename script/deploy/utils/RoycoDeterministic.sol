@@ -18,7 +18,7 @@ import { CREATE2_FACTORY_ADDRESS } from "../../utils/Create2DeployUtils.sol";
  */
 library RoycoDeterministic {
     /// @notice The environment salt suffixes: a test deployment and a production deployment never collide on a deterministic address.
-    string internal constant PROD_SALT_SUFFIX = "_PROD_V1.0.2";
+    string internal constant PROD_SALT_SUFFIX = "_PROD_V1.0.1";
     string internal constant TEST_SALT_SUFFIX = "_TEST_3243241421";
 
     /// @notice CREATE2 salt for a protocol singleton (AccessManager, factory, template, etc.), suffixed by environment
@@ -37,7 +37,7 @@ library RoycoDeterministic {
     }
 
     /// @notice The salt for the factory proxy
-    bytes32 internal constant FACTORY_PROXY_SALT = hex"18cba0c9d6fd70d0000000000000000000000000046122e60000000000000000";
+    bytes32 internal constant FACTORY_PROXY_SALT = hex"18cad0767bcf6638000000000000000a0000000009f5d4400000000000000000";
 
     /// @notice Predicts the factory proxy `_deployer` stands up under the environment's salts
     function predictFactoryProxy(address _deployer, bool _isTest) internal pure returns (address) {

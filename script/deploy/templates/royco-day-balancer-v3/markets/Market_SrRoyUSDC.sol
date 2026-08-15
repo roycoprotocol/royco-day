@@ -72,7 +72,6 @@ abstract contract Market_SrRoyUSDC is DayMarketRegistryBase {
                 symbol: "srsrRoyUSDC/frxUSD",
                 eclpParams: _exitLiquidityPrioritizedEclpParams(),
                 derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
-                swapFeePercentage: 10e14, // 10 bps, the pool swap fee every market previously inherited from the template policy
                 quoteAsset: 0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29, // frxUSD (18 decimals)
                 quoteAssetRateProvider: address(0)
             }),

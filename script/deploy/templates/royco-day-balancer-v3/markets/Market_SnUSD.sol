@@ -83,7 +83,6 @@ abstract contract Market_SnUSD is DayMarketRegistryBase {
                 symbol: "srsNUSD/USDC",
                 eclpParams: _exitLiquidityPrioritizedEclpParams(),
                 derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
-                swapFeePercentage: 10e14, // 10 bps, the pool swap fee every market previously inherited from the template policy
                 quoteAsset: USDC[block.chainid],
                 quoteAssetRateProvider: address(0)
             }),

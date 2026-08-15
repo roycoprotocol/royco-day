@@ -78,7 +78,6 @@ abstract contract Market_FalconX is DayMarketRegistryBase {
                 symbol: "srFalconX/srsrRoyUSDC",
                 eclpParams: _exitLiquidityPrioritizedEclpParams(),
                 derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
-                swapFeePercentage: 10e14, // 10 bps, the pool swap fee every market previously inherited from the template policy
                 quoteAsset: SRROYUSDC_SENIOR_TRANCHE,
                 quoteAssetRateProvider: SRROYUSDC_KERNEL
             }),
