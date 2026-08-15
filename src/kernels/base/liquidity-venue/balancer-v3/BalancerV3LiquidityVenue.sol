@@ -305,8 +305,6 @@ abstract contract BalancerV3LiquidityVenue is RoycoDayKernel, VaultGuard, IBalan
         if (_syncBeforeUpdate) _preOpSyncTrancheAccountingWithPriceCache();
         // Update the BPT oracle
         _setBPTOracle(_bptOracle);
-        // Sync the tranche accounting against the incoming oracle so the committed liquidity provider tranche raw NAV reflects it
-        _preOpSyncTrancheAccountingWithPriceCache();
     }
 
     /// @notice Sets the maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT
