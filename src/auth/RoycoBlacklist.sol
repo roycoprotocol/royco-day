@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
-import { RoycoUUPSBase } from "../base/RoycoUUPSBase.sol";
+import { Ownable } from "../../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
+import { Ownable2Step } from "../../lib/openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 import { IRoycoBlacklist } from "../interfaces/IRoycoBlacklist.sol";
 import { ISanctionsList } from "../interfaces/external/chainalysis/ISanctionsList.sol";
 
@@ -9,30 +10,23 @@ import { ISanctionsList } from "../interfaces/external/chainalysis/ISanctionsLis
  * @title RoycoBlacklist
  * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Manages account blacklisting and Chainalysis sanctions screening for a Royco market
- * @notice Queried by kernels for any operations involving preview or state mutating asset transfers between accounts
+ * @notice Queried by the market's kernel for any operations involving preview or state-mutating asset transfers between accounts
  */
-contract RoycoBlacklist is IRoycoBlacklist, RoycoUUPSBase {
-    /// @dev Storage slot for RoycoBlacklistState using ERC-7201 pattern
-    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoBlacklistState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant _ROYCO_BLACKLIST_STORAGE_SLOT = 0x9cdd7566a2b8c3aa6c16fbea0646d47b549e37af578fc5d5261a1bd123401800;
+contract RoycoBlacklist is Ownable2Step, IRoycoBlacklist {
+    /// @notice The Chainalysis maintained sanctions list used to screen accounts (the null address if unused)
+    address private _chainalysisSanctionsList;
 
-    // =============================
-    // Initialization Functions
-    // =============================
+    /// @notice Accounts locally blacklisted from holding or transferring this market's tranche shares
+    mapping(address account => bool isBlacklisted) private _accountToIsBlacklisted;
 
     /**
-     * @notice Initializes the Royco blacklist state
-     * @param _initialAuthority The initial authority for the Royco market's blacklist
-     * @param _chainalysisSanctionsList The Chainalysis maintained sanctions list for addresses (set to the null address if unused)
+     * @notice Deploys the market's blacklist under the given owner
+     * @param _owner The account granted ownership of the blacklist's mutation surface (blacklist/unblacklist/sanctions)
+     * @param _chainalysisSanctionsListAddress The Chainalysis maintained sanctions list for addresses (the null address if unused)
      * @param _accounts The initial accounts to blacklist
      */
-    function initialize(address _initialAuthority, address _chainalysisSanctionsList, address[] calldata _accounts) external initializer {
-        // Initialize the base state of the blacklist
-        __RoycoBase_init(_initialAuthority);
-
-        // Set the initial Chainalysis sanctions list
-        _setSanctionsList(_chainalysisSanctionsList);
-        // Blacklist the initially specified accounts
+    constructor(address _owner, address _chainalysisSanctionsListAddress, address[] memory _accounts) Ownable(_owner) {
+        _setSanctionsList(_chainalysisSanctionsListAddress);
         _blacklistAccounts(_accounts);
     }
 
@@ -41,17 +35,16 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoUUPSBase {
     // =============================
 
     /// @inheritdoc IRoycoBlacklist
-    function blacklistAccounts(address[] calldata _accounts) public override(IRoycoBlacklist) restricted {
+    function blacklistAccounts(address[] calldata _accounts) public override(IRoycoBlacklist) onlyOwner {
         _blacklistAccounts(_accounts);
     }
 
     /// @inheritdoc IRoycoBlacklist
-    function unblacklistAccounts(address[] calldata _accounts) external override(IRoycoBlacklist) restricted {
-        RoycoBlacklistState storage $ = _getRoycoBlacklistStorage();
+    function unblacklistAccounts(address[] calldata _accounts) external override(IRoycoBlacklist) onlyOwner {
         for (uint256 i = 0; i < _accounts.length; ++i) {
             address account = _accounts[i];
             require(account != address(0), NULL_ADDRESS());
-            $.accountToIsBlacklisted[account] = false;
+            _accountToIsBlacklisted[account] = false;
             emit AccountUnblacklisted(account);
         }
     }
@@ -64,7 +57,7 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoUUPSBase {
     function isBlacklisted(address _account) public view override(IRoycoBlacklist) returns (bool) {
         // An account is blacklisted if it is locally blacklisted, screened by the configured Chainalysis sanctions list, or flagged by the exogenous blacklist check
         if (_account == address(0)) return false;
-        return (_getRoycoBlacklistStorage().accountToIsBlacklisted[_account] || _isSanctioned(_account) || _isExogenouslyBlacklisted(_account));
+        return (_accountToIsBlacklisted[_account] || _isSanctioned(_account) || _isExogenouslyBlacklisted(_account));
     }
 
     /// @inheritdoc IRoycoBlacklist
@@ -85,13 +78,13 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoUUPSBase {
     // =============================
 
     /// @inheritdoc IRoycoBlacklist
-    function setSanctionsList(address _chainalysisSanctionsList) external override(IRoycoBlacklist) restricted {
-        _setSanctionsList(_chainalysisSanctionsList);
+    function setSanctionsList(address _chainalysisSanctionsListAddress) external override(IRoycoBlacklist) onlyOwner {
+        _setSanctionsList(_chainalysisSanctionsListAddress);
     }
 
     /// @inheritdoc IRoycoBlacklist
     function getSanctionsList() external view override(IRoycoBlacklist) returns (address chainalysisSanctionsList) {
-        return _getRoycoBlacklistStorage().chainalysisSanctionsList;
+        return _chainalysisSanctionsList;
     }
 
     // =============================
@@ -103,21 +96,20 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoUUPSBase {
      * @dev Idempotent: blacklisting an already-blacklisted account is a no-op (still emits AccountBlacklisted)
      * @param _accounts The addresses of the accounts to blacklist
      */
-    function _blacklistAccounts(address[] calldata _accounts) internal {
-        RoycoBlacklistState storage $ = _getRoycoBlacklistStorage();
+    function _blacklistAccounts(address[] memory _accounts) internal {
         for (uint256 i = 0; i < _accounts.length; ++i) {
             address account = _accounts[i];
             require(account != address(0), NULL_ADDRESS());
-            $.accountToIsBlacklisted[account] = true;
+            _accountToIsBlacklisted[account] = true;
             emit AccountBlacklisted(account);
         }
     }
 
     /// @notice Sets the Chainalysis sanctions list used to screen accounts
-    /// @param _chainalysisSanctionsList The Chainalysis maintained sanctions list address (set to the null address to disable sanctions screening)
-    function _setSanctionsList(address _chainalysisSanctionsList) internal {
-        _getRoycoBlacklistStorage().chainalysisSanctionsList = _chainalysisSanctionsList;
-        emit SanctionsListUpdated(_chainalysisSanctionsList);
+    /// @param _chainalysisSanctionsListAddress The Chainalysis maintained sanctions list address (set to the null address to disable sanctions screening)
+    function _setSanctionsList(address _chainalysisSanctionsListAddress) internal {
+        _chainalysisSanctionsList = _chainalysisSanctionsListAddress;
+        emit SanctionsListUpdated(_chainalysisSanctionsListAddress);
     }
 
     /**
@@ -127,7 +119,7 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoUUPSBase {
      * @return sanctioned Whether the account is included in the configured Chainalysis sanctions designation
      */
     function _isSanctioned(address _account) internal view returns (bool sanctioned) {
-        address sanctionsList = _getRoycoBlacklistStorage().chainalysisSanctionsList;
+        address sanctionsList = _chainalysisSanctionsList;
         return (sanctionsList != address(0) && ISanctionsList(sanctionsList).isSanctioned(_account));
     }
 
@@ -139,19 +131,4 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoUUPSBase {
      * @return blacklisted Whether the account is blacklisted by the exogenous blacklist
      */
     function _isExogenouslyBlacklisted(address _account) internal view virtual returns (bool blacklisted) { }
-
-    // =============================
-    // Blacklist State Accessor Functions
-    // =============================
-
-    /**
-     * @notice Returns a storage pointer to the RoycoBlacklistState storage
-     * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
-     * @return $ Storage pointer to the blacklist's state
-     */
-    function _getRoycoBlacklistStorage() private pure returns (RoycoBlacklistState storage $) {
-        assembly ("memory-safe") {
-            $.slot := _ROYCO_BLACKLIST_STORAGE_SLOT
-        }
-    }
 }

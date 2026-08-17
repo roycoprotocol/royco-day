@@ -9,11 +9,6 @@ import { AccountantEconomics, CollateralOracleConfig, DayMarketConfig, KernelSet
 import { DayMarketRegistryBase } from "./DayMarketRegistryBase.sol";
 
 /// @title Market_APYX
-/// @notice APYX, per the market sheet: underlying 10.23%, min coverage 15%, min liquidity 10%, JT yield share 15% @
-///         target, LP yield share 8% @ target, 30-day observation period, protected exit at 3% coverage remaining,
-///         NO self-liquidation bonus. 20-day redemption cooldown. Collateral is apyUSD (18-decimal ERC4626 over
-///         apxUSD) priced through the 18-decimal Chainlink apxUSD/USD exchange-rate feed; the pool quotes in the
-///         srRoyUSDC senior tranche with the srRoyUSDC kernel as the leg's rate provider.
 abstract contract Market_APYX is DayMarketRegistryBase {
     function _initializeApyxMarket() internal {
         _dayMarketConfigs[APYX] = DayMarketConfig({
@@ -22,7 +17,6 @@ abstract contract Market_APYX is DayMarketRegistryBase {
             stParams: IBaseTemplate.TrancheDeploymentParams({ name: "Senior apyUSD", symbol: "srapyUSD" }),
             jtParams: IBaseTemplate.TrancheDeploymentParams({ name: "Junior apyUSD", symbol: "jrapyUSD" }),
             lptParams: IBaseTemplate.TrancheDeploymentParams({ name: "Senior Liquidity apyUSD", symbol: "slapyUSD" }),
-            // apyUSD (18 decimals), APYX's ERC4626 vault over apxUSD, per the dawn apyUSD market
             collateralAsset: 0x38EEb52F0771140d10c4E9A9a72349A329Fe8a6A,
             oracle: CollateralOracleConfig({
                 deployed: address(0),
@@ -37,11 +31,11 @@ abstract contract Market_APYX is DayMarketRegistryBase {
                         // Attested share-price update timestamp as of deployment
                         lastUpdate: 1_782_400_000,
                         chainlinkOracleStalenessThresholdSeconds: 48 hours, // the feed pushes ~every 12 hours; 48h mirrors dawn
-                        // Yield accrual moves the share price continuously; 8 days covers any plausible flat stretch
-                        vaultSharePriceStalenessThresholdSeconds: 8 days
+                        vaultSharePriceStalenessThresholdSeconds: 7 days // Yield accrual moves the share price continuously; 7 days covers any plausible flat stretch
                     })
                 )
             }),
+            roycoBlacklist: address(0),
             accountant: AccountantEconomics({
                 fixedTermGracePeriodSeconds: 1 days,
                 minCoverageWAD: 0.15e18,
@@ -50,13 +44,13 @@ abstract contract Market_APYX is DayMarketRegistryBase {
                 jtYdm: YDMSelection({
                     ydmType: YDMType.AdaptiveCurve_V2,
                     curveParams: abi.encode(
-                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.15e18, yieldShareAtFullUtilWAD: 0.31e18 })
+                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.15e18, yieldShareAtTargetUtilWAD: 0.15e18, yieldShareAtFullUtilWAD: 0.4e18 })
                     )
                 }),
                 lptYdm: YDMSelection({
                     ydmType: YDMType.AdaptiveCurve_V2,
                     curveParams: abi.encode(
-                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.04e18, yieldShareAtTargetUtilWAD: 0.08e18, yieldShareAtFullUtilWAD: 0.31e18 })
+                        AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.15e18, yieldShareAtTargetUtilWAD: 0.15e18, yieldShareAtFullUtilWAD: 0.4e18 })
                     )
                 }),
                 maxJTYieldShareWAD: 0.5e18,
@@ -75,8 +69,9 @@ abstract contract Market_APYX is DayMarketRegistryBase {
             pool: GyroECLPPoolParams({
                 name: "Senior apyUSD / Senior SrRoyUSDC",
                 symbol: "srapyUSD/srsrRoyUSDC",
-                eclpParams: _srRoyUsdcEclpParams(),
-                derivedEclpParams: _srRoyUsdcDerivedEclpParams(),
+                eclpParams: _exitLiquidityPrioritizedEclpParams(),
+                derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
+                swapFeePercentage: 10e14, // 10 bps, the pool swap fee every market previously inherited from the template policy
                 quoteAsset: SRROYUSDC_SENIOR_TRANCHE,
                 quoteAssetRateProvider: SRROYUSDC_KERNEL
             }),

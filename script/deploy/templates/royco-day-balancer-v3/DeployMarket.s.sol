@@ -90,7 +90,7 @@ contract DeployMarketComponent is CollateralOracleDeployer {
             juniorTranche: IRoycoVaultTranche(r.juniorTranche),
             accountant: IRoycoDayAccountant(r.accountant),
             kernel: IRoycoDayKernel(r.kernel),
-            roycoBlacklist: UP.roycoBlacklist,
+            roycoBlacklist: _config.roycoBlacklist,
             entryPoint: UP.entryPoint,
             marketSyncer: UP.marketSyncer
         });
@@ -117,6 +117,7 @@ contract DeployMarketComponent is CollateralOracleDeployer {
         params.lptParams = _config.lptParams;
         params.collateralAsset = _config.collateralAsset;
         params.quoteAsset = _config.pool.quoteAsset;
+        params.roycoBlacklist = _config.roycoBlacklist;
 
         // The Gyro E-CLP pool the template creates for this market's liquidity venue
         params.poolCreationParams = BalancerV3PoolCreationParams({
@@ -124,6 +125,7 @@ contract DeployMarketComponent is CollateralOracleDeployer {
             symbol: _config.pool.symbol,
             eclpParams: _config.pool.eclpParams,
             derivedEclpParams: _config.pool.derivedEclpParams,
+            swapFeePercentage: _config.pool.swapFeePercentage,
             quoteAssetRateProvider: _config.pool.quoteAssetRateProvider
         });
 
@@ -185,14 +187,14 @@ contract DeployMarket is DeployMarketComponent, DayMarketRegistry {
         string memory marketName = vm.envString("MARKET_NAME");
         DayMarketConfig memory cfg = getDayMarketConfig(marketName);
 
-        // Resolve the live template + blacklist off the chain (the factory has exactly the registered Day template)
+        // Resolve the live template off the chain (the factory has exactly the registered Day template)
         UP.template = _resolveEnabledTemplate();
-        UP.roycoBlacklist = RoycoDayBalancerV3MarketDeploymentTemplate(UP.template).ROYCO_BLACKLIST();
 
         deployMarket(cfg, getMarketId(marketName, UP.factory), vm.envUint("DEPLOYER_PRIVATE_KEY"));
     }
 
-    /// @dev The chain has ONE enabled Day template at a time; resolve it from the factory's registry
+    /// @dev The chain has ONE enabled Day template at a time; a standalone run pins it via the TEMPLATE_ADDRESS env
+    ///      var (the factory keeps no enumerable template registry to resolve it from)
     function _resolveEnabledTemplate() internal view returns (address) {
         return vm.envAddress("TEMPLATE_ADDRESS");
     }

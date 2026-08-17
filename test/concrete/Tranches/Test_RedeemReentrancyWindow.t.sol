@@ -9,7 +9,7 @@ import { UpgradeableBeacon } from "../../../lib/openzeppelin-contracts/contracts
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
-import { ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { RoycoDayBalancerV3Kernel } from "../../../src/kernels/RoycoDayBalancerV3Kernel.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
@@ -73,7 +73,6 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         probe = new MockReentrancyProbe();
         vm.label(address(probe), "ReentrancyProbe");
         accessManager.grantRole(ST_LP_ROLE, address(probe), 0);
-        accessManager.grantRole(SYNC_ROLE, address(probe), 0);
     }
 
     /**

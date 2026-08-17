@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { ConstantPriceFeed } from "../../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/ConstantPriceFeed.sol";
 import { ChainlinkPriceOracle } from "../../../../src/oracle/ChainlinkPriceOracle.sol";
 import { ERC4626SharePriceOracle } from "../../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../../../../src/oracle/IdleCDOTranchePriceOracle.sol";
@@ -48,6 +49,15 @@ abstract contract CollateralOracleDeployer is DeployScriptBase {
             ctorArgs = abi.encode(_config.collateralAsset, p.collateralToNavAssetFeed, p.chainlinkOracleStalenessThresholdSeconds);
         } else if (o.oracleType == OracleType.ERC4626SharePrice) {
             ERC4626SharePriceOracleParams memory p = abi.decode(o.specificParams, (ERC4626SharePriceOracleParams));
+            // A zero feed is the "$1 base asset" recipe: the base asset is attested at one NAV unit, so the oracle
+            // composes with a constant-1.0 feed (always fresh: updatedAt == block.timestamp) instead of a live
+            // Chainlink feed. Deployed once per deployer and reused across markets — the feed is stateless
+            if (p.baseAssetToNavAssetFeed == address(0)) {
+                bool feedExisted;
+                (p.baseAssetToNavAssetFeed, feedExisted) =
+                    deployWithSanityChecks(keccak256("ROYCO_USD_IDENTITY_PRICE_FEED"), type(ConstantPriceFeed).creationCode, false);
+                _logDeploy("USD identity feed     ", p.baseAssetToNavAssetFeed, feedExisted);
+            }
             creationCode = type(ERC4626SharePriceOracle).creationCode;
             ctorArgs = abi.encode(
                 _config.collateralAsset,

@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { Vm } from "../../../lib/forge-std/src/Vm.sol";
-import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { BalancerV3LiquidityVenue } from "../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -52,25 +52,32 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
     }
 
     /**
-     * @notice A right-pool oracle lands in storage with its event, and on BOTH sync-flag paths the trailing sync
-     *         re-commits the LPT raw NAV against the INCOMING oracle's mark
-     * @dev Both paths end with a sync against the incoming oracle; the flag only controls whether the outgoing
-     *      oracle gets a final sync first. Expected committed marks are hand-pinned MANUAL-mode TVLs
+     * @notice A right-pool oracle lands in storage with its event, and the setter never re-marks against the INCOMING
+     *         oracle: the sync flag only controls a final commit at the OUTGOING oracle's mark, and the incoming
+     *         oracle's mark is first committed by the next accounting sync
+     * @dev Path 1 (flag set) commits the outgoing oracle's mark before the swap and leaves it there; path 2 (flag
+     *      unset) leaves the last committed mark untouched. Expected committed marks are hand-pinned MANUAL-mode TVLs
      */
-    function test_SetBPTOracle_RecommitsLPTRawNAVAgainstIncomingOracle_OnBothSyncFlagPaths() public {
+    function test_SetBPTOracle_CommitsOutgoingMarkOnlyWhenFlagged_IncomingMarkFirstCommittedByNextSync() public {
         _seedMarket(100e18, 50e18); // JT then ST (auto-seeds minimal quote-only LPT depth for the liquidity requirement)
 
         uint256 ownedBpt = toUint256(kernel.getState().totalLPTAssets);
         uint256 bptSupply = balancerVault.totalSupply(address(bpt));
 
-        // Path 1 (sync against the outgoing oracle first): a replacement pinned to a 3e18 TVL
+        // Expected committed LPT raw NAV under a pinned TVL, via the venue's two-step floor: first the per-whole-BPT
+        // price floor(1e18 x TVL / bptSupply), then floor(ownedBPT x price / 1e18)
+        uint256 outgoingLptRawNAV = Math.mulDiv(ownedBpt, Math.mulDiv(1e18, 2e18, bptSupply, Math.Rounding.Floor), 1e18, Math.Rounding.Floor);
+        uint256 replacementLptRawNAV = Math.mulDiv(ownedBpt, Math.mulDiv(1e18, 3e18, bptSupply, Math.Rounding.Floor), 1e18, Math.Rounding.Floor);
+        uint256 secondReplacementLptRawNAV = Math.mulDiv(ownedBpt, Math.mulDiv(1e18, 5e18, bptSupply, Math.Rounding.Floor), 1e18, Math.Rounding.Floor);
+
+        // Path 1 (sync against the outgoing oracle first): move the OUTGOING oracle to a pinned 2e18 TVL that has not
+        // been committed yet, so the pre-swap sync is observable as a commit at the outgoing mark
+        bptOracle.setTVL(2e18);
+        bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
+        assertNotEq(toUint256(accountant.getState().lastLPTRawNAV), outgoingLptRawNAV, "arrange: the outgoing oracle's new mark must not be committed yet");
         MockBPTOracle replacement = new MockBPTOracle(balancerVault, address(bpt));
         replacement.setTVL(3e18);
         replacement.setMode(MockBPTOracle.Mode.MANUAL);
-        // Expected committed LPT raw NAV under the incoming oracle, via the venue's two-step floor: first the
-        // per-whole-BPT price floor(1e18 x TVL / bptSupply), then floor(ownedBPT x price / 1e18)
-        uint256 replacementPrice = Math.mulDiv(1e18, 3e18, bptSupply, Math.Rounding.Floor);
-        uint256 expectedLptRawNAV = Math.mulDiv(ownedBpt, replacementPrice, 1e18, Math.Rounding.Floor);
 
         vm.prank(ORACLE_ADMIN);
         vm.expectEmit(true, false, false, true, address(kernel));
@@ -78,14 +85,21 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
         kernel.setBPTOracle(address(replacement), true);
 
         assertEq(kernel.getBalancerV3LiquidityVenueState().bptOracle, address(replacement), "the replacement oracle must land in venue storage");
-        assertEq(toUint256(accountant.getState().lastLPTRawNAV), expectedLptRawNAV, "the committed LPT raw NAV must be re-marked against the incoming oracle");
+        assertEq(
+            toUint256(accountant.getState().lastLPTRawNAV), outgoingLptRawNAV, "the pre-sync path must commit the OUTGOING oracle's mark, not the incoming one"
+        );
 
-        // Path 2 (no pre-sync against the outgoing oracle): a second replacement pinned to a 5e18 TVL
+        // The incoming oracle's mark is first committed by the next sync
+        vm.prank(SYNC_OPERATOR);
+        kernel.syncTrancheAccounting();
+        assertEq(toUint256(accountant.getState().lastLPTRawNAV), replacementLptRawNAV, "the next sync must re-mark against the incoming oracle");
+
+        // Path 2 (no pre-sync against the outgoing oracle): move the outgoing (replacement) oracle to an uncommitted
+        // 4e18 TVL, then swap without syncing; neither the outgoing nor the incoming mark may be committed
+        replacement.setTVL(4e18);
         MockBPTOracle secondReplacement = new MockBPTOracle(balancerVault, address(bpt));
         secondReplacement.setTVL(5e18);
         secondReplacement.setMode(MockBPTOracle.Mode.MANUAL);
-        uint256 secondPrice = Math.mulDiv(1e18, 5e18, bptSupply, Math.Rounding.Floor);
-        uint256 expectedSecondLptRawNAV = Math.mulDiv(ownedBpt, secondPrice, 1e18, Math.Rounding.Floor);
 
         vm.prank(ORACLE_ADMIN);
         vm.expectEmit(true, false, false, true, address(kernel));
@@ -93,9 +107,12 @@ contract Test_OracleGuardAndConversions_LiquidityVenue is DayMarketTestBase {
         kernel.setBPTOracle(address(secondReplacement), false);
 
         assertEq(kernel.getBalancerV3LiquidityVenueState().bptOracle, address(secondReplacement), "the no-pre-sync path must also land the oracle in storage");
-        assertEq(
-            toUint256(accountant.getState().lastLPTRawNAV), expectedSecondLptRawNAV, "the no-pre-sync path must also re-commit against the incoming oracle"
-        );
+        assertEq(toUint256(accountant.getState().lastLPTRawNAV), replacementLptRawNAV, "the no-pre-sync path must leave the last committed mark untouched");
+
+        // The second incoming oracle's mark is likewise first committed by the next sync
+        vm.prank(SYNC_OPERATOR);
+        kernel.syncTrancheAccounting();
+        assertEq(toUint256(accountant.getState().lastLPTRawNAV), secondReplacementLptRawNAV, "the next sync must re-mark against the second incoming oracle");
     }
 
     /**

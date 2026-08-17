@@ -14,8 +14,7 @@ import {
     JT_LP_ROLE,
     LPT_LP_ROLE,
     PUBLIC_ROLE,
-    ST_LP_ROLE,
-    SYNC_ROLE
+    ST_LP_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
@@ -29,11 +28,6 @@ import { DeployScriptBase } from "./DeployScriptBase.sol";
  * @title DeployPeripheryComponent
  * @notice Deploys (or reuses) the chain's periphery singletons — the Royco Day entry point and the market syncer,
  *         each impl + ERC1967 proxy — and wires their full role surface on first deployment.
- * @dev Upstream addresses arrive at CONSTRUCTION in a struct. Both proxies must land on the addresses the core's
- *      gatekeeper was built against (`RoycoDeterministic.predictPeripherySingletons` is the ONE derivation both
- *      sides use), which this script asserts.
- * @dev ORDERING: must run BEFORE the role graph's second pass — the LP-role grants to the entry point require those
- *      roles' admin to still be ADMIN_ROLE (held by the deployer).
  */
 contract DeployPeripheryComponent is DeployScriptBase, EnvConfig {
     PeripheryUpstream internal UP;
@@ -87,12 +81,6 @@ contract DeployPeripheryComponent is DeployScriptBase, EnvConfig {
     }
 
     /// @notice Binds the entry point's selectors to their roles and grants it the tranche LP roles.
-    /// @dev Mirrors the production access model: LP request/execute/cancel selectors are public (user compliance is
-    ///      enforced by the tranches), config is ADMIN_ENTRY_POINT_ROLE-gated (held by the factory + admin multisig),
-    ///      fee collection has its own role, and pause/unpause/upgrade follow the protocol-wide roles.
-    /// @dev The array executors carry no `restricted` of their own: they self-delegatecall into `executeDeposit` and
-    ///      `executeRedemption`, so the bindings on those two selectors govern every batched request against the real
-    ///      caller. Binding the array selectors here would gate nothing.
     function _wireEntryPointRoles(AccessManager _accessManager, address _entryPoint) internal {
         bytes4[] memory lpSelectors = new bytes4[](9);
         lpSelectors[0] = IRoycoDayEntryPoint.requestDeposit.selector;
@@ -113,34 +101,26 @@ contract DeployPeripheryComponent is DeployScriptBase, EnvConfig {
         _accessManager.setTargetFunctionRole(_entryPoint, _sel(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
 
         // The entry point itself needs the LP roles to call tranche.deposit/redeem on behalf of its users.
-        // MUST run while the LP roles' admin is still ADMIN_ROLE (the deployer).
         _accessManager.grantRole(ST_LP_ROLE, _entryPoint, 0);
         _accessManager.grantRole(JT_LP_ROLE, _entryPoint, 0);
         _accessManager.grantRole(LPT_LP_ROLE, _entryPoint, 0);
-
-        // The entry point syncs each market before it acts on it. Granted here rather than per market deployment: the
-        // role is market-agnostic and the entry point is an existing singleton, which a deployment may never touch.
-        _accessManager.grantRole(SYNC_ROLE, _entryPoint, 0);
     }
 
-    /// @notice Binds the syncer's selectors to their roles and grants it SYNC_ROLE.
-    /// @dev The batch-sync surface and kernel registration are SYNC_ROLE-gated (held by the factory, the sync
-    ///      operators, and the syncer itself: each kernel's syncTrancheAccounting is also SYNC_ROLE-gated), and
-    ///      pause/unpause/upgrade follow the protocol-wide roles (mirroring royco-periphery's syncer deployment).
+    /// @notice Binds the syncer's selectors to their roles.
     function _wireSyncerRoles(AccessManager _accessManager, address _marketSyncer) internal {
-        bytes4[] memory syncerSelectors = new bytes4[](4);
-        syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
-        syncerSelectors[1] = RoycoMarketSyncer.removeMarketKernels.selector;
-        syncerSelectors[2] = RoycoMarketSyncer.executeBatchAccountingSync.selector;
-        syncerSelectors[3] = RoycoMarketSyncer.executeBatchAccountingSyncFor.selector;
-        _accessManager.setTargetFunctionRole(_marketSyncer, syncerSelectors, SYNC_ROLE);
+        bytes4[] memory kernelRegistrationSelectors = new bytes4[](2);
+        kernelRegistrationSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
+        kernelRegistrationSelectors[1] = RoycoMarketSyncer.removeMarketKernels.selector;
+        _accessManager.setTargetFunctionRole(_marketSyncer, kernelRegistrationSelectors, ADMIN_ENTRY_POINT_ROLE);
+
+        bytes4[] memory batchSyncSelectors = new bytes4[](2);
+        batchSyncSelectors[0] = RoycoMarketSyncer.executeBatchAccountingSync.selector;
+        batchSyncSelectors[1] = RoycoMarketSyncer.executeBatchAccountingSyncFor.selector;
+        _accessManager.setTargetFunctionRole(_marketSyncer, batchSyncSelectors, PUBLIC_ROLE);
 
         _accessManager.setTargetFunctionRole(_marketSyncer, _sel(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         _accessManager.setTargetFunctionRole(_marketSyncer, _sel(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
         _accessManager.setTargetFunctionRole(_marketSyncer, _sel(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
-
-        // The syncer drives each registered kernel's SYNC_ROLE-gated syncTrancheAccounting
-        _accessManager.grantRole(SYNC_ROLE, _marketSyncer, 0);
     }
 }
 

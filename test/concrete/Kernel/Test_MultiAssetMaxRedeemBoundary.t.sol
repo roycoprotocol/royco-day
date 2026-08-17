@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
 import { Vm } from "../../../lib/forge-std/src/Vm.sol";
-import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
@@ -349,13 +348,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
     /// @notice A blacklisted owner and a paused kernel each zero the advertised maximum, and clearing the condition restores it
     function test_MaxRedeemMultiAsset_BlacklistAndPause_ReportZeroLikeInKind() public {
-        RoycoBlacklist roycoBlacklist = RoycoBlacklist(
-            address(
-                new ERC1967Proxy(
-                    address(new RoycoBlacklist()), abi.encodeCall(RoycoBlacklist.initialize, (address(accessManager), address(0), new address[](0)))
-                )
-            )
-        );
+        RoycoBlacklist roycoBlacklist = new RoycoBlacklist(address(this), address(0), new address[](0));
         vm.prank(MARKET_OPS_ADMIN);
         kernel.setRoycoBlacklist(address(roycoBlacklist));
 

@@ -28,7 +28,6 @@ import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
-    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
@@ -36,8 +35,8 @@ import {
     BURNER_ROLE,
     JT_LP_ROLE,
     LPT_LP_ROLE,
-    ST_LP_ROLE,
-    SYNC_ROLE
+    PUBLIC_ROLE,
+    ST_LP_ROLE
 } from "../Roles.sol";
 import { BaseDeploymentTemplate } from "./base/BaseDeploymentTemplate.sol";
 import { TAG_ACCOUNTANT_PROXY, TAG_BALANCER_V3_POOL, TAG_JT_PROXY, TAG_KERNEL_PROXY, TAG_LPT_PROXY, TAG_ST_PROXY } from "./base/Constants.sol";
@@ -71,21 +70,19 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
      * @custom:field balancerV3PoolFactory - The Balancer V3 Gyro E-CLP pool factory
      * @custom:field eclpLPOracleFactory - The Balancer E-CLP LP oracle factory that creates each market's BPT TVL oracle
      * @custom:field bptOracleConstantPriceFeed - The shared stateless constant-1.0 price feed both pool legs are priced against
-     * @custom:field roycoBlacklist - The chain's blacklist singleton every market this template deploys screens against
      * @custom:field seniorTrancheBeacon - The senior tranche beacon, holding the implementation every senior proxy resolves against
      * @custom:field juniorTrancheBeacon - The junior tranche beacon
      * @custom:field liquidityProviderTrancheBeacon - The liquidity provider tranche beacon
      * @custom:field kernelBeacon - The Day kernel beacon for this template's kernel family
      * @custom:field accountantBeacon - The accountant beacon
      * @custom:field protocolFeeConfig - The protocol fees every market this template deploys starts with
-     * @custom:field balancerPoolConfig - The Balancer pool policy every market's pool is created with
+     * @custom:field balancerPoolYieldFeeConfig - The Balancer pool yield fee policy every market's pool is created with
      */
     struct TemplateConstructionParams {
         IRoycoFactory factory;
         GyroECLPPoolFactory balancerV3PoolFactory;
         ILPOracleFactoryBase eclpLPOracleFactory;
         address bptOracleConstantPriceFeed;
-        address roycoBlacklist;
         address seniorTrancheBeacon;
         address juniorTrancheBeacon;
         address liquidityProviderTrancheBeacon;
@@ -93,7 +90,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         address accountantBeacon;
         ProtocolFeeConfig protocolFeeConfig;
         address protocolFeeRecipient;
-        BalancerPoolConfig balancerPoolConfig;
+        BalancerPoolYieldFeeConfig balancerPoolYieldFeeConfig;
     }
 
     /**
@@ -138,6 +135,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
      * @custom:field lptParams - The liquidity provider tranche's deployer-supplied params
      * @custom:field collateralAsset - The coinvested collateral asset underlying both the senior and junior tranches
      * @custom:field quoteAsset - The quote asset expected as the pool's second token, pinned during pool verification
+     * @custom:field roycoBlacklist - The blacklist contract for the market
      * @custom:field accountantParams - The accountant's deployer-supplied params (coverage, premiums, and state machine config)
      * @custom:field poolCreationParams - The Gyro E-CLP pool creation parameters, used to create the market's liquidity venue
      * @custom:field poolInitializationParams - The genesis liquidity the pool is seeded with once the market is wired
@@ -157,6 +155,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         TrancheDeploymentParams lptParams;
         address collateralAsset;
         address quoteAsset;
+        address roycoBlacklist;
         AccountantDeploymentParams accountantParams;
         BalancerV3PoolCreationParams poolCreationParams;
         PoolInitializationParams poolInitializationParams;
@@ -171,15 +170,13 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     }
 
     /**
-     * @notice The Balancer pool policy every market this template creates its pool with
-     * @custom:field swapFeePercentage - The pool's static swap fee, scaled to WAD
-     * @custom:field chargeYieldFeeOnSeniorTrancheShares - Whether Balancer charges yield fees on the senior leg's rate growth
-     * @custom:field chargeYieldFeeOnQuoteAsset - Whether Balancer charges yield fees on the quote leg's rate growth
+     * @notice The Balancer pool yield fee policy every market this template creates its pool with
+     * @custom:field chargeYieldFeeOnSTShares - Whether Balancer charges yield fees on the senior leg's rate growth
+     * @custom:field chargeYieldFeeOnQuoteAssets - Whether Balancer charges yield fees on the quote leg's rate growth
      */
-    struct BalancerPoolConfig {
-        uint64 swapFeePercentage;
-        bool chargeYieldFeeOnSeniorTrancheShares;
-        bool chargeYieldFeeOnQuoteAsset;
+    struct BalancerPoolYieldFeeConfig {
+        bool chargeYieldFeeOnSTShares;
+        bool chargeYieldFeeOnQuoteAssets;
     }
 
     /**
@@ -208,11 +205,11 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     /// @notice Thrown when the genesis deposit mints too few shares to cover the dead-share lock
     error INSUFFICIENT_GENESIS_SHARES(uint256 shares);
 
-    /// @notice Thrown when the configured pool swap fee falls outside the band the Gyro E-CLP pool accepts
-    error INVALID_SWAP_FEE(uint256 swapFeePercentage);
+    /// @notice Thrown when a market's per-tranche entry-point redemption delay is below the template's floor
+    error REDEMPTION_DELAY_BELOW_MIN(uint24 suppliedRedemptionDelaySeconds, uint24 minRedemptionDelaySeconds);
 
-    /// @notice Emitted when the Balancer pool policy every future market is created with changes
-    event BalancerPoolConfigUpdated(BalancerPoolConfig config);
+    /// @notice Emitted when the Balancer pool yield fee policy every future market is created with changes
+    event BalancerPoolYieldFeeConfigUpdated(BalancerPoolYieldFeeConfig config);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTANTS
@@ -224,11 +221,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     /// @notice The address the dead shares are locked at
     address public constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
-    /// @notice The lowest swap fee a Gyro E-CLP pool accepts
-    uint64 internal constant MIN_POOL_SWAP_FEE_WAD = 1e12;
-
-    /// @notice The highest swap fee a Gyro E-CLP pool accepts
-    uint64 internal constant MAX_POOL_SWAP_FEE_WAD = 1e18;
+    /// @notice The minimum redemption delay every market's tranches must meet at deployment
+    uint24 public constant MIN_REDEMPTION_DELAY_SECONDS = 24 hours;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // IMMUTABLES
@@ -245,9 +239,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
 
     /// @notice The shared stateless constant-1.0 price feed both of a pool's legs are priced against
     address public immutable BPT_ORACLE_CONSTANT_PRICE_FEED;
-
-    /// @notice The chain's blacklist singleton every market this template deploys screens tranche balance updates against
-    address public immutable ROYCO_BLACKLIST;
 
     /// @notice The senior tranche beacon every market's senior proxy resolves its implementation from
     address public immutable SENIOR_TRANCHE_BEACON;
@@ -268,8 +259,8 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     // CONFIGURATION STATE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice The Balancer pool policy every future market's pool is created with
-    BalancerPoolConfig public balancerPoolConfig;
+    /// @notice The Balancer pool's yield fee policy every future market's pool is created with
+    BalancerPoolYieldFeeConfig public balancerPoolYieldFeeConfig;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // YIELD DISTRIBUTION MODEL REGISTRY
@@ -284,15 +275,13 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     constructor(TemplateConstructionParams memory _params) BaseDeploymentTemplate(_params.factory, _params.protocolFeeConfig, _params.protocolFeeRecipient) {
         require(
             address(_params.balancerV3PoolFactory) != address(0) && address(_params.eclpLPOracleFactory) != address(0)
-                && _params.bptOracleConstantPriceFeed != address(0) && _params.roycoBlacklist != address(0) && _params.seniorTrancheBeacon != address(0)
-                && _params.juniorTrancheBeacon != address(0) && _params.liquidityProviderTrancheBeacon != address(0) && _params.kernelBeacon != address(0)
-                && _params.accountantBeacon != address(0),
+                && _params.bptOracleConstantPriceFeed != address(0) && _params.seniorTrancheBeacon != address(0) && _params.juniorTrancheBeacon != address(0)
+                && _params.liquidityProviderTrancheBeacon != address(0) && _params.kernelBeacon != address(0) && _params.accountantBeacon != address(0),
             NULL_CONSTRUCTION_PARAMETER()
         );
         require(address(_params.balancerV3PoolFactory).code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(address(_params.balancerV3PoolFactory)));
         require(address(_params.eclpLPOracleFactory).code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(address(_params.eclpLPOracleFactory)));
         require(_params.bptOracleConstantPriceFeed.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.bptOracleConstantPriceFeed));
-        require(_params.roycoBlacklist.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.roycoBlacklist));
         require(_params.seniorTrancheBeacon.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.seniorTrancheBeacon));
         require(_params.juniorTrancheBeacon.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.juniorTrancheBeacon));
         require(_params.liquidityProviderTrancheBeacon.code.length > 0, CONSTRUCTION_PARAMETER_HAS_NO_CODE(_params.liquidityProviderTrancheBeacon));
@@ -303,7 +292,6 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         BALANCER_V3_VAULT = IVault(address(_params.balancerV3PoolFactory.getVault()));
         ECLP_LP_ORACLE_FACTORY = _params.eclpLPOracleFactory;
         BPT_ORACLE_CONSTANT_PRICE_FEED = _params.bptOracleConstantPriceFeed;
-        ROYCO_BLACKLIST = _params.roycoBlacklist;
 
         SENIOR_TRANCHE_BEACON = _params.seniorTrancheBeacon;
         JUNIOR_TRANCHE_BEACON = _params.juniorTrancheBeacon;
@@ -311,23 +299,19 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         KERNEL_BEACON = _params.kernelBeacon;
         ACCOUNTANT_BEACON = _params.accountantBeacon;
 
-        _setBalancerPoolConfig(_params.balancerPoolConfig);
+        _setBalancerPoolYieldFeeConfig(_params.balancerPoolYieldFeeConfig);
     }
 
-    /// @notice Sets the Balancer pool policy every FUTURE market's pool is created with
-    /// @param _config The new pool policy
-    function setBalancerPoolConfig(BalancerPoolConfig calldata _config) external restricted {
-        _setBalancerPoolConfig(_config);
+    /// @notice Sets the Balancer pool yield fee policy every FUTURE market's pool is created with
+    /// @param _config The new pool yield fee policy
+    function setBalancerPoolYieldFeeConfig(BalancerPoolYieldFeeConfig calldata _config) external restricted {
+        _setBalancerPoolYieldFeeConfig(_config);
     }
 
-    /// @dev The one place the pool policy is validated and written, shared by construction and the admin setter
-    function _setBalancerPoolConfig(BalancerPoolConfig memory _config) internal {
-        require(
-            _config.swapFeePercentage >= MIN_POOL_SWAP_FEE_WAD && _config.swapFeePercentage <= MAX_POOL_SWAP_FEE_WAD,
-            INVALID_SWAP_FEE(_config.swapFeePercentage)
-        );
-        balancerPoolConfig = _config;
-        emit BalancerPoolConfigUpdated(_config);
+    /// @dev The one place the pool yield fee policy is written, shared by construction and the admin setter
+    function _setBalancerPoolYieldFeeConfig(BalancerPoolYieldFeeConfig memory _config) internal {
+        balancerPoolYieldFeeConfig = _config;
+        emit BalancerPoolYieldFeeConfigUpdated(_config);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -371,7 +355,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     /// @inheritdoc IRoycoProtocolTemplate
     function deployMarket(bytes calldata _params) external override(IRoycoProtocolTemplate) onlyRoycoFactory returns (DeploymentResult memory result) {
         // Validate the deployer's params
-        MarketParams memory params = MarketDeploymentValidationLogic.validateMarketParams(_params, balancerPoolConfig.chargeYieldFeeOnQuoteAsset);
+        MarketParams memory params = MarketDeploymentValidationLogic.validateMarketParams(_params, balancerPoolYieldFeeConfig.chargeYieldFeeOnQuoteAssets);
 
         // The base salt is the hash of the params and the deployer's address.
         bytes32 baseSalt = keccak256(abi.encode(params, ROYCO_FACTORY.marketDeployer()));
@@ -394,7 +378,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
             ECLP_LP_ORACLE_FACTORY,
             BPT_ORACLE_CONSTANT_PRICE_FEED,
             params.poolCreationParams,
-            balancerPoolConfig,
+            balancerPoolYieldFeeConfig,
             result.seniorTranche,
             params.quoteAsset,
             kernel,
@@ -443,6 +427,14 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         (tranches[0], configs[0]) = (_result.seniorTranche, params.entryPointTrancheConfigs.st);
         (tranches[1], configs[1]) = (_result.juniorTranche, params.entryPointTrancheConfigs.jt);
         (tranches[2], configs[2]) = (_result.liquidityProviderTranche, params.entryPointTrancheConfigs.lpt);
+
+        // Enforce the minimum redemption delay for every tranche.
+        for (uint256 i; i < configs.length; ++i) {
+            require(
+                configs[i].redemptionDelaySeconds >= MIN_REDEMPTION_DELAY_SECONDS,
+                REDEMPTION_DELAY_BELOW_MIN(configs[i].redemptionDelaySeconds, MIN_REDEMPTION_DELAY_SECONDS)
+            );
+        }
 
         // Configure the market's tranches on the entry point and register its kernel on the syncer
         ROYCO_FACTORY.configureMarketPeriphery(tranches, configs, _result.kernel);
@@ -534,7 +526,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
             accountant: _result.accountant,
             protocolFeeRecipient: protocolFeeRecipient,
             stSelfLiquidationBonusWAD: _params.stSelfLiquidationBonusWAD,
-            roycoBlacklist: ROYCO_BLACKLIST,
+            roycoBlacklist: _params.roycoBlacklist,
             collateralAssetOracle: _params.collateralAssetOracle,
             sequencerUptimeFeed: _params.sequencerUptimeFeed,
             gracePeriodSeconds: _params.gracePeriodSeconds
@@ -554,7 +546,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
      */
     function _validateDeployment(MarketParams memory _params, DeploymentResult memory _result, address _pool) internal view {
         MarketDeploymentValidationLogic.validateDeployment(
-            _result, BALANCER_V3_VAULT, _pool, _params.collateralAsset, ROYCO_BLACKLIST, ROYCO_FACTORY.ROYCO_AUTHORITY()
+            _result, BALANCER_V3_VAULT, _pool, _params.collateralAsset, _params.roycoBlacklist, ROYCO_FACTORY.ROYCO_AUTHORITY()
         );
 
         // Kernel-family-specific wiring (e.g. Makina machine, IdleCDO CDO)
@@ -680,15 +672,15 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         selectors[2] = IRoycoAuth.unpause.selector;
         roleIds[2] = ADMIN_UNPAUSER_ROLE;
         selectors[3] = IRoycoDayKernel.syncTrancheAccounting.selector;
-        roleIds[3] = SYNC_ROLE;
+        roleIds[3] = PUBLIC_ROLE;
         selectors[4] = IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector;
         roleIds[4] = ADMIN_KERNEL_ROLE;
         selectors[5] = IRoycoDayKernel.reinvestLiquidityPremium.selector;
-        roleIds[5] = ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE;
+        roleIds[5] = PUBLIC_ROLE;
         selectors[6] = IRoycoDayKernel.setRoycoBlacklist.selector;
         roleIds[6] = ADMIN_MARKET_OPS_ROLE;
         selectors[7] = IRoycoDayKernel.syncTrancheAccountingFor.selector;
-        roleIds[7] = SYNC_ROLE;
+        roleIds[7] = PUBLIC_ROLE;
     }
 
     /// @dev Upgrades are not bound here: the accountant's beacon carries that authority for every market at once

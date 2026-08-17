@@ -13,6 +13,7 @@ import { DayMarketConfig } from "../../script/deploy/templates/royco-day-balance
 import { DeployMarketComponent } from "../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
 import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, LP_ROLE_ADMIN_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
+import { RoycoBlacklist } from "../../src/auth/RoycoBlacklist.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
@@ -68,6 +69,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     Vm.Wallet internal ORACLE_EMERGENCY_ADMIN;
     address internal ORACLE_EMERGENCY_ADMIN_ADDRESS;
 
+    /// @dev Historic name: reinvestLiquidityPremium is PERMISSIONLESS (slippage-gated), this actor holds no role
     Vm.Wallet internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
     address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS;
 
@@ -126,6 +128,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     IRoycoDayKernel internal KERNEL;
     IRoycoDayAccountant internal ACCOUNTANT;
     IRoycoBlacklist internal BLACKLIST;
+    /// @dev Owner of every per-market blacklist the base deploys — prank this to blacklist/unblacklist in tests
+    address internal BLACKLIST_OWNER = makeAddr("BLACKLIST_OWNER");
 
     // -----------------------------------------
     // Royco Deployments Parameters
@@ -159,10 +163,16 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         _setupFork();
         _setupWallets();
 
-        // Stand up the deployment pipeline components
-        BOOTSTRAP = new BootstrapChainComponent(false, address(0));
-        MARKET_REGISTRY = new DayMarketRegistry();
+        (BOOTSTRAP, MARKET_REGISTRY) = _deployPipelineComponents();
         _pinChainPolicyForTests();
+    }
+
+    /// @notice Stands up the pipeline components from build artifacts. `deployCode` keeps their creation code OUT
+    ///         of the test contract's own bytecode — embedding the orchestrator (which embeds every component
+    ///         script) plus the full market registry in each leaf overruns solc's per-contract tag budget
+    function _deployPipelineComponents() internal returns (BootstrapChainComponent bootstrap, DayMarketRegistry registry) {
+        bootstrap = BootstrapChainComponent(deployCode("BootstrapChain.s.sol:BootstrapChainComponent", abi.encode(false, address(0))));
+        registry = DayMarketRegistry(deployCode("DayMarketRegistry.sol:DayMarketRegistry"));
     }
 
     /// @notice Pins the chain-level policy these suites' reference math and actors assume, without touching the
@@ -179,8 +189,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         pinned.jtProtocolFeeWAD = 0;
         pinned.jtYieldShareProtocolFeeWAD = 0.45e18;
         pinned.lptYieldShareProtocolFeeWAD = 0;
-        // The venue suites' leak and slippage formulas are written against a 1 bp pool swap fee
-        pinned.poolSwapFeePercentage = 1e14;
         BOOTSTRAP.overrideTemplatePolicyForTest(pinned);
 
         // The fixtures act through role-specific prankable wallets, with OWNER as the AccessManager admin
@@ -207,6 +215,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
             z: -28_859_471_639_991_253_843_240_999_485_797_747_790,
             dSq: 99_999_999_999_999_999_886_624_093_342_106_115_200
         });
+        // The venue suites' leak and slippage formulas are written against a 1 bp pool swap fee
+        snUsd.pool.swapFeePercentage = 1e14;
         MARKET_REGISTRY.overrideDayMarketConfigForTest(snUsd);
     }
 
@@ -215,6 +225,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     ///         admin-gated setup ends before any market lands), then deploy the market from its config struct
     function _deployMarketThroughPipeline(DayMarketConfig memory _cfg) internal returns (DeploymentResult memory result) {
         DeployMarketComponent market = _marketComponent();
+        // The blacklist is per-market and deployer-supplied now: stand up a fresh one owned by BLACKLIST_OWNER
+        if (_cfg.roycoBlacklist == address(0)) _cfg.roycoBlacklist = address(new RoycoBlacklist(BLACKLIST_OWNER, address(0), new address[](0)));
         result = market.deployMarket(_cfg, MARKET_REGISTRY.getMarketId(_cfg.marketName, CHAIN.factory), DEPLOYER.privateKey);
     }
 
@@ -223,17 +235,22 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     function _marketComponent() internal returns (DeployMarketComponent market) {
         CHAIN = BOOTSTRAP.bootstrap(DEPLOYER.privateKey);
 
-        new RenounceDeployerRolesComponent(CHAIN.accessManager).execute(BOOTSTRAP.factoryAdmin(false), !CHAIN.amExisted, DEPLOYER.privateKey);
+        RenounceDeployerRolesComponent(deployCode("RenounceDeployerRoles.s.sol:RenounceDeployerRolesComponent", abi.encode(CHAIN.accessManager)))
+            .execute(BOOTSTRAP.factoryAdmin(false), !CHAIN.amExisted, DEPLOYER.privateKey);
 
-        market = new DeployMarketComponent(
-            MarketUpstream({
-                accessManager: CHAIN.accessManager,
-                factory: CHAIN.factory,
-                entryPoint: CHAIN.entryPoint,
-                marketSyncer: CHAIN.marketSyncer,
-                roycoBlacklist: CHAIN.roycoBlacklist,
-                template: CHAIN.template
-            })
+        market = DeployMarketComponent(
+            deployCode(
+                "DeployMarket.s.sol:DeployMarketComponent",
+                abi.encode(
+                    MarketUpstream({
+                        accessManager: CHAIN.accessManager,
+                        factory: CHAIN.factory,
+                        entryPoint: CHAIN.entryPoint,
+                        marketSyncer: CHAIN.marketSyncer,
+                        template: CHAIN.template
+                    })
+                )
+            )
         );
     }
 
@@ -476,7 +493,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 lpRoleHolderAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
                 balancerPoolManagerAddress: KERNEL_ADMIN_ADDRESS,
                 marketOpsAddress: KERNEL_ADMIN_ADDRESS,
-                marketReinvestLiquidityPremiumAddress: MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS,
                 adminEntryPointAddress: KERNEL_ADMIN_ADDRESS,
                 entryPointFeeCollectorAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
             }));

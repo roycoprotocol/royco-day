@@ -163,25 +163,24 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
     }
 
     /**
-     * @notice An attacker cannot force-deploy the idle liquidity premium senior shares into the pool at a moment
-     *         of their choosing, reinvestLiquidityPremium is market-ops gated
-     * @dev A permissionless reinvest would let an attacker time the deploy against a manipulated pool composition
-     *      and capture the add's slippage themselves
+     * @notice reinvestLiquidityPremium is deliberately PUBLIC: anyone may push the market's own accrued premium
+     *         into the pool. The timing-manipulation defense is the venue's `maxReinvestmentSlippageWAD` gate —
+     *         a fill worse than the gate defers the add and leaves the shares idle (pinned by the gate suite) —
+     *         so an open caller set adds liveness without adding extractable slippage
      */
-    function test_RevertIf_ReinvestLiquidityPremiumCalledByNonMarketOps() public {
+    function test_ReinvestLiquidityPremiumIsPubliclyCallable() public {
         vm.prank(ATTACKER);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, ATTACKER));
+        // With nothing accrued the call is a harmless no-op; the point pinned here is that AUTH does not revert
         kernel.reinvestLiquidityPremium(type(uint256).max);
     }
 
     /**
-     * @notice An attacker cannot drive a tranche accounting sync directly, the entrypoint is SYNC_ROLE gated
-     * @dev Direct sync access is the setup step of a sync-then-swap sandwich, so the gate forces every sync
-     *      through an authorized operator or the pool hook
+     * @notice Tranche accounting sync is public, so any caller can drive it directly
+     * @dev Sync no longer carries an access-managed gate; it is exposed to every caller because it only refreshes
+     *      accounting state, so an arbitrary account may invoke it without a role
      */
-    function test_RevertIf_SyncTrancheAccountingCalledByNonSyncRole() public {
+    function test_SyncTrancheAccountingIsPublicForAnyCaller() public {
         vm.prank(ATTACKER);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, ATTACKER));
         kernel.syncTrancheAccounting();
     }
 

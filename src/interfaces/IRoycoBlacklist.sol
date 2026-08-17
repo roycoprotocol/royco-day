@@ -4,17 +4,6 @@ pragma solidity ^0.8.28;
 /// @title IRoycoBlacklist
 /// @notice Interface for the RoycoBlacklist contract that manages account blacklisting and sanctions screening for a Royco market
 interface IRoycoBlacklist {
-    /**
-     * @notice Storage state for the Royco blacklist
-     * @custom:storage-location erc7201:Royco.storage.RoycoBlacklistState
-     * @custom:field chainalysisSanctionsList - The Chainalysis maintained sanctions list used to screen accounts (the null address if unused)
-     * @custom:field accountToIsBlacklisted - A mapping of accounts to a boolean indicating if they are locally blacklisted
-     */
-    struct RoycoBlacklistState {
-        address chainalysisSanctionsList;
-        mapping(address account => bool isBlacklisted) accountToIsBlacklisted;
-    }
-
     /// @notice Emitted when an account is blacklisted
     /// @param account The address of the account
     event AccountBlacklisted(address indexed account);
@@ -29,6 +18,9 @@ interface IRoycoBlacklist {
 
     /// @notice Thrown when the specified account is blacklisted
     error ACCOUNT_BLACKLISTED(address account);
+
+    /// @notice Thrown when a null address is supplied where a real account is required
+    error NULL_ADDRESS();
 
     /**
      * @notice Blacklists the specified addresses from holding or transferring Royco tranche shares

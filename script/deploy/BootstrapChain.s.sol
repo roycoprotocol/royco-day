@@ -5,7 +5,6 @@ import { ChainDeployment, CoreDeployment, ImplementationSet, PeripheryUpstream, 
 import { RoleGraphConfig } from "./config/RoleGraphConfig.sol";
 import { TemplateConfig } from "./config/TemplateConfig.sol";
 import { ApplyRoleGraphComponent } from "./core/ApplyRoleGraph.s.sol";
-import { DeployBlacklistComponent } from "./core/DeployBlacklist.s.sol";
 import { DeployCoreComponent } from "./core/DeployCore.s.sol";
 import { DeployPeripheryComponent } from "./core/DeployPeriphery.s.sol";
 import { DeployScriptBase } from "./core/DeployScriptBase.sol";
@@ -15,16 +14,7 @@ import { DeployYDMsComponent } from "./templates/royco-day-balancer-v3/DeployYDM
 
 /**
  * @title BootstrapChainComponent
- * @notice THE chain-bootstrap orchestrator: composes the per-component deployment scripts, in dependency order, to
- *         stand up everything a chain needs BEFORE any market exists — the auth + factory core, the periphery
- *         singletons, the role graph, the shared blacklist, and (per template family) the implementation set, the
- *         template, and the yield distribution models.
- * @dev Composition only: each component broadcasts ITS OWN transactions, the orchestrator never does (nested
- *      broadcasts revert). Ordering encodes the two cross-component constraints: periphery runs BEFORE the role
- *      graph's second pass (its LP-role grants need the default role admins), and the deployer's roles are NOT
- *      renounced here — markets may still be added, and `RenounceDeployerRoles` is the runbook's explicit final
- *      step. Every component is idempotent, so re-running the bootstrap against a live chain reuses what exists.
- * @dev As new template families ship, this grows one composition block per family.
+ * @notice Bootstraps the chain end-to-end, returning every address downstream market deployments consume
  */
 contract BootstrapChainComponent is DeployScriptBase, RoleGraphConfig, TemplateConfig {
     constructor(bool _isTestEnv, address _testDeploymentAdmin) {
@@ -58,22 +48,14 @@ contract BootstrapChainComponent is DeployScriptBase, RoleGraphConfig, TemplateC
             _deployerPrivateKey
         );
 
-        // 4. The chain's shared blacklist
-        DeployBlacklistComponent blacklist = new DeployBlacklistComponent(isTestEnv, c.accessManager);
-        blacklist.enableLogging();
-        chain.roycoBlacklist = blacklist.execute(_deployerPrivateKey);
-
-        // 5. Royco Day Balancer V3 template family: implementation set -> template -> yield distribution models
+        // 4. Royco Day Balancer V3 template family: implementation set -> template -> yield distribution models.
         DeployImplementationsComponent impls = new DeployImplementationsComponent(isTestEnv, c.accessManager);
         impls.enableLogging();
         chain.impls = impls.execute(_deployerPrivateKey);
 
-        DeployTemplateComponent template = new DeployTemplateComponent(
-            isTestEnv, TemplateUpstream({ accessManager: c.accessManager, factory: c.factory, roycoBlacklist: chain.roycoBlacklist, impls: chain.impls })
-        );
+        DeployTemplateComponent template =
+            new DeployTemplateComponent(isTestEnv, TemplateUpstream({ accessManager: c.accessManager, factory: c.factory, impls: chain.impls }));
         template.enableLogging();
-        // Forward THIS instance's resolved policy (canonical or test-pinned), so the component and the orchestrator
-        // can never disagree on the template's construction params — and therefore its address
         template.overrideTemplatePolicyForTest(templatePolicy(isTestEnv));
         chain.template = template.execute(_deployerPrivateKey);
 

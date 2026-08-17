@@ -11,17 +11,10 @@ import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/inte
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import { BootstrapChainComponent } from "../../../script/deploy/BootstrapChain.s.sol";
 import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
-import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
-import {
-    ADMIN_ACCOUNTANT_ROLE,
-    ADMIN_BLACKLIST_ROLE,
-    ADMIN_MARKET_OPS_ROLE,
-    ADMIN_ORACLE_ROLE,
-    ADMIN_UNPAUSER_ROLE,
-    LPT_LP_ROLE
-} from "../../../src/factory/Roles.sol";
+import { ADMIN_ACCOUNTANT_ROLE, ADMIN_MARKET_OPS_ROLE, ADMIN_ORACLE_ROLE, ADMIN_UNPAUSER_ROLE, LPT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
@@ -149,8 +142,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         }
 
         _setupWallets();
-        BOOTSTRAP = new BootstrapChainComponent(false, address(0));
-        MARKET_REGISTRY = new DayMarketRegistry();
+        (BOOTSTRAP, MARKET_REGISTRY) = _deployPipelineComponents();
         _pinChainPolicyForTests();
 
         // Deploy the market end-to-end through the real script (concrete test selects the config by name).
@@ -1031,14 +1023,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         }
     }
 
-    /// @notice Blacklists `_account` on the market's shared blacklist via the AccessManager admin.
-    /// @dev The blacklist's restricted selectors are unbound, so they resolve to the AccessManager ADMIN_ROLE holder.
+    /// @notice Blacklists `_account` on the market's per-market blacklist via its Ownable2Step owner.
     function _blacklist(address _account) internal {
         address[] memory accounts = new address[](1);
         accounts[0] = _account;
-        // The blacklist admin surface is gated by ADMIN_BLACKLIST_ROLE, whose production grant carries a 72h
-        // execution delay; act through a delay-0 holder
-        vm.prank(_immediateRoleHolder(ADMIN_BLACKLIST_ROLE, "BLACKLIST_ADMIN"));
+        vm.prank(BLACKLIST_OWNER);
         BLACKLIST.blacklistAccounts(accounts);
     }
 
@@ -4603,10 +4592,6 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         JT.deposit(toTrancheUnits(assets), outsider);
         vm.expectRevert(unauthorizedError);
         JT.redeem(1, outsider, outsider);
-        vm.expectRevert(unauthorizedError);
-        KERNEL.syncTrancheAccounting();
-        vm.expectRevert(unauthorizedError);
-        KERNEL.reinvestLiquidityPremium(1);
         vm.expectRevert(unauthorizedError);
         KERNEL.setProtocolFeeRecipient(outsider);
         vm.expectRevert(unauthorizedError);

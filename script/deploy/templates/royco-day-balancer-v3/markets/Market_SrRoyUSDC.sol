@@ -24,7 +24,7 @@ abstract contract Market_SrRoyUSDC is DayMarketRegistryBase {
                 oracleType: OracleType.ERC4626SharePrice,
                 specificParams: abi.encode(
                     ERC4626SharePriceOracleParams({
-                        queryMode: ERC4626SharePriceOracle.ERC4626QueryMode.CONVERT_TO_ASSETS,
+                        queryMode: ERC4626SharePriceOracle.ERC4626QueryMode.PREVIEW_REDEEM,
                         baseAssetToNavAssetFeed: 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6,
                         // The vault accrues continuously, so any observed share-price change counts as an update
                         minDeviationWAD: 0,
@@ -36,6 +36,7 @@ abstract contract Market_SrRoyUSDC is DayMarketRegistryBase {
                     })
                 )
             }),
+            roycoBlacklist: address(0),
             accountant: AccountantEconomics({
                 fixedTermGracePeriodSeconds: 1 days,
                 minCoverageWAD: 0.2e18,
@@ -53,8 +54,6 @@ abstract contract Market_SrRoyUSDC is DayMarketRegistryBase {
                         AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.18e18, yieldShareAtTargetUtilWAD: 0.22e18, yieldShareAtFullUtilWAD: 0.31e18 })
                     )
                 }),
-                // The caps must SUM to at most WAD (both premiums are carved out of the same senior gain, enforced by
-                // the accountant and the deployment validation). An even split never binds: both curves top out at 0.31
                 maxJTYieldShareWAD: 0.5e18,
                 maxLPTYieldShareWAD: 0.5e18,
                 fixedTermDurationSeconds: 7 days,
@@ -65,21 +64,20 @@ abstract contract Market_SrRoyUSDC is DayMarketRegistryBase {
                 sequencerUptimeFeed: address(0),
                 gracePeriodSeconds: 0,
                 kernelSpecificParams: abi.encode(
-                    RoycoDayBalancerV3MarketDeploymentTemplate.BalancerV3LiquidityVenueDeploymentParams({
-                        maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
-                    })
+                    RoycoDayBalancerV3MarketDeploymentTemplate.BalancerV3LiquidityVenueDeploymentParams({ maxReinvestmentSlippageWAD: 0.001e18 })
                 )
             }),
             pool: GyroECLPPoolParams({
                 name: "Senior SrRoyUSDC / frxUSD",
                 symbol: "srsrRoyUSDC/frxUSD",
-                eclpParams: _srRoyUsdcEclpParams(),
-                derivedEclpParams: _srRoyUsdcDerivedEclpParams(),
+                eclpParams: _exitLiquidityPrioritizedEclpParams(),
+                derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
+                swapFeePercentage: 10e14, // 10 bps, the pool swap fee every market previously inherited from the template policy
                 quoteAsset: 0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29, // frxUSD (18 decimals)
                 quoteAssetRateProvider: address(0)
             }),
             poolInitialization: RoycoDayBalancerV3MarketDeploymentTemplate.PoolInitializationParams({
-                collateralAmount: 0, // no collateral leg: the genesis liquidity is quote-only
+                collateralAmount: 0,
                 quoteAmount: 1e18, // 1 frxUSD ($1)
                 minLPTAssetsOut: 0
             }),

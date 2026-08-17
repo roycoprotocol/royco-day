@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { ILPOracleBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleBase.sol";
 import { ILPOracleFactoryBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
 import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
@@ -27,7 +28,6 @@ import {
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
-    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
@@ -38,8 +38,7 @@ import {
     LPT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
     PUBLIC_ROLE,
-    ST_LP_ROLE,
-    SYNC_ROLE
+    ST_LP_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
@@ -325,8 +324,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         // only forwards into its fresh-only entrypoint
         (bool isEntry,) = ACCESS_MANAGER.hasRole(ADMIN_ENTRY_POINT_ROLE, address(FACTORY));
         assertFalse(isEntry, "the factory must NOT hold ADMIN_ENTRY_POINT_ROLE");
-        (bool isSync,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(FACTORY));
-        assertFalse(isSync, "the factory must NOT hold SYNC_ROLE");
 
         // The role it lost lives on the gatekeeper the factory names, and the pairing is mutual
         address gatekeeper = FACTORY.ROYCO_FACTORY_GATEKEEPER();
@@ -379,14 +376,14 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     }
 
     /// @notice The pre-deployed syncer registered the market's kernel, answers to the market authority, and has
-    ///         its registration surface bound to SYNC_ROLE
+    ///         its registration surface bound to ADMIN_ENTRY_POINT_ROLE
     function test_Periphery_SyncerRegisteredKernel() public view {
         assertTrue(MARKET_SYNCER.isMarketKernelRegistered(address(KERNEL)), "kernel registered on the syncer");
         assertEq(AccessManagedUpgradeable(address(MARKET_SYNCER)).authority(), address(ACCESS_MANAGER), "syncer authority");
         assertEq(
             ACCESS_MANAGER.getTargetFunctionRole(address(MARKET_SYNCER), RoycoMarketSyncer.addMarketKernels.selector),
-            SYNC_ROLE,
-            "addMarketKernels bound to SYNC_ROLE"
+            ADMIN_ENTRY_POINT_ROLE,
+            "addMarketKernels bound to ADMIN_ENTRY_POINT_ROLE"
         );
     }
 
@@ -416,12 +413,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         (bool jt,) = ACCESS_MANAGER.hasRole(JT_LP_ROLE, ep);
         (bool lt,) = ACCESS_MANAGER.hasRole(LPT_LP_ROLE, ep);
         assertTrue(st && jt && lt, "entry point holds the tranche LP roles");
-        // The entry point holds SYNC_ROLE so it can sync the kernel when pricing its request-time references.
-        (bool epSync,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, ep);
-        assertTrue(epSync, "entry point holds SYNC_ROLE");
-        // The syncer holds SYNC_ROLE so its batch syncs can drive each kernel's SYNC_ROLE-gated accounting sync.
-        (bool sync,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(MARKET_SYNCER));
-        assertTrue(sync, "syncer holds SYNC_ROLE");
     }
 
     /// @notice Each tranche entrypoint is bound to its intended role: LP-gated deposits and redeems on every
@@ -451,12 +442,12 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     function test_Auth_KernelAndHookSelectorRoleBindings() public view {
         _assertRole(address(KERNEL), IRoycoDayKernel.setProtocolFeeRecipient.selector, ADMIN_KERNEL_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector, ADMIN_KERNEL_ROLE);
-        _assertRole(address(KERNEL), IRoycoDayKernel.syncTrancheAccounting.selector, SYNC_ROLE);
-        _assertRole(address(KERNEL), IRoycoDayKernel.syncTrancheAccountingFor.selector, SYNC_ROLE);
+        _assertRole(address(KERNEL), IRoycoDayKernel.syncTrancheAccounting.selector, PUBLIC_ROLE);
+        _assertRole(address(KERNEL), IRoycoDayKernel.syncTrancheAccountingFor.selector, PUBLIC_ROLE);
         _assertRole(address(KERNEL), IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
 
-        // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE.
-        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
+        // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE; reinvestment is deliberately PUBLIC
+        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, PUBLIC_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setRoycoBlacklist.selector, ADMIN_MARKET_OPS_ROLE);
         _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
 
@@ -652,6 +643,9 @@ contract Test_DayMarketDeployment_GenesisSeedBoundary is RoycoDayTestBase {
     function _seededConfig(uint256 _quoteAmount) internal returns (DayMarketConfig memory cfg) {
         cfg = MARKET_REGISTRY.getDayMarketConfig("snUSD");
         cfg.poolInitialization.quoteAmount = _quoteAmount;
+        // This path deploys the market directly (bypassing the pipeline base that injects the blacklist), so supply
+        // the mandatory per-market blacklist here
+        cfg.roycoBlacklist = address(new RoycoBlacklist(BLACKLIST_OWNER, address(0), new address[](0)));
         deal(cfg.pool.quoteAsset, DEPLOYER.addr, _quoteAmount);
     }
 

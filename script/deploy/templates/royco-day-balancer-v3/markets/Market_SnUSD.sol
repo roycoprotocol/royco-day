@@ -44,6 +44,7 @@ abstract contract Market_SnUSD is DayMarketRegistryBase {
                     })
                 )
             }),
+            roycoBlacklist: address(0),
             accountant: AccountantEconomics({
                 fixedTermGracePeriodSeconds: 0,
                 minCoverageWAD: 0.1e18,
@@ -80,8 +81,9 @@ abstract contract Market_SnUSD is DayMarketRegistryBase {
             pool: GyroECLPPoolParams({
                 name: "Senior Staked NUSD / USDC",
                 symbol: "srsNUSD/USDC",
-                eclpParams: _srRoyUsdcEclpParams(),
-                derivedEclpParams: _srRoyUsdcDerivedEclpParams(),
+                eclpParams: _exitLiquidityPrioritizedEclpParams(),
+                derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
+                swapFeePercentage: 10e14, // 10 bps, the pool swap fee every market previously inherited from the template policy
                 quoteAsset: USDC[block.chainid],
                 quoteAssetRateProvider: address(0)
             }),

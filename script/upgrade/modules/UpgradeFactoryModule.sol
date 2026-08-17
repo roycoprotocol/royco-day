@@ -14,8 +14,7 @@ import {
     GUARDIAN_ROLE,
     JT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
-    ST_LP_ROLE,
-    SYNC_ROLE
+    ST_LP_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoleConfigUtils } from "../base/RoleConfigUtils.sol";
@@ -64,20 +63,19 @@ contract UpgradeFactoryModule is UpgradeModuleBase, RoleConfigUtils {
     ///      Ordering is stable so snapshot encoding and verification stay aligned.
     ///      Add an entry here when a new role is introduced in `Roles`.
     function _allRoles() internal pure returns (uint64[] memory roles) {
-        roles = new uint64[](13);
+        roles = new uint64[](12);
         roles[0] = _ADMIN_ROLE; // OpenZeppelin AccessManager default
         roles[1] = ADMIN_PAUSER_ROLE;
         roles[2] = ADMIN_UPGRADER_ROLE;
         roles[3] = ST_LP_ROLE;
         roles[4] = JT_LP_ROLE;
         roles[5] = BURNER_ROLE;
-        roles[6] = SYNC_ROLE;
-        roles[7] = ADMIN_KERNEL_ROLE;
-        roles[8] = ADMIN_ACCOUNTANT_ROLE;
-        roles[9] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        roles[10] = ADMIN_ORACLE_ROLE;
-        roles[11] = LP_ROLE_ADMIN_ROLE;
-        roles[12] = GUARDIAN_ROLE;
+        roles[6] = ADMIN_KERNEL_ROLE;
+        roles[7] = ADMIN_ACCOUNTANT_ROLE;
+        roles[8] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        roles[9] = ADMIN_ORACLE_ROLE;
+        roles[10] = LP_ROLE_ADMIN_ROLE;
+        roles[11] = GUARDIAN_ROLE;
     }
 
     /// @dev Accounts whose membership we snapshot per-role. Both multisigs cover the protocol's

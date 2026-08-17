@@ -68,7 +68,6 @@ contract DeployTemplateComponent is DeployScriptBase, TemplateConfig {
         cp.factory = IRoycoFactory(UP.factory);
         cp.balancerV3PoolFactory = GyroECLPPoolFactory(gyroFactory);
         cp.eclpLPOracleFactory = ILPOracleFactoryBase(eclpOracleFactory);
-        cp.roycoBlacklist = UP.roycoBlacklist;
 
         cp.protocolFeeRecipient = policy.protocolFeeRecipient;
         cp.protocolFeeConfig = BaseDeploymentTemplate.ProtocolFeeConfig({
@@ -77,10 +76,8 @@ contract DeployTemplateComponent is DeployScriptBase, TemplateConfig {
             jtYieldShareProtocolFeeWAD: policy.jtYieldShareProtocolFeeWAD,
             lptYieldShareProtocolFeeWAD: policy.lptYieldShareProtocolFeeWAD
         });
-        cp.balancerPoolConfig = RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig({
-            swapFeePercentage: policy.poolSwapFeePercentage,
-            chargeYieldFeeOnSeniorTrancheShares: policy.chargeYieldFeeOnSeniorTrancheShares,
-            chargeYieldFeeOnQuoteAsset: policy.chargeYieldFeeOnQuoteAsset
+        cp.balancerPoolYieldFeeConfig = RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig({
+            chargeYieldFeeOnSTShares: policy.chargeYieldFeeOnSTShares, chargeYieldFeeOnQuoteAssets: policy.chargeYieldFeeOnQuoteAssets
         });
 
         (template, existed) = deployWithSanityChecks(
@@ -100,7 +97,7 @@ contract DeployTemplateComponent is DeployScriptBase, TemplateConfig {
         bytes4[] memory factoryAdminSelectors = new bytes4[](3);
         factoryAdminSelectors[0] = BaseDeploymentTemplate.setYieldDistributionModels.selector;
         factoryAdminSelectors[1] = BaseDeploymentTemplate.setProtocolFeeRecipient.selector;
-        factoryAdminSelectors[2] = RoycoDayBalancerV3MarketDeploymentTemplate.setBalancerPoolConfig.selector;
+        factoryAdminSelectors[2] = RoycoDayBalancerV3MarketDeploymentTemplate.setBalancerPoolYieldFeeConfig.selector;
         AccessManager(UP.accessManager).setTargetFunctionRole(_template, factoryAdminSelectors, ADMIN_FACTORY_ROLE);
 
         // The fee set answers to the same role as each market's own protocol fee setters

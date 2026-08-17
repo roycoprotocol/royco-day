@@ -66,7 +66,6 @@ struct RoleAssignmentAddresses {
     address lpRoleHolderAddress;
     address balancerPoolManagerAddress;
     address marketOpsAddress;
-    address marketReinvestLiquidityPremiumAddress;
     address adminEntryPointAddress;
     address entryPointFeeCollectorAddress;
 }
@@ -213,7 +212,6 @@ struct ImplementationSet {
 struct TemplateUpstream {
     address accessManager;
     address factory;
-    address roycoBlacklist;
     ImplementationSet impls;
 }
 
@@ -223,7 +221,6 @@ struct MarketUpstream {
     address factory;
     address entryPoint;
     address marketSyncer;
-    address roycoBlacklist;
     address template;
 }
 
@@ -234,7 +231,6 @@ struct ChainDeployment {
     address factory;
     address entryPoint;
     address marketSyncer;
-    address roycoBlacklist;
     address template;
     ImplementationSet impls;
     bool amExisted;
@@ -250,9 +246,8 @@ struct TemplatePolicy {
     uint64 jtProtocolFeeWAD;
     uint64 jtYieldShareProtocolFeeWAD;
     uint64 lptYieldShareProtocolFeeWAD;
-    uint64 poolSwapFeePercentage;
-    bool chargeYieldFeeOnSeniorTrancheShares;
-    bool chargeYieldFeeOnQuoteAsset;
+    bool chargeYieldFeeOnSTShares;
+    bool chargeYieldFeeOnQuoteAssets;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -267,6 +262,7 @@ struct TemplatePolicy {
  * @custom:field symbol - The symbol of the Gyro E-CLP BPT
  * @custom:field eclpParams - The E-CLP curve parameters (price bounds and rotation) defining the pool's rate-scaled AMM
  * @custom:field derivedEclpParams - The high-precision derived E-CLP parameters computed off-chain from `eclpParams`
+ * @custom:field swapFeePercentage - The pool's static swap fee, scaled to WAD precision
  * @custom:field quoteAsset - The quote asset (stablecoin) paired against the senior tranche share in the pool
  * @custom:field quoteAssetRateProvider - The rate provider supplying the quote leg's rate to the pool
  */
@@ -275,6 +271,7 @@ struct GyroECLPPoolParams {
     string symbol;
     IGyroECLPPool.EclpParams eclpParams;
     IGyroECLPPool.DerivedEclpParams derivedEclpParams;
+    uint64 swapFeePercentage;
     address quoteAsset;
     address quoteAssetRateProvider;
 }

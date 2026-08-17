@@ -5,7 +5,7 @@ import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/Royco
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
-import { ADMIN_ENTRY_POINT_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ENTRY_POINT_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
@@ -21,7 +21,7 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  * @title Test_PeripheryConfiguration
  * @notice Always-running (no-RPC) coverage for the periphery configuration a market deployment drives: the template's
  *         post-registration hook calls the factory, the factory forwards into the gatekeeper, and the gatekeeper —
- *         which alone holds `ADMIN_ENTRY_POINT_ROLE` and `SYNC_ROLE` — applies the tranche configs and registers the
+ *         which alone holds `ADMIN_ENTRY_POINT_ROLE` — applies the tranche configs and registers the
  *         kernel, but only for tranches and a kernel that carry no configuration yet
  * @dev Every test drives a SECOND, independent factory/gatekeeper/periphery set over the fixture's market components.
  *      The shared fixture already consumes its one-shot configuration during `_deployEntryPoint`, and the whole point
@@ -43,7 +43,7 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
         (freshFactory, freshGatekeeper, freshEntryPoint, freshSyncer) =
             FactoryScaffold.deployFactory(RoycoAccessManager(address(accessManager)), keccak256("PERIPHERY_TEST_FACTORY"));
         accessManager.setTargetFunctionRole(address(freshEntryPoint), _sels(IRoycoDayEntryPoint.modifyTrancheConfigs.selector), ADMIN_ENTRY_POINT_ROLE);
-        accessManager.setTargetFunctionRole(address(freshSyncer), _sels(RoycoMarketSyncer.addMarketKernels.selector), SYNC_ROLE);
+        accessManager.setTargetFunctionRole(address(freshSyncer), _sels(RoycoMarketSyncer.addMarketKernels.selector), ADMIN_ENTRY_POINT_ROLE);
 
         freshTemplate = new MockMarketRegistrationTemplate(IRoycoFactory(address(freshFactory)));
         freshFactory.registerTemplate(address(freshTemplate));

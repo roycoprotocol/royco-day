@@ -22,13 +22,16 @@ contract Test_DeterministicAddresses is Test {
     /// @dev The test harness deployer, `vm.createWallet("DEPLOYER")` (private key keccak256("DEPLOYER")).
     address internal constant TEST_HARNESS_DEPLOYER = 0x3A383B39c10856a75B9E3f6eda6fCC8fC3334050;
 
-    // Captured 2026-08-06 from the pre-split monolith (TEST_SALT_SUFFIX = "_TEST_3243241421")
-    address internal constant PROD_FACTORY = 0xa093c0EbD81d1350a8bb8cD11d273A38cF45f390;
-    address internal constant LOCAL_HARNESS_FACTORY = 0xDed778B5bB6B3a3bA77F93220188d660D711Bf65;
-    address internal constant TEST_ENV_FACTORY = 0xD1FC1d1502f4ad42f0E7a508485C04e91a1bF76c;
-    address internal constant PROD_ACCESS_MANAGER = 0xeF31d0A3a178f575380bA2e72494a41A9B44a0F4;
-    address internal constant PROD_ENTRY_POINT = 0x4E29Cf4C21503D54BA271Dc016d63f2954800B49;
-    address internal constant PROD_MARKET_SYNCER = 0x538f9993F8719BfaF3c1bc2351c209b99f2319A2;
+    // Recaptured 2026-08-14: the prod namespace bumped to PROD_SALT_SUFFIX = "_PROD_V1.0.2" (fresh deployments) AND
+    // the factory-proxy salt was re-mined to the vanity `RoycoDeterministic.FACTORY_PROXY_SALT` (9-leading-`a` prod
+    // factory). The suffix bump moves the AccessManager/create3-deployer/periphery too, so every prod address is fresh.
+    // (TEST_SALT_SUFFIX = "_TEST_3243241421")
+    address internal constant PROD_FACTORY = 0xaAAaaAAAaE46cA12Bf3810DF8C13c5E8A4400812;
+    address internal constant LOCAL_HARNESS_FACTORY = 0xf03E361DEdaC92b2fbA45189FEbeB286b1149aEd;
+    address internal constant TEST_ENV_FACTORY = 0x6da9980875dCB6Bd9faBae0D743Ab8b9160F25Dc;
+    address internal constant PROD_ACCESS_MANAGER = 0x82EecE4a736db0767370d2DfFdE9BDF6e38AaeB8;
+    address internal constant PROD_ENTRY_POINT = 0xaF55a0c251690d9322b5F94b7e50EE895750262c;
+    address internal constant PROD_MARKET_SYNCER = 0x387e025306cb1C41fe7AB752D9C04607E03Bb8CE;
 
     function test_Canary_FactoryPredictionsUnchanged() public view {
         assertEq(RoycoDeterministic.predictFactoryProxy(DEPLOYER, false), PROD_FACTORY, "prod factory prediction drifted");

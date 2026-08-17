@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Test, Vm } from "../../../lib/forge-std/src/Test.sol";
-import { ADMIN_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ROLE, ADMIN_ORACLE_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { IRoycoAccessManager } from "../../../src/interfaces/factory/IRoycoAccessManager.sol";
 
@@ -42,7 +42,7 @@ contract Test_RoycoAccessManager is Test {
     }
 
     function test_setTargetFunctionRole_recordsTheTarget() public {
-        am.setTargetFunctionRole(TARGET, _selectors(), SYNC_ROLE);
+        am.setTargetFunctionRole(TARGET, _selectors(), ADMIN_ORACLE_ROLE);
         assertTrue(am.wasEverConfigured(TARGET), "binding a selector must record the target");
     }
 
@@ -62,7 +62,7 @@ contract Test_RoycoAccessManager is Test {
     function test_setTargetFunctionRole_emitsOnlyOnTheFirstConfiguration() public {
         vm.expectEmit(true, false, false, false, address(am));
         emit IRoycoAccessManager.TargetConfiguredAtGenesis(TARGET);
-        am.setTargetFunctionRole(TARGET, _selectors(), SYNC_ROLE);
+        am.setTargetFunctionRole(TARGET, _selectors(), ADMIN_ORACLE_ROLE);
 
         // A second write must not re-announce it (getRecordedLogs drains the buffer, so read it exactly once)
         vm.recordLogs();
@@ -81,7 +81,7 @@ contract Test_RoycoAccessManager is Test {
      *      anyone able to clear it could re-open an existing contract to a market deployment
      */
     function test_wasEverConfigured_isMonotonicAcrossEveryWrite() public {
-        am.setTargetFunctionRole(TARGET, _selectors(), SYNC_ROLE);
+        am.setTargetFunctionRole(TARGET, _selectors(), ADMIN_ORACLE_ROLE);
         assertTrue(am.wasEverConfigured(TARGET), "recorded on the first write");
 
         // Unbinding the selector (rebinding to ADMIN_ROLE), closing, then re-opening the target all leave it recorded

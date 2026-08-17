@@ -26,8 +26,7 @@ import {
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
-    PUBLIC_ROLE,
-    SYNC_ROLE
+    PUBLIC_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
@@ -112,7 +111,7 @@ contract Test_RoycoFactory is Test {
         (factory, gatekeeper, entryPoint, syncer) = FactoryScaffold.deployFactory(am, keccak256("FACTORY_PROXY"));
 
         // Every market the template deploys screens against this one blacklist, and the template rejects a null one
-        roycoBlacklist = FactoryScaffold.deployBlacklist(am);
+        roycoBlacklist = FactoryScaffold.deployBlacklist(address(this));
 
         // Grant the factory-facing roles the scaffold bound to the factory's selectors.
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
@@ -131,11 +130,11 @@ contract Test_RoycoFactory is Test {
         am.setTargetFunctionRole(address(entryPoint), entryPointSelectors, ADMIN_ENTRY_POINT_ROLE);
         bytes4[] memory syncerSelectors = new bytes4[](1);
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
-        am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
+        am.setTargetFunctionRole(address(syncer), syncerSelectors, ADMIN_ENTRY_POINT_ROLE);
 
         // The real Day template, bound to this factory, stood up through the real per-component deploy scripts.
         // The template deploys every market contract itself, so the script only builds the params (`buildMarketParams`).
-        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory, roycoBlacklist);
+        TemplateScaffold.Result memory scaffold = TemplateScaffold.standUp(am, factory);
         registry = scaffold.registry;
         marketBuilder = scaffold.market;
         implementationSet = scaffold.impls;
@@ -154,7 +153,7 @@ contract Test_RoycoFactory is Test {
         // protocol fee setters
         bytes4[] memory configSelectors = new bytes4[](2);
         configSelectors[0] = BaseDeploymentTemplate.setProtocolFeeRecipient.selector;
-        configSelectors[1] = RoycoDayBalancerV3MarketDeploymentTemplate.setBalancerPoolConfig.selector;
+        configSelectors[1] = RoycoDayBalancerV3MarketDeploymentTemplate.setBalancerPoolYieldFeeConfig.selector;
         am.setTargetFunctionRole(address(template), configSelectors, ADMIN_FACTORY_ROLE);
 
         bytes4[] memory feeSelectors = new bytes4[](1);
@@ -205,6 +204,8 @@ contract Test_RoycoFactory is Test {
     /// @dev The `deploy()` flow resolves an unset config oracle itself; the direct-template path must supply it, so
     ///      deploy the config's ERC4626 share-price adapter over the market's collateral vault + base->NAV feed.
     function _resolveCollateralOracle(DayMarketConfig memory _cfg) internal {
+        // Every market this suite deploys by hand pins the suite's per-market blacklist into its params
+        _cfg.roycoBlacklist = roycoBlacklist;
         if (_cfg.oracle.deployed != address(0)) return;
         _cfg.oracle.deployed = address(
             _newErc4626Oracle(_cfg.collateralAsset, _cfg.oracle.specificParams)
@@ -378,7 +379,7 @@ contract Test_RoycoFactory is Test {
         (RoycoFactory otherFactory,,,) = FactoryScaffold.deployFactory(am, keccak256("FOREIGN_FACTORY_PROXY"));
         new RoycoDayEntryPoint(address(otherFactory));
         RoycoDayBalancerV3MarketDeploymentTemplate foreign =
-            RoycoDayBalancerV3MarketDeploymentTemplate(TemplateScaffold.deployTemplateFor(am, otherFactory, roycoBlacklist, implementationSet));
+            RoycoDayBalancerV3MarketDeploymentTemplate(TemplateScaffold.deployTemplateFor(am, otherFactory, implementationSet));
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(IRoycoFactory.TEMPLATE_BOUND_TO_DIFFERENT_FACTORY.selector);
         factory.registerTemplate(address(foreign));
@@ -488,6 +489,26 @@ contract Test_RoycoFactory is Test {
         assertEq(stored.baseConfig.depositDelaySeconds, _expected.depositDelaySeconds, string.concat(_ctx, ": deposit delay"));
         assertEq(stored.baseConfig.redemptionDelaySeconds, _expected.redemptionDelaySeconds, string.concat(_ctx, ": redemption delay"));
         assertEq(stored.baseConfig.gateByOracleUpdate, _expected.gateByOracleUpdate, string.concat(_ctx, ": oracle enabled"));
+    }
+
+    /// @notice The template enforces a fixed 24h entry-point redemption-delay floor and REVERTS any market whose
+    ///         per-tranche redemption delay is below it — so a permissionless deployer cannot register a faster-settling market
+    function test_MinRedemptionDelay_RejectsConfigsBelowTheConstantFloor() external {
+        _register();
+        assertEq(template.MIN_REDEMPTION_DELAY_SECONDS(), 24 hours, "the redemption-delay floor constant must be 24h");
+
+        // Ask for a 1h redemption delay on the senior tranche — below the floor
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
+        cfg.stEntryPointConfig.redemptionDelaySeconds = 1 hours;
+        _fundPoolSeed(cfg);
+        bytes memory p = abi.encode(marketBuilder.buildMarketParams(cfg, MARKET_ID_A, address(factory), DEPLOYER));
+
+        vm.prank(DEPLOYER);
+        vm.expectRevert(
+            abi.encodeWithSelector(RoycoDayBalancerV3MarketDeploymentTemplate.REDEMPTION_DELAY_BELOW_MIN.selector, uint24(1 hours), uint24(24 hours))
+        );
+        factory.executeMarketDeployment(address(template), p);
     }
 
     /// @notice Only the factory may drive the periphery configuration hook
@@ -1016,6 +1037,29 @@ contract Test_RoycoFactory is Test {
         _expectParamsRevert(p, MarketDeploymentValidationLogic.MARKET_PARAMETER_HAS_NO_CODE.selector);
     }
 
+    /// The per-market blacklist is OPTIONAL (a null address disables screening), but a NON-null one must be a live contract
+    function test_RevertIf_RoycoBlacklistIsNonNullButHasNoCode() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.roycoBlacklist = makeAddr("NOT_A_BLACKLIST");
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.MARKET_PARAMETER_HAS_NO_CODE.selector);
+    }
+
+    /// The per-market blacklist is optional: a market may deploy with none, in which case the kernel wires the null
+    /// address and screening is simply disabled for that market (the kernel's BlacklistLogic null-guards every screen)
+    function test_ExecuteMarketDeployment_BlacklistIsOptional() external {
+        _register();
+
+        DayMarketConfig memory cfg = registry.getDayMarketConfig("snUSD");
+        _resolveCollateralOracle(cfg);
+        cfg.roycoBlacklist = address(0); // deploy with no blacklist
+        _fundPoolSeed(cfg);
+        bytes memory p = abi.encode(marketBuilder.buildMarketParams(cfg, MARKET_ID_A, address(factory), DEPLOYER));
+
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
+        assertEq(IRoycoDayKernel(r.kernel).getState().roycoBlacklist, address(0), "a market with no blacklist wires the null address");
+    }
+
 
     function test_RevertIf_TrancheNameIsEmpty() external {
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
@@ -1058,6 +1102,21 @@ contract Test_RoycoFactory is Test {
         (p.poolCreationParams.eclpParams.alpha, p.poolCreationParams.eclpParams.beta) =
         (p.poolCreationParams.eclpParams.beta, p.poolCreationParams.eclpParams.alpha);
         _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_ECLP_PRICE_RANGE.selector);
+    }
+
+    /// The market's swap fee is held to Gyro's own band. Below it, Balancer would reject the pool mid-deployment,
+    /// after the senior tranche proxy already exists, so the floor belongs in the params validation
+    function test_RevertIf_SwapFeeBelowGyrosBand() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.poolCreationParams.swapFeePercentage = 1e12 - 1;
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_SWAP_FEE.selector);
+    }
+
+    /// The band's ceiling is a 100% swap fee, Gyro's own maximum
+    function test_RevertIf_SwapFeeAboveGyrosBand() external {
+        RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
+        p.poolCreationParams.swapFeePercentage = uint64(1e18) + 1;
+        _expectParamsRevert(p, MarketDeploymentValidationLogic.INVALID_SWAP_FEE.selector);
     }
 
 
@@ -1148,7 +1207,7 @@ contract Test_RoycoFactory is Test {
     /// Each configuration setter is admin-only: a market deployer needs no role at all, never the config surface
     function test_RevertIf_ConfigSettersCalledByNonAdmin() external {
         // Read the pool config BEFORE pranking: a view call would otherwise consume the prank before the setter runs
-        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory poolConfig = _templateBalancerPoolConfig();
+        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig memory poolConfig = _templateBalancerPoolYieldFeeConfig();
 
         vm.prank(DEPLOYER);
         vm.expectPartialRevert(IAccessManaged.AccessManagedUnauthorized.selector);
@@ -1160,7 +1219,7 @@ contract Test_RoycoFactory is Test {
 
         vm.prank(DEPLOYER);
         vm.expectPartialRevert(IAccessManaged.AccessManagedUnauthorized.selector);
-        template.setBalancerPoolConfig(poolConfig);
+        template.setBalancerPoolYieldFeeConfig(poolConfig);
     }
 
     /// A protocol fee above 100% is refused, matching the bound the accountant itself enforces
@@ -1178,22 +1237,6 @@ contract Test_RoycoFactory is Test {
         template.setProtocolFeeRecipient(address(0));
     }
 
-    /// The swap fee is held to Gyro's own band. Below it, Balancer would reject the pool mid-deployment and every
-    /// market this template deploys would fail, so the floor belongs at configuration time
-    function test_RevertIf_SwapFeeOutsideGyrosBand() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory tooLow = _templateBalancerPoolConfig();
-        tooLow.swapFeePercentage = 1e12 - 1;
-        vm.expectPartialRevert(RoycoDayBalancerV3MarketDeploymentTemplate.INVALID_SWAP_FEE.selector);
-        vm.prank(FACTORY_ADMIN);
-        template.setBalancerPoolConfig(tooLow);
-
-        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory tooHigh = _templateBalancerPoolConfig();
-        tooHigh.swapFeePercentage = uint64(1e18) + 1;
-        vm.expectPartialRevert(RoycoDayBalancerV3MarketDeploymentTemplate.INVALID_SWAP_FEE.selector);
-        vm.prank(FACTORY_ADMIN);
-        template.setBalancerPoolConfig(tooHigh);
-    }
-
     /// The constructor runs the same validator as the setter, so a template can never be born out of bounds
     function test_RevertIf_TemplateConstructedWithAnInvalidFeeConfig() external {
         RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _templateConstructionParams();
@@ -1206,10 +1249,10 @@ contract Test_RoycoFactory is Test {
     ///         template policy and the rate provider is the deployer's, so the clash is caught before anything deploys
     ///         rather than inside pool creation, which runs after the senior tranche proxy already exists
     function test_RevertIf_QuoteYieldFeeChargedWithoutAQuoteRateProvider() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory cfg = _templateBalancerPoolConfig();
-        cfg.chargeYieldFeeOnQuoteAsset = true;
+        RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig memory cfg = _templateBalancerPoolYieldFeeConfig();
+        cfg.chargeYieldFeeOnQuoteAssets = true;
         vm.prank(FACTORY_ADMIN);
-        template.setBalancerPoolConfig(cfg);
+        template.setBalancerPoolYieldFeeConfig(cfg);
 
         // The snUSD config leaves the quote leg's rate provider null, so the pool policy and the market disagree
         RoycoDayBalancerV3MarketDeploymentTemplate.MarketParams memory p = _validParams();
@@ -1221,28 +1264,11 @@ contract Test_RoycoFactory is Test {
     // BLACKLIST
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// The blacklist is the template's, not the market's: every market it deploys reads back exactly the pinned one
-    function test_ExecuteMarketDeployment_KernelReadsBackTheTemplatesBlacklist() external {
+    /// The blacklist is per-market: the kernel reads back exactly the blacklist pinned into the market's params
+    function test_ExecuteMarketDeployment_KernelReadsBackTheMarketsBlacklist() external {
         _register();
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(MARKET_ID_A);
-        assertEq(template.ROYCO_BLACKLIST(), roycoBlacklist, "the template must pin the blacklist it was constructed with");
-        assertEq(IRoycoDayKernel(r.kernel).getState().roycoBlacklist, roycoBlacklist, "the market's kernel must screen against the template's blacklist");
-    }
-
-    /// Screening is mandatory: a template cannot be constructed without a blacklist, so no market can opt out of it
-    function test_RevertIf_TemplateConstructedWithNullBlacklist() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _templateConstructionParams();
-        cp.roycoBlacklist = address(0);
-        vm.expectRevert(RoycoDayBalancerV3MarketDeploymentTemplate.NULL_CONSTRUCTION_PARAMETER.selector);
-        new RoycoDayBalancerV3MarketDeploymentTemplate(cp);
-    }
-
-    /// An EOA passes the non-null check but could never screen anything, so it is rejected separately
-    function test_RevertIf_TemplateConstructedWithCodelessBlacklist() external {
-        RoycoDayBalancerV3MarketDeploymentTemplate.TemplateConstructionParams memory cp = _templateConstructionParams();
-        cp.roycoBlacklist = makeAddr("NOT_A_BLACKLIST");
-        vm.expectRevert(abi.encodeWithSelector(RoycoDayBalancerV3MarketDeploymentTemplate.CONSTRUCTION_PARAMETER_HAS_NO_CODE.selector, cp.roycoBlacklist));
-        new RoycoDayBalancerV3MarketDeploymentTemplate(cp);
+        assertEq(IRoycoDayKernel(r.kernel).getState().roycoBlacklist, roycoBlacklist, "the market's kernel must screen against the market's blacklist");
     }
 
     // ─── internal ───
@@ -1255,7 +1281,6 @@ contract Test_RoycoFactory is Test {
             balancerV3PoolFactory: template.BALANCER_V3_POOL_FACTORY(),
             eclpLPOracleFactory: template.ECLP_LP_ORACLE_FACTORY(),
             bptOracleConstantPriceFeed: template.BPT_ORACLE_CONSTANT_PRICE_FEED(),
-            roycoBlacklist: template.ROYCO_BLACKLIST(),
             seniorTrancheBeacon: template.SENIOR_TRANCHE_BEACON(),
             juniorTrancheBeacon: template.JUNIOR_TRANCHE_BEACON(),
             liquidityProviderTrancheBeacon: template.LIQUIDITY_PROVIDER_TRANCHE_BEACON(),
@@ -1263,7 +1288,7 @@ contract Test_RoycoFactory is Test {
             accountantBeacon: template.ACCOUNTANT_BEACON(),
             protocolFeeConfig: _templateProtocolFeeConfig(),
             protocolFeeRecipient: template.protocolFeeRecipient(),
-            balancerPoolConfig: _templateBalancerPoolConfig()
+            balancerPoolYieldFeeConfig: _templateBalancerPoolYieldFeeConfig()
         });
     }
 
@@ -1275,11 +1300,11 @@ contract Test_RoycoFactory is Test {
         });
     }
 
-    /// @dev The live template's pool policy, read back through its auto-getter
-    function _templateBalancerPoolConfig() internal view returns (RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig memory) {
-        (uint64 swapFee, bool chargeSenior, bool chargeQuote) = template.balancerPoolConfig();
-        return RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolConfig({
-            swapFeePercentage: swapFee, chargeYieldFeeOnSeniorTrancheShares: chargeSenior, chargeYieldFeeOnQuoteAsset: chargeQuote
+    /// @dev The live template's pool yield fee policy, read back through its auto-getter
+    function _templateBalancerPoolYieldFeeConfig() internal view returns (RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig memory) {
+        (bool chargeSenior, bool chargeQuote) = template.balancerPoolYieldFeeConfig();
+        return RoycoDayBalancerV3MarketDeploymentTemplate.BalancerPoolYieldFeeConfig({
+            chargeYieldFeeOnSTShares: chargeSenior, chargeYieldFeeOnQuoteAssets: chargeQuote
         });
     }
 

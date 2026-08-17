@@ -4,13 +4,11 @@ pragma solidity ^0.8.28;
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
-    ADMIN_BLACKLIST_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
-    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
@@ -21,8 +19,7 @@ import {
     JT_LP_ROLE,
     LPT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
-    ST_LP_ROLE,
-    SYNC_ROLE
+    ST_LP_ROLE
 } from "../../../src/factory/Roles.sol";
 import { RoleAssignment, RoleAssignmentAddresses, RoleConfig } from "../../config/DeploymentTypes.sol";
 import { EnvConfig } from "./EnvConfig.sol";
@@ -96,7 +93,6 @@ abstract contract RoleGraphConfig is EnvConfig {
             lpRoleHolderAddress: fndn,
             balancerPoolManagerAddress: way,
             marketOpsAddress: way,
-            marketReinvestLiquidityPremiumAddress: way,
             adminEntryPointAddress: way,
             entryPointFeeCollectorAddress: fndn
         });
@@ -104,29 +100,26 @@ abstract contract RoleGraphConfig is EnvConfig {
 
     /// @notice Builds the role assignments the apply script grants, combining the address surface with the role table
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](22);
+        roleAssignments = new RoleAssignment[](19);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
-        roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
-        roleAssignments[3] = _assignment(ADMIN_KERNEL_ROLE, _addresses.adminKernelAddress);
-        roleAssignments[4] = _assignment(ADMIN_ACCOUNTANT_ROLE, _addresses.adminAccountantAddress);
-        roleAssignments[5] = _assignment(ADMIN_PROTOCOL_FEE_SETTER_ROLE, _addresses.adminProtocolFeeSetterAddress);
-        roleAssignments[6] = _assignment(ADMIN_ORACLE_ROLE, _addresses.adminOracleAddress);
-        roleAssignments[7] = _assignment(LP_ROLE_ADMIN_ROLE, _addresses.lpRoleAdminAddress);
-        roleAssignments[8] = _assignment(ST_LP_ROLE, _addresses.lpRoleHolderAddress);
-        roleAssignments[9] = _assignment(JT_LP_ROLE, _addresses.lpRoleHolderAddress);
-        roleAssignments[10] = _assignment(GUARDIAN_ROLE, _addresses.guardianAddress);
-        roleAssignments[11] = _assignment(ADMIN_UNPAUSER_ROLE, _addresses.unpauserAddress);
-        roleAssignments[12] = _assignment(LPT_LP_ROLE, _addresses.lpRoleHolderAddress);
-        roleAssignments[13] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
-        roleAssignments[14] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
-        roleAssignments[15] = _assignment(ADMIN_BLACKLIST_ROLE, _addresses.marketOpsAddress);
-        roleAssignments[16] = _assignment(ADMIN_ENTRY_POINT_ROLE, _addresses.adminEntryPointAddress);
-        roleAssignments[17] = _assignment(ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, _addresses.entryPointFeeCollectorAddress);
-        roleAssignments[18] = _assignment(ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE, _addresses.marketReinvestLiquidityPremiumAddress);
-        roleAssignments[19] = _assignment(GUARDIAN_ROLE, _addresses.guardianVetoAddress);
-        roleAssignments[20] = _assignmentWithDelay(ADMIN_ORACLE_ROLE, _addresses.adminOracleEmergencyAddress, DELAY_IMMEDIATE);
-        roleAssignments[21] = _assignment(LP_ROLE_ADMIN_ROLE, _addresses.lpRoleAdminOperatorAddress);
+        roleAssignments[2] = _assignment(ADMIN_KERNEL_ROLE, _addresses.adminKernelAddress);
+        roleAssignments[3] = _assignment(ADMIN_ACCOUNTANT_ROLE, _addresses.adminAccountantAddress);
+        roleAssignments[4] = _assignment(ADMIN_PROTOCOL_FEE_SETTER_ROLE, _addresses.adminProtocolFeeSetterAddress);
+        roleAssignments[5] = _assignment(ADMIN_ORACLE_ROLE, _addresses.adminOracleAddress);
+        roleAssignments[6] = _assignment(LP_ROLE_ADMIN_ROLE, _addresses.lpRoleAdminAddress);
+        roleAssignments[7] = _assignment(ST_LP_ROLE, _addresses.lpRoleHolderAddress);
+        roleAssignments[8] = _assignment(JT_LP_ROLE, _addresses.lpRoleHolderAddress);
+        roleAssignments[9] = _assignment(GUARDIAN_ROLE, _addresses.guardianAddress);
+        roleAssignments[10] = _assignment(ADMIN_UNPAUSER_ROLE, _addresses.unpauserAddress);
+        roleAssignments[11] = _assignment(LPT_LP_ROLE, _addresses.lpRoleHolderAddress);
+        roleAssignments[12] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
+        roleAssignments[13] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
+        roleAssignments[14] = _assignment(ADMIN_ENTRY_POINT_ROLE, _addresses.adminEntryPointAddress);
+        roleAssignments[15] = _assignment(ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, _addresses.entryPointFeeCollectorAddress);
+        roleAssignments[16] = _assignment(GUARDIAN_ROLE, _addresses.guardianVetoAddress);
+        roleAssignments[17] = _assignmentWithDelay(ADMIN_ORACLE_ROLE, _addresses.adminOracleEmergencyAddress, DELAY_IMMEDIATE);
+        roleAssignments[18] = _assignment(LP_ROLE_ADMIN_ROLE, _addresses.lpRoleAdminOperatorAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -148,7 +141,6 @@ abstract contract RoleGraphConfig is EnvConfig {
             return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_IMMEDIATE });
         }
         if (role == LP_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_IMMEDIATE });
-        if (role == SYNC_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_IMMEDIATE });
         if (role == ADMIN_KERNEL_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_ROOT });
         if (role == ADMIN_ACCOUNTANT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_ROOT });
         if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_ROOT });
@@ -157,12 +149,10 @@ abstract contract RoleGraphConfig is EnvConfig {
         if (role == ADMIN_FACTORY_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_ROOT });
         if (role == ADMIN_UNPAUSER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_IMMEDIATE });
         if (role == LPT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_IMMEDIATE });
-        if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_ROOT });
-        if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_ROOT });
-        if (role == ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE) {
+        if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_IMMEDIATE });
         }
-        if (role == ADMIN_BLACKLIST_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_ROOT });
+        if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_ROOT });
         if (role == ADMIN_ENTRY_POINT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_SHORT });
         if (role == ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: DELAY_IMMEDIATE });

@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
-import { ADMIN_ROLE, PUBLIC_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
+import { ADMIN_ROLE, PUBLIC_ROLE, ST_LP_ROLE, ADMIN_ORACLE_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoFactoryGatekeeper } from "../../../src/interfaces/factory/IRoycoFactoryGatekeeper.sol";
 
 /**
@@ -44,7 +44,7 @@ contract Test_FactoryGatekeeper is Test {
     function _two() internal pure returns (bytes4[] memory selectors, uint64[] memory roleIds) {
         selectors = new bytes4[](2);
         roleIds = new uint64[](2);
-        (selectors[0], roleIds[0]) = (SELECTOR_A, SYNC_ROLE);
+        (selectors[0], roleIds[0]) = (SELECTOR_A, ADMIN_ORACLE_ROLE);
         (selectors[1], roleIds[1]) = (SELECTOR_B, ST_LP_ROLE);
     }
 
@@ -66,7 +66,7 @@ contract Test_FactoryGatekeeper is Test {
         (bytes4[] memory selectors, uint64[] memory roleIds) = _two();
         _bind(FRESH_TARGET, selectors, roleIds);
 
-        assertEq(am.getTargetFunctionRole(FRESH_TARGET, SELECTOR_A), SYNC_ROLE, "the first selector must be bound");
+        assertEq(am.getTargetFunctionRole(FRESH_TARGET, SELECTOR_A), ADMIN_ORACLE_ROLE, "the first selector must be bound");
         assertEq(am.getTargetFunctionRole(FRESH_TARGET, SELECTOR_B), ST_LP_ROLE, "the second selector must be bound");
         assertTrue(am.wasEverConfigured(FRESH_TARGET), "configuring a target must record it");
     }
@@ -90,7 +90,7 @@ contract Test_FactoryGatekeeper is Test {
     function test_RevertIf_targetWasConfiguredDirectlyByGovernance() public {
         bytes4[] memory governanceSelectors = new bytes4[](1);
         governanceSelectors[0] = SELECTOR_A;
-        am.setTargetFunctionRole(FRESH_TARGET, governanceSelectors, SYNC_ROLE);
+        am.setTargetFunctionRole(FRESH_TARGET, governanceSelectors, ADMIN_ORACLE_ROLE);
 
         (bytes4[] memory selectors, uint64[] memory roleIds) = _two();
         vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.TARGET_ALREADY_CONFIGURED.selector, FRESH_TARGET));
@@ -181,13 +181,14 @@ contract Test_FactoryGatekeeper is Test {
     // ---------------------------------------------------------------------
 
     /**
-     * @notice A market's bindings gate admin surfaces, so PUBLIC_ROLE is never legitimate: it would leave the selector
-     *         callable by anyone. Enforced here rather than only in a template, so no template can bind around it
+     * @notice PUBLIC_ROLE is a legitimate template decision (e.g. permissionless reinvestment): the fresh-target
+     *         rule already confines template bindings to contracts the deployment itself authored, so opening a
+     *         selector there escalates nothing
      */
-    function test_RevertIf_configureFreshTargetBindsPublicRole() public {
+    function test_ConfigureFreshTargetBindsPublicRole() public {
         (bytes4[] memory selectors, uint64[] memory roleIds) = _one(PUBLIC_ROLE);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, PUBLIC_ROLE));
         _bind(FRESH_TARGET, selectors, roleIds);
+        assertEq(am.getTargetFunctionRole(FRESH_TARGET, selectors[0]), PUBLIC_ROLE, "the selector must be publicly callable");
     }
 
     /// @notice ADMIN_ROLE is the access manager's super-admin, equally never a gate a market deployment should install
@@ -201,10 +202,10 @@ contract Test_FactoryGatekeeper is Test {
     function test_RevertIf_configureFreshTargetBindsAForbiddenRoleAfterAValidOne() public {
         bytes4[] memory selectors = new bytes4[](2);
         uint64[] memory roleIds = new uint64[](2);
-        (selectors[0], roleIds[0]) = (SELECTOR_A, SYNC_ROLE);
-        (selectors[1], roleIds[1]) = (SELECTOR_B, PUBLIC_ROLE);
+        (selectors[0], roleIds[0]) = (SELECTOR_A, ADMIN_ORACLE_ROLE);
+        (selectors[1], roleIds[1]) = (SELECTOR_B, ADMIN_ROLE);
 
-        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, PUBLIC_ROLE));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoFactoryGatekeeper.ROLE_FORBIDDEN.selector, ADMIN_ROLE));
         _bind(FRESH_TARGET, selectors, roleIds);
 
         assertFalse(am.wasEverConfigured(FRESH_TARGET), "a rejected binding must not consume the target's one-time freshness");

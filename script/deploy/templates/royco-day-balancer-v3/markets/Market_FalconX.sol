@@ -30,9 +30,6 @@ abstract contract Market_FalconX is DayMarketRegistryBase {
                         idleCDO: 0x433D5B175148dA32Ffe1e1A37a939E1b7e79be4d,
                         underlyingTokenToNavAssetFeed: 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6,
                         minDeviationWAD: 0.001e18,
-                        // The CDO's last virtual-price update, attested on-chain: the AA virtualPrice jumped +0.67% at
-                        // block ~25675158 (2026-08-03). RE-ATTEST BEFORE EVERY DEPLOY — a zero holds pricing shut, and
-                        // a stale attestation fails the oracle's staleness gate; either way the deployment reverts
                         lastUpdate: 1_785_769_583,
                         // Per-hop thresholds, each sized to ITS source: the Chainlink USDC/USD leg keeps its tight 48h
                         // gate (24h heartbeat, doubled), while the virtual-price clock gets 8 days for Pareto's ~WEEKLY
@@ -42,6 +39,7 @@ abstract contract Market_FalconX is DayMarketRegistryBase {
                     })
                 )
             }),
+            roycoBlacklist: address(0),
             accountant: AccountantEconomics({
                 fixedTermGracePeriodSeconds: 7 days,
                 minCoverageWAD: 0.03e18,
@@ -78,8 +76,9 @@ abstract contract Market_FalconX is DayMarketRegistryBase {
             pool: GyroECLPPoolParams({
                 name: "Senior FalconX / Senior SrRoyUSDC",
                 symbol: "srFalconX/srsrRoyUSDC",
-                eclpParams: _srRoyUsdcEclpParams(),
-                derivedEclpParams: _srRoyUsdcDerivedEclpParams(),
+                eclpParams: _exitLiquidityPrioritizedEclpParams(),
+                derivedEclpParams: _exitLiquidityPrioritizedDerivedEclpParams(),
+                swapFeePercentage: 10e14, // 10 bps, the pool swap fee every market previously inherited from the template policy
                 quoteAsset: SRROYUSDC_SENIOR_TRANCHE,
                 quoteAssetRateProvider: SRROYUSDC_KERNEL
             }),
