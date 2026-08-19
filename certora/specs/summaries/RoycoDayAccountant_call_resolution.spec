@@ -1,0 +1,24 @@
+using AdaptiveCurveYDM_V1Harness as adaptiveCurveYDM_V1Harness;
+using AdaptiveCurveYDM_V2Harness as adaptiveCurveYDM_V2Harness;
+using ChainlinkPriceOracleHarness as chainlinkPriceOracleHarness;
+using ERC4626SharePriceOracleHarness as eRC4626SharePriceOracleHarness;
+using FixedYDMHarness as fixedYDMHarness;
+using IdleCDOTranchePriceOracleHarness as idleCDOTranchePriceOracleHarness;
+using MakinaSharePriceOracleHarness as makinaSharePriceOracleHarness;
+using RoycoDayAccountant as roycoDayAccountant;
+using RoycoDayAccountantHarness as roycoDayAccountantHarness;
+using RoycoDayBalancerV3KernelHarness as roycoDayBalancerV3KernelHarness;
+using RoycoJuniorTrancheHarness as roycoJuniorTrancheHarness;
+using RoycoSeniorTrancheHarness as roycoSeniorTrancheHarness;
+using StaticCurveYDMHarness as staticCurveYDMHarness;
+
+links {
+    roycoDayAccountant.ext_Royco_storage_RoycoDayAccountantState.kernel => roycoDayBalancerV3KernelHarness;
+    roycoDayAccountant.ext_Royco_storage_RoycoDayAccountantState.jtYDM => [adaptiveCurveYDM_V1Harness, adaptiveCurveYDM_V2Harness, fixedYDMHarness, staticCurveYDMHarness];
+    roycoDayAccountant.ext_Royco_storage_RoycoDayAccountantState.lptYDM => [adaptiveCurveYDM_V1Harness, adaptiveCurveYDM_V2Harness, fixedYDMHarness, staticCurveYDMHarness];
+    roycoDayBalancerV3KernelHarness.ext_Royco_storage_RoycoDayKernelState.collateralAssetOracle => [chainlinkPriceOracleHarness, eRC4626SharePriceOracleHarness, idleCDOTranchePriceOracleHarness, makinaSharePriceOracleHarness];
+    roycoDayBalancerV3KernelHarness.ext_Royco_storage_RoycoDayKernelState.accountant => [roycoDayAccountant, roycoDayAccountantHarness];
+    roycoDayBalancerV3KernelHarness.ext_Royco_storage_RoycoDayKernelState.seniorTranche => roycoSeniorTrancheHarness;
+    roycoDayBalancerV3KernelHarness.ext_Royco_storage_RoycoDayKernelState.juniorTranche => [roycoJuniorTrancheHarness, roycoSeniorTrancheHarness];
+    eRC4626SharePriceOracleHarness.COLLATERAL_ASSET => [roycoJuniorTrancheHarness, roycoSeniorTrancheHarness];
+}
