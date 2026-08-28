@@ -31,3 +31,10 @@ output/
 .DS_Store
 **/.DS_Store
 .vscode/
+
+# AutoProver local output
+.certora_internal/
+certora_internal/
+.certora_cache/
+certoraBuild/
+certora_build/
