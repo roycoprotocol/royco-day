@@ -50,18 +50,16 @@ struct RoleAssignmentAddresses {
     address pauserAddress;
     address unpauserAddress;
     address upgraderAddress;
+    address adminFactoryAddress;
     address syncRoleAddress;
     address adminKernelAddress;
     address adminAccountantAddress;
     address adminProtocolFeeSetterAddress;
     address adminOracleAddress;
-    // The FNDN emergency co-hold on the oracle role (immediate), beside WAY's delayed parameter path
     address adminOracleEmergencyAddress;
     address lpRoleAdminAddress;
-    // The AUTO service-provider co-hold on LP_ROLE_ADMIN_ROLE (immediate)
     address lpRoleAdminOperatorAddress;
     address guardianAddress;
-    // The FNDN_VETO fast-response co-hold on GUARDIAN_ROLE (immediate)
     address guardianVetoAddress;
     address lpRoleHolderAddress;
     address balancerPoolManagerAddress;

@@ -47,6 +47,15 @@ contract DeployYDMsComponent is DeployScriptBase {
             if (t.jtYdms(name) == jtYdm && t.lptYdms(name) == lptYdm) continue;
             t.setYieldDistributionModels(name, jtYdm, lptYdm);
         }
+
+        uint256[10] memory speeds = YDMLib.adaptiveV2SpeedVariantsPerYear();
+        for (uint256 i; i < speeds.length; ++i) {
+            string memory name = YDMLib.adaptiveV2VariantName(speeds[i]);
+            address jtYdm = _deployV2SpeedVariant("JT model  ", speeds[i], TAG_YDM);
+            address lptYdm = _deployV2SpeedVariant("LPT model ", speeds[i], TAG_LDM);
+            if (t.jtYdms(name) == jtYdm && t.lptYdms(name) == lptYdm) continue;
+            t.setYieldDistributionModels(name, jtYdm, lptYdm);
+        }
     }
 
     /// @notice Deploys (or reuses) one yield distribution model instance for a shape and tranche slot
@@ -67,5 +76,16 @@ contract DeployYDMsComponent is DeployScriptBase {
             false
         );
         _logDeploy(string.concat(_label, vm.toString(uint8(_ydmType))), model, existed);
+    }
+
+    /// @notice Deploys (or reuses) one AdaptiveCurveYDM_V2 speed-variant instance for a tranche slot
+    function _deployV2SpeedVariant(string memory _label, uint256 _speedPerYear, bytes32 _slotTag) internal returns (address model) {
+        bool existed;
+        (model, existed) = deployWithSanityChecks(
+            YDMLib.adaptiveV2VariantSalt(_slotTag, _speedPerYear),
+            abi.encodePacked(type(AdaptiveCurveYDM_V2).creationCode, YDMLib.adaptiveV2VariantConstructorArgs(YDMLib.YDM_TARGET_UTILIZATION_WAD, _speedPerYear)),
+            false
+        );
+        _logDeploy(string.concat(_label, "V2 speed ", vm.toString(_speedPerYear)), model, existed);
     }
 }

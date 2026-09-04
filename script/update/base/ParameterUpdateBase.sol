@@ -67,6 +67,7 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
         require(_updates.length > 0, NoUpdatesForChain(_chainId));
 
         vm.createSelectFork(_getRpcUrl(_chainId));
+        _prepareChain(_chainId);
 
         console2.log("");
         console2.log("========================================");
@@ -224,6 +225,12 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
 
     /// @notice Override in leaf scripts to assert the parameter landed. Called after each simulated op; must revert on failure.
     function _verify(UpdateParams memory _params) internal view virtual;
+
+    /// @notice Hook invoked right after each chain's fork is created, before any classification or simulation.
+    /// @dev Override in leaf scripts that must stage per-chain state the ops depend on — e.g. broadcasting
+    ///      permissionless deployments the admin ops then reference, or pre-applying a pending governance op the
+    ///      classification requires. Default is a no-op.
+    function _prepareChain(uint256 _chainId) internal virtual { }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // RPC URL RESOLUTION

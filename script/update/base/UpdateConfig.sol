@@ -6,11 +6,13 @@ import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
+    ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
     ADMIN_ORACLE_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+    ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     GUARDIAN_ROLE,
@@ -41,14 +43,25 @@ abstract contract UpdateConfig {
     // PROTOCOL SINGLETONS (chain-agnostic — same address on every chain)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev The RoycoAccessManager — the target of every schedule/execute/cancel transaction
-    address internal constant ACCESS_MANAGER = 0x87aED46566cb28c8375cfcC9971090882A0fB12e;
+    /// @dev The RoycoAccessManager — the target of every schedule/execute/cancel transaction (_PROD_V1.0.2)
+    address internal constant ACCESS_MANAGER = 0x82EecE4a736db0767370d2DfFdE9BDF6e38AaeB8;
 
-    /// @dev The Day factory proxy (CREATE3 vanity address)
-    address internal constant ROYCO_FACTORY = 0xaaAaaaaa01Af9426C2eB6FeBc61DcD7C302cc45F;
+    /// @dev The Day factory proxy (CREATE3 vanity address, _PROD_V1.0.2)
+    address internal constant ROYCO_FACTORY = 0xaAAaaAAAaE46cA12Bf3810DF8C13c5E8A4400812;
 
-    /// @dev The Day entry point proxy
-    address internal constant ROYCO_ENTRY_POINT = 0x30a4D4C600b043d3358B861ff690B3c1dD3FED02;
+    /// @dev The Day entry point proxy (_PROD_V1.0.2)
+    address internal constant ROYCO_ENTRY_POINT = 0xaF55a0c251690d9322b5F94b7e50EE895750262c;
+
+    /// @notice The registered Day template per chain (_PROD_V1.0.2)
+    /// @dev Unlike the singletons above, the template's CREATE2 constructor args include the chain's Balancer venue
+    ///      factories, so its address DIFFERS per chain (captured from each chain's bootstrap broadcast).
+    function dayTemplate(uint256 _chainId) internal pure returns (address) {
+        if (_chainId == MAINNET) return 0xDA3fd0EFF34f201436F21806A0F2A0B55A5b97f1;
+        if (_chainId == ARBITRUM) return 0x281EaB0FFC407F17BdFC5964984490DF58F3A25d;
+        if (_chainId == BASE) return 0x51b1000A0eF7199d2D37Ee1Bb70bB9118D65F3DB;
+        if (_chainId == AVALANCHE) return 0x6a5F3284E6b1882061D80339602A6c0eA36D0594;
+        revert("no Day template configured for this chain");
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // GOVERNANCE MULTISIGS (kerchkoffs four-multisig model)
@@ -118,6 +131,7 @@ abstract contract UpdateConfig {
      *      so this map only needs the holder, not the delay.
      */
     function _roleScheduler(uint64 _roleId) internal pure returns (address scheduler) {
+        if (_roleId == ADMIN_ROLE) return FNDN;
         if (_roleId == ADMIN_PAUSER_ROLE) return WAY_PAUSE;
         if (_roleId == ADMIN_UNPAUSER_ROLE) return FNDN;
         if (_roleId == ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE) return FNDN;
@@ -125,7 +139,7 @@ abstract contract UpdateConfig {
         if (
             _roleId == ADMIN_UPGRADER_ROLE || _roleId == ADMIN_KERNEL_ROLE || _roleId == ADMIN_ACCOUNTANT_ROLE || _roleId == ADMIN_PROTOCOL_FEE_SETTER_ROLE
                 || _roleId == ADMIN_ORACLE_ROLE || _roleId == ADMIN_MARKET_OPS_ROLE || _roleId == ADMIN_BALANCER_POOL_MANAGER_ROLE
-                || _roleId == ADMIN_ENTRY_POINT_ROLE || _roleId == LP_ROLE_ADMIN_ROLE
+                || _roleId == ADMIN_ENTRY_POINT_ROLE || _roleId == LP_ROLE_ADMIN_ROLE || _roleId == ADMIN_FACTORY_ROLE
         ) {
             return WAY;
         }

@@ -80,6 +80,7 @@ abstract contract RoleGraphConfig is EnvConfig {
             pauserAddress: pauser,
             unpauserAddress: fndn,
             upgraderAddress: way,
+            adminFactoryAddress: way,
             syncRoleAddress: way,
             adminKernelAddress: way,
             adminAccountantAddress: way,
@@ -100,7 +101,7 @@ abstract contract RoleGraphConfig is EnvConfig {
 
     /// @notice Builds the role assignments the apply script grants, combining the address surface with the role table
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](19);
+        roleAssignments = new RoleAssignment[](20);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(ADMIN_KERNEL_ROLE, _addresses.adminKernelAddress);
@@ -118,19 +119,14 @@ abstract contract RoleGraphConfig is EnvConfig {
         roleAssignments[14] = _assignment(ADMIN_ENTRY_POINT_ROLE, _addresses.adminEntryPointAddress);
         roleAssignments[15] = _assignment(ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, _addresses.entryPointFeeCollectorAddress);
         roleAssignments[16] = _assignment(GUARDIAN_ROLE, _addresses.guardianVetoAddress);
-        roleAssignments[17] = _assignmentWithDelay(ADMIN_ORACLE_ROLE, _addresses.adminOracleEmergencyAddress, DELAY_IMMEDIATE);
+        roleAssignments[17] = _assignment(ADMIN_ORACLE_ROLE, _addresses.adminOracleEmergencyAddress);
         roleAssignments[18] = _assignment(LP_ROLE_ADMIN_ROLE, _addresses.lpRoleAdminOperatorAddress);
+        roleAssignments[19] = _assignment(ADMIN_FACTORY_ROLE, _addresses.adminFactoryAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
         RoleConfig memory cfg = getRoleConfig(_role);
-        return _assignmentWithDelay(_role, _assignee, cfg.executionDelay);
-    }
-
-    /// @dev For co-holds whose delay differs from the role table's
-    function _assignmentWithDelay(uint64 _role, address _assignee, uint32 _executionDelay) private pure returns (RoleAssignment memory) {
-        RoleConfig memory cfg = getRoleConfig(_role);
-        return RoleAssignment({ role: _role, roleAdminRole: cfg.adminRole, assignee: _assignee, executionDelay: _executionDelay });
+        return RoleAssignment({ role: _role, roleAdminRole: cfg.adminRole, assignee: _assignee, executionDelay: cfg.executionDelay });
     }
 
     /// @notice The admin/guardian/execution-delay configuration for a role
