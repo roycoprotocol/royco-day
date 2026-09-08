@@ -2,12 +2,15 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
+import { Ownable } from "../../../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import { NAV_UNIT, toUint256 } from "../../../src/libraries/Units.sol";
+import { DiscreteIdleCDOTranchePriceOracle } from "../../../src/oracle/DiscreteIdleCDOTranchePriceOracle.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
 import { MakinaSharePriceOracle } from "../../../src/oracle/MakinaSharePriceOracle.sol";
 import { ChainlinkPriceOracleBase } from "../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
 import { ClockedChainlinkPriceOracleBase } from "../../../src/oracle/base/ClockedChainlinkPriceOracleBase.sol";
+import { DiscretePriceOracleBase } from "../../../src/oracle/base/DiscretePriceOracleBase.sol";
 import { OracleClockBase } from "../../../src/oracle/base/clock/OracleClockBase.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockERC20C } from "../../mocks/MockERC20C.sol";
@@ -46,6 +49,7 @@ contract Test_CollateralOracles is Test {
     MockERC20C internal cdoUnderlying;
     MockIdleCDO internal cdo;
     IdleCDOTranchePriceOracle internal cdoOracle;
+    address internal cdoOracleOwner;
 
     function setUp() public {
         vm.warp(T0);
@@ -76,6 +80,7 @@ contract Test_CollateralOracles is Test {
         cdoUnderlying = new MockERC20C("USDC", "USDC", 6);
         cdo = new MockIdleCDO(address(aaTranche), address(cdoUnderlying), 1.01e6);
         cdoOracle = _deployCDOOracle(address(aaTranche), 0);
+        cdoOracleOwner = makeAddr("CDO_ORACLE_OWNER");
     }
 
     /// @dev Deploys the CDO tranche price oracle for the tranche with the specified deviation threshold and no attested checkpoint
@@ -87,6 +92,12 @@ contract Test_CollateralOracles is Test {
     ///      (an unattested zero checkpoint holds pricing shut under the source staleness gate)
     function _deploySeededCDOOracle(address _tranche, uint32 _lastUpdate) internal returns (IdleCDOTranchePriceOracle oracle) {
         return new IdleCDOTranchePriceOracle(address(cdo), _tranche, address(feed), 0, _lastUpdate, FEED_STALENESS, CDO_PRICE_STALENESS);
+    }
+
+    /// @dev Deploys the discrete CDO oracle whose owner checkpoints the virtual price at settlements, unactivated
+    ///      (the zero checkpoint holds pricing shut until the owner's first checkpointPrice call)
+    function _deployDiscreteCDOOracle(address _tranche) internal returns (DiscreteIdleCDOTranchePriceOracle oracle) {
+        return new DiscreteIdleCDOTranchePriceOracle(cdoOracleOwner, address(cdo), _tranche, address(feed), FEED_STALENESS, CDO_PRICE_STALENESS);
     }
 
     /*----------------------------------------------------------------------
@@ -512,6 +523,86 @@ contract Test_CollateralOracles is Test {
         assertEq(bbOracle.COLLATERAL_ASSET(), address(bbTranche), "the collateral asset is the BB tranche");
         (NAV_UNIT price,) = bbOracle.getPrice();
         assertEq(toUint256(price), 1.01e18, "the BB tranche's virtual price composes identically at the unit feed price");
+        assertEq(bbOracle.description(), string.concat("BB_FalconXUSDC / ", feed.description()), "the description reads the BB chain");
+    }
+
+    /*----------------------------------------------------------------------
+                        DiscreteIdleCDOTranchePriceOracle
+    ----------------------------------------------------------------------*/
+
+    /**
+     * The composed price is the owner-checkpointed virtual price times the feed price, and live virtual price
+     * drift after the checkpoint never reaches the market until the owner checkpoints again
+     * Derivation: checkpointed virtual price 1.01e6 at the 6-decimal underlying lifts by 1e12 to 1.01e18 at the
+     * unit feed: price = floor(1.01e18 * 1e8 / 1e8) = 1.01e18. The fee-accrual dip to 1.009999e6 leaves it
+     * unchanged, and the settlement to 1.015e6 reprices only through the owner's checkpoint, which stamps updatedAt
+     */
+    function test_DiscreteIdleCDO_composesTheCheckpointedVirtualPriceWithFeed() public {
+        DiscreteIdleCDOTranchePriceOracle oracle = _deployDiscreteCDOOracle(address(aaTranche));
+        // A fresh deployment prices nothing: the zero checkpoint is stale until the owner's first checkpoint
+        vm.expectRevert(DiscretePriceOracleBase.STALE_SOURCE_PRICE.selector);
+        oracle.getPrice();
+        vm.prank(cdoOracleOwner);
+        oracle.checkpointPrice();
+        (NAV_UNIT price, uint256 updatedAt) = oracle.getPrice();
+        assertEq(toUint256(price), 1.01e18, "composed price must be the checkpointed virtual price times the feed price");
+        assertEq(updatedAt, T0, "updatedAt is the checkpoint's timestamp");
+
+        // The between-settlement fee dip this oracle exists to mute: the live drop never reaches the market
+        vm.warp(T0 + 1 days);
+        feed.setUpdatedAt(block.timestamp);
+        cdo.setVirtualPrice(1.009999e6);
+        (price,) = oracle.getPrice();
+        assertEq(toUint256(price), 1.01e18, "a fee-accrual dip must never mark the market");
+        assertEq(oracle.poke(), T0, "a live dip must never open the execution gate");
+
+        // The settlement reprices only through the owner's checkpoint, which stamps the observation time
+        cdo.setVirtualPrice(1.015e6);
+        assertEq(oracle.poke(), T0, "a settlement is invisible until the owner checkpoints it");
+        vm.prank(cdoOracleOwner);
+        oracle.checkpointPrice();
+        (price, updatedAt) = oracle.getPrice();
+        assertEq(toUint256(price), 1.015e18, "the checkpointed settlement composes through");
+        assertEq(updatedAt, T0 + 1 days, "the checkpoint stamps the settlement's observation time");
+    }
+
+    /// Construction wires the checkpoint lever and the collateral identity against the CDO, and rejects null,
+    /// non-member, or ownerless configuration exactly like the clocked variant rejects its own
+    function test_DiscreteIdleCDO_constructionIdentityAndNullChecks() public {
+        DiscreteIdleCDOTranchePriceOracle oracle = _deployDiscreteCDOOracle(address(aaTranche));
+        assertEq(oracle.owner(), cdoOracleOwner, "the checkpoint lever is wired to the constructed owner");
+        assertEq(oracle.COLLATERAL_ASSET(), address(aaTranche), "the collateral asset is the configured CDO tranche");
+        assertEq(oracle.IDLE_CDO(), address(cdo), "the CDO is wired");
+        assertEq(address(oracle.ORACLE()), address(feed), "the feed is wired");
+        assertEq(oracle.FEED_STALENESS_THRESHOLD_SECONDS(), FEED_STALENESS, "the feed hop's staleness threshold is a construction immutable");
+        assertEq(oracle.SOURCE_PRICE_STALENESS_THRESHOLD_SECONDS(), CDO_PRICE_STALENESS, "the checkpoint hop's staleness threshold is a construction immutable");
+        assertEq(oracle.decimals(), 18, "prices are reported at WAD precision");
+        assertEq(oracle.version(), 1, "version");
+        assertEq(oracle.description(), string.concat("AA_FalconXUSDC / ", feed.description()), "the description chains through the feed");
+        // Only the owner holds the checkpoint lever
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
+        oracle.checkpointPrice();
+        // A null owner is rejected before any lever could go dead on arrival
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+        new DiscreteIdleCDOTranchePriceOracle(address(0), address(cdo), address(aaTranche), address(feed), FEED_STALENESS, CDO_PRICE_STALENESS);
+        // The constructor body's typed null check rejects a null CDO before any read can touch it
+        vm.expectRevert(ChainlinkPriceOracleBase.NULL_ADDRESS.selector);
+        new DiscreteIdleCDOTranchePriceOracle(cdoOracleOwner, address(0), address(aaTranche), address(feed), FEED_STALENESS, CDO_PRICE_STALENESS);
+        // The CDO's virtualPrice silently computes the BB price for any unknown address, so membership is checked
+        vm.expectRevert(DiscreteIdleCDOTranchePriceOracle.COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE.selector);
+        new DiscreteIdleCDOTranchePriceOracle(cdoOracleOwner, address(cdo), makeAddr("NOT_A_TRANCHE"), address(feed), FEED_STALENESS, CDO_PRICE_STALENESS);
+    }
+
+    /// The oracle prices the BB (junior) tranche identically: virtualPrice works for either CDO tranche
+    function test_DiscreteIdleCDO_pricesTheBBTranche() public {
+        MockERC20C bbTranche = new MockERC20C("BB_FalconXUSDC", "BB_FalconXUSDC", 18);
+        cdo.setBBTranche(address(bbTranche));
+        DiscreteIdleCDOTranchePriceOracle bbOracle = _deployDiscreteCDOOracle(address(bbTranche));
+        vm.prank(cdoOracleOwner);
+        bbOracle.checkpointPrice();
+        assertEq(bbOracle.COLLATERAL_ASSET(), address(bbTranche), "the collateral asset is the BB tranche");
+        (NAV_UNIT price,) = bbOracle.getPrice();
+        assertEq(toUint256(price), 1.01e18, "the BB tranche's checkpointed virtual price composes identically at the unit feed price");
         assertEq(bbOracle.description(), string.concat("BB_FalconXUSDC / ", feed.description()), "the description reads the BB chain");
     }
 

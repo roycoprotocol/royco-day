@@ -6,13 +6,16 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { NAV_UNIT, toUint256 } from "../../../src/libraries/Units.sol";
 import { ChainlinkPriceOracle } from "../../../src/oracle/ChainlinkPriceOracle.sol";
+import { DiscreteIdleCDOTranchePriceOracle } from "../../../src/oracle/DiscreteIdleCDOTranchePriceOracle.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
 import { MakinaSharePriceOracle } from "../../../src/oracle/MakinaSharePriceOracle.sol";
 import { ChainlinkPriceOracleBase } from "../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
 import { ClockedChainlinkPriceOracleBase } from "../../../src/oracle/base/ClockedChainlinkPriceOracleBase.sol";
+import { DiscretePriceOracleBase } from "../../../src/oracle/base/DiscretePriceOracleBase.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockCheckpointClock } from "../../mocks/MockCheckpointClock.sol";
+import { MockDiscretePriceOracle } from "../../mocks/MockDiscretePriceOracle.sol";
 import { MockERC20C } from "../../mocks/MockERC20C.sol";
 import { MockERC4626C } from "../../mocks/MockERC4626C.sol";
 import { MockIdleCDO } from "../../mocks/MockIdleCDO.sol";
@@ -31,11 +34,14 @@ contract TestFuzz_Oracles is Test {
     uint32 internal constant FEED_STALENESS = 1 days;
     uint32 internal constant SHARE_PRICE_STALENESS = 3 days;
     uint32 internal constant MAKINA_ACCOUNTING_STALENESS = 2 days;
+    uint32 internal constant SETTLEMENT_STALENESS = 45 days;
 
     MockERC20C internal baseAsset;
     MockERC4626C internal vault;
     MockAggregatorV3 internal feed;
     MockValueSource internal source;
+    MockValueSource internal discreteSource;
+    address internal discreteOwner;
 
     function setUp() public {
         vm.warp(T0);
@@ -43,6 +49,8 @@ contract TestFuzz_Oracles is Test {
         vault = new MockERC4626C(address(baseAsset), "Staked NUSD", "sNUSD", 18);
         feed = new MockAggregatorV3(8, 1e8);
         source = new MockValueSource(1e18);
+        discreteSource = new MockValueSource(1e18);
+        discreteOwner = makeAddr("DISCRETE_ORACLE_OWNER");
     }
 
     /**
@@ -238,6 +246,34 @@ contract TestFuzz_Oracles is Test {
     }
 
     /**
+     * The discrete CDO composition matches the lifted mirror for any checkpointed virtual price and answer, and
+     * live drift after the checkpoint never enters the formula:
+     * price = floor(checkpointedVirtualPrice x 10^(18 - underlyingDecimals) x answer / feedPrecision)
+     */
+    function testFuzz_DiscreteCDOComposition_MatchesLiftedMirror(uint256 _virtualPrice, uint256 _drift, uint256 _answer) public {
+        uint256 virtualPrice = bound(_virtualPrice, 1, 1e15);
+        uint256 drift = bound(_drift, 1, 1e15);
+        uint256 answer = bound(_answer, 1, 1e12);
+
+        MockERC20C aaTranche = new MockERC20C("AA", "AA", 18);
+        MockERC20C underlying = new MockERC20C("USDC", "USDC", 6);
+        MockIdleCDO cdo = new MockIdleCDO(address(aaTranche), address(underlying), virtualPrice);
+        feed.setAnswer(int256(answer));
+        DiscreteIdleCDOTranchePriceOracle oracle = new DiscreteIdleCDOTranchePriceOracle(
+            discreteOwner, address(cdo), address(aaTranche), address(feed), FEED_STALENESS, SHARE_PRICE_STALENESS
+        );
+        vm.prank(discreteOwner);
+        oracle.checkpointPrice();
+
+        // Any post-checkpoint drift on the live virtual price must never enter the composition
+        cdo.setVirtualPrice(drift);
+        (NAV_UNIT price,) = oracle.getPrice();
+        assertEq(
+            toUint256(price), Math.mulDiv(virtualPrice * 1e12, answer, 1e8), "composed price must equal the mirror's lifted product of the checkpointed virtual price"
+        );
+    }
+
+    /**
      * The probe-amount algebra makes the composition decimals-invariant: for ANY share/asset decimal pair the
      * probe 10^(18 + shareDecimals - assetDecimals) converts to the WAD share rate verbatim, so the composed
      * price equals floor(rate x answer / feedPrecision) regardless of the shape
@@ -264,5 +300,72 @@ contract TestFuzz_Oracles is Test {
 
         (NAV_UNIT price,) = oracle.getPrice();
         assertEq(toUint256(price), Math.mulDiv(rate, answer, 1e8), "the composition must be invariant to the vault's decimal shape");
+    }
+
+    /**
+     * The discrete composition equals the single-floored product of the checkpointed source price and the feed
+     * answer for any price and any positive answer: price = floor(value x answer / feedPrecision)
+     */
+    function testFuzz_DiscreteComposition_MatchesFlooredMirror(uint256 _value, uint256 _answer) public {
+        // Checkpointed prices over 9 orders of magnitude in both directions, answers up to 1e4 dollars at 8 feed decimals
+        uint256 value = bound(_value, 1e9, 1e27);
+        uint256 answer = bound(_answer, 1, 1e12);
+        feed.setAnswer(int256(answer));
+
+        MockERC20C collateral = new MockERC20C("cpUSDC", "cpUSDC", 18);
+        MockDiscretePriceOracle oracle =
+            new MockDiscretePriceOracle(discreteOwner, address(collateral), address(feed), address(discreteSource), FEED_STALENESS, SETTLEMENT_STALENESS);
+        // The fuzzed price reaches the conversion hop through the owner's checkpoint, the only update path
+        discreteSource.setValue(value);
+        vm.prank(discreteOwner);
+        oracle.checkpointPrice();
+        (NAV_UNIT price,) = oracle.getPrice();
+        assertEq(toUint256(price), Math.mulDiv(value, answer, 1e8), "composed price must equal the mirror's single-floored product");
+    }
+
+    /**
+     * The discrete report's timestamp is the older hop for any checkpoint age and feed age inside both
+     * staleness windows, and getPrice, poke, and previewPoke all agree on it
+     */
+    function testFuzz_DiscreteReportTimestamp_IsTheOldestHop(uint256 _checkpointAge, uint256 _feedAge) public {
+        // Both hops stay inside their staleness windows so the report always prices
+        uint256 checkpointAge = bound(_checkpointAge, 0, SETTLEMENT_STALENESS - 1);
+        uint256 feedAge = bound(_feedAge, 0, FEED_STALENESS - 1);
+
+        // The aged checkpoint lands through the owner's call at its own timestamp
+        MockERC20C collateral = new MockERC20C("cpUSDC", "cpUSDC", 18);
+        MockDiscretePriceOracle oracle =
+            new MockDiscretePriceOracle(discreteOwner, address(collateral), address(feed), address(discreteSource), FEED_STALENESS, SETTLEMENT_STALENESS);
+        vm.warp(T0 - checkpointAge);
+        vm.prank(discreteOwner);
+        oracle.checkpointPrice();
+        vm.warp(T0);
+        feed.setUpdatedAt(T0 - feedAge);
+        uint256 expected = Math.min(T0 - feedAge, T0 - checkpointAge);
+
+        (, uint256 updatedAt) = oracle.getPrice();
+        assertEq(updatedAt, expected, "getPrice must report the older hop");
+        assertEq(oracle.previewPoke(), expected, "previewPoke must agree with getPrice");
+        assertEq(oracle.poke(), expected, "poke must agree with getPrice");
+    }
+
+    /// The settlement staleness gate fires exactly past its boundary for any checkpoint age, with the feed held fresh
+    function testFuzz_DiscreteSourceStalenessBoundary_FiresExactly(uint256 _age) public {
+        uint256 age = bound(_age, 0, 2 * uint256(SETTLEMENT_STALENESS));
+        MockERC20C collateral = new MockERC20C("cpUSDC", "cpUSDC", 18);
+        MockDiscretePriceOracle oracle =
+            new MockDiscretePriceOracle(discreteOwner, address(collateral), address(feed), address(discreteSource), FEED_STALENESS, SETTLEMENT_STALENESS);
+        vm.prank(discreteOwner);
+        oracle.checkpointPrice();
+
+        vm.warp(T0 + age);
+        feed.setUpdatedAt(block.timestamp);
+        if (age > SETTLEMENT_STALENESS) {
+            vm.expectRevert(DiscretePriceOracleBase.STALE_SOURCE_PRICE.selector);
+            oracle.getPrice();
+        } else {
+            (, uint256 updatedAt) = oracle.getPrice();
+            assertEq(updatedAt, T0, "a checkpoint inside the window prices and binds the report");
+        }
     }
 }
