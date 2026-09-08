@@ -259,9 +259,8 @@ contract TestFuzz_Oracles is Test {
         MockERC20C underlying = new MockERC20C("USDC", "USDC", 6);
         MockIdleCDO cdo = new MockIdleCDO(address(aaTranche), address(underlying), virtualPrice);
         feed.setAnswer(int256(answer));
-        DiscreteIdleCDOTranchePriceOracle oracle = new DiscreteIdleCDOTranchePriceOracle(
-            discreteOwner, address(cdo), address(aaTranche), address(feed), FEED_STALENESS, SHARE_PRICE_STALENESS
-        );
+        DiscreteIdleCDOTranchePriceOracle oracle =
+            new DiscreteIdleCDOTranchePriceOracle(discreteOwner, address(cdo), address(aaTranche), address(feed), FEED_STALENESS, SHARE_PRICE_STALENESS);
         vm.prank(discreteOwner);
         oracle.checkpointPrice();
 
@@ -269,7 +268,9 @@ contract TestFuzz_Oracles is Test {
         cdo.setVirtualPrice(drift);
         (NAV_UNIT price,) = oracle.getPrice();
         assertEq(
-            toUint256(price), Math.mulDiv(virtualPrice * 1e12, answer, 1e8), "composed price must equal the mirror's lifted product of the checkpointed virtual price"
+            toUint256(price),
+            Math.mulDiv(virtualPrice * 1e12, answer, 1e8),
+            "composed price must equal the mirror's lifted product of the checkpointed virtual price"
         );
     }
 

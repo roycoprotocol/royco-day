@@ -90,7 +90,9 @@ contract Test_DiscretePriceOracle is Test {
         assertEq(oracle.COLLATERAL_ASSET(), address(collateral), "the collateral asset is wired");
         assertEq(address(oracle.ORACLE()), address(feed), "the feed is wired");
         assertEq(oracle.FEED_STALENESS_THRESHOLD_SECONDS(), FEED_STALENESS, "the feed hop's staleness threshold is a construction immutable");
-        assertEq(oracle.SOURCE_PRICE_STALENESS_THRESHOLD_SECONDS(), SETTLEMENT_STALENESS, "the settlement hop's staleness threshold is a construction immutable");
+        assertEq(
+            oracle.SOURCE_PRICE_STALENESS_THRESHOLD_SECONDS(), SETTLEMENT_STALENESS, "the settlement hop's staleness threshold is a construction immutable"
+        );
         assertEq(oracle.decimals(), 18, "prices are reported at WAD precision");
         assertEq(oracle.version(), 1, "version");
         assertEq(oracle.description(), string.concat("cpUSDC / ", feed.description()), "the description chains through the feed");

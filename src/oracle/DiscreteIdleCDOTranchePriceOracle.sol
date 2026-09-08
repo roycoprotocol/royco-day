@@ -41,11 +41,7 @@ contract DiscreteIdleCDOTranchePriceOracle is DiscretePriceOracleBase {
         uint32 _cdoPriceStalenessThresholdSeconds
     )
         DiscretePriceOracleBase(
-            _owner,
-            _tranche,
-            _underlyingTokenToNavAssetOracle,
-            _chainlinkOracleStalenessThresholdSeconds,
-            _cdoPriceStalenessThresholdSeconds
+            _owner, _tranche, _underlyingTokenToNavAssetOracle, _chainlinkOracleStalenessThresholdSeconds, _cdoPriceStalenessThresholdSeconds
         )
     {
         require(_idleCDO != address(0), NULL_ADDRESS());
