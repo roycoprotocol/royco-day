@@ -41,7 +41,6 @@ contract TestFuzz_Oracles is Test {
     MockAggregatorV3 internal feed;
     MockValueSource internal source;
     MockValueSource internal discreteSource;
-    address internal discreteOwner;
 
     function setUp() public {
         vm.warp(T0);
@@ -50,7 +49,6 @@ contract TestFuzz_Oracles is Test {
         feed = new MockAggregatorV3(8, 1e8);
         source = new MockValueSource(1e18);
         discreteSource = new MockValueSource(1e18);
-        discreteOwner = makeAddr("DISCRETE_ORACLE_OWNER");
     }
 
     /**
@@ -246,9 +244,9 @@ contract TestFuzz_Oracles is Test {
     }
 
     /**
-     * The discrete CDO composition matches the lifted mirror for any checkpointed virtual price and answer, and
-     * live drift after the checkpoint never enters the formula:
-     * price = floor(checkpointedVirtualPrice x 10^(18 - underlyingDecimals) x answer / feedPrecision)
+     * The discrete CDO composition matches the lifted mirror for any seeded virtual price and answer, and live
+     * drift while the epoch runs never enters the formula:
+     * price = floor(seededVirtualPrice x 10^(18 - underlyingDecimals) x answer / feedPrecision)
      */
     function testFuzz_DiscreteCDOComposition_MatchesLiftedMirror(uint256 _virtualPrice, uint256 _drift, uint256 _answer) public {
         uint256 virtualPrice = bound(_virtualPrice, 1, 1e15);
@@ -259,18 +257,15 @@ contract TestFuzz_Oracles is Test {
         MockERC20C underlying = new MockERC20C("USDC", "USDC", 6);
         MockIdleCDO cdo = new MockIdleCDO(address(aaTranche), address(underlying), virtualPrice);
         feed.setAnswer(int256(answer));
+        // Construction seeds the fuzzed virtual price through the shared commit path
         DiscreteIdleCDOTranchePriceOracle oracle =
-            new DiscreteIdleCDOTranchePriceOracle(discreteOwner, address(cdo), address(aaTranche), address(feed), FEED_STALENESS, SHARE_PRICE_STALENESS);
-        vm.prank(discreteOwner);
-        oracle.checkpointPrice();
+            new DiscreteIdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), FEED_STALENESS, SETTLEMENT_STALENESS);
 
-        // Any post-checkpoint drift on the live virtual price must never enter the composition
+        // The unchanged epochNumber mutes any post-seed drift on the live virtual price
         cdo.setVirtualPrice(drift);
         (NAV_UNIT price,) = oracle.getPrice();
         assertEq(
-            toUint256(price),
-            Math.mulDiv(virtualPrice * 1e12, answer, 1e8),
-            "composed price must equal the mirror's lifted product of the checkpointed virtual price"
+            toUint256(price), Math.mulDiv(virtualPrice * 1e12, answer, 1e8), "composed price must equal the mirror's lifted product of the seeded virtual price"
         );
     }
 
@@ -313,15 +308,53 @@ contract TestFuzz_Oracles is Test {
         uint256 answer = bound(_answer, 1, 1e12);
         feed.setAnswer(int256(answer));
 
+        // The fuzzed price reaches the conversion hop through the construction seed, the shared commit path
         MockERC20C collateral = new MockERC20C("cpUSDC", "cpUSDC", 18);
-        MockDiscretePriceOracle oracle =
-            new MockDiscretePriceOracle(discreteOwner, address(collateral), address(feed), address(discreteSource), FEED_STALENESS, SETTLEMENT_STALENESS);
-        // The fuzzed price reaches the conversion hop through the owner's checkpoint, the only update path
         discreteSource.setValue(value);
-        vm.prank(discreteOwner);
-        oracle.checkpointPrice();
+        MockDiscretePriceOracle oracle =
+            new MockDiscretePriceOracle(address(collateral), address(feed), address(discreteSource), FEED_STALENESS, SETTLEMENT_STALENESS);
         (NAV_UNIT price,) = oracle.getPrice();
         assertEq(toUint256(price), Math.mulDiv(value, answer, 1e8), "composed price must equal the mirror's single-floored product");
+    }
+
+    /**
+     * The predicate mirror: for any baseline ID, next ID, force bit, seeded baseline price, and next live read
+     * (zero included, a pending zero commits like any value), a poke latches and stamps exactly when the mirror
+     * idChanged || (force && next != baseline) fires, and is a stateless no-op otherwise
+     */
+    function testFuzz_DiscretePredicate_PokeLatchesExactlyWhenTheMirrorFires(
+        uint256 _baselineId,
+        uint256 _nextId,
+        bool _force,
+        uint256 _baseline,
+        uint256 _next
+    )
+        public
+    {
+        uint256 baseline = bound(_baseline, 0, type(uint160).max);
+        uint256 next = bound(_next, 0, type(uint160).max);
+
+        MockERC20C collateral = new MockERC20C("cpUSDC", "cpUSDC", 18);
+        discreteSource.setValue(baseline);
+        MockDiscretePriceOracle oracle =
+            new MockDiscretePriceOracle(address(collateral), address(feed), address(discreteSource), FEED_STALENESS, SETTLEMENT_STALENESS);
+        // The fuzzed baseline ID lands through a poke commit (a no-op when it matches the seeded zero ID)
+        oracle.setCheckpointId(_baselineId);
+        oracle.poke();
+        oracle.setForceCheckpoint(_force);
+        vm.warp(T0 + 100);
+        feed.setUpdatedAt(T0 + 100);
+        discreteSource.setValue(next);
+        oracle.setCheckpointId(_nextId);
+
+        // The independent mirror of the checkpoint predicate
+        bool expectCommit = _nextId != _baselineId || (_force && next != baseline);
+
+        assertEq(oracle.poke(), expectCommit ? T0 + 100 : T0, "the poke must stamp exactly when the mirror says the predicate fires");
+        (uint160 lastSourcePrice, uint32 lastUpdatedAt, uint256 lastCheckpointId) = oracle.getDiscretePriceOracleState();
+        assertEq(lastSourcePrice, expectCommit ? next : baseline, "the poke must latch exactly when the mirror says the predicate fires");
+        assertEq(lastUpdatedAt, expectCommit ? T0 + 100 : T0, "the checkpoint stamp must match the mirror's transition");
+        assertEq(lastCheckpointId, expectCommit ? _nextId : _baselineId, "the checkpoint ID must match the mirror's transition");
     }
 
     /**
@@ -333,13 +366,15 @@ contract TestFuzz_Oracles is Test {
         uint256 checkpointAge = bound(_checkpointAge, 0, SETTLEMENT_STALENESS - 1);
         uint256 feedAge = bound(_feedAge, 0, FEED_STALENESS - 1);
 
-        // The aged checkpoint lands through the owner's call at its own timestamp
+        // The aged checkpoint lands through a predicate commit at its own timestamp: the epoch counter bumps,
+        // the price moves, and the poke latches the settlement
         MockERC20C collateral = new MockERC20C("cpUSDC", "cpUSDC", 18);
         MockDiscretePriceOracle oracle =
-            new MockDiscretePriceOracle(discreteOwner, address(collateral), address(feed), address(discreteSource), FEED_STALENESS, SETTLEMENT_STALENESS);
+            new MockDiscretePriceOracle(address(collateral), address(feed), address(discreteSource), FEED_STALENESS, SETTLEMENT_STALENESS);
         vm.warp(T0 - checkpointAge);
-        vm.prank(discreteOwner);
-        oracle.checkpointPrice();
+        discreteSource.setValue(1.05e18);
+        oracle.setCheckpointId(1);
+        oracle.poke();
         vm.warp(T0);
         feed.setUpdatedAt(T0 - feedAge);
         uint256 expected = Math.min(T0 - feedAge, T0 - checkpointAge);
@@ -350,14 +385,13 @@ contract TestFuzz_Oracles is Test {
         assertEq(oracle.poke(), expected, "poke must agree with getPrice");
     }
 
-    /// The settlement staleness gate fires exactly past its boundary for any checkpoint age, with the feed held fresh
+    /// The settlement staleness gate fires exactly past its boundary for any seed age, with the feed held fresh
     function testFuzz_DiscreteSourceStalenessBoundary_FiresExactly(uint256 _age) public {
         uint256 age = bound(_age, 0, 2 * uint256(SETTLEMENT_STALENESS));
+        // The construction seed is the checkpoint under test, aged by the gate-closed warp
         MockERC20C collateral = new MockERC20C("cpUSDC", "cpUSDC", 18);
         MockDiscretePriceOracle oracle =
-            new MockDiscretePriceOracle(discreteOwner, address(collateral), address(feed), address(discreteSource), FEED_STALENESS, SETTLEMENT_STALENESS);
-        vm.prank(discreteOwner);
-        oracle.checkpointPrice();
+            new MockDiscretePriceOracle(address(collateral), address(feed), address(discreteSource), FEED_STALENESS, SETTLEMENT_STALENESS);
 
         vm.warp(T0 + age);
         feed.setUpdatedAt(block.timestamp);
