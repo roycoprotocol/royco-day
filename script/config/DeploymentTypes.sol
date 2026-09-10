@@ -31,7 +31,8 @@ enum OracleType {
     ChainlinkPrice,
     ERC4626SharePrice,
     MakinaSharePrice,
-    IdleCDOTranchePrice
+    IdleCDOTranchePrice,
+    StorkPrice
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -113,6 +114,18 @@ struct ChainlinkPriceOracleParams {
     address collateralToNavAssetFeed;
     // The maximum age of the feed's report before pricing fails shut, sized to the feed's heartbeat
     uint32 chainlinkOracleStalenessThresholdSeconds;
+}
+
+/// @notice Params for `OracleType.StorkPrice`: up to two Stork-published legs read from the Stork core contract,
+///         collateral -> reference (required) times reference -> NAV (zero id = identity, the reference asset is the NAV unit).
+/// @dev Reads the core rather than Stork's Chainlink-adapter ports, whose nanosecond timestamps defeat the staleness gate
+///      and overflow the entry point's uint32 update clock. Both thresholds are construction immutables (see above).
+struct StorkPriceOracleParams {
+    address stork;
+    bytes32 collateralToReferenceId;
+    bytes32 referenceToNavId;
+    uint32 collateralLegStalenessThresholdSeconds;
+    uint32 referenceLegStalenessThresholdSeconds;
 }
 
 /// @notice Params for `OracleType.ERC4626SharePrice`: share price via `convertToAssets` x the base-asset-to-NAV feed.
