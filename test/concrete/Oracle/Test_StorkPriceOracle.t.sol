@@ -117,13 +117,27 @@ contract Test_StorkPriceOracle is Test {
         assertEq(updatedAt, T0 - 60, "the collateral leg is older");
     }
 
-    /// A publisher clock ahead of the chain is clamped to the block, so the gate can never open early
-    function test_UpdatedAt_futurePublisherStampIsClampedToTheBlock() public {
-        stork.setValue(ID_A, _ns(T0 + 3600), VALUE_A);
-        (NAV_UNIT price, uint256 updatedAt) = oracle.getPrice();
-        assertEq(updatedAt, T0, "clamped to block.timestamp");
-        assertEq(toUint256(price), 1.2196791e18, "the price is still served");
-        assertEq(oracle.poke(), T0, "poke clamps identically");
+    /// A publisher clock ahead of the chain fails shut on every surface: a future stamp must never reach the gate
+    function test_RevertIf_PublisherStampInTheFuture() public {
+        // Sub-second ahead within the current second still floors to the block and prices
+        stork.setValue(ID_A, _ns(T0) + 999_999_999, VALUE_A);
+        (, uint256 updatedAt) = oracle.getPrice();
+        assertEq(updatedAt, T0, "a stamp inside the current second floors to the block");
+
+        // One whole second ahead is a future update
+        stork.setValue(ID_A, _ns(T0 + 1), VALUE_A);
+        vm.expectRevert(StorkPriceOracle.UPDATED_AT_CANNOT_BE_FUTURE.selector);
+        oracle.getPrice();
+        vm.expectRevert(StorkPriceOracle.UPDATED_AT_CANNOT_BE_FUTURE.selector);
+        oracle.poke();
+        vm.expectRevert(StorkPriceOracle.UPDATED_AT_CANNOT_BE_FUTURE.selector);
+        oracle.previewPoke();
+
+        // The reference leg is held to the same rule
+        stork.setValue(ID_A, _ns(T0), VALUE_A);
+        stork.setValue(ID_B, _ns(T0 + 1), VALUE_B);
+        vm.expectRevert(StorkPriceOracle.UPDATED_AT_CANNOT_BE_FUTURE.selector);
+        oracle.getPrice();
     }
 
     /*----------------------------------------------------------------------

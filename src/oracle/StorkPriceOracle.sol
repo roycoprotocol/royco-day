@@ -57,6 +57,9 @@ contract StorkPriceOracle is IRoycoPriceOracle {
     /// @notice Thrown when a staleness threshold is constructed as zero, which would fail every price read
     error INVALID_STALENESS_THRESHOLD_SECONDS();
 
+    /// @notice Thrown when a leg's publisher timestamp is in the future
+    error UPDATED_AT_CANNOT_BE_FUTURE();
+
     /**
      * @notice Constructs the Stork composed price oracle
      * @param _collateralAsset The collateral asset this oracle prices in NAV units
@@ -153,9 +156,8 @@ contract StorkPriceOracle is IRoycoPriceOracle {
 
         // Floor the nanosecond stamp to seconds: the reported update time is never later than the real one
         updatedAt = uint256(report.timestampNs) / _NANOSECONDS_PER_SECOND;
+        require(updatedAt <= block.timestamp, UPDATED_AT_CANNOT_BE_FUTURE());
         require((updatedAt + _stalenessThresholdSeconds) >= block.timestamp, STALE_STORK_PRICE(_id));
-        // A publisher clock ahead of the chain must never report a future update: the entry point's gate would open early
-        if (updatedAt > block.timestamp) updatedAt = block.timestamp;
 
         value = uint256(int256(report.quantizedValue));
     }
