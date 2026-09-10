@@ -9,6 +9,7 @@ import { ChainlinkPriceOracle } from "../../../src/oracle/ChainlinkPriceOracle.s
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
 import { MakinaSharePriceOracle } from "../../../src/oracle/MakinaSharePriceOracle.sol";
+import { StorkPriceOracle } from "../../../src/oracle/StorkPriceOracle.sol";
 import { ChainlinkPriceOracleBase } from "../../../src/oracle/base/ChainlinkPriceOracleBase.sol";
 import { ClockedChainlinkPriceOracleBase } from "../../../src/oracle/base/ClockedChainlinkPriceOracleBase.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
@@ -17,6 +18,7 @@ import { MockERC20C } from "../../mocks/MockERC20C.sol";
 import { MockERC4626C } from "../../mocks/MockERC4626C.sol";
 import { MockIdleCDO } from "../../mocks/MockIdleCDO.sol";
 import { MockMakinaMachine } from "../../mocks/MockMakinaMachine.sol";
+import { MockStork } from "../../mocks/MockStork.sol";
 import { MockValueSource } from "../../mocks/MockValueSource.sol";
 
 /**
@@ -264,5 +266,57 @@ contract TestFuzz_Oracles is Test {
 
         (NAV_UNIT price,) = oracle.getPrice();
         assertEq(toUint256(price), Math.mulDiv(rate, answer, 1e8), "the composition must be invariant to the vault's decimal shape");
+    }
+
+    /**
+     * The Stork composed price equals the single-floored product of the two 18-decimal legs for any positive values,
+     * and the report's clock is the older leg's publisher stamp floored from nanoseconds to seconds, on all surfaces
+     */
+    function testFuzz_StorkComposition_MatchesMirror(uint256 _a, uint256 _b, uint256 _tsA, uint256 _tsB) public {
+        uint256 a = bound(_a, 1, 1e30);
+        uint256 b = bound(_b, 1, 1e30);
+        // Both legs published within the last hour, at arbitrary nanosecond offsets
+        uint256 tsA = bound(_tsA, (T0 - 1 hours) * 1e9, T0 * 1e9);
+        uint256 tsB = bound(_tsB, (T0 - 1 hours) * 1e9, T0 * 1e9);
+        bytes32 idA = keccak256("A");
+        bytes32 idB = keccak256("B");
+        MockStork stork = new MockStork();
+        stork.setValue(idA, uint64(tsA), int192(int256(a)));
+        stork.setValue(idB, uint64(tsB), int192(int256(b)));
+        StorkPriceOracle oracle = new StorkPriceOracle(address(baseAsset), address(stork), idA, idB, 2 hours, 2 hours);
+
+        (NAV_UNIT price, uint256 updatedAt) = oracle.getPrice();
+        assertEq(toUint256(price), Math.mulDiv(a, b, 1e18), "price = floor(a x b / 1e18)");
+        assertEq(updatedAt, Math.min(tsA / 1e9, tsB / 1e9), "the older leg, floored to seconds");
+        assertEq(oracle.previewPoke(), updatedAt, "previewPoke agrees");
+        assertEq(oracle.poke(), updatedAt, "poke agrees");
+    }
+
+    /**
+     * Each Stork leg's staleness gate fires exactly past its own threshold, the collateral leg checked first, and
+     * inside both windows the report binds to the older leg
+     */
+    function testFuzz_StorkStalenessBoundary_FiresExactlyPerLeg(uint256 _ageA, uint256 _ageB) public {
+        uint32 thresholdA = 2 hours;
+        uint32 thresholdB = 4 hours;
+        uint256 ageA = bound(_ageA, 0, 2 * uint256(thresholdA));
+        uint256 ageB = bound(_ageB, 0, 2 * uint256(thresholdB));
+        bytes32 idA = keccak256("A");
+        bytes32 idB = keccak256("B");
+        MockStork stork = new MockStork();
+        stork.setValue(idA, uint64((T0 - ageA) * 1e9), 1e18);
+        stork.setValue(idB, uint64((T0 - ageB) * 1e9), 1e18);
+        StorkPriceOracle oracle = new StorkPriceOracle(address(baseAsset), address(stork), idA, idB, thresholdA, thresholdB);
+
+        if (ageA > thresholdA) {
+            vm.expectRevert(abi.encodeWithSelector(StorkPriceOracle.STALE_STORK_PRICE.selector, idA));
+            oracle.getPrice();
+        } else if (ageB > thresholdB) {
+            vm.expectRevert(abi.encodeWithSelector(StorkPriceOracle.STALE_STORK_PRICE.selector, idB));
+            oracle.getPrice();
+        } else {
+            (, uint256 updatedAt) = oracle.getPrice();
+            assertEq(updatedAt, T0 - Math.max(ageA, ageB), "inside both windows the report binds to the older leg");
+        }
     }
 }

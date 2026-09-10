@@ -11,9 +11,9 @@ import { RenounceDeployerRolesComponent } from "../../script/deploy/core/Renounc
 import { DayMarketRegistry } from "../../script/deploy/templates/royco-day-balancer-v3/DayMarketRegistry.sol";
 import { DayMarketConfig } from "../../script/deploy/templates/royco-day-balancer-v3/DayMarketTypes.sol";
 import { DeployMarketComponent } from "../../script/deploy/templates/royco-day-balancer-v3/DeployMarket.s.sol";
+import { RoycoBlacklist } from "../../src/auth/RoycoBlacklist.sol";
 import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, LP_ROLE_ADMIN_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { RoycoBlacklist } from "../../src/auth/RoycoBlacklist.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
@@ -63,11 +63,11 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     Vm.Wallet internal ORACLE_ADMIN;
     address internal ORACLE_ADMIN_ADDRESS;
 
-    /// @dev The FNDN-style emergency oracle seat: co-holds ADMIN_ORACLE_ROLE at delay 0 beside ORACLE_ADMIN's
-    ///      delayed parameter path. A DISTINCT wallet: granting both seats to one account would hit OZ AM's
-    ///      delay-decrease timelock and leave the second grant at the first grant's delay
     Vm.Wallet internal ORACLE_EMERGENCY_ADMIN;
     address internal ORACLE_EMERGENCY_ADMIN_ADDRESS;
+
+    Vm.Wallet internal FACTORY_ROLE_ADMIN;
+    address internal FACTORY_ROLE_ADMIN_ADDRESS;
 
     /// @dev Historic name: reinvestLiquidityPremium is PERMISSIONLESS (slippage-gated), this actor holds no role
     Vm.Wallet internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
@@ -295,6 +295,9 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         ORACLE_EMERGENCY_ADMIN = _initWallet("ORACLE_EMERGENCY_ADMIN", 1000 ether);
         ORACLE_EMERGENCY_ADMIN_ADDRESS = ORACLE_EMERGENCY_ADMIN.addr;
 
+        FACTORY_ROLE_ADMIN = _initWallet("FACTORY_ROLE_ADMIN", 1000 ether);
+        FACTORY_ROLE_ADMIN_ADDRESS = FACTORY_ROLE_ADMIN.addr;
+
         MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = _initWallet("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN", 1000 ether);
         MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS = MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN.addr;
 
@@ -480,6 +483,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 pauserAddress: PAUSER_ADDRESS,
                 unpauserAddress: UNPAUSER_ADDRESS,
                 upgraderAddress: UPGRADER_ADDRESS,
+                adminFactoryAddress: FACTORY_ROLE_ADMIN_ADDRESS,
                 syncRoleAddress: SYNC_ROLE_ADDRESS,
                 adminKernelAddress: KERNEL_ADMIN_ADDRESS,
                 adminAccountantAddress: ACCOUNTANT_ADMIN_ADDRESS,

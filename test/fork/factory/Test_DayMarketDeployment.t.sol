@@ -479,15 +479,20 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         (bool marketOps,) = ACCESS_MANAGER.hasRole(ADMIN_MARKET_OPS_ROLE, KERNEL_ADMIN_ADDRESS);
         assertTrue(marketOps, "market ops granted");
 
-        // The kerchkoffs co-holds: a second guardian (veto seat), an IMMEDIATE emergency oracle admin beside the
-        // delayed parameter path, and a second LP-role admin (the operator seat)
+        // The kerchkoffs co-holds: a second guardian (veto seat), the FNDN oracle co-hold riding the table delay
+        // beside WAY's parameter path, and a second LP-role admin (the operator seat)
         (bool veto,) = ACCESS_MANAGER.hasRole(GUARDIAN_ROLE, ROLE_GUARDIAN_ADDRESS);
         assertTrue(veto, "guardian veto seat granted");
         (bool emergencyOracle, uint32 emergencyDelay) = ACCESS_MANAGER.hasRole(ADMIN_ORACLE_ROLE, ORACLE_EMERGENCY_ADMIN_ADDRESS);
         assertTrue(emergencyOracle, "emergency oracle seat granted");
-        assertEq(emergencyDelay, 0, "the emergency oracle seat must act immediately");
+        assertEq(emergencyDelay, 72 hours, "the oracle co-hold seat rides the table delay like WAY's grant");
         (bool lpOperator,) = ACCESS_MANAGER.hasRole(LP_ROLE_ADMIN_ROLE, LP_ROLE_ADMIN_ADDRESS);
         assertTrue(lpOperator, "LP-role operator seat granted");
+
+        // WAY's standing factory-admin seat: ADMIN_FACTORY_ROLE is not memberless after the deployer renounces
+        (bool factoryAdmin, uint32 factoryAdminDelay) = ACCESS_MANAGER.hasRole(ADMIN_FACTORY_ROLE, FACTORY_ROLE_ADMIN_ADDRESS);
+        assertTrue(factoryAdmin, "standing factory-admin seat granted");
+        assertEq(factoryAdminDelay, 72 hours, "the factory-admin seat rides the 72h tier");
     }
 
     /// The pipeline renounces the hot deployer key's ENTIRE admin surface: market deployment is PUBLIC, so the
