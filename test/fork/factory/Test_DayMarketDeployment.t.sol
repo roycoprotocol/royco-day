@@ -42,7 +42,8 @@ import {
 } from "../../../src/factory/Roles.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
@@ -122,7 +123,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         // Capture the Day-only addresses the script's DeploymentResult omits, by reading the deployed contracts.
         LPT = IRoycoVaultTranche(KERNEL.liquidityProviderTranche());
         POOL = KERNEL.lptAsset();
-        LPT_YDM = ACCOUNTANT.getState().lptYDM;
+        LPT_YDM = ACCOUNTANT.getRoycoDayFloatingRateAccountantState().lptYDM;
         (address gyroECLPPoolFactory,) = BOOTSTRAP.venueFactories(block.chainid);
         VAULT = IVault(address(GyroECLPPoolFactory(gyroECLPPoolFactory).getVault()));
     }
@@ -241,8 +242,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     /// @notice The accountant wires two DISTINCT yield models: the JT YDM and the LPT LDM must never be the same contract
     function test_YDM_DistinctJTAndLPTModelsWired() public view {
-        assertEq(ACCOUNTANT.getState().jtYDM, address(YDM), "accountant jtYDM");
-        assertEq(ACCOUNTANT.getState().lptYDM, LPT_YDM, "accountant lptYDM");
+        assertEq(ACCOUNTANT.getRoycoDayFloatingRateAccountantState().jtYDM, address(YDM), "accountant jtYDM");
+        assertEq(ACCOUNTANT.getRoycoDayFloatingRateAccountantState().lptYDM, LPT_YDM, "accountant lptYDM");
         assertTrue(address(YDM) != LPT_YDM, "YDM == LDM");
     }
 
@@ -267,14 +268,15 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     /// @notice Every accountant parameter matches the snUSD market config file, the single source of truth
     function test_Accountant_ConfigMatchesMarketConfigFile() public view {
         IRoycoDayAccountant.RoycoDayAccountantState memory s = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertEq(s.minCoverageWAD, 0.1e18, "minCoverage");
         assertEq(s.coverageLiquidationUtilizationWAD, 1.0009009e18, "liquidationUtil");
         assertEq(s.stProtocolFeeWAD, 0.1e18, "stFee");
         assertEq(s.jtProtocolFeeWAD, 0, "jtFee");
         assertEq(s.jtYieldShareProtocolFeeWAD, 0.45e18, "jtYieldShareFee");
         assertEq(s.lptYieldShareProtocolFeeWAD, 0, "lptYieldShareFee");
-        assertEq(s.maxJTYieldShareWAD, 1e18, "maxJTYieldShare == WAD");
-        assertEq(s.maxLPTYieldShareWAD, 0, "maxLPTYieldShare == 0 (LPT off)");
+        assertEq(sFloating.maxJTYieldShareWAD, 1e18, "maxJTYieldShare == WAD");
+        assertEq(sFloating.maxLPTYieldShareWAD, 0, "maxLPTYieldShare == 0 (LPT off)");
         assertEq(s.minLiquidityWAD, 0, "minLiquidity == 0");
         assertEq(s.fixedTermDurationSeconds, 0, "fixedTerm");
     }

@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { stdError } from "../../../lib/forge-std/src/StdError.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IYDM } from "../../../src/interfaces/IYDM.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
@@ -31,10 +32,11 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + 123);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(s.lastYieldShareAccrualTimestamp, uint32(block.timestamp), "accrual timestamp initialized");
-        assertEq(s.lastPremiumPaymentTimestamp, uint32(block.timestamp), "premium payment timestamp initialized");
-        assertEq(s.twJTYieldShareAccruedWAD, 0, "jt accumulator untouched");
-        assertEq(s.twLPTYieldShareAccruedWAD, 0, "lt accumulator untouched");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
+        assertEq(sFloating.lastYieldShareAccrualTimestamp, uint32(block.timestamp), "accrual timestamp initialized");
+        assertEq(sFloating.lastPremiumPaymentTimestamp, uint32(block.timestamp), "premium payment timestamp initialized");
+        assertEq(sFloating.twJTYieldShareAccruedWAD, 0, "jt accumulator untouched");
+        assertEq(sFloating.twLPTYieldShareAccruedWAD, 0, "lt accumulator untouched");
         assertEq(jtYDM.yieldShareCallCount(), 0, "jt ydm not consulted on first accrual");
         assertEq(lptYDM.yieldShareCallCount(), 0, "lt ydm not consulted on first accrual");
     }
@@ -71,13 +73,15 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         uint256 jtCalls = jtYDM.yieldShareCallCount();
         uint256 lptCalls = lptYDM.yieldShareCallCount();
         IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory beforeFloating = accountant.getRoycoDayFloatingRateAccountantState();
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         IRoycoDayAccountant.RoycoDayAccountantState memory afterState = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory afterStateFloating = accountant.getRoycoDayFloatingRateAccountantState();
         assertEq(jtYDM.yieldShareCallCount(), jtCalls, "jt ydm not re-consulted in the same block");
         assertEq(lptYDM.yieldShareCallCount(), lptCalls, "lt ydm not re-consulted in the same block");
-        assertEq(afterState.twJTYieldShareAccruedWAD, before.twJTYieldShareAccruedWAD, "jt accumulator unchanged");
-        assertEq(afterState.twLPTYieldShareAccruedWAD, before.twLPTYieldShareAccruedWAD, "lt accumulator unchanged");
-        assertEq(afterState.lastYieldShareAccrualTimestamp, before.lastYieldShareAccrualTimestamp, "accrual timestamp unchanged");
+        assertEq(afterStateFloating.twJTYieldShareAccruedWAD, beforeFloating.twJTYieldShareAccruedWAD, "jt accumulator unchanged");
+        assertEq(afterStateFloating.twLPTYieldShareAccruedWAD, beforeFloating.twLPTYieldShareAccruedWAD, "lt accumulator unchanged");
+        assertEq(afterStateFloating.lastYieldShareAccrualTimestamp, beforeFloating.lastYieldShareAccrualTimestamp, "accrual timestamp unchanged");
     }
 
     /**
@@ -92,9 +96,10 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + 3600);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(s.twJTYieldShareAccruedWAD, uint128(0.15e18 * 3600), "jt accrues its raw sub-cap rate");
-        assertEq(s.twLPTYieldShareAccruedWAD, uint128(0.1e18 * 3600), "lt rate capped at maxLPTYieldShareWAD");
-        assertEq(s.lastYieldShareAccrualTimestamp, uint32(block.timestamp), "accrual timestamp advanced");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
+        assertEq(sFloating.twJTYieldShareAccruedWAD, uint128(0.15e18 * 3600), "jt accrues its raw sub-cap rate");
+        assertEq(sFloating.twLPTYieldShareAccruedWAD, uint128(0.1e18 * 3600), "lt rate capped at maxLPTYieldShareWAD");
+        assertEq(sFloating.lastYieldShareAccrualTimestamp, uint32(block.timestamp), "accrual timestamp advanced");
     }
 
     /// accumulators compound across windows when no premium is paid in between
@@ -109,9 +114,10 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + 100);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
         // twJT = 0.15e18 * 3600 + 0.02e18 * 100, twLPT = 0.05e18 * 3600 + 0.01e18 * 100
-        assertEq(s.twJTYieldShareAccruedWAD, uint128(0.15e18 * 3600 + 0.02e18 * 100), "jt accumulator compounds");
-        assertEq(s.twLPTYieldShareAccruedWAD, uint128(0.05e18 * 3600 + 0.01e18 * 100), "lt accumulator compounds");
+        assertEq(sFloating.twJTYieldShareAccruedWAD, uint128(0.15e18 * 3600 + 0.02e18 * 100), "jt accumulator compounds");
+        assertEq(sFloating.twLPTYieldShareAccruedWAD, uint128(0.05e18 * 3600 + 0.01e18 * 100), "lt accumulator compounds");
     }
 
     /// the YDMs are consulted with the last market state and utilizations computed from the last-committed checkpoints
@@ -148,7 +154,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + 500);
         // jt capped: min(0.9e18, 0.2e18) = 0.2e18, lt raw: 0.04e18 below the 0.1e18 cap
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.YieldSharesAccrued(0.2e18, 0.2e18 * 500, 0.04e18, 0.04e18 * 500);
+        emit IRoycoDayFloatingRateAccountant.YieldSharesAccrued(0.2e18, 0.2e18 * 500, 0.04e18, 0.04e18 * 500);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
     }
 
@@ -257,7 +263,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
      * Derivation: 1e18 * (100 * 365 days) = 1e18 * 3153600000 = 3.1536e27, far below 2^192
      */
     function test_Accrual_accumulatorNoOverflowAt100Years() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = uint64(WAD);
         p.maxLPTYieldShareWAD = 0;
         _deploy(p);
@@ -265,7 +271,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         jtYDM.setYieldShareReturn(WAD);
         vm.warp(block.timestamp + 100 * 365 days);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
-        assertEq(accountant.getState().twJTYieldShareAccruedWAD, uint128(uint256(1e18) * 3_153_600_000), "century-scale accumulator exact");
+        assertEq(accountant.getRoycoDayFloatingRateAccountantState().twJTYieldShareAccruedWAD, uint128(uint256(1e18) * 3_153_600_000), "century-scale accumulator exact");
     }
 
     /**
@@ -282,7 +288,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
      *   a second window of E1 seconds doubles the total: 2 * (1e18 * E1) > 2^128 - 1, so the checked += panics
      */
     function test_RevertIf_AccrualAccumulatorOverflowsUint128() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = uint64(WAD);
         p.maxLPTYieldShareWAD = 0;
         _deploy(p);
@@ -295,14 +301,14 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + elapsedOne);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         assertEq(
-            uint256(accountant.getState().twJTYieldShareAccruedWAD),
+            uint256(accountant.getRoycoDayFloatingRateAccountantState().twJTYieldShareAccruedWAD),
             340_282_366_920_938_463_463_000_000_000_000_000_000,
             "first window lands the accumulator just under the uint128 ceiling"
         );
 
         // The accrual clock is stored as a uint32, so at this timestamp it holds block.timestamp mod 2^32,
         // warp to storedClock + E1 (a forward warp here) so the next elapsed reads exactly E1 once more
-        uint256 storedClock = accountant.getState().lastYieldShareAccrualTimestamp;
+        uint256 storedClock = accountant.getRoycoDayFloatingRateAccountantState().lastYieldShareAccrualTimestamp;
         vm.warp(storedClock + elapsedOne);
         // The second increment alone still fits uint128, but the running total 2 * (1e18 * E1) exceeds the
         // ceiling, so the checked += reverts: the sync bricks loudly instead of wrapping the accumulator to a
@@ -324,7 +330,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
      * this is a latent width hazard rather than a live economic path, in asymmetry with the loud += overflow above
      */
     function test_AccrualIncrementCastWrapsModuloUint128_DoesNotRevert() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = uint64(WAD);
         p.maxLPTYieldShareWAD = 0;
         _deploy(p);
@@ -337,7 +343,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + elapsed);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         assertEq(
-            uint256(accountant.getState().twJTYieldShareAccruedWAD), 625_392_568_231_788_544, "oversized increment wraps modulo 2^128 instead of reverting"
+            uint256(accountant.getRoycoDayFloatingRateAccountantState().twJTYieldShareAccruedWAD), 625_392_568_231_788_544, "oversized increment wraps modulo 2^128 instead of reverting"
         );
     }
 
@@ -387,12 +393,13 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
                     ghostLastPay = nowTs;
                 }
                 IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-                assertEq(uint256(s.twJTYieldShareAccruedWAD), ghostTwJT, "jt accumulator vs ghost");
-                assertEq(uint256(s.twLPTYieldShareAccruedWAD), ghostTwLPT, "lt accumulator vs ghost");
-                assertEq(uint256(s.lastPremiumPaymentTimestamp), ghostLastPay, "premium timestamp vs ghost");
-                assertEq(uint256(s.lastYieldShareAccrualTimestamp), ghostLastAccrual, "accrual timestamp vs ghost");
-                assertEq(uint256(s.twJTYieldShareAccruedWAD), cappedJT * (ghostLastAccrual - ghostLastPay), "jt window contiguity");
-                assertEq(uint256(s.twLPTYieldShareAccruedWAD), cappedLPT * (ghostLastAccrual - ghostLastPay), "lt window contiguity");
+                IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
+                assertEq(uint256(sFloating.twJTYieldShareAccruedWAD), ghostTwJT, "jt accumulator vs ghost");
+                assertEq(uint256(sFloating.twLPTYieldShareAccruedWAD), ghostTwLPT, "lt accumulator vs ghost");
+                assertEq(uint256(sFloating.lastPremiumPaymentTimestamp), ghostLastPay, "premium timestamp vs ghost");
+                assertEq(uint256(sFloating.lastYieldShareAccrualTimestamp), ghostLastAccrual, "accrual timestamp vs ghost");
+                assertEq(uint256(sFloating.twJTYieldShareAccruedWAD), cappedJT * (ghostLastAccrual - ghostLastPay), "jt window contiguity");
+                assertEq(uint256(sFloating.twLPTYieldShareAccruedWAD), cappedLPT * (ghostLastAccrual - ghostLastPay), "lt window contiguity");
             }
         }
     }
@@ -424,14 +431,15 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
 
         // First gain sync accrues and pays the time-weighted premium, consuming the window
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.YieldSharesAccrued(0.1e18, 100e18, 0.05e18, 50e18);
+        emit IRoycoDayFloatingRateAccountant.YieldSharesAccrued(0.1e18, 100e18, 0.05e18, 50e18);
         SyncedAccountingState memory first = kernel.doPreOp(toNAVUnits(SEED_COLLATERAL + 100e18));
         assertEq(toUint256(first.jtEffectiveNAV), 225e18, "first sync books the jt residual plus the time-weighted premium");
         assertEq(toUint256(first.lptLiquidityPremium), 4_166_666_666_666_666_666, "first sync pays the time-weighted lt premium");
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(uint256(s.twJTYieldShareAccruedWAD), 0, "jt window consumed by the payment");
-        assertEq(uint256(s.twLPTYieldShareAccruedWAD), 0, "lt window consumed by the payment");
-        assertEq(uint256(s.lastPremiumPaymentTimestamp), block.timestamp, "payment stamped this block");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
+        assertEq(uint256(sFloating.twJTYieldShareAccruedWAD), 0, "jt window consumed by the payment");
+        assertEq(uint256(sFloating.twLPTYieldShareAccruedWAD), 0, "lt window consumed by the payment");
+        assertEq(uint256(sFloating.lastPremiumPaymentTimestamp), block.timestamp, "payment stamped this block");
 
         // Same-block replay attempt: fresh preview rates prove the second premium prices instantaneously on the
         // second sync's own attributed gain, never on the consumed window's 0.1e18 / 0.05e18 averages
@@ -442,9 +450,9 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         assertEq(toUint256(second.lptLiquidityPremium), 1_653_846_153_846_153_846, "second lt premium priced instantaneously on gain2 alone");
         assertEq(toUint256(second.stEffectiveNAV), 1_154_384_615_384_615_384_615, "st retains its attributed gain net of the jt premium");
         s = accountant.getState();
-        assertEq(uint256(s.twJTYieldShareAccruedWAD), 0, "jt window still empty, nothing replayed");
-        assertEq(uint256(s.twLPTYieldShareAccruedWAD), 0, "lt window still empty, nothing replayed");
-        assertEq(uint256(s.lastPremiumPaymentTimestamp), block.timestamp, "payment stamp unchanged in the same block");
+        assertEq(uint256(sFloating.twJTYieldShareAccruedWAD), 0, "jt window still empty, nothing replayed");
+        assertEq(uint256(sFloating.twLPTYieldShareAccruedWAD), 0, "lt window still empty, nothing replayed");
+        assertEq(uint256(sFloating.lastPremiumPaymentTimestamp), block.timestamp, "payment stamp unchanged in the same block");
         // Conservation across both syncs
         assertEq(toUint256(s.lastSTEffectiveNAV) + toUint256(s.lastJTEffectiveNAV), SEED_COLLATERAL + 200e18, "conservation across the replay attempt");
     }

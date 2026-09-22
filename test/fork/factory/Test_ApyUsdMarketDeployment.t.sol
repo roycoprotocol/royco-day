@@ -17,7 +17,8 @@ import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekeeper.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
@@ -257,13 +258,14 @@ contract Test_ApyUsdMarketDeployment is Test {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("APYX");
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
 
-        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayFloatingRateAccountant(r.accountant).getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = IRoycoDayFloatingRateAccountant(r.accountant).getRoycoDayFloatingRateAccountantState();
         assertEq(a.fixedTermDurationSeconds, 30 days, "fixed term != the sheet's 30-day observation period");
         assertEq(a.minLiquidityWAD, cfg.accountant.minLiquidityWAD, "minLiquidityWAD");
-        assertEq(a.maxJTYieldShareWAD, cfg.accountant.maxJTYieldShareWAD, "maxJTYieldShareWAD");
-        assertEq(a.maxLPTYieldShareWAD, cfg.accountant.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
-        assertLe(uint256(a.maxJTYieldShareWAD) + a.maxLPTYieldShareWAD, 1e18, "caps must sum within the senior gain");
-        assertTrue(a.jtYDM != a.lptYDM, "JT and LPT must hold distinct model instances");
+        assertEq(aFloating.maxJTYieldShareWAD, cfg.accountant.maxJTYieldShareWAD, "maxJTYieldShareWAD");
+        assertEq(aFloating.maxLPTYieldShareWAD, cfg.accountant.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
+        assertLe(uint256(aFloating.maxJTYieldShareWAD) + aFloating.maxLPTYieldShareWAD, 1e18, "caps must sum within the senior gain");
+        assertTrue(aFloating.jtYDM != aFloating.lptYDM, "JT and LPT must hold distinct model instances");
 
         assertEq(IRoycoDayKernel(r.kernel).getState().stSelfLiquidationBonusWAD, 0, "the sheet grants APYX no self-liquidation bonus");
     }

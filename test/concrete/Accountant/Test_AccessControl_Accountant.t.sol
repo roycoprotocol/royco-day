@@ -3,7 +3,8 @@ pragma solidity ^0.8.28;
 
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { Operation } from "../../../src/libraries/Types.sol";
 import { toNAVUnits } from "../../../src/libraries/Units.sol";
@@ -57,8 +58,8 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
         for (uint256 i; i < 10; ++i) {
             calls[i] = hardSync[i];
         }
-        calls[10] = abi.encodeCall(IRoycoDayAccountant.setJuniorTrancheYDM, (address(0xBEEF), bytes("")));
-        calls[11] = abi.encodeCall(IRoycoDayAccountant.setLiquidityProviderTrancheYDM, (address(0xBEEF), bytes("")));
+        calls[10] = abi.encodeCall(IRoycoDayFloatingRateAccountant.setJuniorTrancheYDM, (address(0xBEEF), bytes("")));
+        calls[11] = abi.encodeCall(IRoycoDayFloatingRateAccountant.setLiquidityProviderTrancheYDM, (address(0xBEEF), bytes("")));
         calls[12] = abi.encodeCall(IRoycoAuth.pause, ());
         calls[13] = abi.encodeCall(IRoycoAuth.unpause, ());
         for (uint256 i; i < calls.length; ++i) {
@@ -104,10 +105,10 @@ contract Test_AccessControl_Accountant is AccountantTestBase {
         kernel.setSyncMode(MockAccountantKernel.SyncMode.REVERT);
         MockRecordingYDM newJT = new MockRecordingYDM();
         accountant.setJuniorTrancheYDM(address(newJT), "");
-        assertEq(accountant.getState().jtYDM, address(newJT), "jt ydm updated despite reverting kernel");
+        assertEq(accountant.getRoycoDayFloatingRateAccountantState().jtYDM, address(newJT), "jt ydm updated despite reverting kernel");
         MockRecordingYDM newLPT = new MockRecordingYDM();
         accountant.setLiquidityProviderTrancheYDM(address(newLPT), "");
-        assertEq(accountant.getState().lptYDM, address(newLPT), "lt ydm updated despite reverting kernel");
+        assertEq(accountant.getRoycoDayFloatingRateAccountantState().lptYDM, address(newLPT), "lt ydm updated despite reverting kernel");
     }
 
     /// the tolerated kernel sync is still attempted by both YDM setters (counted in NONE mode)

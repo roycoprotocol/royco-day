@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
 import { WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { MarketState, Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";

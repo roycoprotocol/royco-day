@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { ADMIN_ACCOUNTANT_ROLE } from "../../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
-import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
 import { AssetClaims, MarketState, SyncedAccountingState, TrancheType } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";

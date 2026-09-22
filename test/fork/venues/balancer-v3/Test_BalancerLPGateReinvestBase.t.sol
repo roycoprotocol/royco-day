@@ -11,7 +11,7 @@ import { GyroECLPPool } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro
 import { GyroECLPMath } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/lib/GyroECLPMath.sol";
 import { BasePoolMath } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BasePoolMath.sol";
 
-import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";

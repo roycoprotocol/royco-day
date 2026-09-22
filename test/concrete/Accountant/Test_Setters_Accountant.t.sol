@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -94,14 +95,15 @@ contract Test_Setters_Accountant is AccountantTestBase {
 
     /// setMaxYieldShares reverts above a WAD sum and passes at exactly WAD with event and write
     function test_SetMaxYieldShares_boundaryEventWrite() public {
-        vm.expectRevert(IRoycoDayAccountant.INVALID_MAX_YIELD_SHARE_CONFIG.selector);
+        vm.expectRevert(IRoycoDayFloatingRateAccountant.INVALID_MAX_YIELD_SHARE_CONFIG.selector);
         accountant.setMaxYieldShares(0.6e18, 0.4e18 + 1);
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.MaxYieldSharesUpdated(0.6e18, 0.4e18);
+        emit IRoycoDayFloatingRateAccountant.MaxYieldSharesUpdated(0.6e18, 0.4e18);
         accountant.setMaxYieldShares(0.6e18, 0.4e18);
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(s.maxJTYieldShareWAD, 0.6e18, "maxJT written");
-        assertEq(s.maxLPTYieldShareWAD, 0.4e18, "maxLPT written");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
+        assertEq(sFloating.maxJTYieldShareWAD, 0.6e18, "maxJT written");
+        assertEq(sFloating.maxLPTYieldShareWAD, 0.4e18, "maxLPT written");
     }
 
     /// a nonzero duration update mid-FIXED_TERM changes only the duration, leaving IL, state, and end timestamp intact
@@ -112,6 +114,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
         emit IRoycoDayAccountant.FixedTermDurationUpdated(uint24(1_209_600));
         accountant.setFixedTermDuration(uint24(1_209_600));
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
         assertEq(s.fixedTermDurationSeconds, 1_209_600, "duration written");
         assertEq(uint8(s.lastMarketState), uint8(MarketState.FIXED_TERM), "market state untouched");
         assertEq(toUint256(s.lastJTImpermanentLoss), 100e18, "il untouched");
@@ -127,6 +130,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
         emit IRoycoDayAccountant.FixedTermDurationUpdated(0);
         accountant.setFixedTermDuration(0);
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
         assertEq(s.fixedTermDurationSeconds, 0, "duration zeroed");
         assertEq(uint8(s.lastMarketState), uint8(MarketState.PERPETUAL), "forced perpetual");
         assertEq(toUint256(s.lastJTImpermanentLoss), 0, "il erased");
@@ -214,7 +218,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
     function test_HugeDustTolerance_SuppressesProtocolFeesPremiumResetsAndFixedTermEntry() public {
         // Flat 1000e18 / 200e18 market with the accrual and premium clocks initialized this block
         _seedAndInitAccrual();
-        uint32 premiumClockBefore = accountant.getState().lastPremiumPaymentTimestamp;
+        uint32 premiumClockBefore = accountant.getRoycoDayFloatingRateAccountantState().lastPremiumPaymentTimestamp;
 
         // An absurd but non-overflowing dust tolerance: 1e45 dwarfs every NAV this market will ever hold
         accountant.setDustTolerance(toNAVUnits(uint256(1e45)));
@@ -246,9 +250,10 @@ contract Test_Setters_Accountant is AccountantTestBase {
 
         // The premiums were paid but never marked as paid: the earned window survives to be paid again
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(uint256(s.twJTYieldShareAccruedWAD), 100e18, "jt accumulator not reset by the paid premium");
-        assertEq(uint256(s.twLPTYieldShareAccruedWAD), 50e18, "lt accumulator not reset by the paid premium");
-        assertEq(s.lastPremiumPaymentTimestamp, premiumClockBefore, "premium payment clock frozen");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
+        assertEq(uint256(sFloating.twJTYieldShareAccruedWAD), 100e18, "jt accumulator not reset by the paid premium");
+        assertEq(uint256(sFloating.twLPTYieldShareAccruedWAD), 50e18, "lt accumulator not reset by the paid premium");
+        assertEq(sFloating.lastPremiumPaymentTimestamp, premiumClockBefore, "premium payment clock frozen");
 
         // A genuine -110e18 collateral loss at checkpoint 1075e18 / 225e18 (collateral 1300e18):
         // deltaST = floor(110e18 * 1075e18 / 1300e18) = 90961538461538461538 with the JT residual
@@ -275,16 +280,16 @@ contract Test_Setters_Accountant is AccountantTestBase {
 
     /// setJuniorTrancheYDM rejects the current LPT YDM
     function test_RevertIf_SetJuniorTrancheYDMEqualsLPTYDM() public {
-        vm.expectRevert(IRoycoDayAccountant.YDMS_CANNOT_BE_IDENTICAL.selector);
+        vm.expectRevert(IRoycoDayFloatingRateAccountant.YDMS_CANNOT_BE_IDENTICAL.selector);
         accountant.setJuniorTrancheYDM(address(lptYDM), "");
     }
 
     /// only cross-identity is checked, so re-setting the current JT YDM is allowed
     function test_SetJuniorTrancheYDM_allowsCurrentJTYDM() public {
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.JuniorTrancheYDMUpdated(address(jtYDM));
+        emit IRoycoDayFloatingRateAccountant.JuniorTrancheYDMUpdated(address(jtYDM));
         accountant.setJuniorTrancheYDM(address(jtYDM), "");
-        assertEq(accountant.getState().jtYDM, address(jtYDM), "jt ydm unchanged");
+        assertEq(accountant.getRoycoDayFloatingRateAccountantState().jtYDM, address(jtYDM), "jt ydm unchanged");
     }
 
     /// setJuniorTrancheYDM rejects the null address
@@ -301,11 +306,11 @@ contract Test_Setters_Accountant is AccountantTestBase {
 
         MockRecordingYDM initialized = new MockRecordingYDM();
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.JuniorTrancheYDMUpdated(address(initialized));
+        emit IRoycoDayFloatingRateAccountant.JuniorTrancheYDMUpdated(address(initialized));
         accountant.setJuniorTrancheYDM(address(initialized), abi.encodeCall(MockRecordingYDM.initializeModel, (hex"abcd")));
         assertEq(initialized.initializeCallCount(), 1, "non-empty data initializes");
         assertEq(initialized.lastInitializePayload(), hex"abcd", "payload forwarded verbatim");
-        assertEq(accountant.getState().jtYDM, address(initialized), "jt ydm written");
+        assertEq(accountant.getRoycoDayFloatingRateAccountantState().jtYDM, address(initialized), "jt ydm written");
 
         MockRecordingYDM reverting = new MockRecordingYDM();
         reverting.setRevertOnInitialize(true);
@@ -315,16 +320,16 @@ contract Test_Setters_Accountant is AccountantTestBase {
 
     /// setLiquidityProviderTrancheYDM rejects the current JT YDM
     function test_RevertIf_SetLiquidityProviderTrancheYDMEqualsJTYDM() public {
-        vm.expectRevert(IRoycoDayAccountant.YDMS_CANNOT_BE_IDENTICAL.selector);
+        vm.expectRevert(IRoycoDayFloatingRateAccountant.YDMS_CANNOT_BE_IDENTICAL.selector);
         accountant.setLiquidityProviderTrancheYDM(address(jtYDM), "");
     }
 
     /// re-setting the current LPT YDM is allowed
     function test_SetLiquidityProviderTrancheYDM_allowsCurrentLPTYDM() public {
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.LiquidityProviderTrancheYDMUpdated(address(lptYDM));
+        emit IRoycoDayFloatingRateAccountant.LiquidityProviderTrancheYDMUpdated(address(lptYDM));
         accountant.setLiquidityProviderTrancheYDM(address(lptYDM), "");
-        assertEq(accountant.getState().lptYDM, address(lptYDM), "lt ydm unchanged");
+        assertEq(accountant.getRoycoDayFloatingRateAccountantState().lptYDM, address(lptYDM), "lt ydm unchanged");
     }
 
     /// setLiquidityProviderTrancheYDM rejects the null address
@@ -341,11 +346,11 @@ contract Test_Setters_Accountant is AccountantTestBase {
 
         MockRecordingYDM initialized = new MockRecordingYDM();
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.LiquidityProviderTrancheYDMUpdated(address(initialized));
+        emit IRoycoDayFloatingRateAccountant.LiquidityProviderTrancheYDMUpdated(address(initialized));
         accountant.setLiquidityProviderTrancheYDM(address(initialized), abi.encodeCall(MockRecordingYDM.initializeModel, (hex"beef")));
         assertEq(initialized.initializeCallCount(), 1, "non-empty data initializes");
         assertEq(initialized.lastInitializePayload(), hex"beef", "payload forwarded verbatim");
-        assertEq(accountant.getState().lptYDM, address(initialized), "lt ydm written");
+        assertEq(accountant.getRoycoDayFloatingRateAccountantState().lptYDM, address(initialized), "lt ydm written");
 
         MockRecordingYDM reverting = new MockRecordingYDM();
         reverting.setRevertOnInitialize(true);
@@ -377,15 +382,16 @@ contract Test_Setters_Accountant is AccountantTestBase {
         kernel.setSyncMode(MockAccountantKernel.SyncMode.SYNC);
         kernel.setSyncNAV(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF));
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.YieldSharesAccrued(0.2e18, 200e18, 0.1e18, 100e18);
+        emit IRoycoDayFloatingRateAccountant.YieldSharesAccrued(0.2e18, 200e18, 0.1e18, 100e18);
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.MaxYieldSharesUpdated(0, 0);
+        emit IRoycoDayFloatingRateAccountant.MaxYieldSharesUpdated(0, 0);
         accountant.setMaxYieldShares(0, 0);
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(uint256(s.twJTYieldShareAccruedWAD), 200e18, "jt window accrued at the old cap before the body");
-        assertEq(uint256(s.twLPTYieldShareAccruedWAD), 100e18, "lt window accrued at the old cap before the body");
-        assertEq(s.maxJTYieldShareWAD, 0, "jt cap lowered to zero");
-        assertEq(s.maxLPTYieldShareWAD, 0, "lt cap lowered to zero");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
+        assertEq(uint256(sFloating.twJTYieldShareAccruedWAD), 200e18, "jt window accrued at the old cap before the body");
+        assertEq(uint256(sFloating.twLPTYieldShareAccruedWAD), 100e18, "lt window accrued at the old cap before the body");
+        assertEq(sFloating.maxJTYieldShareWAD, 0, "jt cap lowered to zero");
+        assertEq(sFloating.maxLPTYieldShareWAD, 0, "lt cap lowered to zero");
 
         // The same-block gain still pays the premium earned under the old caps
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 100e18));
@@ -396,7 +402,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
         assertEq(toUint256(state.lptProtocolFee), 833_333_333_333_333_333, "lt fee on the earned premium");
         assertEq(toUint256(state.stProtocolFee), 5_833_333_333_333_333_333, "st fee on the retained residual");
         s = accountant.getState();
-        assertEq(uint256(s.twJTYieldShareAccruedWAD), 0, "window consumed by the payment");
-        assertEq(uint256(s.twLPTYieldShareAccruedWAD), 0, "lt window consumed by the payment");
+        assertEq(uint256(sFloating.twJTYieldShareAccruedWAD), 0, "window consumed by the payment");
+        assertEq(uint256(sFloating.twLPTYieldShareAccruedWAD), 0, "lt window consumed by the payment");
     }
 }

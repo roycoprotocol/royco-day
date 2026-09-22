@@ -10,10 +10,11 @@ import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-up
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IRoycoAuth } from "../../interfaces/IRoycoAuth.sol";
-import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
+import { IRoycoDayAccountant } from "../../interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoAccessManager } from "../../interfaces/factory/IRoycoAccessManager.sol";
 import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
@@ -687,9 +688,9 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
     function _accountantBinding() private pure returns (bytes4[] memory selectors, uint64[] memory roleIds) {
         selectors = new bytes4[](14);
         roleIds = new uint64[](14);
-        selectors[0] = IRoycoDayAccountant.setJuniorTrancheYDM.selector;
+        selectors[0] = IRoycoDayFloatingRateAccountant.setJuniorTrancheYDM.selector;
         roleIds[0] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[1] = IRoycoDayAccountant.setLiquidityProviderTrancheYDM.selector;
+        selectors[1] = IRoycoDayFloatingRateAccountant.setLiquidityProviderTrancheYDM.selector;
         roleIds[1] = ADMIN_ACCOUNTANT_ROLE;
         selectors[2] = IRoycoDayAccountant.setSeniorTrancheProtocolFee.selector;
         roleIds[2] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
@@ -705,7 +706,7 @@ contract RoycoDayBalancerV3MarketDeploymentTemplate is BaseDeploymentTemplate {
         roleIds[7] = ADMIN_ACCOUNTANT_ROLE;
         selectors[8] = IRoycoDayAccountant.setMinLiquidity.selector;
         roleIds[8] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[9] = IRoycoDayAccountant.setMaxYieldShares.selector;
+        selectors[9] = IRoycoDayFloatingRateAccountant.setMaxYieldShares.selector;
         roleIds[9] = ADMIN_ACCOUNTANT_ROLE;
         selectors[10] = IRoycoDayAccountant.setFixedTermDuration.selector;
         roleIds[10] = ADMIN_ACCOUNTANT_ROLE;

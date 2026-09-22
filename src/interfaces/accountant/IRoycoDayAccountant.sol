@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
-import { MarketState, Operation, SyncedAccountingState } from "../libraries/Types.sol";
-import { NAV_UNIT } from "../libraries/Units.sol";
+import { MarketState, Operation, SyncedAccountingState } from "../../libraries/Types.sol";
+import { NAV_UNIT } from "../../libraries/Units.sol";
 
 /// @title IRoycoDayAccountant
-/// @notice Interface for the RoycoDayAccountant contract that manages accounting, coverage, and liquidity requirements for a Royco market
+/// @notice Interface for a Royco Day accountant that manages accounting, coverage, and liquidity requirements for a Royco market
 interface IRoycoDayAccountant {
     /**
      * @notice Initialization parameters for the Royco Accountant
@@ -15,12 +15,6 @@ interface IRoycoDayAccountant {
      * @custom:field minCoverageWAD - The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity provider tranche's market making inventory, scaled to WAD precision
-     * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
-     * @custom:field jtYDMInitializationData - The data used to initialize the JT YDM for this market
-     * @custom:field lptYDM - The liquidity provider tranche's Yield Distribution Model (LPT YDM), responsible for determining the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche
-     * @custom:field lptYDMInitializationData - The data used to initialize the LPT YDM for this market
-     * @custom:field maxJTYieldShareWAD - The maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
-     * @custom:field maxLPTYieldShareWAD - The maximum LPT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
      * @custom:field dustTolerance - The worst case dust tolerance for collateralNAV from underlying NAV quoting/rounding
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the senior tranche, scaled to WAD precision
@@ -39,14 +33,6 @@ interface IRoycoDayAccountant {
         uint256 coverageLiquidationUtilizationWAD;
         // Liquidity configuration
         uint64 minLiquidityWAD;
-        // Yield Distribution Models
-        address jtYDM;
-        bytes jtYDMInitializationData;
-        address lptYDM;
-        bytes lptYDMInitializationData;
-        // Maximum yield shares (premiums)
-        uint64 maxJTYieldShareWAD;
-        uint64 maxLPTYieldShareWAD;
         // Fixed term duration
         uint24 fixedTermDurationSeconds;
         // Dust tolerance
@@ -69,15 +55,6 @@ interface IRoycoDayAccountant {
      * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity provider tranche's market making inventory, scaled to WAD precision
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
      * @custom:field lastMarketState - The last recorded state of this market (perpetual or fixed term)
-     * @custom:field fixedTermEndTimestamp - The end timestamp of the currently ongoing fixed term (set to 0 if the market is in a perpetual state)
-     * @custom:field lastYieldShareAccrualTimestamp - The timestamp at which the time-weighted yield share accumulators were last updated
-     * @custom:field lastPremiumPaymentTimestamp - The timestamp at which the last premium payments occurred (the risk and liquidity premiums are always paid together)
-     * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
-     * @custom:field maxJTYieldShareWAD - The maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
-     * @custom:field lptYDM - The liquidity provider tranche's Yield Distribution Model (LPT YDM), responsible for determining the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche
-     * @custom:field maxLPTYieldShareWAD - The maximum LPT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
-     * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (JT YDM output) since the last premium payment, scaled to WAD precision
-     * @custom:field twLPTYieldShareAccruedWAD - The time-weighted liquidity provider tranche yield share (LPT YDM output) since the last premium payment, scaled to WAD precision
      * @custom:field fixedTermCommenceableAtTimestamp - The timestamp at which the market can enter a fixed term, the deployment time plus the fixed-term grace period
      * @custom:field fixedTermEndTimestamp - The end timestamp of the currently ongoing fixed term (set to 0 if the market is in a perpetual state)
      * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
@@ -100,21 +77,10 @@ interface IRoycoDayAccountant {
         uint24 fixedTermDurationSeconds;
         MarketState lastMarketState;
         uint32 fixedTermEndTimestamp;
-        uint32 lastYieldShareAccrualTimestamp;
-        uint32 lastPremiumPaymentTimestamp;
         // Slot 2
-        address jtYDM;
-        uint64 maxJTYieldShareWAD;
-        // Slot 3
-        address lptYDM;
-        uint64 maxLPTYieldShareWAD;
-        // Slot 4 (uint128 holds over 1e13 years of the config-capped WAD-per-second accrual)
-        uint128 twJTYieldShareAccruedWAD;
-        uint128 twLPTYieldShareAccruedWAD;
-        // Slot 5
         address kernel;
         uint64 fixedTermCommenceableAtTimestamp;
-        // Slot 6-11
+        // Slot 3-9
         uint256 coverageLiquidationUtilizationWAD;
         NAV_UNIT lastCollateralNAV;
         NAV_UNIT lastSTEffectiveNAV;
@@ -124,22 +90,9 @@ interface IRoycoDayAccountant {
         NAV_UNIT dustTolerance;
     }
 
-    /**
-     * @notice Emitted when the JT and LPT shares of ST yield (the risk and liquidity premiums) are accrued based on the market's coverageUtilization and liquidityUtilization since the last accrual
-     * @param jtYieldShareWAD JT's instantaneous yield share (JT YDM output) based on coverageUtilization since the last accrual
-     * @param twJTYieldShareAccruedWAD The time-weighted JT yield share accrued since the last yield distribution
-     * @param lptYieldShareWAD LPT's instantaneous yield share (LPT YDM output) based on liquidityUtilization since the last accrual
-     * @param twLPTYieldShareAccruedWAD The time-weighted LPT yield share accrued since the last liquidity premium payment
-     */
-    event YieldSharesAccrued(uint256 jtYieldShareWAD, uint256 twJTYieldShareAccruedWAD, uint256 lptYieldShareWAD, uint256 twLPTYieldShareAccruedWAD);
-
     /// @notice Emitted when a fixed term regime is commenced by this market
     /// @param fixedTermEndTimestamp The end timestamp of the new fixed term regime
     event FixedTermCommenced(uint32 fixedTermEndTimestamp);
-
-    /// @notice Emitted when the junior tranche yield distribution model is updated
-    /// @param jtYDM The new junior tranche's YDM address
-    event JuniorTrancheYDMUpdated(address jtYDM);
 
     /// @notice Emitted when the senior tranche protocol fee percentage is updated
     /// @param stProtocolFeeWAD The new protocol fee percentage charged on senior tranche yield, scaled to WAD precision
@@ -176,10 +129,6 @@ interface IRoycoDayAccountant {
     /// @notice Emitted when a fixed term regime is ended by this market
     event FixedTermEnded();
 
-    /// @notice Emitted when the LPT YDM (liquidity provider tranche Yield Distribution Model) address is updated
-    /// @param lptYDM The new LPT YDM address
-    event LiquidityProviderTrancheYDMUpdated(address lptYDM);
-
     /// @notice Emitted when the yield share (liquidity premium) protocol fee percentage is updated
     /// @param lptYieldShareProtocolFeeWAD The new protocol fee percentage charged from the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche, scaled to WAD precision
     event LiquidityProviderTrancheYieldShareProtocolFeeUpdated(uint64 lptYieldShareProtocolFeeWAD);
@@ -191,13 +140,6 @@ interface IRoycoDayAccountant {
     /// @notice Emitted when the timestamp at which the market can first enter a fixed term is set
     /// @param fixedTermCommenceableAtTimestamp The timestamp at which the market can first enter a fixed term
     event FixedTermCommenceableAt(uint64 fixedTermCommenceableAtTimestamp);
-
-    /**
-     * @notice Emitted when the maximum JT and LPT yield shares (premiums) are updated
-     * @param maxJTYieldShareWAD The new maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
-     * @param maxLPTYieldShareWAD The new maximum LPT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
-     */
-    event MaxYieldSharesUpdated(uint64 maxJTYieldShareWAD, uint64 maxLPTYieldShareWAD);
 
     /// @notice Emitted when the kernel commits the freshly marked liquidity provider tranche raw NAV
     /// @param freshLPTRawNAV The committed liquidity provider tranche raw NAV in NAV units
@@ -212,20 +154,11 @@ interface IRoycoDayAccountant {
     /// @notice Thrown when the accountant's liquidity configuration is invalid (the minimum liquidity must be less than 100%)
     error INVALID_LIQUIDITY_CONFIG();
 
-    /// @notice Thrown when the accountant's yield share configuration is invalid (the maximum JT and LPT yield shares must sum to at most 100%)
-    error INVALID_MAX_YIELD_SHARE_CONFIG();
-
     /// @notice Thrown when the configured protocol fee exceeds the maximum
     error MAX_PROTOCOL_FEE_EXCEEDED();
 
-    /// @notice Thrown when the junior and liquidity provider tranche YDMs are identical
-    error YDMS_CANNOT_BE_IDENTICAL();
-
     /// @notice Thrown when the collateral NAV doesn't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();
-
-    /// @notice Thrown when the combined risk and liquidity premiums exceed the senior gain they are drawn from: the JT and LPT yield shares must sum to at most 100% of senior appreciation
-    error PREMIUMS_EXCEED_SENIOR_YIELD();
 
     /// @notice Thrown when the operation and NAVs passed to post-op lead to an invalid state
     error INVALID_POST_OP_STATE(Operation _op);
@@ -313,22 +246,6 @@ interface IRoycoDayAccountant {
     function maxLPTWithdrawal(SyncedAccountingState memory state) external view returns (NAV_UNIT lptWithdrawableNAV);
 
     /**
-     * @notice Updates the JT YDM (Junior Tranche Yield Distribution Model) for this market
-     * @dev Only callable by a designated admin
-     * @param _jtYDM The new JT YDM address to set
-     * @param _jtYDMInitializationData The data used to initialize the new JT YDM for this market
-     */
-    function setJuniorTrancheYDM(address _jtYDM, bytes calldata _jtYDMInitializationData) external;
-
-    /**
-     * @notice Updates the LPT YDM (Liquidity Provider Tranche Yield Distribution Model) for this market
-     * @dev Only callable by a designated admin
-     * @param _lptYDM The new LPT YDM address to set
-     * @param _lptYDMInitializationData The data used to initialize the new LPT YDM for this market
-     */
-    function setLiquidityProviderTrancheYDM(address _lptYDM, bytes calldata _lptYDMInitializationData) external;
-
-    /**
      * @notice Updates the senior tranche protocol fee percentage for this market
      * @dev Only callable by a designated admin
      * @param _stProtocolFeeWAD The new protocol fee percentage charged on senior tranche yield, scaled to WAD precision
@@ -376,14 +293,6 @@ interface IRoycoDayAccountant {
      * @param _minLiquidityWAD The new percentage of the senior tranche NAV that must be in the liquidity provider tranche's market making inventory, scaled to WAD precision
      */
     function setMinLiquidity(uint64 _minLiquidityWAD) external;
-
-    /**
-     * @notice Updates the maximum JT and LPT yield shares (premiums) for this market
-     * @dev Only callable by a designated admin
-     * @param _maxJTYieldShareWAD The new maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
-     * @param _maxLPTYieldShareWAD The new maximum LPT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
-     */
-    function setMaxYieldShares(uint64 _maxJTYieldShareWAD, uint64 _maxLPTYieldShareWAD) external;
 
     /**
      * @notice Updates the fixed term duration for this market

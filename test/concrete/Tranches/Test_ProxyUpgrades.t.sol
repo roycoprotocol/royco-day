@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { Ownable } from "../../../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
-import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
+import { RoycoDayFloatingRateAccountant } from "../../../src/accountant/RoycoDayFloatingRateAccountant.sol";
 import { UpgradeableBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { RoycoDayBalancerV3Kernel as DayKernel } from "../../../src/kernels/RoycoDayBalancerV3Kernel.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
@@ -46,9 +46,9 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
      *      market-independent — the market wiring lives in each proxy's storage, untouched by an upgrade — so the
      *      only construction input anywhere is the kernel's Balancer Vault
      */
-    function _deployFreshImplementations() internal returns (RoycoSeniorTranche stImpl, DayKernel kernelImpl, RoycoDayAccountant accImpl) {
+    function _deployFreshImplementations() internal returns (RoycoSeniorTranche stImpl, DayKernel kernelImpl, RoycoDayFloatingRateAccountant accImpl) {
         stImpl = new RoycoSeniorTranche();
-        accImpl = new RoycoDayAccountant();
+        accImpl = new RoycoDayFloatingRateAccountant();
         kernelImpl = new DayKernel(IVault(address(balancerVault)));
     }
 
@@ -96,7 +96,7 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
         bytes memory accStateBefore = abi.encode(accountant.getState());
         bytes memory kernelStateBefore = abi.encode(kernel.getState());
 
-        (RoycoSeniorTranche freshStImpl, DayKernel freshKernelImpl, RoycoDayAccountant freshAccImpl) = _deployFreshImplementations();
+        (RoycoSeniorTranche freshStImpl, DayKernel freshKernelImpl, RoycoDayFloatingRateAccountant freshAccImpl) = _deployFreshImplementations();
         vm.startPrank(UPGRADER);
         _upgradeBeacon(stBeacon, address(freshStImpl));
         _upgradeBeacon(kernelBeacon, address(freshKernelImpl));
@@ -151,7 +151,7 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
      *      performs no proxiable-slot probe, so any contract with code is an acceptable target
      */
     function test_RevertIf_BeaconUpgradeUnauthorizedOrCodeless() public {
-        (RoycoSeniorTranche freshStImpl, DayKernel freshKernelImpl, RoycoDayAccountant freshAccImpl) = _deployFreshImplementations();
+        (RoycoSeniorTranche freshStImpl, DayKernel freshKernelImpl, RoycoDayFloatingRateAccountant freshAccImpl) = _deployFreshImplementations();
         UpgradeableBeacon[3] memory beacons = [stBeacon, kernelBeacon, accountantBeacon];
         address[3] memory validImpls = [address(freshStImpl), address(freshKernelImpl), address(freshAccImpl)];
         address intruder = makeAddr("UPGRADE_INTRUDER");

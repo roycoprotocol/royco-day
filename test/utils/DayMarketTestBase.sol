@@ -8,7 +8,7 @@ import { BeaconProxy } from "../../lib/openzeppelin-contracts/contracts/proxy/be
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { UpgradeableBeacon } from "../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
-import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol";
+import { RoycoDayFloatingRateAccountant } from "../../src/accountant/RoycoDayFloatingRateAccountant.sol";
 import { RoycoAccessManager } from "../../src/factory/RoycoAccessManager.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -27,7 +27,8 @@ import {
     ST_LP_ROLE
 } from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
-import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
@@ -191,7 +192,7 @@ abstract contract DayMarketTestBase is Assertions {
     RoycoLiquidityProviderTranche internal liquidityProviderTranche;
 
     /// @notice The accountant proxy
-    RoycoDayAccountant internal accountant;
+    RoycoDayFloatingRateAccountant internal accountant;
 
     /// @notice The kernel proxy
     RoycoDayBalancerV3Kernel internal kernel;
@@ -304,7 +305,7 @@ abstract contract DayMarketTestBase is Assertions {
         stBeacon = new UpgradeableBeacon(address(new RoycoSeniorTranche()), address(accessManager));
         jtBeacon = new UpgradeableBeacon(address(new RoycoJuniorTranche()), address(accessManager));
         lptBeacon = new UpgradeableBeacon(address(new RoycoLiquidityProviderTranche()), address(accessManager));
-        accountantBeacon = new UpgradeableBeacon(address(new RoycoDayAccountant()), address(accessManager));
+        accountantBeacon = new UpgradeableBeacon(address(new RoycoDayFloatingRateAccountant()), address(accessManager));
 
         // 8. Tranche and accountant proxies MUST exist before the kernel (its initialize calls tranche.asset())
         seniorTranche =
@@ -318,11 +319,11 @@ abstract contract DayMarketTestBase is Assertions {
         vm.label(address(juniorTranche), "JT");
         vm.label(address(liquidityProviderTranche), "LPT");
 
-        accountant = RoycoDayAccountant(
+        accountant = RoycoDayFloatingRateAccountant(
             address(
                 new BeaconProxy(
                     address(accountantBeacon),
-                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(_params, predictedKernel, jtYdmInitData, lptYdmInitData)))
+                    abi.encodeCall(RoycoDayFloatingRateAccountant.initialize, (_buildAccountantInitParams(_params, predictedKernel, jtYdmInitData, lptYdmInitData)))
                 )
             )
         );
@@ -512,7 +513,7 @@ abstract contract DayMarketTestBase is Assertions {
      * @notice Seeds the ST and JT tranches through the production deposit paths
      * @dev Deposits JT first: senior deposits are coverage-gated on existing junior NAV, so a JT-less market
      *      rejects ST deposits. Amounts are denominated in shared vault-share tranche units
-     * @dev PRODUCTION CONSTRAINT: ST deposits are ALSO liquidity-gated (RoycoDayAccountant.sol:332-334), and a
+     * @dev PRODUCTION CONSTRAINT: ST deposits are ALSO liquidity-gated (RoycoDayFloatingRateAccountant.sol:332-334), and a
      *      market with positive minLiquidity and zero LPT depth reads liquidityUtilization as type(uint256).max
      *      (UtilizationLogic.sol:72), so no ST deposit can ever land first. When needed, this helper auto-seeds
      *      the minimal quote-only LPT depth that satisfies the requirement before the ST deposit. Tests that need
@@ -752,27 +753,29 @@ abstract contract DayMarketTestBase is Assertions {
     )
         internal
         view
-        returns (IRoycoDayAccountant.RoycoDayAccountantInitParams memory)
+        returns (IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory)
     {
-        return IRoycoDayAccountant.RoycoDayAccountantInitParams({
-            kernel: _kernel,
-            initialAuthority: address(accessManager),
-            fixedTermGracePeriodSeconds: _params.fixedTermGracePeriodSeconds,
-            minCoverageWAD: _params.minCoverageWAD,
-            coverageLiquidationUtilizationWAD: _params.coverageLiquidationUtilizationWAD,
-            minLiquidityWAD: _params.minLiquidityWAD,
+        return IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams({
+            standardParams: IRoycoDayAccountant.RoycoDayAccountantInitParams({
+                kernel: _kernel,
+                initialAuthority: address(accessManager),
+                fixedTermGracePeriodSeconds: _params.fixedTermGracePeriodSeconds,
+                minCoverageWAD: _params.minCoverageWAD,
+                coverageLiquidationUtilizationWAD: _params.coverageLiquidationUtilizationWAD,
+                minLiquidityWAD: _params.minLiquidityWAD,
+                fixedTermDurationSeconds: _params.fixedTermDurationSeconds,
+                dustTolerance: toNAVUnits(_params.dustTolerance),
+                stProtocolFeeWAD: _params.stProtocolFeeWAD,
+                jtProtocolFeeWAD: _params.jtProtocolFeeWAD,
+                jtYieldShareProtocolFeeWAD: _params.jtYieldShareProtocolFeeWAD,
+                lptYieldShareProtocolFeeWAD: _params.lptYieldShareProtocolFeeWAD
+            }),
             jtYDM: address(jtYdm),
             jtYDMInitializationData: _jtYdmInitData,
             lptYDM: address(lptYdm),
             lptYDMInitializationData: _lptYdmInitData,
             maxJTYieldShareWAD: _params.maxJTYieldShareWAD,
-            maxLPTYieldShareWAD: _params.maxLPTYieldShareWAD,
-            fixedTermDurationSeconds: _params.fixedTermDurationSeconds,
-            dustTolerance: toNAVUnits(_params.dustTolerance),
-            stProtocolFeeWAD: _params.stProtocolFeeWAD,
-            jtProtocolFeeWAD: _params.jtProtocolFeeWAD,
-            jtYieldShareProtocolFeeWAD: _params.jtYieldShareProtocolFeeWAD,
-            lptYieldShareProtocolFeeWAD: _params.lptYieldShareProtocolFeeWAD
+            maxLPTYieldShareWAD: _params.maxLPTYieldShareWAD
         });
     }
 
@@ -819,12 +822,12 @@ abstract contract DayMarketTestBase is Assertions {
         accessManager.setTargetFunctionRole(
             a,
             _sels7(
-                IRoycoDayAccountant.setJuniorTrancheYDM.selector,
-                IRoycoDayAccountant.setLiquidityProviderTrancheYDM.selector,
+                IRoycoDayFloatingRateAccountant.setJuniorTrancheYDM.selector,
+                IRoycoDayFloatingRateAccountant.setLiquidityProviderTrancheYDM.selector,
                 IRoycoDayAccountant.setMinCoverage.selector,
                 IRoycoDayAccountant.setLiquidationCoverageUtilization.selector,
                 IRoycoDayAccountant.setMinLiquidity.selector,
-                IRoycoDayAccountant.setMaxYieldShares.selector,
+                IRoycoDayFloatingRateAccountant.setMaxYieldShares.selector,
                 IRoycoDayAccountant.setFixedTermDuration.selector
             ),
             ADMIN_ACCOUNTANT_ROLE

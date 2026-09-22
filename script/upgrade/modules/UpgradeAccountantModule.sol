@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { RoycoDayFloatingRateAccountant } from "../../../src/accountant/RoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT } from "../../../src/libraries/Units.sol";
 
@@ -11,7 +12,7 @@ import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
 
 /**
  * @title UpgradeAccountantModule
- * @notice Module for upgrading `RoycoDayAccountant` proxies.
+ * @notice Module for upgrading `RoycoDayFloatingRateAccountant` proxies.
  *
  * @dev Payload schema (ABI-encoded by the orchestrator):
  *        abi.encode(string marketName)
@@ -44,19 +45,19 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
         MarketAddresses memory addrs = getMarketAddresses(_chainId, marketName);
         address proxy = addrs.accountant;
 
-        IRoycoDayAccountant a = IRoycoDayAccountant(proxy);
+        IRoycoDayFloatingRateAccountant a = IRoycoDayFloatingRateAccountant(proxy);
         address kernel = a.getState().kernel;
         require(kernel != address(0), UpgradeAccountantModule__NotAnAccountantProxy(proxy));
 
         // Strong type check: call an accountant-specific view. Reverts if the proxy is not actually
-        // a `RoycoDayAccountant` (e.g. if an address was mis-entered in `UpgradeConfig`).
+        // a `RoycoDayFloatingRateAccountant` (e.g. if an address was mis-entered in `UpgradeConfig`).
         IRoycoDayKernel k = IRoycoDayKernel(kernel);
         a.previewSyncTrancheAccounting(k.convertCollateralAssetsToValue(k.getState().totalCollateralAssets));
 
         address beacon = getComponentBeacons(_chainId).accountant;
         address oldImpl = _readBeaconImplementation(beacon);
 
-        bytes memory creationCode = type(RoycoDayAccountant).creationCode;
+        bytes memory creationCode = type(RoycoDayFloatingRateAccountant).creationCode;
         bytes32 salt = keccak256(abi.encodePacked("ROYCO_ACCOUNTANT_IMPLEMENTATION_", _saltVersion));
 
         address newImpl = _predictImpl(salt, creationCode);
@@ -82,7 +83,7 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
 
     /// @inheritdoc UpgradeModuleBase
     function snapshotState(address _proxy) external view override returns (bytes memory) {
-        IRoycoDayAccountant a = IRoycoDayAccountant(_proxy);
+        IRoycoDayFloatingRateAccountant a = IRoycoDayFloatingRateAccountant(_proxy);
         IRoycoDayKernel kernel = IRoycoDayKernel(a.getState().kernel);
 
         NAV_UNIT collateralNAV = kernel.convertCollateralAssetsToValue(kernel.getState().totalCollateralAssets);
@@ -99,7 +100,7 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
         (address preKernel, IRoycoDayAccountant.RoycoDayAccountantState memory preState, SyncedAccountingState memory preSync, NAV_UNIT preCollateralNAV) =
             abi.decode(_preStateSnapshot, (address, IRoycoDayAccountant.RoycoDayAccountantState, SyncedAccountingState, NAV_UNIT));
 
-        IRoycoDayAccountant a = IRoycoDayAccountant(_proxy);
+        IRoycoDayFloatingRateAccountant a = IRoycoDayFloatingRateAccountant(_proxy);
         require(a.getState().kernel == preKernel, UpgradeAccountantModule__KernelImmutableChanged(preKernel, a.getState().kernel));
 
         _assertStateEqual(a.getState(), preState);

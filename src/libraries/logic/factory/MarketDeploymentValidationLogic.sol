@@ -4,10 +4,12 @@ pragma solidity ^0.8.28;
 import { IVault } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
 import { IAccessManaged } from "../../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { RoycoDayFloatingRateAccountant } from "../../../accountant/RoycoDayFloatingRateAccountant.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
-import { IRoycoDayAccountant } from "../../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
+import { IRoycoDayAccountant } from "../../../interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IBaseTemplate } from "../../../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtocolTemplate.sol";
 import { WAD } from "../../Constants.sol";
@@ -189,7 +191,7 @@ library MarketDeploymentValidationLogic {
 
     /**
      * @notice Validates the accountant's economic configuration
-     * @dev Mirrors the bounds `RoycoDayAccountant.initialize` enforces, applied before the market's first proxy exists
+     * @dev Mirrors the bounds `RoycoDayFloatingRateAccountant.initialize` enforces, applied before the market's first proxy exists
      * @param _params The accountant's deployer-supplied params
      */
     function _validateAccountantParams(IBaseTemplate.AccountantDeploymentParams memory _params) private pure {
@@ -285,9 +287,11 @@ library MarketDeploymentValidationLogic {
         require(_vault.getHooksConfig(_pool).hooksContract == address(0), MARKET_WIRING_VERIFICATION_FAILED(_pool));
 
         // Accountant: kernel binding and the injected JT YDM / LPT LDM instances
-        IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = IRoycoDayAccountant(_result.accountant).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = IRoycoDayFloatingRateAccountant(_result.accountant).getState();
         require(accountantState.kernel == _result.kernel, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
-        require(accountantState.jtYDM == _result.ydm && accountantState.lptYDM == _result.lptYdm, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory floatingRateState =
+            RoycoDayFloatingRateAccountant(_result.accountant).getRoycoDayFloatingRateAccountantState();
+        require(floatingRateState.jtYDM == _result.ydm && floatingRateState.lptYDM == _result.lptYdm, MARKET_WIRING_VERIFICATION_FAILED(_result.accountant));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

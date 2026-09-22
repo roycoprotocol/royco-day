@@ -228,7 +228,7 @@ library RoycoTestMath {
 
     /**
      * @notice Gain attribution: attributed = ⌊gain · claim / lastCollateralNAV⌋.
-     * @dev Mirrors the pro-rata split inlined in src RoycoDayAccountant's STEP_ATTRIBUTE_RESIDUAL_GAIN.
+     * @dev Mirrors the pro-rata split inlined in src RoycoDayFloatingRateAccountant's STEP_ATTRIBUTE_RESIDUAL_GAIN.
      *      Only gains are ever attributed: the waterfall absorbs a loss junior-first, so a loss never splits.
      *      Rounding: Floor. Favors: the complementary tranche (JT is the residual and absorbs the flooring drift of the split).
      *      Edge: returns 0 if gain == 0, claim == 0, or lastCollateralNAV == 0. The empty-checkpoint seniority

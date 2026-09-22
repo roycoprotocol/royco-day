@@ -36,7 +36,8 @@ import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/Base
 import { TAG_ST_PROXY } from "../../../src/factory/templates/base/Constants.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoAccessManager } from "../../../src/interfaces/factory/IRoycoAccessManager.sol";
@@ -1176,7 +1177,7 @@ contract Test_RoycoFactory is Test {
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(MARKET_ID_A);
 
         (uint64 st, uint64 jt, uint64 jtYield, uint64 lptYield) = template.protocolFeeConfig();
-        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayFloatingRateAccountant(r.accountant).getState();
         assertEq(a.stProtocolFeeWAD, st, "senior fee must come from the template");
         assertEq(a.jtProtocolFeeWAD, jt, "junior fee must come from the template");
         assertEq(a.jtYieldShareProtocolFeeWAD, jtYield, "junior yield-share fee must come from the template");
@@ -1193,15 +1194,15 @@ contract Test_RoycoFactory is Test {
     function test_SetProtocolFeeConfig_BindsFutureMarketsOnly() external {
         _register();
         IRoycoProtocolTemplate.DeploymentResult memory first = _deploy(MARKET_ID_A);
-        uint64 originalFee = IRoycoDayAccountant(first.accountant).getState().stProtocolFeeWAD;
+        uint64 originalFee = IRoycoDayFloatingRateAccountant(first.accountant).getState().stProtocolFeeWAD;
 
         vm.prank(FACTORY_ADMIN);
         template.setProtocolFeeConfig(_feeConfig(0.42e18));
 
         IRoycoProtocolTemplate.DeploymentResult memory second = _deploy(MARKET_ID_B);
 
-        assertEq(IRoycoDayAccountant(first.accountant).getState().stProtocolFeeWAD, originalFee, "the live market must be untouched");
-        assertEq(IRoycoDayAccountant(second.accountant).getState().stProtocolFeeWAD, 0.42e18, "the new market must take the new fee");
+        assertEq(IRoycoDayFloatingRateAccountant(first.accountant).getState().stProtocolFeeWAD, originalFee, "the live market must be untouched");
+        assertEq(IRoycoDayFloatingRateAccountant(second.accountant).getState().stProtocolFeeWAD, 0.42e18, "the new market must take the new fee");
     }
 
     /// Each configuration setter is admin-only: a market deployer needs no role at all, never the config surface

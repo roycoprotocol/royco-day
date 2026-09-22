@@ -15,7 +15,8 @@ import { RoycoFactoryGatekeeper } from "../../../src/factory/RoycoFactoryGatekee
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE } from "../../../src/factory/Roles.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
@@ -183,14 +184,15 @@ contract Test_SrRoyUsdcMarketDeployment is Test {
         DayMarketConfig memory cfg = registry.getDayMarketConfig("srRoyUSDC");
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
 
-        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayFloatingRateAccountant(r.accountant).getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = IRoycoDayFloatingRateAccountant(r.accountant).getRoycoDayFloatingRateAccountantState();
         assertEq(a.minLiquidityWAD, cfg.accountant.minLiquidityWAD, "minLiquidityWAD");
-        assertEq(a.maxJTYieldShareWAD, cfg.accountant.maxJTYieldShareWAD, "maxJTYieldShareWAD");
-        assertEq(a.maxLPTYieldShareWAD, cfg.accountant.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
-        assertLe(uint256(a.maxJTYieldShareWAD) + a.maxLPTYieldShareWAD, 1e18, "caps must sum within the senior gain");
-        assertTrue(a.jtYDM != a.lptYDM, "JT and LPT must hold distinct model instances");
-        assertEq(a.jtYDM, r.ydm, "accountant JT model != registry instance");
-        assertEq(a.lptYDM, r.lptYdm, "accountant LPT model != registry instance");
+        assertEq(aFloating.maxJTYieldShareWAD, cfg.accountant.maxJTYieldShareWAD, "maxJTYieldShareWAD");
+        assertEq(aFloating.maxLPTYieldShareWAD, cfg.accountant.maxLPTYieldShareWAD, "maxLPTYieldShareWAD");
+        assertLe(uint256(aFloating.maxJTYieldShareWAD) + aFloating.maxLPTYieldShareWAD, 1e18, "caps must sum within the senior gain");
+        assertTrue(aFloating.jtYDM != aFloating.lptYDM, "JT and LPT must hold distinct model instances");
+        assertEq(aFloating.jtYDM, r.ydm, "accountant JT model != registry instance");
+        assertEq(aFloating.lptYDM, r.lptYdm, "accountant LPT model != registry instance");
     }
 
     /// @notice The 18-decimal frxUSD genesis seed lands: the pool opens with quote-only depth, the dead-share lock is

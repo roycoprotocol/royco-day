@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
@@ -49,9 +50,9 @@ contract Test_CoverageCrossClaimFindings_Accountant is AccountantTestBase {
     }
 
     /// @dev Default params with only the liquidation threshold raised (see the contract natspec for why)
-    function _findingsParams() internal pure returns (IRoycoDayAccountant.RoycoDayAccountantInitParams memory p) {
+    function _findingsParams() internal pure returns (IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p) {
         p = _defaultParams();
-        p.coverageLiquidationUtilizationWAD = FINDINGS_LIQUIDATION_UTILIZATION_WAD;
+        p.standardParams.coverageLiquidationUtilizationWAD = FINDINGS_LIQUIDATION_UTILIZATION_WAD;
     }
 
     /// @dev Pins deterministic instantaneous yield shares: jt 10%, lt 5% (all syncs run same-block, so the premium
@@ -156,7 +157,7 @@ contract Test_CoverageCrossClaimFindings_Accountant is AccountantTestBase {
      * accounting stays neutral, pinning that the closed form leak = 0 now holds across the whole ys range
      */
     function test_Finding1_FullYieldShare_RoundTripStillNeutral() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _findingsParams();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _findingsParams();
         p.maxJTYieldShareWAD = 1e18;
         p.maxLPTYieldShareWAD = 0;
         _deploy(p);

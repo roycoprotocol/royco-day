@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
@@ -38,8 +39,8 @@ contract Test_PremiumDustAndFixedTermEdges is AccountantTestBase {
      */
     function test_dustSizedGain_paysPremiumsWithZeroProtocolFee() public {
         // Deploy with a 1e12-wei dust tolerance so a sub-dust gain is easy to construct
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.dustTolerance = toNAVUnits(uint256(1e12));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.dustTolerance = toNAVUnits(uint256(1e12));
         _deploy(p);
 
         // Pin the instantaneous yield shares both YDMs report so the premium is a fixed constant

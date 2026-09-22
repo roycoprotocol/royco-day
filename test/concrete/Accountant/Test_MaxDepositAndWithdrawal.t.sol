@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { MAX_NAV_UNITS, WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -73,8 +74,8 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * liquidity leg = floor(100e18 / 0.05) - (900e18 + 10) = 1100e18 - 10 -> coverage binds at 900e18 - 10
      */
     function test_MaxSTDeposit_matchesRTM_withDustTolerance() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.dustTolerance = toNAVUnits(uint256(10));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.dustTolerance = toNAVUnits(uint256(10));
         _deploy(p);
         SyncedAccountingState memory st = _bareState(1100e18, 100e18, 900e18, 200e18, 0.1e18, 0.05e18);
         assertEq(toUint256(accountant.maxSTDeposit(st)), 900e18 - 10, "coverage leg minus the dust term binds");
@@ -92,8 +93,8 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * more wei violates the liquidity requirement
      */
     function test_MaxSTDeposit_LiquidityBindingWithDustSlackGateBoundary() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.dustTolerance = toNAVUnits(uint256(10));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.dustTolerance = toNAVUnits(uint256(10));
         _deploy(p);
         _seedSymmetric(1000e18, 300e18, 100e18);
 
@@ -243,8 +244,8 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * liquidityUtilization = WAD + 1 and violates
      */
     function test_MaxLPTWithdrawal_DustSlackGateBoundary() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.dustTolerance = toNAVUnits(uint256(3));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.dustTolerance = toNAVUnits(uint256(3));
         _deploy(p);
         _seedSymmetric(1000e18, 200e18, 100e18);
 
@@ -276,8 +277,8 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * Derivation: floor(200e18 * 1e18 / 0.1e18) = 2000e18, minus (1200e18 + 10) = 800e18 - 10
      */
     function test_MaxSTDeposit_coverageLegExactWithDustTolerance() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.dustTolerance = toNAVUnits(uint256(10));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.dustTolerance = toNAVUnits(uint256(10));
         _deploy(p);
         SyncedAccountingState memory st = _bareState(1200e18, 0, 1000e18, 200e18, 0.1e18, 0);
         assertEq(toUint256(accountant.maxSTDeposit(st)), 800e18 - 10, "coverage leg subtracts the whole collateral NAV and the dust");
@@ -357,8 +358,8 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * max + slack + 1 violates
      */
     function test_MaxSTDeposit_DustSlackExactGateBoundary() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.dustTolerance = toNAVUnits(uint256(10));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.dustTolerance = toNAVUnits(uint256(10));
         _deploy(p);
         _seedFlatWithLPT(1000e18);
         NAV_UNIT max = accountant.maxSTDeposit(_checkpointState());
@@ -394,8 +395,8 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * y = floor((80e18 - 1) * 1e18 / 0.9e18) = 88888888888888888887
      */
     function test_MaxJTWithdrawal_dustToleranceFoldsIntoTheSurplus() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.dustTolerance = toNAVUnits(uint256(10));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.dustTolerance = toNAVUnits(uint256(10));
         _deploy(p);
         SyncedAccountingState memory st = _bareState(1200e18, 0, 1000e18, 200e18, 0.1e18, 0);
         NAV_UNIT jtW = accountant.maxJTWithdrawal(st);
@@ -474,8 +475,8 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 50e18 - 1, "inner ceil rounds the required depth up");
         st.lptRawNAV = toNAVUnits(uint256(40e18));
         assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 0, "under-provisioned inventory saturates to zero");
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.dustTolerance = toNAVUnits(uint256(100));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.dustTolerance = toNAVUnits(uint256(100));
         _deploy(p);
         st.lptRawNAV = toNAVUnits(uint256(100e18));
         assertEq(toUint256(accountant.maxLPTWithdrawal(st)), 50e18 - 6, "dust tolerance shrinks the withdrawable depth");

@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../lib/forge-std/src/Test.sol";
-import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../utils/DayMarketTestBase.sol";
@@ -155,6 +156,7 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
     /// @notice Reads the full senior/junior trajectory from committed state and live balances
     function trajectory() external view returns (SeniorJuniorTrajectory memory t) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = accountant.getRoycoDayFloatingRateAccountantState();
         t.collateralNAV = toUint256(a.lastCollateralNAV);
         t.stEffectiveNAV = toUint256(a.lastSTEffectiveNAV);
         t.jtEffectiveNAV = toUint256(a.lastJTEffectiveNAV);
@@ -172,11 +174,12 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
     /// @notice Reads every trace the liquidity overlay could leave, all of which must stay zero in a zero minimum-liquidity market
     function overlayTrace() external view returns (LiquidityOverlayTrace memory o) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = accountant.getRoycoDayFloatingRateAccountantState();
         IRoycoDayKernel.RoycoDayKernelState memory k = kernel.getState();
         o.lptSupply = liquidityProviderTranche.totalSupply();
         o.lptOwnedSeniorTrancheShares = k.lptOwnedSeniorTrancheShares;
         o.kernelSeniorShareBalance = seniorTranche.balanceOf(address(kernel));
-        o.twLPTYieldShareAccrued = uint256(a.twLPTYieldShareAccruedWAD);
+        o.twLPTYieldShareAccrued = uint256(aFloating.twLPTYieldShareAccruedWAD);
         o.committedLPTRawNAV = toUint256(a.lastLPTRawNAV);
         o.liquidityUtilizationWAD = RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLPTRawNAV));
     }

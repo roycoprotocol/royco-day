@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { RoycoDayFloatingRateAccountant } from "../../../src/accountant/RoycoDayFloatingRateAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
@@ -97,7 +99,7 @@ contract SetYDM is ParameterUpdateBase {
                     updates[idx] = UpdateParams({
                         marketName: cfg.marketName,
                         target: addrs.accountant,
-                        callData: abi.encodeCall(IRoycoDayAccountant.setJuniorTrancheYDM, (cfg.ydm, ydmInitData)),
+                        callData: abi.encodeCall(IRoycoDayFloatingRateAccountant.setJuniorTrancheYDM, (cfg.ydm, ydmInitData)),
                         description: string.concat("Set YDM for ", cfg.marketName)
                     });
                     idx++;
@@ -124,7 +126,8 @@ contract SetYDM is ParameterUpdateBase {
         (uint64 expectedZeroUtilWAD, uint64 expectedTargetUtilWAD, uint64 expectedFullUtilWAD) = _decodeInitializeYDMForMarketCallData(initData);
 
         // Accountant must now point at the expected YDM
-        IRoycoDayAccountant.RoycoDayAccountantState memory state = IRoycoDayAccountant(_params.target).getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory state =
+            RoycoDayFloatingRateAccountant(_params.target).getRoycoDayFloatingRateAccountantState();
         require(state.jtYDM == expectedYDM, VerificationFailed("YDM address mismatch after execution"));
 
         // The YDM must have stored the new curve params for this accountant.

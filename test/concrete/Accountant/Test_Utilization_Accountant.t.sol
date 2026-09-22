@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { MarketState, Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits } from "../../../src/libraries/Units.sol";
@@ -29,9 +30,9 @@ contract Test_Utilization_Accountant is AccountantTestBase {
      * the deposit reads utilizations the kernel gate lets through
      */
     function test_Utilization_bothZeroWhenMinimumRequirementsZero() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.minCoverageWAD = 0;
-        p.minLiquidityWAD = 0;
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.minCoverageWAD = 0;
+        p.standardParams.minLiquidityWAD = 0;
         _deploy(p);
         SyncedAccountingState memory state = kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         assertEq(state.coverageUtilizationWAD, 0, "zero minimum coverage short-circuits before the empty-buffer max edge");
@@ -104,8 +105,8 @@ contract Test_Utilization_Accountant is AccountantTestBase {
      * over the zero-inventory max edge, so the senior deposit reads a liquidity utilization the kernel gate lets through
      */
     function test_Utilization_liquidityZeroWhenMinLiquidityZero() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.minLiquidityWAD = 0;
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.minLiquidityWAD = 0;
         _deploy(p);
         _seedFlatWithLPT(0);
         SyncedAccountingState memory state =

@@ -2,8 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
+import { IRoycoDayAccountant } from "../../interfaces/accountant/IRoycoDayAccountant.sol";
 import { Cache, CacheKey } from "../Cache.sol";
 import { WAD } from "../Constants.sol";
 import { AssetClaims, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";

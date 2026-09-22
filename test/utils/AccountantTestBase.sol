@@ -3,8 +3,9 @@ pragma solidity ^0.8.28;
 
 import { Test, Vm } from "../../lib/forge-std/src/Test.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol";
-import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
+import { RoycoDayFloatingRateAccountant } from "../../src/accountant/RoycoDayFloatingRateAccountant.sol";
+import { IRoycoDayAccountant } from "../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
 import { MarketState, Operation, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../src/libraries/Units.sol";
@@ -15,7 +16,7 @@ import { RoycoTestMath } from "./RoycoTestMath.sol";
 
 /**
  * @title AccountantTestBase
- * @notice Shared mock-kernel base for every RoycoDayAccountant test suite: the default init params, the
+ * @notice Shared mock-kernel base for every RoycoDayFloatingRateAccountant test suite: the default init params, the
  *         proxy deploy path, checkpoint seeding through legal kernel calls only, the regime seeds for the
  *         tranche accounting sync scenarios, and the committed-checkpoint marshallers for the max* views
  * @dev Checkpoints are always constructed through legal kernel calls (post-op deposits, pre-op syncs, LPT
@@ -41,8 +42,8 @@ abstract contract AccountantTestBase is Test {
     uint256 internal constant SEED_COVERAGE_UTILIZATION_WAD = 0.6e18;
     uint256 internal constant SEED_LIQUIDITY_UTILIZATION_WAD = 0.5e18;
 
-    RoycoDayAccountant internal accountant;
-    RoycoDayAccountant internal implementation;
+    RoycoDayFloatingRateAccountant internal accountant;
+    RoycoDayFloatingRateAccountant internal implementation;
     MockAccountantKernel internal kernel;
     MockRecordingYDM internal jtYDM;
     MockRecordingYDM internal lptYDM;
@@ -57,49 +58,49 @@ abstract contract AccountantTestBase is Test {
     //////////////////////////////////////////////////////////////////////*/
 
     /// @dev Default init params with null kernel and YDM slots that the deploy helpers fill in
-    function _defaultParams() internal pure returns (IRoycoDayAccountant.RoycoDayAccountantInitParams memory p) {
-        p.kernel = address(0);
-        p.initialAuthority = address(0);
-        p.fixedTermGracePeriodSeconds = 0;
-        p.minCoverageWAD = DEFAULT_MIN_COVERAGE_WAD;
-        p.coverageLiquidationUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
-        p.minLiquidityWAD = DEFAULT_MIN_LIQUIDITY_WAD;
+    function _defaultParams() internal pure returns (IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p) {
+        p.standardParams.kernel = address(0);
+        p.standardParams.initialAuthority = address(0);
+        p.standardParams.fixedTermGracePeriodSeconds = 0;
+        p.standardParams.minCoverageWAD = DEFAULT_MIN_COVERAGE_WAD;
+        p.standardParams.coverageLiquidationUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
+        p.standardParams.minLiquidityWAD = DEFAULT_MIN_LIQUIDITY_WAD;
         p.jtYDM = address(0);
         p.jtYDMInitializationData = "";
         p.lptYDM = address(0);
         p.lptYDMInitializationData = "";
         p.maxJTYieldShareWAD = DEFAULT_MAX_JT_YIELD_SHARE_WAD;
         p.maxLPTYieldShareWAD = DEFAULT_MAX_LPT_YIELD_SHARE_WAD;
-        p.fixedTermDurationSeconds = DEFAULT_FIXED_TERM_DURATION_SECONDS;
-        p.dustTolerance = ZERO_NAV_UNITS;
-        p.stProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
-        p.jtProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
-        p.jtYieldShareProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
-        p.lptYieldShareProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
+        p.standardParams.fixedTermDurationSeconds = DEFAULT_FIXED_TERM_DURATION_SECONDS;
+        p.standardParams.dustTolerance = ZERO_NAV_UNITS;
+        p.standardParams.stProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
+        p.standardParams.jtProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
+        p.standardParams.jtYieldShareProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
+        p.standardParams.lptYieldShareProtocolFeeWAD = DEFAULT_PROTOCOL_FEE_WAD;
     }
 
     /// @dev Default init params with two fresh mock YDMs and the suite's kernel pre-filled (for direct initialize tests)
-    function _paramsWithFreshYDMs() internal returns (IRoycoDayAccountant.RoycoDayAccountantInitParams memory p) {
+    function _paramsWithFreshYDMs() internal returns (IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p) {
         p = _defaultParams();
-        p.kernel = address(kernel);
+        p.standardParams.kernel = address(kernel);
         p.jtYDM = address(new MockRecordingYDM());
         p.lptYDM = address(new MockRecordingYDM());
     }
 
     /// @dev Deploys a fresh kernel, authority, implementation, and un-initialized ERC1967 proxy (RoycoBase disables initializers on the implementation)
-    function _deployUninitialized() internal returns (RoycoDayAccountant acct) {
+    function _deployUninitialized() internal returns (RoycoDayFloatingRateAccountant acct) {
         return _deployUninitializedWithGrace(0);
     }
 
     /// @dev As _deployUninitialized, but records a nonzero fixed-term grace period so the young-market lock-out is
     ///      exercisable. The grace period is now an initialization parameter rather than an implementation immutable,
     ///      so it is applied when the proxy is initialized, and the anchor is the initializing block's timestamp
-    function _deployUninitializedWithGrace(uint24 _fixedTermGracePeriodSeconds) internal returns (RoycoDayAccountant acct) {
+    function _deployUninitializedWithGrace(uint24 _fixedTermGracePeriodSeconds) internal returns (RoycoDayFloatingRateAccountant acct) {
         kernel = new MockAccountantKernel();
         authority = new AccessManager(address(this));
-        implementation = new RoycoDayAccountant();
+        implementation = new RoycoDayFloatingRateAccountant();
         fixedTermGracePeriodSeconds = _fixedTermGracePeriodSeconds;
-        acct = RoycoDayAccountant(address(new UninitializedERC1967Proxy(address(implementation))));
+        acct = RoycoDayFloatingRateAccountant(address(new UninitializedERC1967Proxy(address(implementation))));
         kernel.setAccountant(address(acct));
     }
 
@@ -107,17 +108,17 @@ abstract contract AccountantTestBase is Test {
      * @dev Full deployment helper used by every test: proxy, initialize, and mock wiring
      * @dev Null YDM slots in the params are filled with fresh MockRecordingYDM instances, otherwise the passed addresses are adopted as the suite's mocks
      */
-    function _deploy(IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params) internal returns (RoycoDayAccountant acct) {
+    function _deploy(IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory _params) internal returns (RoycoDayFloatingRateAccountant acct) {
         return _deployWithGrace(_params, 0);
     }
 
     /// @dev As _deploy, but with a nonzero fixed-term grace period baked into the implementation
     function _deployWithGrace(
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params,
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory _params,
         uint24 _fixedTermGracePeriodSeconds
     )
         internal
-        returns (RoycoDayAccountant acct)
+        returns (RoycoDayFloatingRateAccountant acct)
     {
         acct = _deployUninitializedWithGrace(_fixedTermGracePeriodSeconds);
         if (_params.jtYDM == address(0)) _params.jtYDM = address(new MockRecordingYDM());
@@ -125,9 +126,9 @@ abstract contract AccountantTestBase is Test {
         jtYDM = MockRecordingYDM(_params.jtYDM);
         lptYDM = MockRecordingYDM(_params.lptYDM);
         // The kernel and the grace period are initialization parameters now, not implementation immutables
-        _params.kernel = address(kernel);
-        _params.initialAuthority = address(authority);
-        _params.fixedTermGracePeriodSeconds = _fixedTermGracePeriodSeconds;
+        _params.standardParams.kernel = address(kernel);
+        _params.standardParams.initialAuthority = address(authority);
+        _params.standardParams.fixedTermGracePeriodSeconds = _fixedTermGracePeriodSeconds;
         acct.initialize(_params);
         accountant = acct;
     }
@@ -190,7 +191,7 @@ abstract contract AccountantTestBase is Test {
         calls[4] = abi.encodeCall(IRoycoDayAccountant.setMinCoverage, (uint64(0.3e18)));
         calls[5] = abi.encodeCall(IRoycoDayAccountant.setLiquidationCoverageUtilization, (uint256(1.5e18)));
         calls[6] = abi.encodeCall(IRoycoDayAccountant.setMinLiquidity, (uint64(0.06e18)));
-        calls[7] = abi.encodeCall(IRoycoDayAccountant.setMaxYieldShares, (uint64(0.3e18), uint64(0.2e18)));
+        calls[7] = abi.encodeCall(IRoycoDayFloatingRateAccountant.setMaxYieldShares, (uint64(0.3e18), uint64(0.2e18)));
         calls[8] = abi.encodeCall(IRoycoDayAccountant.setFixedTermDuration, (uint24(1_209_600)));
         calls[9] = abi.encodeCall(IRoycoDayAccountant.setDustTolerance, (toNAVUnits(uint256(5))));
     }
@@ -232,11 +233,11 @@ abstract contract AccountantTestBase is Test {
      * Staging (all in this block): deploy with dust 7, flat seed, loss sync of 12 (> dust 7) enters FIXED_TERM
      * (the junior buffer absorbs the whole 12 wei loss, il 12, stEffectiveNAV unchanged), landing il just above
      * the dust tolerance: a FIXED_TERM checkpoint carrying il <= dust is unrepresentable because the dust
-     * disjunct erases it at commit (RoycoDayAccountant)
+     * disjunct erases it at commit (RoycoDayFloatingRateAccountant)
      */
     function _seedDustILFixedTerm() internal {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.dustTolerance = toNAVUnits(uint256(7));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.dustTolerance = toNAVUnits(uint256(7));
         _deploy(p);
         _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
         kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF - 12));

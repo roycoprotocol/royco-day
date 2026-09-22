@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { Operation, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT } from "../../src/libraries/Units.sol";
 
@@ -16,7 +17,7 @@ contract MockAccountantKernel {
 
     error KERNEL_SYNC_REVERTED();
 
-    IRoycoDayAccountant public accountant;
+    IRoycoDayFloatingRateAccountant public accountant;
     SyncMode public syncMode;
     uint256 public syncCallCount;
     NAV_UNIT public syncCollateralNAV;
@@ -26,7 +27,7 @@ contract MockAccountantKernel {
     bytes32[] public stateHashAtSync;
 
     function setAccountant(address _accountant) external {
-        accountant = IRoycoDayAccountant(_accountant);
+        accountant = IRoycoDayFloatingRateAccountant(_accountant);
     }
 
     function setSyncMode(SyncMode _mode) external {

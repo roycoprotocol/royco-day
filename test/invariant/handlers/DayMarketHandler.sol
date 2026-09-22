@@ -7,7 +7,8 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { JT_LP_ROLE, LPT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { MarketState } from "../../../src/libraries/Types.sol";
@@ -1360,6 +1361,7 @@ contract DayMarketHandler is DayMarketTestBase {
      */
     function _syncAndVerify(string memory _label) internal returns (Snap memory s) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory a0Floating = accountant.getRoycoDayFloatingRateAccountantState();
         IRoycoDayKernel.RoycoDayKernelState memory k0 = kernel.getState();
         SyncCtx memory c;
         c.stSupply0 = seniorTranche.totalSupply();
@@ -1372,13 +1374,13 @@ contract DayMarketHandler is DayMarketTestBase {
             >= a0.coverageLiquidationUtilizationWAD;
 
         // Recompute the premium accrual window exactly as the accountant will, off the pinned model
-        if (a0.lastYieldShareAccrualTimestamp == 0) {
+        if (a0Floating.lastYieldShareAccrualTimestamp == 0) {
             c.firstAccrual = true;
         } else {
-            uint256 elapsedAcc = block.timestamp - uint256(a0.lastYieldShareAccrualTimestamp);
-            c.twJT = uint256(a0.twJTYieldShareAccruedWAD) + Math.min(JT_PINNED_SHARE_WAD, a0.maxJTYieldShareWAD) * elapsedAcc;
-            c.twLPT = uint256(a0.twLPTYieldShareAccruedWAD) + Math.min(LPT_PINNED_SHARE_WAD, a0.maxLPTYieldShareWAD) * elapsedAcc;
-            c.elapsedPrem = block.timestamp - uint256(a0.lastPremiumPaymentTimestamp);
+            uint256 elapsedAcc = block.timestamp - uint256(a0Floating.lastYieldShareAccrualTimestamp);
+            c.twJT = uint256(a0Floating.twJTYieldShareAccruedWAD) + Math.min(JT_PINNED_SHARE_WAD, a0Floating.maxJTYieldShareWAD) * elapsedAcc;
+            c.twLPT = uint256(a0Floating.twLPTYieldShareAccruedWAD) + Math.min(LPT_PINNED_SHARE_WAD, a0Floating.maxLPTYieldShareWAD) * elapsedAcc;
+            c.elapsedPrem = block.timestamp - uint256(a0Floating.lastPremiumPaymentTimestamp);
         }
 
         // The sync itself: it must always succeed while the oracle is healthy
@@ -1410,8 +1412,8 @@ contract DayMarketHandler is DayMarketTestBase {
             elapsedSincePremiumPayment: c.elapsedPrem,
             jtInstYieldShareWAD: JT_PINNED_SHARE_WAD,
             lptInstYieldShareWAD: LPT_PINNED_SHARE_WAD,
-            maxJTYieldShareWAD: a0.maxJTYieldShareWAD,
-            maxLPTYieldShareWAD: a0.maxLPTYieldShareWAD,
+            maxJTYieldShareWAD: a0Floating.maxJTYieldShareWAD,
+            maxLPTYieldShareWAD: a0Floating.maxLPTYieldShareWAD,
             stProtocolFeeWAD: a0.stProtocolFeeWAD,
             jtProtocolFeeWAD: a0.jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: a0.jtYieldShareProtocolFeeWAD,
@@ -1430,12 +1432,21 @@ contract DayMarketHandler is DayMarketTestBase {
             _flag(false, string.concat(_label, ": independent tranche accounting sync recomputation reverted (conservation or premium bound broke)"));
         }
 
-        s = _verifyPostSync(_label, a0, c);
+        s = _verifyPostSync(_label, a0, a0Floating, c);
     }
 
     /// @dev The post-sync half of the verification, split out to bound stack usage
-    function _verifyPostSync(string memory _label, IRoycoDayAccountant.RoycoDayAccountantState memory a0, SyncCtx memory c) internal returns (Snap memory s) {
+    function _verifyPostSync(
+        string memory _label,
+        IRoycoDayAccountant.RoycoDayAccountantState memory a0,
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory a0Floating,
+        SyncCtx memory c
+    )
+        internal
+        returns (Snap memory s)
+    {
         IRoycoDayAccountant.RoycoDayAccountantState memory a1 = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory a1Floating = accountant.getRoycoDayFloatingRateAccountantState();
         IRoycoDayKernel.RoycoDayKernelState memory k1 = kernel.getState();
 
         // The committed collateral mark must echo the fresh quote, and it must equal effective in total
@@ -1512,18 +1523,18 @@ contract DayMarketHandler is DayMarketTestBase {
             // Premium accrual window: reset exactly when premiums pay, otherwise grow by the pinned model
             if (c.firstAccrual || c.w.premiumsPaid) {
                 _flag(
-                    a1.twJTYieldShareAccruedWAD == 0 && a1.twLPTYieldShareAccruedWAD == 0 && uint256(a1.lastPremiumPaymentTimestamp) == block.timestamp,
+                    a1Floating.twJTYieldShareAccruedWAD == 0 && a1Floating.twLPTYieldShareAccruedWAD == 0 && uint256(a1Floating.lastPremiumPaymentTimestamp) == block.timestamp,
                     string.concat(_label, ": premium accumulators failed to reset on a premium payment")
                 );
-                ghost_windowMaxJTShareWAD = a1.maxJTYieldShareWAD;
-                ghost_windowMaxLPTShareWAD = a1.maxLPTYieldShareWAD;
+                ghost_windowMaxJTShareWAD = a1Floating.maxJTYieldShareWAD;
+                ghost_windowMaxLPTShareWAD = a1Floating.maxLPTYieldShareWAD;
             } else {
                 _flag(
-                    uint256(a1.twJTYieldShareAccruedWAD) == c.twJT && uint256(a1.twLPTYieldShareAccruedWAD) == c.twLPT,
+                    uint256(a1Floating.twJTYieldShareAccruedWAD) == c.twJT && uint256(a1Floating.twLPTYieldShareAccruedWAD) == c.twLPT,
                     string.concat(_label, ": accrued premium weight diverges from the pinned model accrual")
                 );
                 _flag(
-                    a1.lastPremiumPaymentTimestamp == a0.lastPremiumPaymentTimestamp,
+                    a1Floating.lastPremiumPaymentTimestamp == a0Floating.lastPremiumPaymentTimestamp,
                     string.concat(_label, ": premium payment timestamp moved without a payment")
                 );
             }
@@ -1537,7 +1548,7 @@ contract DayMarketHandler is DayMarketTestBase {
                 _flag(c.w.lptLiquidityPremium == 0 && premiumShares == 0, string.concat(_label, ": zero-liquidity market accrued a liquidity premium"));
             }
         }
-        _flag(uint256(a1.lastYieldShareAccrualTimestamp) == block.timestamp, string.concat(_label, ": accrual timestamp failed to advance to this block"));
+        _flag(uint256(a1Floating.lastYieldShareAccrualTimestamp) == block.timestamp, string.concat(_label, ": accrual timestamp failed to advance to this block"));
 
         // Staged-premium conservation: the ledger moves only by the mint and the measured pool deployment
         uint256 deployed = seniorTranche.balanceOf(address(balancerVault)) - c.poolSenior0;

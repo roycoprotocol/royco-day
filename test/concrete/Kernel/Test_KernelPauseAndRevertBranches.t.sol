@@ -5,7 +5,8 @@ import { stdError } from "../../../lib/forge-std/src/Test.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { LPT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
@@ -272,7 +273,7 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
     /// @dev A sum within uint64 but above WAD is rejected with the intended named error.
     function test_MaxYieldShareSum_aboveWAD_revertsNamedError() public {
         vm.prank(ACCOUNTANT_ADMIN);
-        vm.expectRevert(IRoycoDayAccountant.INVALID_MAX_YIELD_SHARE_CONFIG.selector);
+        vm.expectRevert(IRoycoDayFloatingRateAccountant.INVALID_MAX_YIELD_SHARE_CONFIG.selector);
         accountant.setMaxYieldShares(0.6e18, 0.4e18 + 1);
     }
 

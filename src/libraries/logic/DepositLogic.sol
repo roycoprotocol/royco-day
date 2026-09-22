@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
+import { IRoycoDayAccountant } from "../../interfaces/accountant/IRoycoDayAccountant.sol";
 import { Cache, CacheKey } from "../Cache.sol";
 import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { AssetClaims, DispatchMode, MarketState, SyncedAccountingState, TrancheType, toDepositOperation } from "../Types.sol";
