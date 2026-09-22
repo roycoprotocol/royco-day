@@ -144,6 +144,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
         emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(toNAVUnits(uint256(50e18)));
         kernel.doPreOp(toNAVUnits(uint256(1150e18)));
         s = accountant.getState();
+        sFloating = accountant.getRoycoDayFloatingRateAccountantState();
         assertEq(uint8(s.lastMarketState), uint8(MarketState.PERPETUAL), "sync respects permanently-perpetual");
         assertEq(toUint256(s.lastJTImpermanentLoss), 0, "il erased on sync");
         assertEq(toUint256(s.lastJTEffectiveNAV), 150e18, "coverage still applied to jt");
@@ -274,6 +275,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
         // but 110e18 <= 1e45 reads as dust so the market never leaves PERPETUAL despite the real loss, and the
         // biconditional PERPETUAL <=> il == 0 holds because the commit erased the drawdown outright
         s = accountant.getState();
+        sFloating = accountant.getRoycoDayFloatingRateAccountantState();
         assertEq(uint8(s.lastMarketState), uint8(MarketState.PERPETUAL), "fixed-term observation period never engages");
         assertEq(toUint256(s.lastJTImpermanentLoss), 0, "perpetual checkpoint carries no il (biconditional invariant)");
     }
@@ -402,6 +404,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
         assertEq(toUint256(state.lptProtocolFee), 833_333_333_333_333_333, "lt fee on the earned premium");
         assertEq(toUint256(state.stProtocolFee), 5_833_333_333_333_333_333, "st fee on the retained residual");
         s = accountant.getState();
+        sFloating = accountant.getRoycoDayFloatingRateAccountantState();
         assertEq(uint256(sFloating.twJTYieldShareAccruedWAD), 0, "window consumed by the payment");
         assertEq(uint256(sFloating.twLPTYieldShareAccruedWAD), 0, "lt window consumed by the payment");
     }

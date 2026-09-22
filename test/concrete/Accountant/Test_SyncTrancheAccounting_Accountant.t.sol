@@ -1835,6 +1835,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         assertEq(toUint256(state.lptLiquidityPremium), 3, "compounded window lt premium");
         assertEq(toUint256(state.stProtocolFee), 6, "st fee taken one wei above dust");
         s = accountant.getState();
+        sFloating = accountant.getRoycoDayFloatingRateAccountantState();
         assertEq(sFloating.twJTYieldShareAccruedWAD, 0, "jt accumulator reset once premiums are paid");
         assertEq(sFloating.twLPTYieldShareAccruedWAD, 0, "lt accumulator reset once premiums are paid");
         // The expected clock is derived from windowStart rather than read from block.timestamp: an identical

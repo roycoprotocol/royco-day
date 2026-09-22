@@ -274,7 +274,8 @@ contract Test_Initialization_Accountant is AccountantTestBase {
     }
 
     /**
-     * initialize emits the accountant's 14 configuration events with exact args in slot-grouped order
+     * initialize emits the accountant's 13 configuration events with exact args in slot-grouped order, the
+     * shared base events first and the floating rate events after
      * NOTE: the other observable logs are OZ's AuthorityUpdated and Initialized, which are not accountant
      * configuration events
      */
@@ -293,21 +294,21 @@ contract Test_Initialization_Accountant is AccountantTestBase {
         vm.expectEmit(true, true, true, true, address(acct));
         emit IRoycoDayAccountant.MinCoverageUpdated(p.standardParams.minCoverageWAD);
         vm.expectEmit(true, true, true, true, address(acct));
-        emit IRoycoDayAccountant.FixedTermDurationUpdated(p.standardParams.fixedTermDurationSeconds);
-        vm.expectEmit(true, true, true, true, address(acct));
-        emit IRoycoDayFloatingRateAccountant.JuniorTrancheYDMUpdated(p.jtYDM);
-        vm.expectEmit(true, true, true, true, address(acct));
-        emit IRoycoDayFloatingRateAccountant.LiquidityProviderTrancheYDMUpdated(p.lptYDM);
-        vm.expectEmit(true, true, true, true, address(acct));
         emit IRoycoDayAccountant.MinLiquidityUpdated(p.standardParams.minLiquidityWAD);
         vm.expectEmit(true, true, true, true, address(acct));
-        emit IRoycoDayFloatingRateAccountant.MaxYieldSharesUpdated(p.maxJTYieldShareWAD, p.maxLPTYieldShareWAD);
+        emit IRoycoDayAccountant.FixedTermDurationUpdated(p.standardParams.fixedTermDurationSeconds);
         vm.expectEmit(true, true, true, true, address(acct));
         emit IRoycoDayAccountant.FixedTermCommenceableAt(uint64(block.timestamp + p.standardParams.fixedTermGracePeriodSeconds));
         vm.expectEmit(true, true, true, true, address(acct));
         emit IRoycoDayAccountant.LiquidationCoverageUtilizationUpdated(p.standardParams.coverageLiquidationUtilizationWAD);
         vm.expectEmit(true, true, true, true, address(acct));
         emit IRoycoDayAccountant.DustToleranceUpdated(p.standardParams.dustTolerance);
+        vm.expectEmit(true, true, true, true, address(acct));
+        emit IRoycoDayFloatingRateAccountant.JuniorTrancheYDMUpdated(p.jtYDM);
+        vm.expectEmit(true, true, true, true, address(acct));
+        emit IRoycoDayFloatingRateAccountant.LiquidityProviderTrancheYDMUpdated(p.lptYDM);
+        vm.expectEmit(true, true, true, true, address(acct));
+        emit IRoycoDayFloatingRateAccountant.MaxYieldSharesUpdated(p.maxJTYieldShareWAD, p.maxLPTYieldShareWAD);
         p.standardParams.initialAuthority = address(authority);
         acct.initialize(p);
     }

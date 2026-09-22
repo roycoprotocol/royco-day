@@ -450,6 +450,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         assertEq(toUint256(second.lptLiquidityPremium), 1_653_846_153_846_153_846, "second lt premium priced instantaneously on gain2 alone");
         assertEq(toUint256(second.stEffectiveNAV), 1_154_384_615_384_615_384_615, "st retains its attributed gain net of the jt premium");
         s = accountant.getState();
+        sFloating = accountant.getRoycoDayFloatingRateAccountantState();
         assertEq(uint256(sFloating.twJTYieldShareAccruedWAD), 0, "jt window still empty, nothing replayed");
         assertEq(uint256(sFloating.twLPTYieldShareAccruedWAD), 0, "lt window still empty, nothing replayed");
         assertEq(uint256(sFloating.lastPremiumPaymentTimestamp), block.timestamp, "payment stamp unchanged in the same block");

@@ -176,9 +176,9 @@ abstract contract AccountantTestBase is Test {
         kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF));
     }
 
-    /// @dev Hash of the accountant's full persisted state for storage-mutation checks
+    /// @dev Hash of the accountant's full persisted state (the shared and floating rate structs) for storage-mutation checks
     function _stateHash() internal view returns (bytes32) {
-        return keccak256(abi.encode(accountant.getState()));
+        return keccak256(abi.encode(accountant.getState(), accountant.getRoycoDayFloatingRateAccountantState()));
     }
 
     /// @dev Calldata for the 10 hard-sync setters (restricted + withSyncedAccounting), each changing state vs the defaults

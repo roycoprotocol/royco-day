@@ -22,6 +22,7 @@ contract MockAccountantKernel {
     uint256 public syncCallCount;
     NAV_UNIT public syncCollateralNAV;
     IRoycoDayAccountant.RoycoDayAccountantState internal _stateAtLastSync;
+    IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState internal _floatingRateStateAtLastSync;
 
     /// @dev The accountant state hash observed at each sync, in call order, so a test can pin what the n-th sync saw
     bytes32[] public stateHashAtSync;
@@ -50,7 +51,8 @@ contract MockAccountantKernel {
         if (syncMode == SyncMode.REVERT) revert KERNEL_SYNC_REVERTED();
         syncCallCount++;
         _stateAtLastSync = accountant.getState();
-        stateHashAtSync.push(keccak256(abi.encode(_stateAtLastSync)));
+        _floatingRateStateAtLastSync = accountant.getRoycoDayFloatingRateAccountantState();
+        stateHashAtSync.push(keccak256(abi.encode(_stateAtLastSync, _floatingRateStateAtLastSync)));
         if (syncMode == SyncMode.SYNC) state = accountant.preOpSyncTrancheAccounting(syncCollateralNAV);
     }
 
