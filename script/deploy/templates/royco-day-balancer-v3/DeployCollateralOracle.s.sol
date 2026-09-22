@@ -6,12 +6,14 @@ import { ChainlinkPriceOracle } from "../../../../src/oracle/ChainlinkPriceOracl
 import { ERC4626SharePriceOracle } from "../../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../../../../src/oracle/IdleCDOTranchePriceOracle.sol";
 import { MakinaSharePriceOracle } from "../../../../src/oracle/MakinaSharePriceOracle.sol";
+import { StorkPriceOracle } from "../../../../src/oracle/StorkPriceOracle.sol";
 import {
     ChainlinkPriceOracleParams,
     ERC4626SharePriceOracleParams,
     IdleCDOTranchePriceOracleParams,
     MakinaSharePriceOracleParams,
-    OracleType
+    OracleType,
+    StorkPriceOracleParams
 } from "../../../config/DeploymentTypes.sol";
 import { DeployScriptBase } from "../../core/DeployScriptBase.sol";
 import { CollateralOracleConfig, DayMarketConfig } from "./DayMarketTypes.sol";
@@ -85,6 +87,17 @@ abstract contract CollateralOracleDeployer is DeployScriptBase {
                 p.lastUpdate,
                 p.chainlinkOracleStalenessThresholdSeconds,
                 p.cdoPriceStalenessThresholdSeconds
+            );
+        } else if (o.oracleType == OracleType.StorkPrice) {
+            StorkPriceOracleParams memory p = abi.decode(o.specificParams, (StorkPriceOracleParams));
+            creationCode = type(StorkPriceOracle).creationCode;
+            ctorArgs = abi.encode(
+                _config.collateralAsset,
+                p.stork,
+                p.collateralToReferenceId,
+                p.referenceToNavId,
+                p.collateralLegStalenessThresholdSeconds,
+                p.referenceLegStalenessThresholdSeconds
             );
         } else {
             revert UnsupportedOracleType(o.oracleType);

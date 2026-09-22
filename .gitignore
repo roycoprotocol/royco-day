@@ -23,6 +23,7 @@ broadcast
 
 # Deployment script output
 output/
+output_saved/
 
 # Claude output
 .claude
@@ -31,3 +32,4 @@ output/
 .DS_Store
 **/.DS_Store
 .vscode/
+

@@ -20,12 +20,9 @@ contract SetTemplateProtocolFeeConfig is ParameterUpdateBase {
     string internal constant OUTPUT_PREFIX = "set_template_fee_config";
     string internal constant BATCH_DESCRIPTION = "Set Day template junior + LP yield-share protocol fees to 5%";
 
-    /// @dev The registered Day template per chain (predicted from that chain's venue factories; simulation re-validates)
+    /// @dev The registered Day template per chain (_PROD_V1.0.2 — per-chain addresses, see `UpdateConfig.dayTemplate`)
     function _template(uint256 _chainId) internal pure returns (address) {
-        if (_chainId == MAINNET) return 0xa3207Ca8d318784d70E2f6DA14907C67dCF94599;
-        if (_chainId == ARBITRUM) return 0xe6B388dA98ac91D1A0a6C67156d12458cFF33443;
-        if (_chainId == BASE) return 0x04e98f2D19f23BDC8F68E535313880D8DB184A44;
-        revert("no Day template configured for this chain");
+        return dayTemplate(_chainId);
     }
 
     function run() external {
