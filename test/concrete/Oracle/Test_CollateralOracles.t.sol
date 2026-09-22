@@ -2,7 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
+import { IIdleCDO } from "../../../src/interfaces/external/idle-finance/IIdleCDO.sol";
 import { NAV_UNIT, toUint256 } from "../../../src/libraries/Units.sol";
+import { DiscreteIdleCDOTranchePriceOracle } from "../../../src/oracle/DiscreteIdleCDOTranchePriceOracle.sol";
 import { ERC4626SharePriceOracle } from "../../../src/oracle/ERC4626SharePriceOracle.sol";
 import { IdleCDOTranchePriceOracle } from "../../../src/oracle/IdleCDOTranchePriceOracle.sol";
 import { MakinaSharePriceOracle } from "../../../src/oracle/MakinaSharePriceOracle.sol";
@@ -87,6 +89,12 @@ contract Test_CollateralOracles is Test {
     ///      (an unattested zero checkpoint holds pricing shut under the source staleness gate)
     function _deploySeededCDOOracle(address _tranche, uint32 _lastUpdate) internal returns (IdleCDOTranchePriceOracle oracle) {
         return new IdleCDOTranchePriceOracle(address(cdo), _tranche, address(feed), 0, _lastUpdate, FEED_STALENESS, CDO_PRICE_STALENESS);
+    }
+
+    /// @dev Deploys the discrete CDO oracle that latches the virtual price on every epochNumber change and on
+    ///      every post-default move, seeded from the live virtual price at construction so it prices immediately
+    function _deployDiscreteCDOOracle(address _tranche) internal returns (DiscreteIdleCDOTranchePriceOracle oracle) {
+        return new DiscreteIdleCDOTranchePriceOracle(address(cdo), _tranche, address(feed), FEED_STALENESS, CDO_PRICE_STALENESS);
     }
 
     /*----------------------------------------------------------------------
@@ -516,6 +524,135 @@ contract Test_CollateralOracles is Test {
     }
 
     /*----------------------------------------------------------------------
+                        DiscreteIdleCDOTranchePriceOracle
+    ----------------------------------------------------------------------*/
+
+    /**
+     * The composed price is the checkpointed virtual price times the feed price: a mid-epoch deployment seeds
+     * the live virtual price, mid-epoch fee drift never reaches the market, the settlement's epochNumber
+     * increment latches the settled price at the first poke, and a later settlement at an UNCHANGED price still
+     * stamps and opens the gate
+     * Derivation: seeded virtual price 1.01e6 at the 6-decimal underlying lifts by 1e12 to 1.01e18 at the
+     * unit feed: price = floor(1.01e18 * 1e8 / 1e8) = 1.01e18. The fee-accrual dip to 1.009999e6 leaves it
+     * unchanged, and the settlement to 1.015e6 reprices at the first poke after the epochNumber increments
+     */
+    function test_DiscreteIdleCDO_composesTheCheckpointedVirtualPriceWithFeed() public {
+        // A mid-epoch deployment seeds the live virtual price and prices immediately
+        DiscreteIdleCDOTranchePriceOracle oracle = _deployDiscreteCDOOracle(address(aaTranche));
+        (NAV_UNIT price, uint256 updatedAt) = oracle.getPrice();
+        assertEq(toUint256(price), 1.01e18, "composed price must be the seeded virtual price times the feed price");
+        assertEq(updatedAt, T0, "updatedAt is the construction seed's timestamp");
+
+        // The between-settlement fee dip this oracle exists to mute: the live drop never reaches the market
+        vm.warp(T0 + 1 days);
+        feed.setUpdatedAt(block.timestamp);
+        cdo.setVirtualPrice(1.009999e6);
+        (price,) = oracle.getPrice();
+        assertEq(toUint256(price), 1.01e18, "a fee-accrual dip must never mark the market");
+        assertEq(oracle.poke(), T0, "a mid-epoch dip must never open the execution gate");
+
+        // stopEpoch books the interest and increments the epochNumber: the first poke latches and stamps it
+        cdo.setVirtualPrice(1.015e6);
+        cdo.setEpochNumber(1);
+        assertEq(oracle.poke(), T0 + 1 days, "the settlement latches at the first poke after the epoch increments");
+        (price, updatedAt) = oracle.getPrice();
+        assertEq(toUint256(price), 1.015e18, "the latched settlement composes through");
+        assertEq(updatedAt, T0 + 1 days, "the commit stamps the settlement's observation time");
+        (,, uint256 lastCheckpointId) = oracle.getDiscretePriceOracleState();
+        assertEq(lastCheckpointId, 1, "the commit latches the observed epochNumber");
+
+        // A later settlement at an UNCHANGED virtual price still stamps and opens the gate: the epoch increment
+        // is the information, not the move
+        vm.warp(T0 + 2 days);
+        feed.setUpdatedAt(block.timestamp);
+        cdo.setEpochNumber(2);
+        assertEq(oracle.poke(), T0 + 2 days, "the unchanged-price settlement still stamps and opens the gate");
+        (uint160 lastSourcePrice, uint32 lastUpdatedAt,) = oracle.getDiscretePriceOracleState();
+        assertEq(lastSourcePrice, 1.015e18, "the unchanged price re-commits as the fresh checkpoint");
+        assertEq(lastUpdatedAt, uint32(T0 + 2 days), "the unchanged-price settlement carries its own stamp");
+    }
+
+    /**
+     * A borrower default freezes the epochNumber while losses are marked down keyless: the defaulted flag is
+     * the force signal, so the markdown latches at the first poke that observes it and a partial recovery
+     * latches through the same clause, with no admin anywhere
+     * Derivation: marked-down virtual price 0.62e6 lifts to 0.62e18 at the unit feed, the recovery 0.8e6 to 0.8e18
+     */
+    function test_DiscreteIdleCDO_markdownAndRecoveryLatchAfterDefault() public {
+        DiscreteIdleCDOTranchePriceOracle oracle = _deployDiscreteCDOOracle(address(aaTranche));
+        vm.warp(T0 + 10 days);
+        feed.setUpdatedAt(block.timestamp);
+        cdo.setDefaulted(true);
+        cdo.setVirtualPrice(0.62e6);
+        assertEq(oracle.previewPoke(), T0 + 10 days, "the pending markdown previews at its observation time");
+        assertEq(oracle.poke(), T0 + 10 days, "the markdown latches at the first poke");
+        (NAV_UNIT price, uint256 updatedAt) = oracle.getPrice();
+        assertEq(toUint256(price), 0.62e18, "users must transact at the marked-down value once latched");
+        assertEq(updatedAt, T0 + 10 days, "the markdown commit stamps and opens the gate");
+        (,, uint256 lastCheckpointId) = oracle.getDiscretePriceOracleState();
+        assertEq(lastCheckpointId, 0, "the default froze the epochNumber, only the force clause fired");
+
+        // The partial recovery latches through the same clause, no monotonicity anywhere
+        vm.warp(T0 + 11 days);
+        feed.setUpdatedAt(block.timestamp);
+        cdo.setVirtualPrice(0.8e6);
+        assertEq(oracle.poke(), T0 + 11 days, "the recovery latches at the next poke");
+        (price,) = oracle.getPrice();
+        assertEq(toUint256(price), 0.8e18, "the recovered value composes through");
+    }
+
+    /// Construction wires the collateral identity against the CDO, seeds the baseline from the live virtual
+    /// price, and rejects null, non-member, or unpriceable configuration
+    function test_DiscreteIdleCDO_constructionIdentityAndNullChecks() public {
+        DiscreteIdleCDOTranchePriceOracle oracle = _deployDiscreteCDOOracle(address(aaTranche));
+        assertEq(oracle.COLLATERAL_ASSET(), address(aaTranche), "the collateral asset is the configured CDO tranche");
+        assertEq(oracle.IDLE_CDO(), address(cdo), "the CDO is wired");
+        assertEq(address(oracle.ORACLE()), address(feed), "the feed is wired");
+        assertEq(oracle.FEED_STALENESS_THRESHOLD_SECONDS(), FEED_STALENESS, "the feed hop's staleness threshold is a construction immutable");
+        assertEq(oracle.SOURCE_PRICE_STALENESS_THRESHOLD_SECONDS(), CDO_PRICE_STALENESS, "the checkpoint hop's staleness threshold is a construction immutable");
+        assertEq(oracle.decimals(), 18, "prices are reported at WAD precision");
+        assertEq(oracle.version(), 1, "version");
+        assertEq(oracle.description(), string.concat("AA_FalconXUSDC / ", feed.description()), "the description chains through the feed");
+        // The construction seed latches the live (virtual price in WAD, timestamp, epochNumber) triple
+        (uint160 lastSourcePrice, uint32 lastUpdatedAt, uint256 lastCheckpointId) = oracle.getDiscretePriceOracleState();
+        assertEq(lastSourcePrice, 1.01e18, "construction seeds the live virtual price in WAD");
+        assertEq(lastUpdatedAt, uint32(T0), "construction stamps the seed at its own timestamp");
+        assertEq(lastCheckpointId, 0, "construction latches the live epochNumber");
+        // The constructor body's typed null check rejects a null CDO before any read can touch it
+        vm.expectRevert(ChainlinkPriceOracleBase.NULL_ADDRESS.selector);
+        new DiscreteIdleCDOTranchePriceOracle(address(0), address(aaTranche), address(feed), FEED_STALENESS, CDO_PRICE_STALENESS);
+        // The CDO's virtualPrice silently computes the BB price for any unknown address, so membership is checked
+        vm.expectRevert(DiscreteIdleCDOTranchePriceOracle.COLLATERAL_ASSET_MUST_BE_CDO_TRANCHE.selector);
+        new DiscreteIdleCDOTranchePriceOracle(address(cdo), makeAddr("NOT_A_TRANCHE"), address(feed), FEED_STALENESS, CDO_PRICE_STALENESS);
+        // A zero virtual price seeds and composes honestly like every source hop in the oracle family:
+        // rejecting a zero price is the kernel's own guard, never the oracle's
+        MockIdleCDO zeroCdo = new MockIdleCDO(address(aaTranche), address(cdoUnderlying), 0);
+        DiscreteIdleCDOTranchePriceOracle zeroSeeded =
+            new DiscreteIdleCDOTranchePriceOracle(address(zeroCdo), address(aaTranche), address(feed), FEED_STALENESS, CDO_PRICE_STALENESS);
+        (lastSourcePrice, lastUpdatedAt,) = zeroSeeded.getDiscretePriceOracleState();
+        assertEq(lastSourcePrice, 0, "a zero virtual price seeds as the baseline");
+        assertEq(lastUpdatedAt, uint32(T0), "the zero seed stamps its own timestamp");
+        (NAV_UNIT zeroPrice,) = zeroSeeded.getPrice();
+        assertEq(toUint256(zeroPrice), 0, "the zero seed composes to zero and is reported as such");
+        vm.mockCallRevert(address(cdo), abi.encodeWithSelector(IIdleCDO.virtualPrice.selector, address(aaTranche)), "CDO: paused");
+        vm.expectRevert("CDO: paused");
+        new DiscreteIdleCDOTranchePriceOracle(address(cdo), address(aaTranche), address(feed), FEED_STALENESS, CDO_PRICE_STALENESS);
+        vm.clearMockedCalls();
+    }
+
+    /// The oracle prices the BB (junior) tranche identically: virtualPrice works for either CDO tranche and the
+    /// construction seed makes the price live from deployment
+    function test_DiscreteIdleCDO_pricesTheBBTranche() public {
+        MockERC20C bbTranche = new MockERC20C("BB_FalconXUSDC", "BB_FalconXUSDC", 18);
+        cdo.setBBTranche(address(bbTranche));
+        DiscreteIdleCDOTranchePriceOracle bbOracle = _deployDiscreteCDOOracle(address(bbTranche));
+        assertEq(bbOracle.COLLATERAL_ASSET(), address(bbTranche), "the collateral asset is the BB tranche");
+        (NAV_UNIT price,) = bbOracle.getPrice();
+        assertEq(toUint256(price), 1.01e18, "the BB tranche's seeded virtual price composes identically at the unit feed price");
+        assertEq(bbOracle.description(), string.concat("BB_FalconXUSDC / ", feed.description()), "the description reads the BB chain");
+    }
+
+    /*----------------------------------------------------------------------
                         Per-hop staleness (immutable thresholds)
     ----------------------------------------------------------------------*/
 
@@ -531,7 +668,7 @@ contract Test_CollateralOracles is Test {
     /**
      * THE per-hop property this design exists for: the two hops of the CDO oracle cross their gates independently.
      * A stale feed fails shut even while the clock hop is fresh, and a stale clock fails shut even while the feed
-     * is fresh — under a single shared threshold sized to the slow clock, the first case was unenforceable
+     * is fresh (under a single shared threshold sized to the slow clock, the first case was unenforceable)
      */
     function test_IdleCDO_hopsFailShutIndependently() public {
         IdleCDOTranchePriceOracle seeded = _deploySeededCDOOracle(address(aaTranche), uint32(T0));
@@ -642,7 +779,8 @@ contract Test_CollateralOracles is Test {
         assertEq(makinaOracle.previewPoke(), updatedAt, "previewPoke must agree with getPrice's report timestamp");
     }
 
-    /// The oracle is a plain immutable contract: no initializer, no tick, no threshold setter, no fallback
+    /// The oracle is a plain immutable contract: no initializer, no tick, no threshold setter, no fallback,
+    /// and the discrete variant carries no owner or checkpoint lever either
     function test_IdleCDO_hasNoAdminSurface() public {
         (bool initOk,) = address(cdoOracle).call(abi.encodeWithSignature("initialize(address,uint256,uint32)", address(this), uint256(0), uint32(0)));
         assertFalse(initOk, "the oracle is not a proxy and exposes no initializer");
@@ -650,6 +788,13 @@ contract Test_CollateralOracles is Test {
         assertFalse(tickOk, "the removed tick selector must not be callable");
         (bool setOk,) = address(cdoOracle).call(abi.encodeWithSignature("setMinDeviationWAD(uint256)", uint256(0.01e18)));
         assertFalse(setOk, "the removed setMinDeviationWAD selector must not be callable");
+
+        // The discrete oracle is admin-free by the same probe: no owner, no privileged checkpoint lever
+        DiscreteIdleCDOTranchePriceOracle discrete = _deployDiscreteCDOOracle(address(aaTranche));
+        (bool ownerOk,) = address(discrete).call(abi.encodeWithSignature("owner()"));
+        assertFalse(ownerOk, "the removed owner selector must not be callable");
+        (bool checkpointOk,) = address(discrete).call(abi.encodeWithSignature("checkpointPrice()"));
+        assertFalse(checkpointOk, "the removed checkpointPrice selector must not be callable");
     }
 
     /// An attested construction checkpoint seeds the clock, and a future one fails shut

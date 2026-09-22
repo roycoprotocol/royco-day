@@ -33,6 +33,12 @@ contract MockIdleCDO is IIdleCDO {
     /// @notice The BB (junior) tranche token, settable so AA-only fixtures stay untouched
     address public storedBBTranche;
 
+    /// @notice The number of successfully settled epochs, the settlement counter the discrete oracle's ID tracks
+    uint256 public epochNumber;
+
+    /// @notice Whether the borrower has defaulted, the discrete oracle's force-checkpoint signal
+    bool public defaulted;
+
     /**
      * @notice Deploys the mock CDO over the two provided tokens
      * @param _aaTranche The CDO's AA tranche token
@@ -57,6 +63,23 @@ contract MockIdleCDO is IIdleCDO {
         storedVirtualPrice = _virtualPrice;
     }
 
+    /// @notice Sets the settlement counter, the mock's stand-in for stopEpoch settlements (a frozen counter models a default)
+    /// @param _epochNumber The number of successfully settled epochs
+    function setEpochNumber(uint256 _epochNumber) external {
+        epochNumber = _epochNumber;
+    }
+
+    /// @notice Sets the defaulted flag, the mock's stand-in for a permanent borrower default
+    /// @param _defaulted Whether the borrower has defaulted
+    function setDefaulted(bool _defaulted) external {
+        defaulted = _defaulted;
+    }
+
+    /// @notice The credit vault strategy pointer, collapsed onto the mock itself so one fixture serves both abridged interfaces
+    function strategy() external view returns (address) {
+        return address(this);
+    }
+
     /// @notice Arms or disarms the revert mode
     function setRevertMode(bool _revertMode) external {
         revertMode = _revertMode;
@@ -77,10 +100,12 @@ contract MockIdleCDO is IIdleCDO {
         return UNDERLYING_TOKEN;
     }
 
-    /// @inheritdoc IIdleCDO
-    /// @dev Requires a known tranche argument so a consumer regression that queried the wrong token fails loud
-    /// @dev The real CDO silently computes the BB price for any unknown address, so this guard is stricter than
-    ///      production by design: it catches miswired queries in tests instead of mispricing them
+    /**
+     * @inheritdoc IIdleCDO
+     * @dev Requires a known tranche argument so a consumer regression that queried the wrong token fails loud
+     * @dev The real CDO silently computes the BB price for any unknown address, so this guard is stricter than
+     *      production by design: it catches miswired queries in tests instead of mispricing them
+     */
     function virtualPrice(address _tranche) external view override(IIdleCDO) returns (uint256) {
         require(!revertMode, CDO_REVERT_MODE());
         require(_tranche == AA_TRANCHE || (_tranche == storedBBTranche && _tranche != address(0)), UNKNOWN_TRANCHE());
