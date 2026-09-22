@@ -349,6 +349,10 @@ contract TestFuzz_Oracles is Test {
         } else {
             (, uint256 updatedAt) = oracle.getPrice();
             assertEq(updatedAt, T0 - Math.max(ageA, ageB), "inside both windows the report binds to the older leg");
+        }
+    }
+
+    /**
      * The discrete composition equals the single-floored product of the checkpointed source price and the feed
      * answer for any price and any positive answer: price = floor(value x answer / feedPrecision)
      */
