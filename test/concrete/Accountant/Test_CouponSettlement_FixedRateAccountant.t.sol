@@ -308,4 +308,62 @@ contract Test_CouponSettlement_FixedRateAccountant is FixedRateAccountantTestBas
         assertEq(toUint256(s.lastJTImpermanentLoss), 0, "no il on gain-funded coupons");
         assertEq(uint8(s.lastMarketState), uint8(MarketState.PERPETUAL), "zero il keeps the market perpetual");
     }
+
+    /**
+     * mid-window JT redemption dodges the accrued coupon liability: the exiting junior takes NAV that is not
+     * yet net of the window's fronted coupon, so the remaining juniors bear the full accrual at settlement
+     * (documented residual: oracle-gated queues execute JT redemptions post-settlement in gated markets)
+     * Derivation: 200s window on stEff 1000e18 at rate 1e9 owes couponDue = 2e14 regardless of the JT exit.
+     * The mid-window JT_REDEMPTION of 50e18 leaves jtEff 150e18 to front it all against a 1 wei gain
+     * (a larger exit would breach the 1.1e18 liquidation threshold and clause 6 would erase the lock):
+     *   couponFromGain = 1, couponFromJT = 2e14 - 1 booked as impermanent loss
+     *   stEffectiveNAV = 1000e18 + 2e14, jtEffectiveNAV = 150e18 - 2e14 + 1
+     *   il = 2e14 - 1 > dust 0 locks FIXED_TERM
+     */
+    function test_Settlement_midWindowJTRedemptionDodgesAccruedLiability() public {
+        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
+        uint256 start = vm.getBlockTimestamp();
+
+        // Half the junior capital exits mid-window: the post-op moves the committed NAVs but never the coupon clock
+        vm.warp(start + 100);
+        kernel.doPostOp(Operation.JT_REDEMPTION, toNAVUnits(SEED_COLLATERAL - 50e18), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS);
+        assertEq(accountant.getRoycoDayFixedRateAccountantState().lastCouponSettlementTimestamp, uint32(start), "clock untouched by the junior exit");
+
+        // The settlement 100s later owes the FULL 200s window, fronted entirely by the remaining juniors
+        vm.warp(start + 200);
+        SyncedAccountingState memory previewed = accountant.previewSyncTrancheAccounting(toNAVUnits(SEED_COLLATERAL - 50e18 + 1));
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_COLLATERAL - 50e18 + 1));
+        assertEq(keccak256(abi.encode(previewed)), keccak256(abi.encode(state)), "preview must match execution exactly");
+        assertEq(toUint256(state.stEffectiveNAV), 1000e18 + 2e14, "the senior collects the full-window coupon on the unchanged base");
+        assertEq(toUint256(state.jtEffectiveNAV), 150e18 - 2e14 + 1, "the remaining juniors front the exited capital's share too");
+        assertEq(toUint256(state.jtImpermanentLoss), 2e14 - 1, "the fronted coupon books as recoverable impermanent loss");
+        assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM), "the fronted coupon above dust locks the observation period");
+        assertEq(toUint256(state.collateralNAV), toUint256(state.stEffectiveNAV) + toUint256(state.jtEffectiveNAV), "conservation holds through the dodge");
+    }
+
+    /**
+     * a zero-rate market never owes a coupon: settlements are pure excess distribution and the clock still
+     * restamps because the predicate is NAV movement, not coupon size
+     * Derivation with a +10e18 gain after 500s at rate 0: couponDue = 0, stEffectiveNAV unchanged, no stFee,
+     * excess = 10e18 all junior-bound (lt rates 0), jtProtocolFee = 1e18
+     */
+    function test_Settlement_zeroRateMarketPaysNoCouponPureExcess() public {
+        IRoycoDayFixedRateAccountant.RoycoDayFixedRateAccountantInitParams memory p = _defaultParams();
+        p.stFixedRatePerSecondWAD = 0;
+        _deploy(p);
+        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
+        uint256 start = vm.getBlockTimestamp();
+
+        vm.warp(start + 500);
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_COLLATERAL + 10e18));
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_EFF, "a zero rate folds no coupon into the senior claim");
+        assertEq(toUint256(state.stProtocolFee), 0, "no coupon means no senior fee");
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_EFF + 10e18, "the whole gain is junior-bound excess");
+        assertEq(toUint256(state.jtProtocolFee), 1e18, "the junior yield share fee prices the full excess");
+        assertEq(
+            accountant.getRoycoDayFixedRateAccountantState().lastCouponSettlementTimestamp,
+            uint32(start + 500),
+            "the predicate restamps on NAV movement even at a zero rate"
+        );
+    }
 }

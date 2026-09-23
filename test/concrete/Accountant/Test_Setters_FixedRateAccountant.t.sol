@@ -47,7 +47,7 @@ contract Test_Setters_FixedRateAccountant is FixedRateAccountantTestBase {
      */
     function test_SetSeniorTrancheFixedRate_pendingMovementSettlesOldWindowAtOldRate() public {
         _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
-        vm.warp(block.timestamp + 1000);
+        vm.warp(vm.getBlockTimestamp() + 1000);
         kernel.setSyncMode(MockFixedRateAccountantKernel.SyncMode.SYNC);
         kernel.setSyncNAV(toNAVUnits(SEED_COLLATERAL + 2e15));
 
@@ -68,7 +68,7 @@ contract Test_Setters_FixedRateAccountant is FixedRateAccountantTestBase {
         assertEq(toUint256(s.lastJTImpermanentLoss), 0, "no il booked (biconditional with perpetual)");
         assertEq(uint8(s.lastMarketState), uint8(MarketState.PERPETUAL), "market stays perpetual");
         assertEq(accountant.getRoycoDayFixedRateAccountantState().stFixedRatePerSecondWAD, 3e9, "new rate written after the settlement");
-        assertEq(_couponWindowStart(), block.timestamp, "settlement restamps the coupon window");
+        assertEq(_couponWindowStart(), vm.getBlockTimestamp(), "settlement restamps the coupon window");
         assertEq(kernel.syncCallCount(), 2, "hard sync brackets ran on both sides");
     }
 
@@ -84,7 +84,7 @@ contract Test_Setters_FixedRateAccountant is FixedRateAccountantTestBase {
     function test_SetSeniorTrancheFixedRate_midWindowChangeRepricesWholeWindowAtNewRate() public {
         _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
         uint256 windowStart = _couponWindowStart();
-        vm.warp(block.timestamp + 1000);
+        vm.warp(vm.getBlockTimestamp() + 1000);
         kernel.setSyncMode(MockFixedRateAccountantKernel.SyncMode.SYNC);
         kernel.setSyncNAV(toNAVUnits(SEED_COLLATERAL));
         vm.expectEmit(true, true, true, true, address(accountant));
@@ -92,7 +92,7 @@ contract Test_Setters_FixedRateAccountant is FixedRateAccountantTestBase {
         accountant.setSeniorTrancheFixedRate(uint64(2e9));
         assertEq(_couponWindowStart(), windowStart, "flat bracket sync leaves the window running");
 
-        vm.warp(block.timestamp + 500);
+        vm.warp(vm.getBlockTimestamp() + 500);
         SyncedAccountingState memory preview = accountant.previewSyncTrancheAccounting(toNAVUnits(SEED_COLLATERAL + 4e15));
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_COLLATERAL + 4e15));
         assertEq(keccak256(abi.encode(preview)), keccak256(abi.encode(state)), "preview == execute");
@@ -107,7 +107,7 @@ contract Test_Setters_FixedRateAccountant is FixedRateAccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         assertEq(toUint256(s.lastSTEffectiveNAV), SEED_ST_EFF + 3e15, "st checkpoint committed");
         assertEq(toUint256(s.lastJTEffectiveNAV), SEED_JT_EFF + 1e15, "jt checkpoint committed");
-        assertEq(_couponWindowStart(), block.timestamp, "settlement restamps the coupon window");
+        assertEq(_couponWindowStart(), vm.getBlockTimestamp(), "settlement restamps the coupon window");
     }
 
     /// setMaxLPTYieldShare reverts above WAD and passes at exactly WAD with event and write
@@ -138,7 +138,7 @@ contract Test_Setters_FixedRateAccountant is FixedRateAccountantTestBase {
     function test_SetMaxLPTYieldShare_loweringCapDoesNotEraseAccruedWindow() public {
         _seedAndInitAccrual();
         lptYDM.setRates(0.5e18);
-        vm.warp(block.timestamp + 1000);
+        vm.warp(vm.getBlockTimestamp() + 1000);
 
         // The hard-sync setter accrues the window at the old cap before its body lowers it to zero
         kernel.setSyncMode(MockFixedRateAccountantKernel.SyncMode.SYNC);
@@ -171,8 +171,8 @@ contract Test_Setters_FixedRateAccountant is FixedRateAccountantTestBase {
         assertEq(toUint256(s.lastSTEffectiveNAV), 1_010_000_900_000_000_000_000, "st checkpoint committed");
         assertEq(toUint256(s.lastJTEffectiveNAV), 289_999_100_000_000_000_000, "jt checkpoint committed");
         assertEq(uint256(sFixed.twLPTYieldShareAccruedWAD), 0, "window consumed by the payment");
-        assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(block.timestamp), "premium clock restamped by the payment");
-        assertEq(sFixed.lastCouponSettlementTimestamp, uint32(block.timestamp), "settlement restamps the coupon window");
+        assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(vm.getBlockTimestamp()), "premium clock restamped by the payment");
+        assertEq(sFixed.lastCouponSettlementTimestamp, uint32(vm.getBlockTimestamp()), "settlement restamps the coupon window");
     }
 
     /// setLiquidityProviderTrancheYDM under a NONE-mode kernel: the best-effort sync reaches the kernel and the new YDM is re-initialized, written, and announced

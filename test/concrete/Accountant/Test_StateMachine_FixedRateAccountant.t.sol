@@ -4,7 +4,8 @@ pragma solidity ^0.8.28;
 import { Vm } from "../../../lib/forge-std/src/Test.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
 import { IRoycoDayFixedRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFixedRateAccountant.sol";
-import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
+import { ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
+import { MarketState, Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { FixedRateAccountantTestBase } from "../../utils/FixedRateAccountantTestBase.sol";
 
@@ -56,8 +57,8 @@ contract Test_StateMachine_FixedRateAccountant is FixedRateAccountantTestBase {
      */
     function _lockViaCouponDrag() internal returns (uint32 end) {
         _seedAndInitAccrual();
-        end = uint32(block.timestamp) + 100 + DEFAULT_FIXED_TERM_DURATION_SECONDS;
-        vm.warp(block.timestamp + 100);
+        end = uint32(vm.getBlockTimestamp()) + 100 + DEFAULT_FIXED_TERM_DURATION_SECONDS;
+        vm.warp(vm.getBlockTimestamp() + 100);
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_COLLATERAL + 1));
         assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM), "lock helper: coupon drag locks the term");
         assertEq(toUint256(state.jtImpermanentLoss), 1e14 - 1, "lock helper: fronted coupon booked as il");
@@ -80,8 +81,8 @@ contract Test_StateMachine_FixedRateAccountant is FixedRateAccountantTestBase {
      */
     function test_StateMachine_couponDragAloneLocksFixedTerm() public {
         _seedAndInitAccrual();
-        uint32 expectedEnd = uint32(block.timestamp) + 100 + DEFAULT_FIXED_TERM_DURATION_SECONDS;
-        vm.warp(block.timestamp + 100);
+        uint32 expectedEnd = uint32(vm.getBlockTimestamp()) + 100 + DEFAULT_FIXED_TERM_DURATION_SECONDS;
+        vm.warp(vm.getBlockTimestamp() + 100);
         bytes32 previewHash = _previewHash(toNAVUnits(SEED_COLLATERAL + 1));
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermCommenced(expectedEnd);
@@ -111,7 +112,7 @@ contract Test_StateMachine_FixedRateAccountant is FixedRateAccountantTestBase {
     function test_StateMachine_fullRestorationUnlocksWithoutReset() public {
         _lockViaCouponDrag();
         uint256 nav = SEED_COLLATERAL + 1 + 200_000_009_999_999;
-        vm.warp(block.timestamp + 100);
+        vm.warp(vm.getBlockTimestamp() + 100);
         bytes32 previewHash = _previewHash(toNAVUnits(nav));
         vm.recordLogs();
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(nav));
@@ -174,7 +175,7 @@ contract Test_StateMachine_FixedRateAccountant is FixedRateAccountantTestBase {
      */
     function test_StateMachine_couponWipeoutForcesPerpetual() public {
         _seedState(SEED_ST_EFF, 1e15, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
-        vm.warp(block.timestamp + 2000);
+        vm.warp(vm.getBlockTimestamp() + 2000);
         bytes32 previewHash = _previewHash(toNAVUnits(SEED_ST_EFF + 1e15 + 1));
         vm.recordLogs();
         vm.expectEmit(true, true, true, true, address(accountant));
@@ -202,7 +203,7 @@ contract Test_StateMachine_FixedRateAccountant is FixedRateAccountantTestBase {
     function test_StateMachine_gracePeriodBlocksCouponDragEntry() public {
         _deployWithGrace(_defaultParams(), 1000);
         _seedAndInitAccrual();
-        vm.warp(block.timestamp + 100);
+        vm.warp(vm.getBlockTimestamp() + 100);
         bytes32 previewHash = _previewHash(toNAVUnits(SEED_COLLATERAL + 1));
         vm.recordLogs();
         vm.expectEmit(true, true, true, true, address(accountant));
@@ -230,7 +231,7 @@ contract Test_StateMachine_FixedRateAccountant is FixedRateAccountantTestBase {
         p.standardParams.fixedTermDurationSeconds = 0;
         _deploy(p);
         _seedAndInitAccrual();
-        vm.warp(block.timestamp + 100);
+        vm.warp(vm.getBlockTimestamp() + 100);
         bytes32 previewHash = _previewHash(toNAVUnits(SEED_COLLATERAL + 1));
         vm.recordLogs();
         vm.expectEmit(true, true, true, true, address(accountant));
@@ -260,7 +261,7 @@ contract Test_StateMachine_FixedRateAccountant is FixedRateAccountantTestBase {
      */
     function test_StateMachine_liquidationBreachForcesPerpetualUnderCouponDrag() public {
         _seedLargeIL();
-        vm.warp(block.timestamp + 100);
+        vm.warp(vm.getBlockTimestamp() + 100);
         bytes32 previewHash = _previewHash(toNAVUnits(uint256(1100e18)));
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermEnded();
@@ -296,7 +297,7 @@ contract Test_StateMachine_FixedRateAccountant is FixedRateAccountantTestBase {
         p.standardParams.dustTolerance = toNAVUnits(uint256(1e14));
         _deploy(p);
         _seedAndInitAccrual();
-        vm.warp(block.timestamp + 100);
+        vm.warp(vm.getBlockTimestamp() + 100);
         bytes32 previewHash = _previewHash(toNAVUnits(SEED_COLLATERAL + 1));
         vm.recordLogs();
         vm.expectEmit(true, true, true, true, address(accountant));
@@ -310,6 +311,31 @@ contract Test_StateMachine_FixedRateAccountant is FixedRateAccountantTestBase {
         assertEq(state.fixedTermEndTimestamp, 0, "no fixed term end stamped");
         assertEq(_countAccountantLogs(vm.getRecordedLogs(), IRoycoDayAccountant.FixedTermCommenced.selector), 0, "no term commences on dust drag");
         assertEq(keccak256(abi.encode(state)), previewHash, "preview matches the executed sync");
+        _assertCommittedCheckpoint(state);
+    }
+
+    /**
+     * clause 2, no senior capital to protect: with the senior fully redeemed the coupon is structurally zero
+     * (it accrues on a zero base) and a junior loss cannot lock the market, the perpetual disjunct erases the
+     * freshly booked impermanent loss at the commit
+     * Derivation: seed 100e18/200e18, redeem the whole senior via post-op, then a 10e18 loss sync 100s later:
+     * couponDue = 0 x 1e9 x 100 / 1e18 = 0, the junior absorbs the 10e18 as impermanent loss inside the
+     * waterfall, and the stEffectiveNAV == 0 disjunct forces PERPETUAL with the 10e18 erased on the spot
+     */
+    function test_StateMachine_zeroSeniorCapitalForcesPerpetual() public {
+        _seedState(100e18, 200e18, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
+        uint256 start = vm.getBlockTimestamp();
+        kernel.doPostOp(Operation.ST_REDEMPTION, toNAVUnits(uint256(200e18)), toNAVUnits(SEED_LPT_RAW), ZERO_NAV_UNITS);
+        assertEq(toUint256(accountant.getState().lastSTEffectiveNAV), 0, "the senior is fully redeemed");
+
+        vm.warp(start + 100);
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(toNAVUnits(uint256(10e18)));
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(190e18)));
+        assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "no senior capital to protect forces the perpetual state");
+        assertEq(toUint256(state.jtEffectiveNAV), 190e18, "the junior absorbs the loss");
+        assertEq(toUint256(state.jtImpermanentLoss), 0, "the perpetual commit erases the fresh impermanent loss");
+        assertEq(toUint256(state.stEffectiveNAV), 0, "a zero senior base accrues no coupon");
         _assertCommittedCheckpoint(state);
     }
 }

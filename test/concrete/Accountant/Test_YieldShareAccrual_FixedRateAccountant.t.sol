@@ -24,12 +24,12 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
     function test_Accrual_firstSyncInitializesTimestampsWithoutYDMCall() public {
         _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
         lptYDM.setYieldShareReturn(0.05e18);
-        vm.warp(block.timestamp + 123);
+        vm.warp(vm.getBlockTimestamp() + 123);
         vm.recordLogs();
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         IRoycoDayFixedRateAccountant.RoycoDayFixedRateAccountantState memory sFixed = accountant.getRoycoDayFixedRateAccountantState();
-        assertEq(sFixed.lastYieldShareAccrualTimestamp, uint32(block.timestamp), "accrual timestamp initialized");
-        assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(block.timestamp), "premium payment timestamp initialized");
+        assertEq(sFixed.lastYieldShareAccrualTimestamp, uint32(vm.getBlockTimestamp()), "accrual timestamp initialized");
+        assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(vm.getBlockTimestamp()), "premium payment timestamp initialized");
         assertEq(sFixed.twLPTYieldShareAccruedWAD, 0, "lt accumulator untouched");
         assertEq(lptYDM.yieldShareCallCount(), 0, "lt ydm not consulted on first accrual");
         assertEq(
@@ -45,16 +45,16 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
      */
     function test_Accrual_accruesTimeWeightedShareBelowCap() public {
         _seedAndInitAccrual();
-        // Snapshot the stamped clock from storage, a raw block.timestamp read is unsafe across warp under via-ir timestamp caching
+        // Snapshot the stamped clock from storage, a raw vm.getBlockTimestamp() read is unsafe across warp under via-ir timestamp caching
         uint256 t0 = accountant.getRoycoDayFixedRateAccountantState().lastPremiumPaymentTimestamp;
         lptYDM.setYieldShareReturn(0.04e18);
-        vm.warp(block.timestamp + 3600);
+        vm.warp(vm.getBlockTimestamp() + 3600);
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayFixedRateAccountant.LPTYieldShareAccrued(0.04e18, 144e18);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         IRoycoDayFixedRateAccountant.RoycoDayFixedRateAccountantState memory sFixed = accountant.getRoycoDayFixedRateAccountantState();
         assertEq(sFixed.twLPTYieldShareAccruedWAD, uint128(uint256(0.04e18) * 3600), "lt accrues its raw sub-cap rate");
-        assertEq(sFixed.lastYieldShareAccrualTimestamp, uint32(block.timestamp), "accrual timestamp advanced");
+        assertEq(sFixed.lastYieldShareAccrualTimestamp, uint32(vm.getBlockTimestamp()), "accrual timestamp advanced");
         assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(t0), "flat sync pays no premium so the payment clock holds");
     }
 
@@ -65,7 +65,7 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
     function test_Accrual_capBindsAboveMaxLPTYieldShare() public {
         _seedAndInitAccrual();
         lptYDM.setYieldShareReturn(0.5e18);
-        vm.warp(block.timestamp + 500);
+        vm.warp(vm.getBlockTimestamp() + 500);
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayFixedRateAccountant.LPTYieldShareAccrued(0.1e18, 50e18);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
@@ -79,10 +79,10 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
     function test_Accrual_accumulatesAcrossWindowsWithoutPremiumPayment() public {
         _seedAndInitAccrual();
         lptYDM.setYieldShareReturn(0.06e18);
-        vm.warp(block.timestamp + 1000);
+        vm.warp(vm.getBlockTimestamp() + 1000);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         lptYDM.setYieldShareReturn(0.02e18);
-        vm.warp(block.timestamp + 250);
+        vm.warp(vm.getBlockTimestamp() + 250);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         assertEq(
             accountant.getRoycoDayFixedRateAccountantState().twLPTYieldShareAccruedWAD,
@@ -95,7 +95,7 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
     function test_Accrual_sameBlockReaccrualIsNoop() public {
         _seedAndInitAccrual();
         lptYDM.setYieldShareReturn(0.05e18);
-        vm.warp(block.timestamp + 1000);
+        vm.warp(vm.getBlockTimestamp() + 1000);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         uint256 lptCalls = lptYDM.yieldShareCallCount();
         IRoycoDayFixedRateAccountant.RoycoDayFixedRateAccountantState memory beforeFixed = accountant.getRoycoDayFixedRateAccountantState();
@@ -115,7 +115,7 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
     /// the YDM is consulted with the last market state and the liquidity utilization computed from the last-committed checkpoints
     function test_Accrual_ydmCalledWithLastCheckpointArgs() public {
         _seedAndInitAccrual();
-        vm.warp(block.timestamp + 60);
+        vm.warp(vm.getBlockTimestamp() + 60);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         assertEq(lptYDM.yieldShareCallCount(), 1, "exactly one mutating consultation");
         assertEq(uint8(lptYDM.lastYieldShareMarketState()), uint8(MarketState.PERPETUAL), "lt ydm sees the last market state");
@@ -134,7 +134,7 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
      */
     function test_Accrual_ydmSeesFixedTermStateAndCheckpointUtilization() public {
         _seedState(1000e18, 200e18, 100e18, 80e18, MarketState.FIXED_TERM);
-        vm.warp(block.timestamp + 3600);
+        vm.warp(vm.getBlockTimestamp() + 3600);
         kernel.doPreOp(toNAVUnits(uint256(1200e18)));
         assertEq(uint8(lptYDM.lastYieldShareMarketState()), uint8(MarketState.FIXED_TERM), "lt ydm sees FIXED_TERM");
         assertEq(
@@ -149,7 +149,7 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
     function test_Accrual_mutatingCallsYieldShareAndPreviewIsPure() public {
         _seedAndInitAccrual();
         lptYDM.setRates(0.03e18);
-        vm.warp(block.timestamp + 250);
+        vm.warp(vm.getBlockTimestamp() + 250);
         bytes32 preHash = _stateHash();
         vm.expectCall(address(lptYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.PERPETUAL, SEED_LIQUIDITY_UTILIZATION_WAD)));
         accountant.previewSyncTrancheAccounting(toNAVUnits(SEED_COLLATERAL));
@@ -177,7 +177,7 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
     function test_Accrual_premiumPaymentResetsAccumulatorAndStampsPaymentClock() public {
         _seedAndInitAccrual();
         lptYDM.setRates(0.05e18);
-        vm.warp(block.timestamp + 1000);
+        vm.warp(vm.getBlockTimestamp() + 1000);
 
         // Same-block preview twin first, executed second, must agree byte for byte
         SyncedAccountingState memory previewed = accountant.previewSyncTrancheAccounting(toNAVUnits(SEED_COLLATERAL + 100e18));
@@ -206,9 +206,9 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
         // The payment consumed the window: accumulator reset, payment clock stamped, coupon clock restamped by the NAV movement
         IRoycoDayFixedRateAccountant.RoycoDayFixedRateAccountantState memory sFixed = accountant.getRoycoDayFixedRateAccountantState();
         assertEq(sFixed.twLPTYieldShareAccruedWAD, 0, "lt window consumed by the payment");
-        assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(block.timestamp), "payment stamped this block");
-        assertEq(sFixed.lastYieldShareAccrualTimestamp, uint32(block.timestamp), "accrual timestamp advanced");
-        assertEq(_couponWindowStart(), block.timestamp, "settling sync restamps the coupon clock");
+        assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(vm.getBlockTimestamp()), "payment stamped this block");
+        assertEq(sFixed.lastYieldShareAccrualTimestamp, uint32(vm.getBlockTimestamp()), "accrual timestamp advanced");
+        assertEq(_couponWindowStart(), vm.getBlockTimestamp(), "settling sync restamps the coupon clock");
     }
 
     /**
@@ -225,12 +225,12 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
      */
     function test_Accrual_unpaidWindowPersistsAcrossExactCouponSettlements() public {
         _seedAndInitAccrual();
-        // Snapshot the stamped clock from storage, a raw block.timestamp read is unsafe across warp under via-ir timestamp caching
+        // Snapshot the stamped clock from storage, a raw vm.getBlockTimestamp() read is unsafe across warp under via-ir timestamp caching
         uint256 t0 = accountant.getRoycoDayFixedRateAccountantState().lastPremiumPaymentTimestamp;
         lptYDM.setRates(0.04e18);
 
         // Settlement one: gain == coupon so the whole movement funds the coupon and no premium pays
-        vm.warp(block.timestamp + 500);
+        vm.warp(vm.getBlockTimestamp() + 500);
         uint256 coupon1 = _specCoupon(SEED_ST_EFF, DEFAULT_ST_FIXED_RATE_PER_SECOND_WAD, 500);
         assertEq(coupon1, 5e14, "coupon one derivation");
         SyncedAccountingState memory first = kernel.doPreOp(toNAVUnits(SEED_COLLATERAL + coupon1));
@@ -245,10 +245,10 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
         IRoycoDayFixedRateAccountant.RoycoDayFixedRateAccountantState memory sFixed = accountant.getRoycoDayFixedRateAccountantState();
         assertEq(sFixed.twLPTYieldShareAccruedWAD, uint128(uint256(0.04e18) * 500), "lt window persists through settlement one");
         assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(t0), "payment clock holds through settlement one");
-        assertEq(_couponWindowStart(), block.timestamp, "settlement one restamps the coupon clock");
+        assertEq(_couponWindowStart(), vm.getBlockTimestamp(), "settlement one restamps the coupon clock");
 
         // Settlement two: same exact-coupon shape on the enlarged base, preview parity checked in-block
-        vm.warp(block.timestamp + 300);
+        vm.warp(vm.getBlockTimestamp() + 300);
         uint256 coupon2 = _specCoupon(1_000_000_500_000_000_000_000, DEFAULT_ST_FIXED_RATE_PER_SECOND_WAD, 300);
         assertEq(coupon2, 300_000_150_000_000, "coupon two derivation");
         SyncedAccountingState memory previewed = accountant.previewSyncTrancheAccounting(toNAVUnits(SEED_COLLATERAL + coupon1 + coupon2));
@@ -287,7 +287,7 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
         assertEq(lptYDM.yieldShareCallCount(), 0, "the instantaneous branch reads previewYieldShare, never yieldShare");
         IRoycoDayFixedRateAccountant.RoycoDayFixedRateAccountantState memory sFixed = accountant.getRoycoDayFixedRateAccountantState();
         assertEq(sFixed.twLPTYieldShareAccruedWAD, 0, "accumulator stays zero, the payment consumed nothing");
-        assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(block.timestamp), "payment stamped in the initializing block");
+        assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(vm.getBlockTimestamp()), "payment stamped in the initializing block");
     }
 
     /**
@@ -307,7 +307,7 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
     function test_Accrual_sameBlockGainAfterPaymentUsesInstantaneousFallbackCapped() public {
         _seedAndInitAccrual();
         lptYDM.setRates(0.05e18);
-        vm.warp(block.timestamp + 1000);
+        vm.warp(vm.getBlockTimestamp() + 1000);
 
         // First sync pays the time-weighted premium and stamps the payment clock this block
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL + 100e18));
@@ -336,6 +336,6 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
         );
         IRoycoDayFixedRateAccountant.RoycoDayFixedRateAccountantState memory sFixed = accountant.getRoycoDayFixedRateAccountantState();
         assertEq(sFixed.twLPTYieldShareAccruedWAD, 0, "lt window still empty, nothing replayed");
-        assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(block.timestamp), "payment stamp unchanged in the same block");
+        assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(vm.getBlockTimestamp()), "payment stamp unchanged in the same block");
     }
 }

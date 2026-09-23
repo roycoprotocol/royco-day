@@ -169,7 +169,7 @@ interface IRoycoDayAccountant {
     /**
      * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market
      * @dev Must be called before any NAV mutating operation
-     * @dev Accrues the JT and LPT yield shares over time based on the market's JT and LPT YDM outputs
+     * @dev Accrues the time-weighted yield shares driving the premium attribution, sourced by the concrete accountant's configured YDM outputs
      * @dev Persists updated NAV and impermanent loss checkpoints for the next sync to use as reference
      * @dev The returned state's lptRawNAV and liquidityUtilizationWAD are zero placeholders: this sync does not mark the liquidity
      *      tranche
