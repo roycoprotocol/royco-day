@@ -18,13 +18,10 @@ import { RoycoDayAccountant } from "./base/RoycoDayAccountant.sol";
  * @notice Performs and tracks the accounting, coverage, and liquidity operations and requirements for a Royco market
  * @notice Responsible for marking tranche NAVs to market, accruing the senior tranche's fixed rate coupon, tracking the JT impermanent loss, distributing the excess yield via the LPT YDM, and computing protocol fees
  * @dev The senior tranche earns a fixed rate coupon underwritten by the junior tranche: the coupon is the fixed rate applied to the senior tranche's committed effective NAV over the window since the last settlement, settled only by a sync that observes a collateral NAV movement, so the coupon is collected exactly when fresh collateral information is priced
- * @dev Senior flows execute at settlement boundaries under the oracle-gated queues, so the committed senior NAV is the whole window's accrual base, and every settlement folds the coupon into it: the senior compounds at the collateral's information cadence
  * @dev Senior capital that exits between settlements is absent from the committed NAV at settlement, so it never collects the window's coupon and the junior buffer is never charged for capital that left
- * @dev The junior tranche is the residual claimant: the excess yield above the coupon pays the LPT liquidity premium (the capped LPT YDM output) and the junior tranche keeps the complement
- * @dev A market with a disabled junior tranche fixes the LPT yield share configuration at 100% so the liquidity premium consumes the entire excess yield, and the coupon is paid from collateral gains only (a capped rate rather than an underwritten one)
- * @dev NOTE: The shared jtProtocolFeeWAD configuration is inert in this flavor and required zero at initialization: JT's income is its yield share of the excess (the residual-form risk premium), charged jtYieldShareProtocolFeeWAD, and the impermanent loss repayment is never fee'd
+ * @dev The junior tranche is the residual claimant: the excess yield above the coupon pays the LPT liquidity premium (the capped LPT YDM output) and the junior tranche keeps the remainder
  */
-contract RoycoDayFixedRateAccountant is IRoycoDayFixedRateAccountant, RoycoDayAccountant {
+contract RoycoDayFixedRateAccountant is RoycoDayAccountant, IRoycoDayFixedRateAccountant {
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for uint256;
     using DispatchLogic for address;
@@ -209,9 +206,7 @@ contract RoycoDayFixedRateAccountant is IRoycoDayFixedRateAccountant, RoycoDayAc
                 NAV_UNIT couponFromJT = RoycoUnitsMath.min((stCouponDue - couponFromGain), jtEffectiveNAV);
                 NAV_UNIT couponPaid = (couponFromGain + couponFromJT);
                 // Compute the protocol fee taken on the coupon if it is not attributable to any rounding/dust
-                if (couponPaid > $_accountant.dustTolerance) {
-                    stProtocolFee = (couponFromGain + couponFromJT).mulDiv($_accountant.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
-                }
+                if (couponPaid > $_accountant.dustTolerance) stProtocolFee = couponPaid.mulDiv($_accountant.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
                 jtEffectiveNAV = (jtEffectiveNAV - couponFromJT);
                 stEffectiveNAV = (stEffectiveNAV + couponPaid);
                 gain = (gain - couponFromGain);
@@ -252,7 +247,7 @@ contract RoycoDayFixedRateAccountant is IRoycoDayFixedRateAccountant, RoycoDayAc
                 // Compute the liquidity premium based on the yield share and time elapsed since the last premium payment
                 lptLiquidityPremium = gain.mulDiv(_twLPTYieldShareAccruedWAD, (elapsedSinceLastPremiumPayment * WAD), Math.Rounding.Floor);
                 // The liquidity premium can never exceed the excess yield: the LPT yield share is capped at 100% of the excess it is carved from
-                require(lptLiquidityPremium <= gain, LIQUIDITY_PREMIUM_EXCEEDS_EXCESS_YIELD());
+                require(lptLiquidityPremium <= gain, PREMIUMS_EXCEED_YIELD());
                 // Pay the liquidity premium to LPT: it is minted as senior shares to LPT, so it remains a senior claim within ST effective NAV (coverage-neutral) and is carved out of the excess only to size JT's retained yield and protocol fee
                 if (lptLiquidityPremium != ZERO_NAV_UNITS) {
                     // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
@@ -374,9 +369,16 @@ contract RoycoDayFixedRateAccountant is IRoycoDayFixedRateAccountant, RoycoDayAc
 
     /// @inheritdoc IRoycoDayFixedRateAccountant
     function setSeniorTrancheFixedRate(uint64 _stFixedRatePerSecondWAD) external override(IRoycoDayFixedRateAccountant) restricted withSyncedAccounting {
-        // The modifier's pre-call sync banked the elapsed window at the outgoing rate, so the new rate only applies going forward
+        // The modifier's pre-call sync settles any unsynced NAV movement at the outgoing rate
+        // NOTE: The new rate applies to the entire in-flight accrual window, so it should be updated right after a coupon settlement
         _getRoycoDayFixedRateAccountantStorage().stFixedRatePerSecondWAD = _stFixedRatePerSecondWAD;
         emit SeniorTrancheFixedRateUpdated(_stFixedRatePerSecondWAD);
+    }
+
+    /// @inheritdoc IRoycoDayAccountant
+    /// @dev The junior tranche protocol fee is unbound in this flavor (JT's yield share of the excess is charged jtYieldShareProtocolFeeWAD), so updates are rejected to keep the zero pinned at initialization
+    function setJuniorTrancheProtocolFee(uint64) external pure override(IRoycoDayAccountant, RoycoDayAccountant) {
+        revert INVALID_PROTOCOL_FEE_CONFIG();
     }
 
     /// @inheritdoc IRoycoDayFixedRateAccountant

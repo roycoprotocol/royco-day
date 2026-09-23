@@ -18,7 +18,7 @@ import { RoycoDayAccountant } from "./base/RoycoDayAccountant.sol";
  * @notice Performs and tracks the accounting, coverage, and liquidity operations and requirements for a Royco market
  * @notice Responsible for marking tranche NAVs to market, tracking the JT impermanent loss, distributing yield via the JT and LPT YDM, and computing protocol fees
  */
-contract RoycoDayFloatingRateAccountant is IRoycoDayFloatingRateAccountant, RoycoDayAccountant {
+contract RoycoDayFloatingRateAccountant is RoycoDayAccountant, IRoycoDayFloatingRateAccountant {
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for uint256;
     using DispatchLogic for address;
@@ -249,7 +249,7 @@ contract RoycoDayFloatingRateAccountant is IRoycoDayFloatingRateAccountant, Royc
                     jtRiskPremium = stGain.mulDiv(_twJTYieldShareAccruedWAD, (elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
                     lptLiquidityPremium = stGain.mulDiv(_twLPTYieldShareAccruedWAD, (elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
                     // The combined premiums can never exceed the senior gain: the JT and LPT yield shares are each capped so that they sum to at most 100% of senior appreciation
-                    require((jtRiskPremium + lptLiquidityPremium) <= stGain, PREMIUMS_EXCEED_SENIOR_YIELD());
+                    require((jtRiskPremium + lptLiquidityPremium) <= stGain, PREMIUMS_EXCEED_YIELD());
                     // Apply the risk premium to JT's effective NAV
                     if (jtRiskPremium != ZERO_NAV_UNITS) {
                         // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust

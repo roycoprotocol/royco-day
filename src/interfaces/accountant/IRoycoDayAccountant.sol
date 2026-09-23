@@ -160,6 +160,9 @@ interface IRoycoDayAccountant {
     /// @notice Thrown when the collateral NAV doesn't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();
 
+    /// @notice Thrown when the premiums exceed the yield they are drawn from: the yield shares are capped so that the premiums always fit within the yield the concrete accountant's attribution distributes
+    error PREMIUMS_EXCEED_YIELD();
+
     /// @notice Thrown when the operation and NAVs passed to post-op lead to an invalid state
     error INVALID_POST_OP_STATE(Operation _op);
 
@@ -254,6 +257,7 @@ interface IRoycoDayAccountant {
 
     /**
      * @notice Updates the junior tranche protocol fee percentage for this market
+     * @dev A concrete accountant whose attribution does not bind this fee rejects updates to keep it pinned at zero
      * @dev Only callable by a designated admin
      * @param _jtProtocolFeeWAD The new protocol fee percentage charged on junior tranche yield, scaled to WAD precision
      */
@@ -262,14 +266,14 @@ interface IRoycoDayAccountant {
     /**
      * @notice Updates the yield share (risk premium) protocol fee percentage for this market
      * @dev Only callable by a designated admin
-     * @param _jtYieldShareProtocolFeeWAD The new protocol fee percentage charged on the yield share (risk premium) payed from senior tranche yield to the junior tranche, scaled to WAD precision
+     * @param _jtYieldShareProtocolFeeWAD The new protocol fee percentage charged on the yield share (risk premium) payed to the junior tranche, sourced by the concrete accountant's attribution, scaled to WAD precision
      */
     function setJTYieldShareProtocolFee(uint64 _jtYieldShareProtocolFeeWAD) external;
 
     /**
      * @notice Updates the yield share (liquidity premium) protocol fee percentage for this market
      * @dev Only callable by a designated admin
-     * @param _lptYieldShareProtocolFeeWAD The new protocol fee percentage charged on the yield share (liquidity premium) payed from senior tranche yield to the liquidity provider tranche, scaled to WAD precision
+     * @param _lptYieldShareProtocolFeeWAD The new protocol fee percentage charged on the yield share (liquidity premium) payed to the liquidity provider tranche, sourced by the concrete accountant's attribution, scaled to WAD precision
      */
     function setLPTYieldShareProtocolFee(uint64 _lptYieldShareProtocolFeeWAD) external;
 

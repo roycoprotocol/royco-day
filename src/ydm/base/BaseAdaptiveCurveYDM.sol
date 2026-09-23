@@ -10,7 +10,7 @@ import { BaseYDM } from "./BaseYDM.sol";
  * @title BaseAdaptiveCurveYDM
  * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Shared engine for Royco's adaptive curve yield distribution models (YDMs)
- * @dev A general-purpose model for paying a tranche's yield as a premium to a capital pool that provides a service to that tranche
+ * @dev A general-purpose model for paying a share of the distributed yield as a premium to a capital pool that provides a service to the market
  * @dev It is parameterized purely by the utilization of that service, so the same contract prices any tranche-yield premium
  * @dev Utilization is the fraction of the capital pool's service capacity that is currently in use: the ratio of demand for the service the pool provides to the pool's capacity to supply it, scaled to WAD precision
  * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least
@@ -88,8 +88,8 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
      * @dev Uses trapezoidal approximation to compute the average continuously adapting yield share for more accurate time-weighted results
      * @param _marketState The state of this Royco market (perpetual or fixed term), the curve only adapts in PERPETUAL
      * @param _utilizationWAD The utilization of the service the capital pool provides, scaled to WAD precision, bounded to WAD here
-     * @return yieldShareWAD The share of the tranche's yield paid to the capital pool as a premium, scaled to WAD precision
-     *                       It is implied that (WAD - yieldShareWAD) is retained by the paying tranche, excluding any protocol fees
+     * @return yieldShareWAD The share of the distributed yield paid to the capital pool as a premium, scaled to WAD precision
+     *                       It is implied that (WAD - yieldShareWAD) is retained by the distributed yield's residual claimant, excluding any protocol fees
      * @return newYieldShareAtTargetWAD The updated yield share at target utilization after adaptation, scaled to WAD precision
      */
     function _yieldShare(MarketState _marketState, uint256 _utilizationWAD) internal view returns (uint256 yieldShareWAD, uint256 newYieldShareAtTargetWAD) {

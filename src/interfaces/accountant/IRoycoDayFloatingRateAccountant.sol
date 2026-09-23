@@ -85,9 +85,6 @@ interface IRoycoDayFloatingRateAccountant is IRoycoDayAccountant {
     /// @notice Thrown when the junior and liquidity provider tranche YDMs are identical
     error YDMS_CANNOT_BE_IDENTICAL();
 
-    /// @notice Thrown when the combined risk and liquidity premiums exceed the senior gain they are drawn from: the JT and LPT yield shares must sum to at most 100% of senior appreciation
-    error PREMIUMS_EXCEED_SENIOR_YIELD();
-
     /**
      * @notice Updates the JT YDM (Junior Tranche Yield Distribution Model) for this market
      * @dev Only callable by a designated admin

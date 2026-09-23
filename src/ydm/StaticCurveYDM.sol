@@ -11,7 +11,7 @@ import { BaseYDM } from "./base/BaseYDM.sol";
  * @title StaticCurveYDM
  * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Royco's static curve yield distribution model (YDM)
- * @dev A general-purpose model for paying a tranche's yield as a premium to a capital pool that provides a service to that tranche
+ * @dev A general-purpose model for paying a share of the distributed yield as a premium to a capital pool that provides a service to the market
  * @dev It is parameterized purely by the utilization of that service, so the same contract prices any tranche-yield premium
  * @dev Utilization is the fraction of the capital pool's service capacity that is currently in use: the ratio of demand for the service the pool provides to the pool's capacity to supply it, scaled to WAD precision
  * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least
@@ -108,7 +108,7 @@ contract StaticCurveYDM is BaseYDM {
          *   Y(U) = Y_0 + S_lt * U                if U < U_T  (below target)
          *        = Y_T + S_gte * (U - U_T)       if U >= U_T (at or above target)
          *
-         * Y(U)  → Share of the paying tranche's yield routed to the capital pool as a premium
+         * Y(U)  → Share of the distributed yield routed to the capital pool as a premium
          * U     → Utilization of the service the capital pool provides
          * U_T   → Target utilization (the kink), configured per instance via TARGET_UTILIZATION_WAD
          * Y_0   → Yield share at zero utilization
@@ -130,7 +130,7 @@ contract StaticCurveYDM is BaseYDM {
         StaticYieldCurve storage curve = accountantToCurve[msg.sender];
         uint256 yieldShareAtTargetWAD = curve.yieldShareAtTargetWAD;
         require(yieldShareAtTargetWAD != 0, UNINITIALIZED_YDM());
-        // Compute Y(U), rounding down in favor of the paying tranche
+        // Compute Y(U), rounding down in favor of the residual claimant
         if (utilizationWAD < TARGET_UTILIZATION_WAD) {
             // If utilization is below the target (kink), apply the first leg of Y(U)
             return uint256(curve.slopeLtTargetUtilWAD).mulDiv(utilizationWAD, WAD, Math.Rounding.Floor) + curve.yieldShareAtZeroUtilWAD;

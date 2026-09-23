@@ -1939,7 +1939,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * PREMIUMS_EXCEED_SENIOR_YIELD is unreachable: with the yield shares capped at accrual and the caps
+     * PREMIUMS_EXCEED_YIELD is unreachable: with the yield shares capped at accrual and the caps
      * summing to exactly WAD, hostile YDM outputs (up to uint256 max) can never push the combined premiums past
      * the senior gain on either the time-weighted or the instantaneous branch. Any revert here is a REAL divergence
      */

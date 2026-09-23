@@ -23,7 +23,7 @@ library RoycoTestMath {
     error CONSERVATION_VIOLATED();
 
     /// @notice Raised when the computed premiums exceed the senior gain, mirroring the production guard.
-    error PREMIUMS_EXCEED_SENIOR_YIELD();
+    error PREMIUMS_EXCEED_YIELD();
 
     /// @notice Raised when a FIXED_TERM resolution carries a nonzero fee or premium, an unrepresentable state under same-sign attribution.
     error FIXED_TERM_FEES_NONZERO();
@@ -582,7 +582,7 @@ library RoycoTestMath {
                 }
                 out.jtRiskPremium = Math.mulDiv(stGain, twJT, elapsed * WAD);
                 out.lptLiquidityPremium = Math.mulDiv(stGain, twLPT, elapsed * WAD);
-                require(out.jtRiskPremium + out.lptLiquidityPremium <= stGain, PREMIUMS_EXCEED_SENIOR_YIELD());
+                require(out.jtRiskPremium + out.lptLiquidityPremium <= stGain, PREMIUMS_EXCEED_YIELD());
                 if (out.jtRiskPremium != 0) {
                     if (out.premiumsPaid) out.jtProtocolFee += Math.mulDiv(out.jtRiskPremium, in_.jtYieldShareProtocolFeeWAD, WAD);
                     jtEffectiveNAV += out.jtRiskPremium;

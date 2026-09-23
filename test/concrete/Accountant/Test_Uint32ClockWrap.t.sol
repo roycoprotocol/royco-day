@@ -180,7 +180,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
     /**
      * @notice Premium window: past the uint32 horizon, with both premium caps at 0.1e18 (so at most 20% of any
      *         senior gain should ever leave as premiums), a handful of flat syncs poison the accumulators so
-     *         badly that every subsequent gain-bearing sync reverts with PREMIUMS_EXCEED_SENIOR_YIELD — and the
+     *         badly that every subsequent gain-bearing sync reverts with PREMIUMS_EXCEED_YIELD — and the
      *         accumulators only reset when a premium is actually paid, which now can never happen, so the market
      *         cannot heal itself
      * @dev Each 1-second flat sync accrues rate x (2^32 + 1) per leg instead of rate x 1, while the premium
@@ -230,7 +230,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // floor(10e18 x 2576980378200000000000000000 / (4294967303 x 1e18)) = 5999999991618096842 and the two
         // legs sum to 11999999983236193684 > the 10e18 senior gain, tripping the premiums-exceed-senior-yield guard
         vm.warp(t0 + 7);
-        vm.expectRevert(IRoycoDayFloatingRateAccountant.PREMIUMS_EXCEED_SENIOR_YIELD.selector);
+        vm.expectRevert(IRoycoDayAccountant.PREMIUMS_EXCEED_YIELD.selector);
         kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 12e18));
 
         // The brick is persistent: the accumulators only reset when premiums are actually paid, and every
@@ -238,7 +238,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // 6 x 2^32-scale numerator, so diluting the combined premium back under the gain would take on the
         // order of 1.2 x 2^32 seconds (about 163 more years). One block later the same gain still reverts
         vm.warp(t0 + 8);
-        vm.expectRevert(IRoycoDayFloatingRateAccountant.PREMIUMS_EXCEED_SENIOR_YIELD.selector);
+        vm.expectRevert(IRoycoDayAccountant.PREMIUMS_EXCEED_YIELD.selector);
         kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 12e18));
     }
 }

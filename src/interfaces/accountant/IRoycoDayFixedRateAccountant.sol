@@ -74,9 +74,6 @@ interface IRoycoDayFixedRateAccountant is IRoycoDayAccountant {
     /// @notice Thrown when the accountant's yield share configuration is invalid (the maximum LPT yield share must be at most 100%)
     error INVALID_MAX_YIELD_SHARE_CONFIG();
 
-    /// @notice Thrown when the liquidity premium exceeds the excess yield it is drawn from: the LPT yield share is capped at 100% of the excess yield
-    error LIQUIDITY_PREMIUM_EXCEEDS_EXCESS_YIELD();
-
     /**
      * @notice Updates the senior tranche's fixed rate for this market
      * @dev The new rate applies to the entire in-flight accrual window, so it should be updated right after a coupon settlement

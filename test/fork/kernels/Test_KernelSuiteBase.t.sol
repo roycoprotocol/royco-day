@@ -3489,7 +3489,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     ///         ledger, with exact-args accrual and premium-mint events and the joint-pricing supply growth.
     function test_Sync_lptLiquidityPremium_mintsIdleSTShares() public whenLPT {
         SyncExpectation memory e = _arrangeStagedPremiumSyncExpectation();
-        assertLe(e.jtYieldShareWAD + e.lptYieldShareWAD, WAD, "the yield share caps must preclude PREMIUMS_EXCEED_SENIOR_YIELD");
+        assertLe(e.jtYieldShareWAD + e.lptYieldShareWAD, WAD, "the yield share caps must preclude PREMIUMS_EXCEED_YIELD");
         uint256 stSupplyPre = ST.totalSupply();
         (uint256 premShares, uint256 stFeeShares) =
             _expectedPremiumShares(e.lptLiquidityPremium, e.stProtocolFee, e.lptProtocolFee, e.stEffectiveNAV, stSupplyPre);

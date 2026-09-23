@@ -118,7 +118,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     // =============================
 
     /// @inheritdoc IRoycoDayAccountant
-    function commitLiquidityProviderTrancheRawNAV(NAV_UNIT _freshLPTRawNAV) external override(IRoycoDayAccountant) onlyRoycoKernel {
+    function commitLiquidityProviderTrancheRawNAV(NAV_UNIT _freshLPTRawNAV) external virtual override(IRoycoDayAccountant) onlyRoycoKernel {
         // Commit the freshly marked liquidity provider tranche raw NAV: the kernel marks it after the sync commits the senior/junior NAVs and mints any fee shares
         // The LPT raw NAV is dependent on the fresh ST share price which is resolved on the preceding pre-op synchronization
         _getRoycoDayAccountantStorage().lastLPTRawNAV = _freshLPTRawNAV;
@@ -132,7 +132,8 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         NAV_UNIT _lptRawNAV,
         NAV_UNIT _stSelfLiquidationBonusNAV
     )
-        public
+        external
+        virtual
         override(IRoycoDayAccountant)
         onlyRoycoKernel
         returns (SyncedAccountingState memory state)
@@ -214,7 +215,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
     /**
      * @notice Applies the market state transition resulting from a synchronization and completes the marshaled post-sync accounting state
-     * @dev Shared by every concrete accountant so the market state machine can never diverge across attribution flavors
+     * @dev Shared by every concrete accountant so the market state machine stays identical across attribution flavors
      * @param state The marshaled post-sync state carrying the waterfall's outputs, completed in memory with the market state and fixed-term fields
      * @param _initialMarketState The market state the synchronization transitions from
      * @return jtImpermanentLossErased The amount of JT coverage loss erased (reset to 0)
@@ -225,6 +226,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     )
         internal
         view
+        virtual
         returns (NAV_UNIT jtImpermanentLossErased)
     {
         // Get the storage pointer to the accountant state
@@ -279,7 +281,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      *
      * @dev The maximum ST deposit NAV is the minimum of x and x'
      */
-    function maxSTDeposit(SyncedAccountingState memory state) external view override(IRoycoDayAccountant) returns (NAV_UNIT) {
+    function maxSTDeposit(SyncedAccountingState memory state) external view virtual override(IRoycoDayAccountant) returns (NAV_UNIT) {
         // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
 
@@ -319,7 +321,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      * @dev Max assets withdrawable from JT, y: JT_EFFECTIVE_NAV - y = (COLLATERAL_NAV - y) * MIN_COVERAGE
      * @dev Isolate y: y = (JT_EFFECTIVE_NAV - (COLLATERAL_NAV * MIN_COVERAGE)) / (1 - MIN_COVERAGE)
      */
-    function maxJTWithdrawal(SyncedAccountingState memory state) external view override(IRoycoDayAccountant) returns (NAV_UNIT) {
+    function maxJTWithdrawal(SyncedAccountingState memory state) external view virtual override(IRoycoDayAccountant) returns (NAV_UNIT) {
         // Compute the minimum junior tranche assets required to cover the collateral as per the market's coverage requirement, rounding in favor of senior protection
         // Also account for the dust tolerance required to preclude reverts due to rounding after JT redemptions
         NAV_UNIT requiredJTValue = (state.collateralNAV + _getRoycoDayAccountantStorage().dustTolerance).mulDiv(state.minCoverageWAD, WAD, Math.Rounding.Ceil);
@@ -338,7 +340,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      * @dev Max assets withdrawable from LPT, z: (LPT_RAW_NAV - z) = (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
      *      Isolate z: z = LPT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
      */
-    function maxLPTWithdrawal(SyncedAccountingState memory state) external view override(IRoycoDayAccountant) returns (NAV_UNIT) {
+    function maxLPTWithdrawal(SyncedAccountingState memory state) external view virtual override(IRoycoDayAccountant) returns (NAV_UNIT) {
         // If there is no minimum liquidity requirement, there is no LPT withdrawal restriction
         if (state.minLiquidityWAD == 0) return state.lptRawNAV;
         // Compute the minimum market-making depth required to satisfy the market's liquidity requirement, rounding in favor of senior protection
@@ -354,7 +356,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     // =============================
 
     /// @inheritdoc IRoycoDayAccountant
-    function setSeniorTrancheProtocolFee(uint64 _stProtocolFeeWAD) external override(IRoycoDayAccountant) restricted withSyncedAccounting {
+    function setSeniorTrancheProtocolFee(uint64 _stProtocolFeeWAD) external virtual override(IRoycoDayAccountant) restricted withSyncedAccounting {
         // Ensure that the protocol fee percentage is valid
         require(_stProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
         _getRoycoDayAccountantStorage().stProtocolFeeWAD = _stProtocolFeeWAD;
@@ -362,7 +364,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoDayAccountant
-    function setJuniorTrancheProtocolFee(uint64 _jtProtocolFeeWAD) external override(IRoycoDayAccountant) restricted withSyncedAccounting {
+    function setJuniorTrancheProtocolFee(uint64 _jtProtocolFeeWAD) external virtual override(IRoycoDayAccountant) restricted withSyncedAccounting {
         // Ensure that the protocol fee percentage is valid
         require(_jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
         _getRoycoDayAccountantStorage().jtProtocolFeeWAD = _jtProtocolFeeWAD;
@@ -370,7 +372,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoDayAccountant
-    function setJTYieldShareProtocolFee(uint64 _jtYieldShareProtocolFeeWAD) external override(IRoycoDayAccountant) restricted withSyncedAccounting {
+    function setJTYieldShareProtocolFee(uint64 _jtYieldShareProtocolFeeWAD) external virtual override(IRoycoDayAccountant) restricted withSyncedAccounting {
         // Ensure that the protocol fee percentage is valid
         require(_jtYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
         _getRoycoDayAccountantStorage().jtYieldShareProtocolFeeWAD = _jtYieldShareProtocolFeeWAD;
@@ -378,7 +380,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoDayAccountant
-    function setLPTYieldShareProtocolFee(uint64 _lptYieldShareProtocolFeeWAD) external override(IRoycoDayAccountant) restricted withSyncedAccounting {
+    function setLPTYieldShareProtocolFee(uint64 _lptYieldShareProtocolFeeWAD) external virtual override(IRoycoDayAccountant) restricted withSyncedAccounting {
         // Ensure that the protocol fee percentage is valid
         require(_lptYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
         _getRoycoDayAccountantStorage().lptYieldShareProtocolFeeWAD = _lptYieldShareProtocolFeeWAD;
@@ -386,7 +388,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoDayAccountant
-    function setMinCoverage(uint64 _minCoverageWAD) external override(IRoycoDayAccountant) restricted withSyncedAccounting {
+    function setMinCoverage(uint64 _minCoverageWAD) external virtual override(IRoycoDayAccountant) restricted withSyncedAccounting {
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
         // The coverage requirement must leave headroom for the junior tranche to provide coverage (the liquidation threshold is unchanged and already valid)
         require(_minCoverageWAD < WAD, INVALID_COVERAGE_CONFIG());
@@ -397,6 +399,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     /// @inheritdoc IRoycoDayAccountant
     function setLiquidationCoverageUtilization(uint256 _coverageLiquidationUtilizationWAD)
         external
+        virtual
         override(IRoycoDayAccountant)
         restricted
         withSyncedAccounting
@@ -409,7 +412,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoDayAccountant
-    function setMinLiquidity(uint64 _minLiquidityWAD) external override(IRoycoDayAccountant) restricted withSyncedAccounting {
+    function setMinLiquidity(uint64 _minLiquidityWAD) external virtual override(IRoycoDayAccountant) restricted withSyncedAccounting {
         // The liquidity requirement must leave headroom (minLiquidity < WAD)
         require(_minLiquidityWAD < WAD, INVALID_LIQUIDITY_CONFIG());
         _getRoycoDayAccountantStorage().minLiquidityWAD = _minLiquidityWAD;
@@ -417,7 +420,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoDayAccountant
-    function setFixedTermDuration(uint24 _fixedTermDurationSeconds) external override(IRoycoDayAccountant) restricted withSyncedAccounting {
+    function setFixedTermDuration(uint24 _fixedTermDurationSeconds) external virtual override(IRoycoDayAccountant) restricted withSyncedAccounting {
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
         $.fixedTermDurationSeconds = _fixedTermDurationSeconds;
         // If the specified duration is 0, the market will permanently be in a perpetual state
@@ -432,7 +435,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoDayAccountant
-    function setDustTolerance(NAV_UNIT _dustTolerance) external override(IRoycoDayAccountant) restricted withSyncedAccounting {
+    function setDustTolerance(NAV_UNIT _dustTolerance) external virtual override(IRoycoDayAccountant) restricted withSyncedAccounting {
         _getRoycoDayAccountantStorage().dustTolerance = _dustTolerance;
         emit DustToleranceUpdated(_dustTolerance);
     }
@@ -447,7 +450,7 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      * @param _ydm The new YDM address to set
      * @param _ydmInitializationData The data used to initialize the new YDM for this market
      */
-    function _initializeYDM(address _ydm, bytes calldata _ydmInitializationData) internal {
+    function _initializeYDM(address _ydm, bytes calldata _ydmInitializationData) internal virtual {
         // Ensure that the YDM is not null
         require(_ydm != address(0), NULL_ADDRESS());
         // Initialize the YDM if required
