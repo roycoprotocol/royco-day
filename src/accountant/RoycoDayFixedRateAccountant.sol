@@ -169,7 +169,7 @@ contract RoycoDayFixedRateAccountant is RoycoDayAccountant, IRoycoDayFixedRateAc
             ? stEffectiveNAV.mulDiv(($.stFixedRatePerSecondWAD * (block.timestamp - $.lastCouponSettlementTimestamp)), WAD, Math.Rounding.Floor)
             : ZERO_NAV_UNITS;
 
-        /// @dev STEP_APPLY_PNL_WATERFALL: Settle the collateral's unrealized PNL through the tranche waterfall: a loss is absorbed junior-first before the coupon settles, while a gain settles the coupon first, then repays the JT impermanent loss and distributes the excess yield
+        /// @dev STEP_APPLY_PNL_WATERFALL: Settle the collateral's unrealized PNL through the tranche waterfall: a loss is absorbed junior-first before the coupon settles, while a gain repays the JT impermanent loss off the top, then settles the coupon and distributes the excess yield
         if (_collateralNAV < lastCollateralNAV) {
             // The unrealized loss of the underlying investment since the last NAV checkpoint
             NAV_UNIT loss = (lastCollateralNAV - _collateralNAV);
@@ -201,7 +201,16 @@ contract RoycoDayFixedRateAccountant is RoycoDayAccountant, IRoycoDayFixedRateAc
             // The unrealized gain of the underlying investment since the last NAV checkpoint
             NAV_UNIT gain = (_collateralNAV - lastCollateralNAV);
 
-            /// @dev STEP_SETTLE_ST_COUPON: The coupon is settled off the top of the gain, ahead of the JT impermanent loss repayment and the excess yield distribution
+            /// @dev STEP_REPAY_JT_IMPERMANENT_LOSS: Any prior transient loss booked by the JT from coverage provided, its own loss, or fronted coupon is repaid first
+            // The repayment is restoration, never yield, so it is never has a fee
+            if (jtImpermanentLoss != ZERO_NAV_UNITS) {
+                NAV_UNIT jtImpermanentLossRepayment = RoycoUnitsMath.min(gain, jtImpermanentLoss);
+                jtImpermanentLoss = (jtImpermanentLoss - jtImpermanentLossRepayment);
+                jtEffectiveNAV = (jtEffectiveNAV + jtImpermanentLossRepayment);
+                gain = (gain - jtImpermanentLossRepayment);
+            }
+
+            /// @dev STEP_SETTLE_ST_COUPON: The coupon is settled from the gain remaining after the impermanent loss repayment, ahead of the excess yield distribution
             // Any shortfall is fronted from JT's buffer up to its full depth and booked as impermanent loss: JT underwrites the senior's minimum rate and is restored by future gains through the repayment step
             if (stCouponDue != ZERO_NAV_UNITS) {
                 NAV_UNIT couponFromGain = RoycoUnitsMath.min(gain, stCouponDue);
@@ -213,15 +222,6 @@ contract RoycoDayFixedRateAccountant is RoycoDayAccountant, IRoycoDayFixedRateAc
                 jtImpermanentLoss = (jtImpermanentLoss + couponFromJT);
                 stEffectiveNAV = (stEffectiveNAV + couponPaid);
                 gain = (gain - couponFromGain);
-            }
-
-            /// @dev STEP_REPAY_JT_IMPERMANENT_LOSS: Any prior transient loss booked by the JT from coverage provided or its own loss is repaid after the coupon
-            // The repayment is restoration, never yield, so it is never has a fee
-            if (gain != ZERO_NAV_UNITS && jtImpermanentLoss != ZERO_NAV_UNITS) {
-                NAV_UNIT jtImpermanentLossRepayment = RoycoUnitsMath.min(gain, jtImpermanentLoss);
-                jtImpermanentLoss = (jtImpermanentLoss - jtImpermanentLossRepayment);
-                jtEffectiveNAV = (jtEffectiveNAV + jtImpermanentLossRepayment);
-                gain = (gain - jtImpermanentLossRepayment);
             }
 
             /// @dev STEP_DISTRIBUTE_EXCESS_YIELD: The gain remaining above the coupon and the impermanent loss repayment is junior-bound: the LPT liquidity premium is carved from it and the junior tranche keeps the complement as the residual claimant
