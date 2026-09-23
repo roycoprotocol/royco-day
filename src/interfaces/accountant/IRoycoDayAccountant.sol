@@ -19,8 +19,8 @@ interface IRoycoDayAccountant {
      * @custom:field dustTolerance - The worst case dust tolerance for collateralNAV from underlying NAV quoting/rounding
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the senior tranche, scaled to WAD precision
      * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the junior tranche, scaled to WAD precision
-     * @custom:field jtYieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
-     * @custom:field lptYieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche, scaled to WAD precision
+     * @custom:field jtYieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (risk premium) payed to the junior tranche, sourced by the concrete accountant's attribution, scaled to WAD precision
+     * @custom:field lptYieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (liquidity premium) payed to the liquidity provider tranche, sourced by the concrete accountant's attribution, scaled to WAD precision
      */
     struct RoycoDayAccountantInitParams {
         // Market Contracts
@@ -49,8 +49,8 @@ interface IRoycoDayAccountant {
      * @custom:storage-location erc7201:Royco.storage.RoycoDayAccountantState
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage charged from yield earned by the senior tranche, scaled to WAD precision
      * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage charged from yield earned by the junior tranche, scaled to WAD precision
-     * @custom:field jtYieldShareProtocolFeeWAD - The market's configured protocol fee percentage charged from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
-     * @custom:field lptYieldShareProtocolFeeWAD - The market's configured protocol fee percentage charged from the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche, scaled to WAD precision
+     * @custom:field jtYieldShareProtocolFeeWAD - The market's configured protocol fee percentage charged from the yield share (risk premium) payed to the junior tranche, sourced by the concrete accountant's attribution, scaled to WAD precision
+     * @custom:field lptYieldShareProtocolFeeWAD - The market's configured protocol fee percentage charged from the yield share (liquidity premium) payed to the liquidity provider tranche, sourced by the concrete accountant's attribution, scaled to WAD precision
      * @custom:field minCoverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity provider tranche's market making inventory, scaled to WAD precision
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
@@ -103,7 +103,7 @@ interface IRoycoDayAccountant {
     event JuniorTrancheProtocolFeeUpdated(uint64 jtProtocolFeeWAD);
 
     /// @notice Emitted when the junior tranche yield share (risk premium) protocol fee percentage is updated
-    /// @param jtYieldShareProtocolFeeWAD The new protocol fee percentage charged from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
+    /// @param jtYieldShareProtocolFeeWAD The new protocol fee percentage charged from the yield share (risk premium) payed to the junior tranche, sourced by the concrete accountant's attribution, scaled to WAD precision
     event JuniorTrancheYieldShareProtocolFeeUpdated(uint64 jtYieldShareProtocolFeeWAD);
 
     /// @notice Emitted when the coverage percentage requirement is updated
@@ -130,7 +130,7 @@ interface IRoycoDayAccountant {
     event FixedTermEnded();
 
     /// @notice Emitted when the yield share (liquidity premium) protocol fee percentage is updated
-    /// @param lptYieldShareProtocolFeeWAD The new protocol fee percentage charged from the yield share (liquidity premium) payed from the senior tranche yield to the liquidity provider tranche, scaled to WAD precision
+    /// @param lptYieldShareProtocolFeeWAD The new protocol fee percentage charged from the yield share (liquidity premium) payed to the liquidity provider tranche, sourced by the concrete accountant's attribution, scaled to WAD precision
     event LiquidityProviderTrancheYieldShareProtocolFeeUpdated(uint64 lptYieldShareProtocolFeeWAD);
 
     /// @notice Emitted when the liquidity percentage requirement is updated

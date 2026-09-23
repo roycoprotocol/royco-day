@@ -5,8 +5,9 @@ import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoDayAccountant } from "../../interfaces/accountant/IRoycoDayAccountant.sol";
 import { MAX_NAV_UNITS, MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
-import { MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../../libraries/Types.sol";
+import { DispatchMode, MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../../libraries/Types.sol";
 import { Math, RoycoUnitsMath, toNAVUnits } from "../../libraries/Units.sol";
+import { DispatchLogic } from "../../libraries/logic/DispatchLogic.sol";
 import { UtilizationLogic } from "../../libraries/logic/UtilizationLogic.sol";
 
 /**
@@ -18,6 +19,7 @@ import { UtilizationLogic } from "../../libraries/logic/UtilizationLogic.sol";
 abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for uint256;
+    using DispatchLogic for address;
 
     /// @dev Storage slot for RoycoDayAccountantState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayAccountantState")) - 1)) & ~bytes32(uint256(0xff))
@@ -210,6 +212,55 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         });
     }
 
+    /**
+     * @notice Applies the market state transition resulting from a synchronization and completes the marshaled post-sync accounting state
+     * @dev Shared by every concrete accountant so the market state machine can never diverge across attribution flavors
+     * @param state The marshaled post-sync state carrying the waterfall's outputs, completed in memory with the market state and fixed-term fields
+     * @param _initialMarketState The market state the synchronization transitions from
+     * @return jtImpermanentLossErased The amount of JT coverage loss erased (reset to 0)
+     */
+    function _applyStateTransition(
+        SyncedAccountingState memory state,
+        MarketState _initialMarketState
+    )
+        internal
+        view
+        returns (NAV_UNIT jtImpermanentLossErased)
+    {
+        // Get the storage pointer to the accountant state
+        RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
+
+        // Apply the market state transition resulting from this sync
+        uint32 fixedTermEndTimestamp = $.fixedTermEndTimestamp;
+        uint256 fixedTermDurationSeconds = $.fixedTermDurationSeconds;
+        // The market must be in a perpetual state if any of the following hold:
+        // 1. The market is permanently perpetual (fixed-term duration 0), so it never enters a JT observation period
+        // 2. There is no senior capital to protect in this market
+        // 3. The junior buffer is wiped (partially collateralized or a total wipe), so its dead restoration claim is extinguished, ST needs to be able to withdraw to avoid/book losses, and the YDM needs to kick in to reinstate proper collateralization
+        // 4. The JT impermanent loss is within the dust tolerance (fully repaid or dust-sized), so JT provides its loss-absorption buffer and needs no observation period: dust ST or JT losses (eg. rounding in the underlying NAVs) never lock or keep locking the market
+        // 5. The current fixed-term has elapsed, so the transient JT observation period is complete
+        // 6. The coverage utilization breached the liquidation threshold, so the market forces open senior exits
+        // 7. The market is still within its post-deployment fixed-term grace period, so it cannot enter it no matter what
+        if (
+            fixedTermDurationSeconds == 0 || state.stEffectiveNAV == ZERO_NAV_UNITS || state.jtEffectiveNAV == ZERO_NAV_UNITS
+                || state.jtImpermanentLoss <= $.dustTolerance || (_initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp)
+                || state.coverageUtilizationWAD >= state.coverageLiquidationUtilizationWAD || block.timestamp < $.fixedTermCommenceableAtTimestamp
+        ) {
+            // A perpetual commit always clears the JT impermanent loss ledger and the term, so a perpetual market never carries a drawdown
+            jtImpermanentLossErased = state.jtImpermanentLoss;
+            state.jtImpermanentLoss = ZERO_NAV_UNITS;
+            // Transition to a perpetual state
+            state.marketState = MarketState.PERPETUAL;
+            state.fixedTermEndTimestamp = 0;
+        } else {
+            // A market is in fixed-term until the JT impermanent loss is completely restored
+            state.marketState = MarketState.FIXED_TERM;
+            // Only modify the fixed term's end timestamp if this sync transitioned the market into it
+            state.fixedTermEndTimestamp =
+            ((_initialMarketState == MarketState.PERPETUAL) ? uint32(block.timestamp + fixedTermDurationSeconds) : fixedTermEndTimestamp);
+        }
+    }
+
     // =============================
     // Coverage and Liquidity Checking Functions
     // =============================
@@ -391,16 +442,16 @@ abstract contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     // =============================
 
     /**
-     * @notice Computes and returns the coverage and liquidity utilizations
-     * @return coverageUtilizationWAD The coverage utilization driving the JT risk premium, scaled to WAD precision
-     * @return liquidityUtilizationWAD The liquidity utilization driving the LPT liquidity premium, scaled to WAD precision
+     * @notice Initializes the YDM (Yield Distribution Model) if required for this market
+     * @dev A failing initialization bubbles the YDM's revert verbatim through the shared dispatch primitive
+     * @param _ydm The new YDM address to set
+     * @param _ydmInitializationData The data used to initialize the new YDM for this market
      */
-    function _computeUtilizations() internal view returns (uint256 coverageUtilizationWAD, uint256 liquidityUtilizationWAD) {
-        // Get the storage pointer to the accountant state
-        RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
-        // Compute both utilizations
-        coverageUtilizationWAD = UtilizationLogic._computeCoverageUtilization($.lastCollateralNAV, $.minCoverageWAD, $.lastJTEffectiveNAV);
-        liquidityUtilizationWAD = UtilizationLogic._computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLPTRawNAV);
+    function _initializeYDM(address _ydm, bytes calldata _ydmInitializationData) internal {
+        // Ensure that the YDM is not null
+        require(_ydm != address(0), NULL_ADDRESS());
+        // Initialize the YDM if required
+        if (_ydmInitializationData.length != 0) _ydm._dispatch(DispatchMode.EXECUTE, _ydmInitializationData);
     }
 
     // =============================
