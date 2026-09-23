@@ -11,7 +11,7 @@ import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts
 import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 
 import { ST_LP_ROLE } from "../../../../src/factory/Roles.sol";
-import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { BalancerV3LiquidityVenue } from "../../../../src/kernels/base/liquidity-venue/balancer-v3/BalancerV3LiquidityVenue.sol";

@@ -4,10 +4,11 @@ pragma solidity ^0.8.28;
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
+import { IRoycoDayAccountant } from "../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { ERC4626SharePriceOracle } from "../../src/oracle/ERC4626SharePriceOracle.sol";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -180,7 +181,7 @@ struct DeploymentResult {
     IYDM ydm;
     IRoycoVaultTranche seniorTranche;
     IRoycoVaultTranche juniorTranche;
-    IRoycoDayAccountant accountant;
+    IRoycoDayFloatingRateAccountant accountant;
     IRoycoDayKernel kernel;
     address roycoBlacklist;
     address entryPoint;

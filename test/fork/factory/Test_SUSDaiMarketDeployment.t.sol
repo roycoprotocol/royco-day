@@ -16,7 +16,8 @@ import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol"
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AggregatorV3Interface } from "../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
@@ -162,12 +163,13 @@ contract Test_SUSDaiMarketDeployment is Test {
     ///         term (observation period), and the 1% self-liquidation bonus
     function test_ExecuteMarketDeployment_SUsdaiEconomicsConfigured() external {
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
-        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayFloatingRateAccountant(r.accountant).getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = IRoycoDayFloatingRateAccountant(r.accountant).getRoycoDayFloatingRateAccountantState();
         assertEq(a.minCoverageWAD, 0.07e18, "sUSDai min coverage");
         assertEq(a.minLiquidityWAD, 0.1e18, "sUSDai min liquidity");
         assertEq(a.coverageLiquidationUtilizationWAD, 1.4e18, "sUSDai protected exit at 5% coverage remaining");
         assertEq(a.fixedTermDurationSeconds, 7 days, "sUSDai fixed term");
-        assertEq(a.maxLPTYieldShareWAD, 0.5e18, "sUSDai LPT yield share cap");
+        assertEq(aFloating.maxLPTYieldShareWAD, 0.5e18, "sUSDai LPT yield share cap");
         assertEq(IRoycoDayKernel(r.kernel).getState().stSelfLiquidationBonusWAD, 0.01e18, "sUSDai self-liquidation bonus");
     }
 

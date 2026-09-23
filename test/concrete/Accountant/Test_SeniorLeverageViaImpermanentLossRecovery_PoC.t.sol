@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { WaterfallSyncDriver } from "../../mocks/WaterfallSyncDriver.sol";
@@ -47,16 +48,20 @@ contract Test_SeniorLeverageViaImpermanentLossRecovery_PoC is Test {
     }
 
     /// @dev The base checkpoint at price 1.0: PERPETUAL, no IL, every fee/premium rate zeroed so only the waterfall acts
-    function _baseSeed() internal view returns (IRoycoDayAccountant.RoycoDayAccountantState memory seed) {
+    function _baseSeed()
+        internal
+        view
+        returns (IRoycoDayAccountant.RoycoDayAccountantState memory seed, IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory floatingRateSeed)
+    {
         seed.minCoverageWAD = 0.1e18; // 10%, keeps coverage utilization well under the liquidation threshold
         seed.fixedTermDurationSeconds = 30 days; // nonzero, so a genuine IL locks the market FIXED_TERM instead of erasing
         seed.lastMarketState = MarketState.PERPETUAL;
-        seed.lastYieldShareAccrualTimestamp = 1;
-        seed.lastPremiumPaymentTimestamp = 1; // elapsed = block.timestamp - 1 > 0
-        seed.jtYDM = address(0x1111); // never called: tw shares are passed in as zero and elapsed is nonzero
-        seed.lptYDM = address(0x2222);
-        seed.maxJTYieldShareWAD = 1e18;
-        seed.maxLPTYieldShareWAD = 1e18;
+        floatingRateSeed.lastYieldShareAccrualTimestamp = 1;
+        floatingRateSeed.lastPremiumPaymentTimestamp = 1; // elapsed = block.timestamp - 1 > 0
+        floatingRateSeed.jtYDM = address(0x1111); // never called: tw shares are passed in as zero and elapsed is nonzero
+        floatingRateSeed.lptYDM = address(0x2222);
+        floatingRateSeed.maxJTYieldShareWAD = 1e18;
+        floatingRateSeed.maxLPTYieldShareWAD = 1e18;
         seed.coverageLiquidationUtilizationWAD = 2e18; // > WAD per the accountant's config invariant
         seed.lastCollateralNAV = COLLATERAL_AT_1;
         seed.lastSTEffectiveNAV = ST_EFF_AT_1;
@@ -74,7 +79,11 @@ contract Test_SeniorLeverageViaImpermanentLossRecovery_PoC is Test {
         // ============================================================
         // Path A: the direct move 1.0 -> 2.0 (the fair benchmark)
         // ============================================================
-        driver.seedCheckpoint(_baseSeed());
+        {
+            (IRoycoDayAccountant.RoycoDayAccountantState memory seed, IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory floatingRateSeed) =
+                _baseSeed();
+            driver.seedCheckpoint(seed, floatingRateSeed);
+        }
         SyncedAccountingState memory direct = _sync(COLLATERAL_AT_2);
 
         // Fair split: gain 150 attributed floor(150 * 100/150)=100 to ST, 50 residual to JT
@@ -86,7 +95,11 @@ contract Test_SeniorLeverageViaImpermanentLossRecovery_PoC is Test {
         // ============================================================
 
         // ---- Sync 1: price 1.0 -> 0.8 (collateral 150 -> 120, delta -30) ----
-        driver.seedCheckpoint(_baseSeed());
+        {
+            (IRoycoDayAccountant.RoycoDayAccountantState memory seed, IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory floatingRateSeed) =
+                _baseSeed();
+            driver.seedCheckpoint(seed, floatingRateSeed);
+        }
         SyncedAccountingState memory dip = _sync(COLLATERAL_AT_0_8);
 
         // Attribution floor(30 * 100/150)=20 to ST, 10 residual to JT.
@@ -98,14 +111,15 @@ contract Test_SeniorLeverageViaImpermanentLossRecovery_PoC is Test {
 
         // ---- Sync 2: price 0.8 -> 2.0 (collateral 120 -> 300, delta +180) ----
         // Re-seed the driver with sync 1's committed output, exactly as preOpSyncTrancheAccounting would persist it
-        IRoycoDayAccountant.RoycoDayAccountantState memory seed2 = _baseSeed();
+        (IRoycoDayAccountant.RoycoDayAccountantState memory seed2, IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory floatingRateSeed2) =
+            _baseSeed();
         seed2.lastMarketState = dip.marketState;
         seed2.fixedTermEndTimestamp = dip.fixedTermEndTimestamp;
         seed2.lastCollateralNAV = toNAVUnits(COLLATERAL_AT_0_8);
         seed2.lastSTEffectiveNAV = dip.stEffectiveNAV;
         seed2.lastJTEffectiveNAV = dip.jtEffectiveNAV;
         seed2.lastJTImpermanentLoss = dip.jtImpermanentLoss;
-        driver.seedCheckpoint(seed2);
+        driver.seedCheckpoint(seed2, floatingRateSeed2);
 
         SyncedAccountingState memory roundTrip = _sync(COLLATERAL_AT_2);
 

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { Operation, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT } from "../../src/libraries/Units.sol";
 
@@ -16,17 +17,18 @@ contract MockAccountantKernel {
 
     error KERNEL_SYNC_REVERTED();
 
-    IRoycoDayAccountant public accountant;
+    IRoycoDayFloatingRateAccountant public accountant;
     SyncMode public syncMode;
     uint256 public syncCallCount;
     NAV_UNIT public syncCollateralNAV;
     IRoycoDayAccountant.RoycoDayAccountantState internal _stateAtLastSync;
+    IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState internal _floatingRateStateAtLastSync;
 
     /// @dev The accountant state hash observed at each sync, in call order, so a test can pin what the n-th sync saw
     bytes32[] public stateHashAtSync;
 
     function setAccountant(address _accountant) external {
-        accountant = IRoycoDayAccountant(_accountant);
+        accountant = IRoycoDayFloatingRateAccountant(_accountant);
     }
 
     function setSyncMode(SyncMode _mode) external {
@@ -49,7 +51,8 @@ contract MockAccountantKernel {
         if (syncMode == SyncMode.REVERT) revert KERNEL_SYNC_REVERTED();
         syncCallCount++;
         _stateAtLastSync = accountant.getState();
-        stateHashAtSync.push(keccak256(abi.encode(_stateAtLastSync)));
+        _floatingRateStateAtLastSync = accountant.getRoycoDayFloatingRateAccountantState();
+        stateHashAtSync.push(keccak256(abi.encode(_stateAtLastSync, _floatingRateStateAtLastSync)));
         if (syncMode == SyncMode.SYNC) state = accountant.preOpSyncTrancheAccounting(syncCollateralNAV);
     }
 

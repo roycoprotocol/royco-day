@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
@@ -104,7 +105,7 @@ contract SetCoverage is ParameterUpdateBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _verify(UpdateParams memory _params) internal view override {
-        IRoycoDayAccountant.RoycoDayAccountantState memory state = IRoycoDayAccountant(_params.target).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = IRoycoDayFloatingRateAccountant(_params.target).getState();
 
         // Extract expected coverage from the calldata (skip 4-byte selector)
         uint64 expected;

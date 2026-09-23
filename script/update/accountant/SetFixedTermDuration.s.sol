@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
@@ -101,7 +102,7 @@ contract SetFixedTermDuration is ParameterUpdateBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _verify(UpdateParams memory _params) internal view override {
-        IRoycoDayAccountant.RoycoDayAccountantState memory state = IRoycoDayAccountant(_params.target).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = IRoycoDayFloatingRateAccountant(_params.target).getState();
 
         // Extract expected duration from the calldata (skip 4-byte selector). uint24 lives in the
         // low-order bytes of the 32-byte word at offset 4, so a full mload + cast pulls it out.

@@ -6,7 +6,7 @@ import { PausableUpgradeable } from "../../../../lib/openzeppelin-contracts-upgr
 import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";

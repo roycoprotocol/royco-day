@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { NAV_UNIT, toNAVUnits } from "../../../src/libraries/Units.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
@@ -106,7 +107,7 @@ contract SetDustTolerance is ParameterUpdateBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _verify(UpdateParams memory _params) internal view override {
-        IRoycoDayAccountant.RoycoDayAccountantState memory state = IRoycoDayAccountant(_params.target).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = IRoycoDayFloatingRateAccountant(_params.target).getState();
 
         // Decode the expected NAV_UNIT from the calldata (skip 4-byte selector)
         uint256 expected;

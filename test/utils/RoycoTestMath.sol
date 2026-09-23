@@ -23,7 +23,7 @@ library RoycoTestMath {
     error CONSERVATION_VIOLATED();
 
     /// @notice Raised when the computed premiums exceed the senior gain, mirroring the production guard.
-    error PREMIUMS_EXCEED_SENIOR_YIELD();
+    error PREMIUMS_EXCEED_YIELD();
 
     /// @notice Raised when a FIXED_TERM resolution carries a nonzero fee or premium, an unrepresentable state under same-sign attribution.
     error FIXED_TERM_FEES_NONZERO();
@@ -151,6 +151,103 @@ library RoycoTestMath {
     }
 
     /**
+     * @title FixedSyncInputs
+     * @notice Complete input set for one fixed-rate tranche accounting sync, mirroring the inputs src's
+     *         RoycoDayFixedRateAccountant._previewSyncTrancheAccounting consumes.
+     * @custom:field collateralNAVLast - Collateral NAV at the last committed checkpoint (the coinvested pool, equal to stEffectiveNAVLast + jtEffectiveNAVLast under conservation)
+     * @custom:field stEffectiveNAVLast - Senior effective NAV at the last committed checkpoint (the coupon base for the whole in-flight window)
+     * @custom:field jtEffectiveNAVLast - Junior effective NAV at the last committed checkpoint (the loss-absorption and coupon-fronting buffer)
+     * @custom:field jtImpermanentLossLast - JT impermanent loss carried from the last checkpoint (coverage, own losses, and fronted coupon)
+     * @custom:field marketStateLast - Market state committed at the last checkpoint
+     * @custom:field fixedTermEndTimestampLast - Fixed-term end timestamp committed at the last checkpoint (0 if none)
+     * @custom:field collateralNAVDelta - Signed collateral-NAV delta since the last checkpoint (0 selects a flat sync: silent accrual, no coupon, no restamp)
+     * @custom:field lptRawNAVNew - Fresh LPT raw NAV mark, committed outside the collateral sync, pass-through only
+     * @custom:field stFixedRatePerSecondWAD - The senior tranche's fixed rate per second in WAD
+     * @custom:field elapsedSinceCouponSettlement - Seconds since the last coupon settlement (the in-flight coupon window's length)
+     * @custom:field lptTwYieldShareAccrual - Time-weighted LPT yield-share accrual Σ shareWAD·Δt over the premium window
+     * @custom:field elapsedSincePremiumPayment - Seconds since the last premium payment (0 selects the instantaneous branch)
+     * @custom:field lptInstYieldShareWAD - Raw LPT previewYieldShare output consumed only by the instantaneous branch
+     * @custom:field maxLPTYieldShareWAD - Cap applied to the instantaneous LPT share, ignored on the time-weighted path
+     * @custom:field stProtocolFeeWAD - Protocol fee fraction applied to the coupon paid
+     * @custom:field jtYieldShareProtocolFeeWAD - Protocol fee fraction applied to JT's excess-yield complement (the residual-form risk premium)
+     * @custom:field lptYieldShareProtocolFeeWAD - Protocol fee fraction applied to the LPT liquidity premium
+     * @custom:field nowTimestamp - Block timestamp of the sync (state-machine predicate input)
+     * @custom:field fixedTermDuration - Configured fixed-term duration (0 forces PERPETUAL)
+     * @custom:field minCoverageWAD - Minimum coverage fraction (input for the post-sync coverage utilization)
+     * @custom:field coverageLiquidationUtilizationWAD - Liquidation threshold on coverage utilization
+     * @custom:field dustTolerance - The single collateral NAV dust tolerance used by the fee gates and the state machine
+     * @custom:field minLiquidityWAD - Minimum liquidity fraction (input for the mirror-side liquidity utilization)
+     */
+    struct FixedSyncInputs {
+        uint256 collateralNAVLast;
+        uint256 stEffectiveNAVLast;
+        uint256 jtEffectiveNAVLast;
+        uint256 jtImpermanentLossLast;
+        MarketState marketStateLast;
+        uint256 fixedTermEndTimestampLast;
+        int256 collateralNAVDelta;
+        uint256 lptRawNAVNew;
+        uint256 stFixedRatePerSecondWAD;
+        uint256 elapsedSinceCouponSettlement;
+        uint256 lptTwYieldShareAccrual;
+        uint256 elapsedSincePremiumPayment;
+        uint256 lptInstYieldShareWAD;
+        uint256 maxLPTYieldShareWAD;
+        uint256 stProtocolFeeWAD;
+        uint256 jtYieldShareProtocolFeeWAD;
+        uint256 lptYieldShareProtocolFeeWAD;
+        uint256 nowTimestamp;
+        uint256 fixedTermDuration;
+        uint256 minCoverageWAD;
+        uint256 coverageLiquidationUtilizationWAD;
+        uint256 dustTolerance;
+        uint256 minLiquidityWAD;
+    }
+
+    /**
+     * @title FixedSyncOutputs
+     * @notice Complete expected post-sync state for the fixed-rate flavor, mirroring the production checkpoint field-for-field.
+     * @custom:field collateralNAV - Post-sync collateral NAV (last collateral NAV plus the applied delta)
+     * @custom:field lptRawNAV - Post-sync LPT raw NAV (committed pass-through of lptRawNAVNew)
+     * @custom:field stEffectiveNAV - Post-sync senior effective NAV
+     * @custom:field jtEffectiveNAV - Post-sync junior effective NAV
+     * @custom:field jtImpermanentLoss - Post-sync JT impermanent loss
+     * @custom:field stCouponDue - The window's full coupon demand (mirror-only observable, the forgiveness bound's reference)
+     * @custom:field stCouponPaid - The coupon actually funded by the gain and the junior buffer this sync (the ST effective NAV's coupon leg, everything above it is forgiven)
+     * @custom:field lptLiquidityPremium - LPT liquidity premium carved from the excess yield on this sync
+     * @custom:field stProtocolFee - Protocol fee taken on the coupon paid on this sync
+     * @custom:field jtProtocolFee - Protocol fee taken on JT's excess-yield complement on this sync
+     * @custom:field lptProtocolFee - Protocol fee taken on the LPT liquidity premium on this sync
+     * @custom:field coverageUtilizationWAD - Coverage utilization at the post-sync marks
+     * @custom:field liquidityUtilizationWAD - Liquidity utilization at the post-sync marks (post-commit view)
+     * @custom:field marketState - Post-sync market state per the state-machine predicate
+     * @custom:field fixedTermEndTimestamp - Post-sync fixed-term end timestamp (0 outside FIXED_TERM)
+     * @custom:field premiumsPaid - Whether the excess-yield dust gate cleared, driving the accumulator reset
+     * @custom:field couponSettled - Whether this sync settled the coupon window (any collateral NAV movement), driving the coupon clock restamp
+     * @custom:field ilErased - The JT IL erased by this sync's PERPETUAL commit (every PERPETUAL commit clears the ledger), the exact reset-event arg
+     */
+    struct FixedSyncOutputs {
+        uint256 collateralNAV;
+        uint256 lptRawNAV;
+        uint256 stEffectiveNAV;
+        uint256 jtEffectiveNAV;
+        uint256 jtImpermanentLoss;
+        uint256 stCouponDue;
+        uint256 stCouponPaid;
+        uint256 lptLiquidityPremium;
+        uint256 stProtocolFee;
+        uint256 jtProtocolFee;
+        uint256 lptProtocolFee;
+        uint256 coverageUtilizationWAD;
+        uint256 liquidityUtilizationWAD;
+        MarketState marketState;
+        uint256 fixedTermEndTimestamp;
+        bool premiumsPaid;
+        bool couponSettled;
+        uint256 ilErased;
+    }
+
+    /**
      * @title Claims
      * @notice Plain-uint256 mirror of the production four-field asset-claims struct.
      * @custom:field collateralAssets - Claim on the coinvested collateral assets in tranche units (the single ST and JT asset leg)
@@ -228,7 +325,7 @@ library RoycoTestMath {
 
     /**
      * @notice Gain attribution: attributed = ⌊gain · claim / lastCollateralNAV⌋.
-     * @dev Mirrors the pro-rata split inlined in src RoycoDayAccountant's STEP_ATTRIBUTE_RESIDUAL_GAIN.
+     * @dev Mirrors the pro-rata split inlined in src RoycoDayFloatingRateAccountant's STEP_ATTRIBUTE_RESIDUAL_GAIN.
      *      Only gains are ever attributed: the waterfall absorbs a loss junior-first, so a loss never splits.
      *      Rounding: Floor. Favors: the complementary tranche (JT is the residual and absorbs the flooring drift of the split).
      *      Edge: returns 0 if gain == 0, claim == 0, or lastCollateralNAV == 0. The empty-checkpoint seniority
@@ -582,7 +679,7 @@ library RoycoTestMath {
                 }
                 out.jtRiskPremium = Math.mulDiv(stGain, twJT, elapsed * WAD);
                 out.lptLiquidityPremium = Math.mulDiv(stGain, twLPT, elapsed * WAD);
-                require(out.jtRiskPremium + out.lptLiquidityPremium <= stGain, PREMIUMS_EXCEED_SENIOR_YIELD());
+                require(out.jtRiskPremium + out.lptLiquidityPremium <= stGain, PREMIUMS_EXCEED_YIELD());
                 if (out.jtRiskPremium != 0) {
                     if (out.premiumsPaid) out.jtProtocolFee += Math.mulDiv(out.jtRiskPremium, in_.jtYieldShareProtocolFeeWAD, WAD);
                     jtEffectiveNAV += out.jtRiskPremium;
@@ -636,6 +733,149 @@ library RoycoTestMath {
             // requires a gain residual that fully recovered the IL, which resolves PERPETUAL instead. A violation
             // here means the waterfall above (or production, via a diverging cross-assert) broke the theorem
             require(out.lptLiquidityPremium == 0 && out.stProtocolFee == 0 && out.jtProtocolFee == 0 && out.lptProtocolFee == 0, FIXED_TERM_FEES_NONZERO());
+        }
+
+        out.stEffectiveNAV = stEffectiveNAV;
+        out.jtEffectiveNAV = jtEffectiveNAV;
+        out.jtImpermanentLoss = il;
+        out.liquidityUtilizationWAD = computeLiquidityUtilization(stEffectiveNAV, in_.minLiquidityWAD, in_.lptRawNAVNew);
+    }
+
+    /**
+     * @notice The full fixed-rate sync mirror, composing the coupon demand, the loss/gain waterfall, the excess split, fees, and the state machine.
+     * @dev Mirrors src RoycoDayFixedRateAccountant._previewSyncTrancheAccounting.
+     *      Coupon demand: ⌊stEffectiveNAVLast · rate · elapsedSinceCouponSettlement / WAD⌋ owed only when the collateral
+     *      NAV moved (a flat sync accrues silently and owes nothing), linear over the whole in-flight window on the
+     *      COMMITTED senior NAV, so the coupon compounds exactly at settlement cadence. Loss pipeline: the loss is
+     *      absorbed junior-first (all of it impermanent), the uncovered residual reaches ST, THEN the coupon is fronted
+     *      from what remains of the buffer and booked as impermanent loss. Gain pipeline: the drawdown is repaid off
+     *      the top (restoration, never fee'd), then the coupon settles from the residual gain with any shortfall
+     *      fronted from the buffer up to its full depth, then the excess pays the capped time-weighted LPT liquidity
+     *      premium (instantaneous branch when elapsedSincePremiumPayment == 0) and JT keeps the complement
+     *      unconditionally as the residual claimant. Coupon beyond gain + buffer is forgiven, never carried.
+     *      Then the byte-exact conservation check and the shared state machine: every PERPETUAL commit erases the IL
+     *      and clears the term, and a FIXED_TERM resolution provably carries no premium and no junior or liquidity fee
+     *      but MAY carry the coupon's senior fee (checked): committed IL above dust requires the coupon to outrun the
+     *      gain, which zeroes the excess before any premium or complement can flow.
+     *      Rounding: Floor on the coupon, the premium, and every fee. Favors: the junior buffer.
+     *      Mirror-side extras vs the raw production return: out.lptRawNAV echoes in.lptRawNAVNew,
+     *      out.liquidityUtilizationWAD is the post-commit view (production returns (0, 0) placeholders), and
+     *      out.stCouponDue / out.stCouponPaid / out.couponSettled expose the coupon leg the packet folds into the NAVs.
+     *      NOT mirrored: src state-machine condition 7, the post-deployment fixed-term grace period, every
+     *      mirror-driven harness deploys with a zero grace period so the condition is structurally false here.
+     *      Preconditions: collateralNAVLast == stEffectiveNAVLast + jtEffectiveNAVLast, the delta does not underflow
+     *      collateralNAVLast, and elapsedSincePremiumPayment · WAD fits uint256.
+     * @param in_ The complete fixed-rate sync input set
+     * @return out The complete expected post-sync state
+     */
+    function syncFixedRateTrancheAccounting(FixedSyncInputs memory in_) internal pure returns (FixedSyncOutputs memory out) {
+        // Fresh collateral NAV from the signed delta; LPT raw NAV is a committed pass-through
+        out.collateralNAV = _applyDelta(in_.collateralNAVLast, in_.collateralNAVDelta);
+        out.lptRawNAV = in_.lptRawNAVNew;
+
+        uint256 stEffectiveNAV = in_.stEffectiveNAVLast;
+        uint256 jtEffectiveNAV = in_.jtEffectiveNAVLast;
+        uint256 il = in_.jtImpermanentLossLast;
+
+        // The coupon is owed only when fresh collateral information is priced: the fixed rate applied to the
+        // COMMITTED senior NAV over the whole window since the last settlement, so mid-window flows reprice nothing
+        out.couponSettled = in_.collateralNAVDelta != 0;
+        if (out.couponSettled) {
+            out.stCouponDue = Math.mulDiv(in_.stEffectiveNAVLast, in_.stFixedRatePerSecondWAD * in_.elapsedSinceCouponSettlement, WAD);
+        }
+
+        if (in_.collateralNAVDelta < 0) {
+            // Junior-first loss absorption: the buffer takes the loss up to exhaustion, all of it impermanent
+            // (recoverable through the repayment step), and only the uncovered residual reaches ST
+            uint256 loss = uint256(-in_.collateralNAVDelta);
+            uint256 ilIncurred = Math.min(loss, jtEffectiveNAV);
+            jtEffectiveNAV -= ilIncurred;
+            il += ilIncurred;
+            loss -= ilIncurred;
+            if (loss != 0) stEffectiveNAV -= loss;
+
+            // The coupon settles after the loss waterfall: a markdown carries no gain, so the whole coupon is
+            // fronted from what remains of the buffer, booked as impermanent loss, and the shortfall is forgiven
+            out.stCouponPaid = Math.min(out.stCouponDue, jtEffectiveNAV);
+            if (out.stCouponPaid != 0) {
+                if (out.stCouponPaid > in_.dustTolerance) out.stProtocolFee = Math.mulDiv(out.stCouponPaid, in_.stProtocolFeeWAD, WAD);
+                jtEffectiveNAV -= out.stCouponPaid;
+                il += out.stCouponPaid;
+                stEffectiveNAV += out.stCouponPaid;
+            }
+        } else if (in_.collateralNAVDelta > 0) {
+            uint256 gain = uint256(in_.collateralNAVDelta);
+
+            // The drawdown is repaid off the top of the gain before the coupon and the excess: restoration, never fee'd
+            if (il > 0) {
+                uint256 ilRepayment = Math.min(gain, il);
+                il -= ilRepayment;
+                jtEffectiveNAV += ilRepayment;
+                gain -= ilRepayment;
+            }
+
+            // The coupon settles from the residual gain, with any shortfall fronted from the buffer up to its full
+            // depth and booked as impermanent loss, and anything beyond gain + buffer forgiven
+            if (out.stCouponDue != 0) {
+                uint256 couponFromGain = Math.min(gain, out.stCouponDue);
+                uint256 couponFromJT = Math.min(out.stCouponDue - couponFromGain, jtEffectiveNAV);
+                out.stCouponPaid = couponFromGain + couponFromJT;
+                if (out.stCouponPaid > in_.dustTolerance) out.stProtocolFee = Math.mulDiv(out.stCouponPaid, in_.stProtocolFeeWAD, WAD);
+                jtEffectiveNAV -= couponFromJT;
+                il += couponFromJT;
+                stEffectiveNAV += out.stCouponPaid;
+                gain -= couponFromGain;
+            }
+
+            // The excess above the coupon and the repayment is junior-bound: the LPT liquidity premium is carved
+            // from it and JT keeps the complement unconditionally as the residual claimant
+            if (gain != 0) {
+                // The dust gate drives the fees and the accumulator reset, not the premium
+                out.premiumsPaid = gain > in_.dustTolerance;
+                uint256 elapsed = in_.elapsedSincePremiumPayment;
+                uint256 twLPT = in_.lptTwYieldShareAccrual;
+                if (elapsed == 0) {
+                    // Same-block instantaneous branch: 1-second window with the capped preview share
+                    elapsed = 1;
+                    twLPT = Math.min(in_.lptInstYieldShareWAD, in_.maxLPTYieldShareWAD);
+                }
+                out.lptLiquidityPremium = Math.mulDiv(gain, twLPT, elapsed * WAD);
+                require(out.lptLiquidityPremium <= gain, PREMIUMS_EXCEED_YIELD());
+                if (out.lptLiquidityPremium != 0) {
+                    if (out.premiumsPaid) out.lptProtocolFee = Math.mulDiv(out.lptLiquidityPremium, in_.lptYieldShareProtocolFeeWAD, WAD);
+                    gain -= out.lptLiquidityPremium;
+                }
+                if (gain != 0) {
+                    if (out.premiumsPaid) out.jtProtocolFee = Math.mulDiv(gain, in_.jtYieldShareProtocolFeeWAD, WAD);
+                    jtEffectiveNAV += gain;
+                }
+                // The LPT premium stays a senior claim (coverage neutral), so it is re-added on the senior side
+                stEffectiveNAV += out.lptLiquidityPremium;
+            }
+        }
+
+        // Collateral conservation at wei precision: the pool always equals the sum of the tranche effective NAVs
+        require(out.collateralNAV == stEffectiveNAV + jtEffectiveNAV, CONSERVATION_VIOLATED());
+
+        // Shared state machine on the fresh collateral NAV and the settled post-sync jtEffectiveNAV, identical to
+        // the floating mirror's predicate: the coupon-as-IL booking is what lets coupon drag alone lock the term
+        out.coverageUtilizationWAD = computeCoverageUtilization(out.collateralNAV, in_.minCoverageWAD, jtEffectiveNAV);
+        bool perpetual = il <= in_.dustTolerance || in_.fixedTermDuration == 0
+            || (in_.marketStateLast == MarketState.FIXED_TERM && in_.fixedTermEndTimestampLast <= in_.nowTimestamp)
+            || out.coverageUtilizationWAD >= in_.coverageLiquidationUtilizationWAD || stEffectiveNAV == 0 || jtEffectiveNAV == 0;
+        if (perpetual) {
+            // A perpetual commit always erases the IL and clears the term, crystallizing any unrecovered fronted coupon
+            out.ilErased = il;
+            il = 0;
+            out.marketState = MarketState.PERPETUAL;
+        } else {
+            out.marketState = MarketState.FIXED_TERM;
+            out.fixedTermEndTimestamp =
+                in_.marketStateLast == MarketState.PERPETUAL ? uint256(uint32(in_.nowTimestamp + in_.fixedTermDuration)) : in_.fixedTermEndTimestampLast;
+            // The fixed-flavor fee theorem, checked rather than assumed: committed IL above dust requires the coupon
+            // to outrun the gain, which zeroes the excess, so no premium or junior/liquidity fee can survive a
+            // FIXED_TERM resolution. The coupon's senior fee CAN: the coupon accrues even when fully fronted
+            require(out.lptLiquidityPremium == 0 && out.jtProtocolFee == 0 && out.lptProtocolFee == 0, FIXED_TERM_FEES_NONZERO());
         }
 
         out.stEffectiveNAV = stEffectiveNAV;

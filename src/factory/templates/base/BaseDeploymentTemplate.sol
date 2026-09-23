@@ -2,10 +2,11 @@
 pragma solidity ^0.8.28;
 
 import { AccessManaged } from "../../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManaged.sol";
-import { RoycoDayAccountant } from "../../../accountant/RoycoDayAccountant.sol";
+import { RoycoDayFloatingRateAccountant } from "../../../accountant/RoycoDayFloatingRateAccountant.sol";
 import { IRoycoAuth } from "../../../interfaces/IRoycoAuth.sol";
-import { IRoycoDayAccountant } from "../../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
+import { IRoycoDayAccountant } from "../../../interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IBaseTemplate } from "../../../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtocolTemplate.sol";
@@ -305,26 +306,28 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate, AccessManaged {
         returns (bytes memory)
     {
         return abi.encodeCall(
-            RoycoDayAccountant.initialize,
-            (IRoycoDayAccountant.RoycoDayAccountantInitParams({
-                    kernel: _kernel,
-                    initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY(),
-                    fixedTermGracePeriodSeconds: _params.fixedTermGracePeriodSeconds,
-                    minCoverageWAD: _params.minCoverageWAD,
-                    coverageLiquidationUtilizationWAD: _params.coverageLiquidationUtilizationWAD,
-                    minLiquidityWAD: _params.minLiquidityWAD,
+            RoycoDayFloatingRateAccountant.initialize,
+            (IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams({
+                    standardParams: IRoycoDayAccountant.RoycoDayAccountantInitParams({
+                        kernel: _kernel,
+                        initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY(),
+                        fixedTermGracePeriodSeconds: _params.fixedTermGracePeriodSeconds,
+                        minCoverageWAD: _params.minCoverageWAD,
+                        coverageLiquidationUtilizationWAD: _params.coverageLiquidationUtilizationWAD,
+                        minLiquidityWAD: _params.minLiquidityWAD,
+                        fixedTermDurationSeconds: _params.fixedTermDurationSeconds,
+                        dustTolerance: _params.dustTolerance,
+                        stProtocolFeeWAD: protocolFeeConfig.stProtocolFeeWAD,
+                        jtProtocolFeeWAD: protocolFeeConfig.jtProtocolFeeWAD,
+                        jtYieldShareProtocolFeeWAD: protocolFeeConfig.jtYieldShareProtocolFeeWAD,
+                        lptYieldShareProtocolFeeWAD: protocolFeeConfig.lptYieldShareProtocolFeeWAD
+                    }),
                     jtYDM: _jtYdm,
                     jtYDMInitializationData: _params.jtYDMInitializationData,
                     lptYDM: _lptYdm,
                     lptYDMInitializationData: _params.lptYDMInitializationData,
                     maxJTYieldShareWAD: _params.maxJTYieldShareWAD,
-                    maxLPTYieldShareWAD: _params.maxLPTYieldShareWAD,
-                    fixedTermDurationSeconds: _params.fixedTermDurationSeconds,
-                    dustTolerance: _params.dustTolerance,
-                    stProtocolFeeWAD: protocolFeeConfig.stProtocolFeeWAD,
-                    jtProtocolFeeWAD: protocolFeeConfig.jtProtocolFeeWAD,
-                    jtYieldShareProtocolFeeWAD: protocolFeeConfig.jtYieldShareProtocolFeeWAD,
-                    lptYieldShareProtocolFeeWAD: protocolFeeConfig.lptYieldShareProtocolFeeWAD
+                    maxLPTYieldShareWAD: _params.maxLPTYieldShareWAD
                 }))
         );
     }

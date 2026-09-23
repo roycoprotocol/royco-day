@@ -17,7 +17,8 @@ import { DayMarketRegistry } from "../../../script/deploy/templates/royco-day-ba
 import { ADMIN_ACCOUNTANT_ROLE, ADMIN_MARKET_OPS_ROLE, ADMIN_ORACLE_ROLE, ADMIN_UNPAUSER_ROLE, LPT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityProviderTranche } from "../../../src/interfaces/IRoycoLiquidityProviderTranche.sol";
 import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche.sol";
@@ -157,7 +158,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         if (testConfig.hasLiquidityProviderTranche) {
             LPT = IRoycoVaultTranche(KERNEL.liquidityProviderTranche());
             POOL = KERNEL.lptAsset();
-            LPT_YDM = ACCOUNTANT.getState().lptYDM;
+            LPT_YDM = ACCOUNTANT.getRoycoDayFloatingRateAccountantState().lptYDM;
             (address gyroECLPPoolFactory,) = BOOTSTRAP.venueFactories(block.chainid);
             VAULT = IVault(address(GyroECLPPoolFactory(gyroECLPPoolFactory).getVault()));
             BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
@@ -287,6 +288,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // Committed accountant checkpoint
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         s.lastCollateralNAV = a.lastCollateralNAV;
         s.lastLPTRawNAV = a.lastLPTRawNAV;
         s.lastSTEffectiveNAV = a.lastSTEffectiveNAV;
@@ -294,10 +296,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         s.lastJTImpermanentLoss = a.lastJTImpermanentLoss;
         s.marketState = a.lastMarketState;
         s.fixedTermEnd = a.fixedTermEndTimestamp;
-        s.lastAccrualTs = a.lastYieldShareAccrualTimestamp;
-        s.lastPremiumTs = a.lastPremiumPaymentTimestamp;
-        s.twJT = a.twJTYieldShareAccruedWAD;
-        s.twLPT = a.twLPTYieldShareAccruedWAD;
+        s.lastAccrualTs = aFloating.lastYieldShareAccrualTimestamp;
+        s.lastPremiumTs = aFloating.lastPremiumPaymentTimestamp;
+        s.twJT = aFloating.twJTYieldShareAccruedWAD;
+        s.twLPT = aFloating.twLPTYieldShareAccruedWAD;
 
         // Utilizations recomputed independently from the committed checkpoint
         s.coverageUtilizationWAD = _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
@@ -360,6 +362,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     ///      FIXED_TERM commit always retains a nonzero IL, so PERPETUAL iff no impermanent loss.
     function _assertCommittedConservation() internal view {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertNAVConservation(a.lastCollateralNAV, a.lastSTEffectiveNAV, a.lastJTEffectiveNAV, "committed checkpoint");
         assertTrue(
             (a.lastMarketState == MarketState.PERPETUAL) == (a.lastJTImpermanentLoss == ZERO_NAV_UNITS), "state machine: PERPETUAL iff no impermanent loss"
@@ -516,7 +519,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice Re-derives the full tranche accounting sync from the written accounting rules, independently of production code.
-     * @dev Mirrors `RoycoDayAccountant._previewSyncTrancheAccounting`: a collateral gain repays the JT
+     * @dev Mirrors `RoycoDayFloatingRateAccountant._previewSyncTrancheAccounting`: a collateral gain repays the JT
      *      impermanent loss off the top (`min(gain, IL)`, restoration, never fee'd, re-anchoring the
      *      attribution basis to the restored claims), then the residual gain splits to ST pro-rata to its
      *      effective NAV claim (floor) with JT taking the residual so it absorbs the rounding drift, the JT
@@ -840,7 +843,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /// @notice Enables the LPT overlay: `setMaxYieldShares(maxJT, maxLPT)` then `setMinLiquidity(minLiq)`.
     function _enableLPTOverlay(uint64 _maxJTShareWAD, uint64 _maxLPTShareWAD, uint64 _minLiquidityWAD) internal {
-        _executeAccountantAdminOperationFresh(abi.encodeCall(ACCOUNTANT.setMaxYieldShares, (_maxJTShareWAD, _maxLPTShareWAD)));
+        _executeAccountantAdminOperationFresh(abi.encodeCall(IRoycoDayFloatingRateAccountant.setMaxYieldShares, (_maxJTShareWAD, _maxLPTShareWAD)));
         _executeAccountantAdminOperationFresh(abi.encodeCall(ACCOUNTANT.setMinLiquidity, (_minLiquidityWAD)));
     }
 
@@ -921,6 +924,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             _applySTLoss(0.05e18);
             _sync();
             IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+            IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
             uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
             if (coverageUtilizationWAD >= a.coverageLiquidationUtilizationWAD) return;
         }
@@ -1143,6 +1147,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     function _minLiquidityForTargetUtilization(uint256 _targetUtilizationWAD) internal view returns (uint64 minLiquidityWAD) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         uint256 requirementWAD = Math.mulDiv(_targetUtilizationWAD, toUint256(a.lastLPTRawNAV), toUint256(a.lastSTEffectiveNAV));
         assertGt(requirementWAD, 0, "arrange: the computed minimum liquidity must be nonzero");
         assertLe(requirementWAD, uint256(type(uint64).max), "arrange: the computed minimum liquidity must fit uint64");
@@ -1467,7 +1472,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      * @notice With a nonzero minimum liquidity whose headroom undercuts the coverage headroom, `stMaxDeposit`
      *         reports the independent liquidity-leg recompute: the max-size deposit lands under the gate and the same
      *         deposit plus the documented slack reverts with `LIQUIDITY_REQUIREMENT_VIOLATED`.
-     * @dev The liquidity leg mirrors `RoycoDayAccountant.maxSTDeposit`: `floor(lptRawNAV * WAD / minLiquidity) -
+     * @dev The liquidity leg mirrors `RoycoDayFloatingRateAccountant.maxSTDeposit`: `floor(lptRawNAV * WAD / minLiquidity) -
      *      stEffectiveNAV - dustTolerance`. The coverage-derived breach slack strictly dominates the liquidity
      *      boundary's under-report (the single dust tolerance plus conversion floors), so it is reused.
      */
@@ -1479,6 +1484,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // Independent two-leg recompute with the liquidity leg binding
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         uint256 liquidityHeadroomValue =
             Math.mulDiv(toUint256(a.lastLPTRawNAV), WAD, a.minLiquidityWAD) - toUint256(a.lastSTEffectiveNAV) - toUint256(a.dustTolerance);
         uint256 coverageHeadroomValue =
@@ -1553,6 +1559,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(ST.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS) - feeRecipientSTPre, stFeeShares, "ST fee shares minted to the recipient");
         assertEq(JT.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS) - feeRecipientJTPre, jtFeeShares, "JT fee shares minted to the recipient");
         IRoycoDayAccountant.RoycoDayAccountantState memory aPost = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aPostFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertEq(aPost.lastJTEffectiveNAV, e.jtEffectiveNAV, "committed JT effective NAV must match the independent recomputation");
         // The deposit's booked delta is the committed collateral NAV over the pre-op sync's measured mark
         assertEq(
@@ -1561,8 +1568,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             "committed ST effective NAV must be the sync output plus the deposit"
         );
         assertEq(aPost.lastJTImpermanentLoss, e.jtImpermanentLoss, "committed IL must match the independent recomputation");
-        assertEq(uint256(aPost.lastPremiumPaymentTimestamp), block.timestamp, "the premium payment must stamp");
-        assertEq(uint256(aPost.twJTYieldShareAccruedWAD), 0, "the accrual accumulators must reset after payment");
+        assertEq(uint256(aPostFloating.lastPremiumPaymentTimestamp), block.timestamp, "the premium payment must stamp");
+        assertEq(uint256(aPostFloating.twJTYieldShareAccruedWAD), 0, "the accrual accumulators must reset after payment");
         // Counterweight independent of the share-pricing mirror: the premium, fee, and deposit mints all pay for
         // real value, so the pre-existing holders' NAV-per-share cannot fall across the whole operation.
         _assertSeniorMintsNonDilutive(stSupplyPre, e.lptLiquidityPremium + e.stProtocolFee + (aPost.lastCollateralNAV - e.collateralNAVNew));
@@ -2012,6 +2019,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     function _expectedTrancheClaims(TrancheType _trancheType) internal view returns (AssetClaims memory claims) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         if (_trancheType == TrancheType.LIQUIDITY_PROVIDER) {
             if (a.lastLPTRawNAV != ZERO_NAV_UNITS) claims.lptAssets = KERNEL.convertValueToLPTAssets(a.lastLPTRawNAV);
             claims.stShares = KERNEL.getState().lptOwnedSeniorTrancheShares;
@@ -2049,6 +2057,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         returns (AssetClaims memory claimsWithBonus, NAV_UNIT bonusNAV)
     {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
         if (coverageUtilizationWAD < a.coverageLiquidationUtilizationWAD) return (_userClaims, ZERO_NAV_UNITS);
 
@@ -2081,6 +2090,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     function _jtCoverageBreachRedemptionNAV() internal view returns (uint256 breachNAV) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         uint256 jtEffectiveNAV = toUint256(a.lastJTEffectiveNAV);
         uint256 collateralNAV = toUint256(a.lastCollateralNAV);
 
@@ -2239,6 +2249,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _breachLiquidation();
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         MarketSnapshot memory pre = _snap();
         assertGe(pre.coverageUtilizationWAD, a.coverageLiquidationUtilizationWAD, "arrange: the liquidation threshold must be breached");
         assertGt(toUint256(a.lastJTEffectiveNAV), 0, "arrange: the junior tranche must not be exhausted");
@@ -2440,6 +2451,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.revertToState(snapshotId);
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         uint256 breachShares = Math.mulDiv(_jtCoverageBreachRedemptionNAV(), JT.totalSupply(), toUint256(a.lastJTEffectiveNAV), Math.Rounding.Ceil) + 1;
         assertGt(breachShares, maxShares, "the breach redemption must exceed the reported maximum");
         assertLe(breachShares, JT.balanceOf(JT_ALICE_ADDRESS), "arrange: the breach redemption must be affordable");
@@ -2476,6 +2488,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertSyncMatchesExpectation(state, e);
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertTrue(a.lastMarketState == MarketState.PERPETUAL, "the dust-classified loss must keep the market perpetual");
         assertEq(a.lastJTImpermanentLoss, ZERO_NAV_UNITS, "the perpetual commit must erase the dust impermanent loss");
         assertEq(state.jtImpermanentLoss, ZERO_NAV_UNITS, "the returned packet must carry the erased impermanent loss");
@@ -2815,9 +2828,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _applySTYield(0.001e18);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        assertEq(uint256(a.twJTYieldShareAccruedWAD), 0, "flush: the JT accrual accumulator must reset");
-        assertEq(uint256(a.twLPTYieldShareAccruedWAD), 0, "flush: the LPT accrual accumulator must reset");
-        assertEq(uint256(a.lastYieldShareAccrualTimestamp), uint256(a.lastPremiumPaymentTimestamp), "flush: the accrual and premium windows must coincide");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
+        assertEq(uint256(aFloating.twJTYieldShareAccruedWAD), 0, "flush: the JT accrual accumulator must reset");
+        assertEq(uint256(aFloating.twLPTYieldShareAccruedWAD), 0, "flush: the LPT accrual accumulator must reset");
+        assertEq(uint256(aFloating.lastYieldShareAccrualTimestamp), uint256(aFloating.lastPremiumPaymentTimestamp), "flush: the accrual and premium windows must coincide");
     }
 
     /**
@@ -2831,19 +2845,20 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     function _buildSyncExpectation(bool _fixedTermActive) internal returns (SyncExpectation memory e) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        e.twJTStart = uint256(a.twJTYieldShareAccruedWAD);
-        e.twLPTStart = uint256(a.twLPTYieldShareAccruedWAD);
-        e.premiumElapsed = block.timestamp - a.lastPremiumPaymentTimestamp;
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
+        e.twJTStart = uint256(aFloating.twJTYieldShareAccruedWAD);
+        e.twLPTStart = uint256(aFloating.twLPTYieldShareAccruedWAD);
+        e.premiumElapsed = block.timestamp - aFloating.lastPremiumPaymentTimestamp;
 
         e.jtYieldShareWAD = _previewYieldShareAsAccountant(
-            a.jtYDM, a.lastMarketState, _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV), a.maxJTYieldShareWAD
+            aFloating.jtYDM, a.lastMarketState, _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV), aFloating.maxJTYieldShareWAD
         );
-        e.lptYieldShareWAD = a.maxLPTYieldShareWAD == 0
+        e.lptYieldShareWAD = aFloating.maxLPTYieldShareWAD == 0
             ? 0
             : _previewYieldShareAsAccountant(
-                a.lptYDM, a.lastMarketState, _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLPTRawNAV), a.maxLPTYieldShareWAD
+                aFloating.lptYDM, a.lastMarketState, _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLPTRawNAV), aFloating.maxLPTYieldShareWAD
             );
-        e.elapsed = block.timestamp - a.lastYieldShareAccrualTimestamp;
+        e.elapsed = block.timestamp - aFloating.lastYieldShareAccrualTimestamp;
         (e.collateralNAVNew,) = _measureFreshSyncInputs(ZERO_TRANCHE_UNITS);
         e.lastCollateralNAV = a.lastCollateralNAV;
         e.lastSTEffectiveNAV = a.lastSTEffectiveNAV;
@@ -2868,6 +2883,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(_state.jtProtocolFee, _e.jtProtocolFee, "returned JT protocol fee vs the independent recomputation");
         assertEq(_state.lptProtocolFee, _e.lptProtocolFee, "returned LPT protocol fee vs the independent recomputation");
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertEq(a.lastCollateralNAV, _e.collateralNAVNew, "committed collateral NAV must equal the measured input");
         assertEq(a.lastSTEffectiveNAV, _e.stEffectiveNAV, "committed ST effective NAV vs the independent recomputation");
         assertEq(a.lastJTEffectiveNAV, _e.jtEffectiveNAV, "committed JT effective NAV vs the independent recomputation");
@@ -3074,7 +3090,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory pre = _snap();
 
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.YieldSharesAccrued(
+        emit IRoycoDayFloatingRateAccountant.YieldSharesAccrued(
             e.jtYieldShareWAD, e.twJTStart + e.jtYieldShareWAD * e.elapsed, e.lptYieldShareWAD, e.twLPTStart + e.lptYieldShareWAD * e.elapsed
         );
         vm.expectEmit(true, false, false, true, address(ST));
@@ -3119,6 +3135,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         _assertSyncMatchesExpectation(state, e);
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertTrue(a.lastMarketState == MarketState.PERPETUAL, "the market must stay perpetual");
         assertEq(a.lastJTImpermanentLoss, ZERO_NAV_UNITS, "the forced perpetual transition must erase the impermanent loss");
         assertEq(state.jtImpermanentLoss, ZERO_NAV_UNITS, "the returned packet must carry the erased impermanent loss");
@@ -3141,7 +3158,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _enableLPTOverlay(0.1e18, 0.5e18, minLiquidityWAD);
         _setFixedTermDuration(7 days);
         _flushPremiumAccrual();
-        uint256 premiumTsPre = ACCOUNTANT.getState().lastPremiumPaymentTimestamp;
+        uint256 premiumTsPre = ACCOUNTANT.getRoycoDayFloatingRateAccountantState().lastPremiumPaymentTimestamp;
         _warpForward(1 days);
         _applySTLoss(0.02e18);
 
@@ -3162,12 +3179,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(state.jtProtocolFee, ZERO_NAV_UNITS, "the fixed-term sync must take no JT fee");
         assertEq(state.lptProtocolFee, ZERO_NAV_UNITS, "the fixed-term sync must take no LPT fee");
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertTrue(a.lastMarketState == MarketState.FIXED_TERM, "the market must enter the fixed term");
         assertEq(uint256(a.fixedTermEndTimestamp), uint256(expectedEndTimestamp), "the fixed-term end must stamp exactly");
         assertEq(a.lastJTImpermanentLoss, e.jtImpermanentLoss, "the impermanent loss must be retained exactly");
-        assertEq(uint256(a.twJTYieldShareAccruedWAD), e.twJTStart + e.jtYieldShareWAD * e.elapsed, "the unpaid JT accrual must be retained");
-        assertEq(uint256(a.twLPTYieldShareAccruedWAD), e.twLPTStart + e.lptYieldShareWAD * e.elapsed, "the unpaid LPT accrual must be retained");
-        assertEq(uint256(a.lastPremiumPaymentTimestamp), premiumTsPre, "no premium payment may stamp on a loss sync");
+        assertEq(uint256(aFloating.twJTYieldShareAccruedWAD), e.twJTStart + e.jtYieldShareWAD * e.elapsed, "the unpaid JT accrual must be retained");
+        assertEq(uint256(aFloating.twLPTYieldShareAccruedWAD), e.twLPTStart + e.lptYieldShareWAD * e.elapsed, "the unpaid LPT accrual must be retained");
+        assertEq(uint256(aFloating.lastPremiumPaymentTimestamp), premiumTsPre, "no premium payment may stamp on a loss sync");
 
         uint256 assets = testConfig.initialFunding / 100;
         vm.startPrank(ST_BOB_ADDRESS);
@@ -3186,6 +3204,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _applySTLoss(0.02e18);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory a0Floating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertTrue(a0.lastMarketState == MarketState.FIXED_TERM, "arrange: the market must be in a fixed term");
         assertGt(a0.lastJTImpermanentLoss, ZERO_NAV_UNITS, "arrange: an impermanent loss must be retained");
 
@@ -3202,12 +3221,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         _assertSyncMatchesExpectation(state, e);
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertTrue(a.lastMarketState == MarketState.PERPETUAL, "the market must exit the fixed term");
         assertEq(a.lastJTImpermanentLoss, ZERO_NAV_UNITS, "the impermanent loss must be fully recovered");
         assertEq(uint256(a.fixedTermEndTimestamp), 0, "the fixed-term end must clear");
-        assertEq(uint256(a.lastPremiumPaymentTimestamp), block.timestamp, "the premium payment must stamp");
-        assertEq(uint256(a.twJTYieldShareAccruedWAD), 0, "the JT accrual accumulator must reset after payment");
-        assertEq(uint256(a.twLPTYieldShareAccruedWAD), 0, "the LPT accrual accumulator must reset after payment");
+        assertEq(uint256(aFloating.lastPremiumPaymentTimestamp), block.timestamp, "the premium payment must stamp");
+        assertEq(uint256(aFloating.twJTYieldShareAccruedWAD), 0, "the JT accrual accumulator must reset after payment");
+        assertEq(uint256(aFloating.twLPTYieldShareAccruedWAD), 0, "the LPT accrual accumulator must reset after payment");
     }
 
     /// @notice A flat sync after the fixed term elapses forces the market perpetual, erases the retained
@@ -3219,13 +3239,14 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _applySTLoss(0.02e18);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory a0Floating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertTrue(a0.lastMarketState == MarketState.FIXED_TERM, "arrange: the market must be in a fixed term");
         NAV_UNIT ilBefore = a0.lastJTImpermanentLoss;
         assertGt(ilBefore, ZERO_NAV_UNITS, "arrange: an impermanent loss must be retained");
 
         _warpForward(uint256(a0.fixedTermDurationSeconds) + 1);
         assertGt(block.timestamp, uint256(a0.fixedTermEndTimestamp), "arrange: the fixed term must have elapsed");
-        uint256 premiumTsPre = a0.lastPremiumPaymentTimestamp;
+        uint256 premiumTsPre = a0Floating.lastPremiumPaymentTimestamp;
 
         // The elapsed window may carry streaming drift, so the settlement runs on the measured deltas
         SyncExpectation memory e = _buildSyncExpectation(false);
@@ -3257,7 +3278,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function test_Sync_jtGain_exactTrancheAccounting() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _sync();
-        uint256 premiumTsPre = ACCOUNTANT.getState().lastPremiumPaymentTimestamp;
+        uint256 premiumTsPre = ACCOUNTANT.getRoycoDayFloatingRateAccountantState().lastPremiumPaymentTimestamp;
         _warpForward(1 days);
         _applyJTYield(0.05e18);
 
@@ -3310,6 +3331,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         _assertSyncMatchesExpectation(state, e);
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertTrue(a.lastMarketState == MarketState.PERPETUAL, "the market must stay perpetual");
         assertEq(a.lastJTImpermanentLoss, ZERO_NAV_UNITS, "the forced perpetual transition must erase the impermanent loss");
         assertEq(state.stProtocolFee, ZERO_NAV_UNITS, "a loss sync must take no ST fee");
@@ -3330,6 +3352,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // loss of fraction p removes about p of each tranche's attributed slice, so JT exhausts once
         // p * stEff >= (1 - p) * jtEff, that is p >= jtEff / collateralNAV, padded 2 percent
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory a0Floating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         uint256 lossPctWAD = Math.mulDiv(toUint256(a0.lastJTEffectiveNAV), WAD, toUint256(a0.lastCollateralNAV), Math.Rounding.Ceil) + 0.02e18;
         assertLt(lossPctWAD, WAD, "arrange: the exhausting loss must be representable");
         _applySTLoss(lossPctWAD);
@@ -3348,6 +3371,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertSyncMatchesExpectation(state, e);
         assertEq(state.coverageUtilizationWAD, type(uint256).max, "coverage utilization must saturate with an exhausted junior tranche");
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertTrue(a.lastMarketState == MarketState.PERPETUAL, "the exhausted market must be forced perpetual");
         assertEq(a.lastJTImpermanentLoss, ZERO_NAV_UNITS, "the forced perpetual transition must erase the impermanent loss");
         assertEq(state.stProtocolFee, ZERO_NAV_UNITS, "a loss sync must take no ST fee");
@@ -3363,10 +3387,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     ///      pre-op sync initializes both clocks at deploy time. The pre-deploy window can never be accrued.
     function test_Sync_firstSyncAfterDeploy_paysNoPremium() public {
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
-        assertEq(uint256(a0.lastYieldShareAccrualTimestamp), block.timestamp, "the genesis seed must stamp the accrual clock at deploy time");
-        assertEq(uint256(a0.lastPremiumPaymentTimestamp), block.timestamp, "the genesis seed must stamp the premium clock at deploy time");
-        assertEq(uint256(a0.twJTYieldShareAccruedWAD), 0, "no accrual may book at the genesis stamp");
-        assertEq(uint256(a0.twLPTYieldShareAccruedWAD), 0, "no accrual may book at the genesis stamp");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory a0Floating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
+        assertEq(uint256(a0Floating.lastYieldShareAccrualTimestamp), block.timestamp, "the genesis seed must stamp the accrual clock at deploy time");
+        assertEq(uint256(a0Floating.lastPremiumPaymentTimestamp), block.timestamp, "the genesis seed must stamp the premium clock at deploy time");
+        assertEq(uint256(a0Floating.twJTYieldShareAccruedWAD), 0, "no accrual may book at the genesis stamp");
+        assertEq(uint256(a0Floating.twLPTYieldShareAccruedWAD), 0, "no accrual may book at the genesis stamp");
         assertEq(a0.lastCollateralNAV, ZERO_NAV_UNITS, "the quote-only genesis seed must commit no collateral NAV");
 
         _warpForward(1 days);
@@ -3378,8 +3403,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(state.jtProtocolFee, ZERO_NAV_UNITS, "the first sync must take no JT fee");
         assertEq(state.stEffectiveNAV, ZERO_NAV_UNITS, "no senior value exists before the first deposit");
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        assertEq(uint256(a.lastYieldShareAccrualTimestamp), block.timestamp, "the accrual clock must re-stamp");
-        assertEq(uint256(a.lastPremiumPaymentTimestamp), uint256(a0.lastPremiumPaymentTimestamp), "no premium payment may stamp without a gain");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
+        assertEq(uint256(aFloating.lastYieldShareAccrualTimestamp), block.timestamp, "the accrual clock must re-stamp");
+        assertEq(uint256(aFloating.lastPremiumPaymentTimestamp), uint256(a0Floating.lastPremiumPaymentTimestamp), "no premium payment may stamp without a gain");
         assertEq(ST.totalSupply(), 0, "no senior shares may mint");
         assertEq(ST.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS), 0, "no fee shares may mint");
         _assertCommittedConservation();
@@ -3401,16 +3427,17 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 feeRecipientJTPre = JT.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS);
 
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.YieldSharesAccrued(
+        emit IRoycoDayFloatingRateAccountant.YieldSharesAccrued(
             e.jtYieldShareWAD, e.twJTStart + e.jtYieldShareWAD * e.elapsed, e.lptYieldShareWAD, e.twLPTStart + e.lptYieldShareWAD * e.elapsed
         );
         SyncedAccountingState memory state = _syncWithState();
 
         _assertSyncMatchesExpectation(state, e);
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        assertEq(uint256(a.lastPremiumPaymentTimestamp), block.timestamp, "the premium payment must stamp");
-        assertEq(uint256(a.twJTYieldShareAccruedWAD), 0, "the JT accrual accumulator must reset after payment");
-        assertEq(uint256(a.twLPTYieldShareAccruedWAD), 0, "the LPT accrual accumulator must reset after payment");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
+        assertEq(uint256(aFloating.lastPremiumPaymentTimestamp), block.timestamp, "the premium payment must stamp");
+        assertEq(uint256(aFloating.twJTYieldShareAccruedWAD), 0, "the JT accrual accumulator must reset after payment");
+        assertEq(uint256(aFloating.twLPTYieldShareAccruedWAD), 0, "the LPT accrual accumulator must reset after payment");
         assertEq(JT.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS) - feeRecipientJTPre, jtFeeShares, "JT yield-share fee shares minted to the recipient");
     }
 
@@ -3434,14 +3461,15 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         simulateSTLoss(driftCounterPctWAD);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a1 = ACCOUNTANT.getState();
-        assertGt(uint256(a1.twJTYieldShareAccruedWAD), 0, "arrange: the first window's accrual must carry unpaid");
-        assertGt(uint256(a1.lastYieldShareAccrualTimestamp), uint256(a1.lastPremiumPaymentTimestamp), "arrange: the accrual clock must lead the premium clock");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory a1Floating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
+        assertGt(uint256(a1Floating.twJTYieldShareAccruedWAD), 0, "arrange: the first window's accrual must carry unpaid");
+        assertGt(uint256(a1Floating.lastYieldShareAccrualTimestamp), uint256(a1Floating.lastPremiumPaymentTimestamp), "arrange: the accrual clock must lead the premium clock");
 
         // Window 2: a real gain pays the premium priced over BOTH windows
         _warpForward(1 days);
         _applySTYield(0.05e18);
         SyncExpectation memory e = _buildSyncExpectation(false);
-        assertEq(e.twJTStart, uint256(a1.twJTYieldShareAccruedWAD), "arrange: the carried accrual must feed the expectation");
+        assertEq(e.twJTStart, uint256(a1Floating.twJTYieldShareAccruedWAD), "arrange: the carried accrual must feed the expectation");
         assertGt(e.premiumElapsed, e.elapsed, "arrange: the premium window must span both accrual windows");
         assertTrue(e.premiumsPaid, "arrange: the gain must clear the dust gate");
         assertGt(toUint256(e.jtRiskPremium), 0, "arrange: a JT risk premium must be due");
@@ -3449,9 +3477,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         SyncedAccountingState memory state = _syncWithState();
         _assertSyncMatchesExpectation(state, e);
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        assertEq(uint256(a.lastPremiumPaymentTimestamp), block.timestamp, "the premium payment must stamp");
-        assertEq(uint256(a.twJTYieldShareAccruedWAD), 0, "the JT accrual accumulator must reset after payment");
-        assertEq(uint256(a.twLPTYieldShareAccruedWAD), 0, "the LPT accrual accumulator must reset after payment");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
+        assertEq(uint256(aFloating.lastPremiumPaymentTimestamp), block.timestamp, "the premium payment must stamp");
+        assertEq(uint256(aFloating.twJTYieldShareAccruedWAD), 0, "the JT accrual accumulator must reset after payment");
+        assertEq(uint256(aFloating.twLPTYieldShareAccruedWAD), 0, "the LPT accrual accumulator must reset after payment");
     }
 
     // ── The LPT liquidity premium mint ──
@@ -3460,7 +3489,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     ///         ledger, with exact-args accrual and premium-mint events and the joint-pricing supply growth.
     function test_Sync_lptLiquidityPremium_mintsIdleSTShares() public whenLPT {
         SyncExpectation memory e = _arrangeStagedPremiumSyncExpectation();
-        assertLe(e.jtYieldShareWAD + e.lptYieldShareWAD, WAD, "the yield share caps must preclude PREMIUMS_EXCEED_SENIOR_YIELD");
+        assertLe(e.jtYieldShareWAD + e.lptYieldShareWAD, WAD, "the yield share caps must preclude PREMIUMS_EXCEED_YIELD");
         uint256 stSupplyPre = ST.totalSupply();
         (uint256 premShares, uint256 stFeeShares) =
             _expectedPremiumShares(e.lptLiquidityPremium, e.stProtocolFee, e.lptProtocolFee, e.stEffectiveNAV, stSupplyPre);
@@ -3468,7 +3497,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory pre = _snap();
 
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.YieldSharesAccrued(
+        emit IRoycoDayFloatingRateAccountant.YieldSharesAccrued(
             e.jtYieldShareWAD, e.twJTStart + e.jtYieldShareWAD * e.elapsed, e.lptYieldShareWAD, e.twLPTStart + e.lptYieldShareWAD * e.elapsed
         );
         // The ST protocol fee mint lands first, so the premium mint's post-mint supply carries the fee shares too
@@ -3522,6 +3551,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 idleShares = _arrangeLPTWithStagedIdleLiquidityPremium();
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertEq(a.lastLPTRawNAV, KERNEL.convertLPTAssetsToValue(KERNEL.getState().totalLPTAssets), "the committed LPT raw NAV must be the BPT mark only");
         NAV_UNIT idleValue = _expectedValue(idleShares, ST.totalSupply(), a.lastSTEffectiveNAV);
         assertGt(toUint256(idleValue), 0, "arrange: the staged premium must carry value");
@@ -3642,6 +3672,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertTrue(_trySetReinvestmentSlippage(slippageWAD), "arrange: the slippage gate must open");
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         NAV_UNIT idleValue = _expectedValue(idleShares, ST.totalSupply(), a.lastSTEffectiveNAV);
         uint256 minLptAssetsOut = Math.mulDiv(toUint256(KERNEL.convertValueToLPTAssets(idleValue)), WAD - slippageWAD, WAD, Math.Rounding.Ceil);
         assertGt(minLptAssetsOut, 0, "arrange: the gate minimum must be nonzero");
@@ -3685,6 +3716,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // The same min-out derivation as the full-amount test, applied to the partial share count
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         NAV_UNIT partialValue = _expectedValue(partialShares, ST.totalSupply(), a.lastSTEffectiveNAV);
         uint256 minLptAssetsOut = Math.mulDiv(toUint256(KERNEL.convertValueToLPTAssets(partialValue)), WAD - slippageWAD, WAD, Math.Rounding.Ceil);
         assertGt(minLptAssetsOut, 0, "arrange: the gate minimum must be nonzero");
@@ -3788,12 +3820,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // Arrange guard: both raw curve outputs must exceed the configured caps at the committed utilizations
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
         uint256 liquidityUtilizationWAD = _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLPTRawNAV);
         vm.prank(address(ACCOUNTANT));
-        uint256 rawJTYieldShareWAD = IYDM(a.jtYDM).previewYieldShare(a.lastMarketState, coverageUtilizationWAD);
+        uint256 rawJTYieldShareWAD = IYDM(aFloating.jtYDM).previewYieldShare(a.lastMarketState, coverageUtilizationWAD);
         vm.prank(address(ACCOUNTANT));
-        uint256 rawLPTYieldShareWAD = IYDM(a.lptYDM).previewYieldShare(a.lastMarketState, liquidityUtilizationWAD);
+        uint256 rawLPTYieldShareWAD = IYDM(aFloating.lptYDM).previewYieldShare(a.lastMarketState, liquidityUtilizationWAD);
         assertGt(rawJTYieldShareWAD, capJTWAD, "arrange: the JT curve must price above its cap");
         assertGt(rawLPTYieldShareWAD, capLPTWAD, "arrange: the LPT curve must price above its cap");
 
@@ -3802,7 +3835,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(e.lptYieldShareWAD, capLPTWAD, "the accrued LPT yield share must bind at the cap");
 
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.YieldSharesAccrued(
+        emit IRoycoDayFloatingRateAccountant.YieldSharesAccrued(
             capJTWAD, e.twJTStart + uint256(capJTWAD) * e.elapsed, capLPTWAD, e.twLPTStart + uint256(capLPTWAD) * e.elapsed
         );
         SyncedAccountingState memory state = _syncWithState();
@@ -3838,12 +3871,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice Independent recompute of the senior deposit capacity from the committed checkpoint, coverage leg only.
-     * @dev Mirrors `RoycoDayAccountant.maxSTDeposit` for a market whose minimum liquidity is
+     * @dev Mirrors `RoycoDayFloatingRateAccountant.maxSTDeposit` for a market whose minimum liquidity is
      *      zero, which callers must guarantee. Callers must have synced in the same block so the committed checkpoint
      *      equals the preview state the production view prices against. The final pricing conversion is an input.
      */
     function _expectedMaxSTDepositAssets() internal view returns (TRANCHE_UNIT assets) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         uint256 totalCoveredValue = Math.mulDiv(toUint256(a.lastJTEffectiveNAV), WAD, a.minCoverageWAD);
         uint256 requiredValue = toUint256(a.lastCollateralNAV) + toUint256(a.dustTolerance);
         return KERNEL.convertValueToCollateralAssets(toNAVUnits(totalCoveredValue > requiredValue ? totalCoveredValue - requiredValue : 0));
@@ -3851,11 +3885,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice Independent recompute of the withdrawable pooled depth from the committed checkpoint.
-     * @dev Mirrors `RoycoDayAccountant.maxLPTWithdrawal` below the liquidation threshold with a
+     * @dev Mirrors `RoycoDayFloatingRateAccountant.maxLPTWithdrawal` below the liquidation threshold with a
      *      nonzero minimum liquidity, which callers must guarantee. Callers must have synced in the same block.
      */
     function _expectedMaxLPTWithdrawalNAV() internal view returns (NAV_UNIT) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         uint256 requiredValue = Math.mulDiv((toUint256(a.lastSTEffectiveNAV) + toUint256(a.dustTolerance)), a.minLiquidityWAD, WAD, Math.Rounding.Ceil);
         uint256 lptRawValue = toUint256(a.lastLPTRawNAV);
         return toNAVUnits(lptRawValue > requiredValue ? lptRawValue - requiredValue : 0);
@@ -3886,6 +3921,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /// @dev The LPT effective NAV is the committed BPT mark plus the claimable idle liquidity premium leg at the committed senior rate.
     function _seqSnapPrices() internal view returns (SeqPrices memory p) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         p.stEffectiveNAV = toUint256(a.lastSTEffectiveNAV);
         p.stSupply = ST.totalSupply();
         p.jtEffectiveNAV = toUint256(a.lastJTEffectiveNAV);
@@ -4189,8 +4225,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      * @notice PINS the zero-BPT-slice edge: an LPT redemption whose BPT slice floors to zero (a dust share
      *         count against a coarse BPT-per-share ratio) is REJECTED by the accountant's operation shape check,
      *         even while a nonzero idle premium slice would be claimable, and the market is left untouched.
-     * @dev Current spec: RoycoDayAccountant.postOpSyncTrancheAccounting requires a strict raw-NAV decrease for
-     *      an LPT_REDEMPTION (src/accountant/RoycoDayAccountant.sol:248, deltaLPTRawNAV < 0), so a redemption
+     * @dev Current spec: RoycoDayFloatingRateAccountant.postOpSyncTrancheAccounting requires a strict raw-NAV decrease for
+     *      an LPT_REDEMPTION (src/accountant/RoycoDayFloatingRateAccountant.sol:248, deltaLPTRawNAV < 0), so a redemption
      *      that would move no deployed depth fails closed with INVALID_POST_OP_STATE(LPT_REDEMPTION). The old
      *      NAV-neutral idle-only payout shape is intentionally unreachable: the redeemer resubmits with enough
      *      shares to move the mark, so no value is stranded, only the dust-sized shape is refused.
@@ -4237,11 +4273,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // A loss large enough that coverage exhausts the junior effective NAV to exactly zero: a rate loss of
         // fraction p exhausts JT once p >= jtEff / collateralNAV (the residual-loss test's derivation), padded 2 percent
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory a0Floating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         uint256 lossPctWAD = Math.mulDiv(toUint256(a0.lastJTEffectiveNAV), WAD, toUint256(a0.lastCollateralNAV), Math.Rounding.Ceil) + 0.02e18;
         assertLt(lossPctWAD, WAD, "arrange: the exhausting loss must be representable");
         _applySTLoss(lossPctWAD);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertEq(a.lastJTEffectiveNAV, ZERO_NAV_UNITS, "arrange: the junior effective NAV must exhaust to exactly zero");
         uint256 jtSupplyPre = JT.totalSupply();
         assertGt(jtSupplyPre, 0, "arrange: the junior supply must remain live");
@@ -4767,7 +4805,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     function test_Sequence_zeroLiquidityReduction_behavesAsPlainSTJT() public {
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
-        vm.skip(a0.minLiquidityWAD != 0 || a0.maxLPTYieldShareWAD != 0);
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory a0Floating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
+        vm.skip(a0.minLiquidityWAD != 0 || a0Floating.maxLPTYieldShareWAD != 0);
 
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _assertZeroLiquidityReduction(_syncWithState());
@@ -4810,6 +4849,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _seedMarket(testConfig.initialFunding / 10, testConfig.initialFunding / 10);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory a0Floating = ACCOUNTANT.getRoycoDayFloatingRateAccountantState();
         assertEq(uint256(a0.minLiquidityWAD), 0, "arrange: coverage must be the only senior deposit bound");
         TRANCHE_UNIT maxDepositBefore = ST.maxDeposit(ST_BOB_ADDRESS);
         assertEq(maxDepositBefore, _expectedMaxSTDepositAssets(), "stMaxDeposit must match the independent recompute");
@@ -4831,7 +4871,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         emit IRoycoDayAccountant.MinCoverageUpdated(newMinCoverageWAD);
         _executeScheduledAccountantOperation(coverageData);
         assertEq(uint256(ACCOUNTANT.getState().minCoverageWAD), uint256(newMinCoverageWAD), "the coverage requirement must update");
-        assertEq(uint256(ACCOUNTANT.getState().lastYieldShareAccrualTimestamp), block.timestamp, "the setter's inline sync must stamp the checkpoint");
+        assertEq(uint256(ACCOUNTANT.getRoycoDayFloatingRateAccountantState().lastYieldShareAccrualTimestamp), block.timestamp, "the setter's inline sync must stamp the checkpoint");
         _sync();
         TRANCHE_UNIT maxDepositAfter = ST.maxDeposit(ST_BOB_ADDRESS);
         assertEq(maxDepositAfter, _expectedMaxSTDepositAssets(), "stMaxDeposit must match the independent recompute after the raise");
@@ -4848,7 +4888,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             emit IRoycoDayAccountant.MinLiquidityUpdated(minLiquidityA);
             _executeScheduledAccountantOperation(liquidityData);
             assertEq(
-                uint256(ACCOUNTANT.getState().lastYieldShareAccrualTimestamp), block.timestamp, "the liquidity setter's inline sync must stamp the checkpoint"
+                uint256(ACCOUNTANT.getRoycoDayFloatingRateAccountantState().lastYieldShareAccrualTimestamp), block.timestamp, "the liquidity setter's inline sync must stamp the checkpoint"
             );
             _sync();
             // The removed kernel getter's withdrawable NAV now reads off the accountant's maxLPTWithdrawal against a non-mutating sync preview

@@ -5,7 +5,7 @@ import { ConstantPriceFeed } from "../../../../lib/balancer-v3-monorepo/pkg/orac
 import { GyroECLPPoolFactory } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { AccessManager } from "../../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { UpgradeableBeacon } from "../../../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
-import { RoycoDayAccountant } from "../../../../src/accountant/RoycoDayAccountant.sol";
+import { RoycoDayFloatingRateAccountant } from "../../../../src/accountant/RoycoDayFloatingRateAccountant.sol";
 import { ADMIN_UPGRADER_ROLE } from "../../../../src/factory/Roles.sol";
 import { RoycoAccessManager } from "../../../../src/factory/RoycoAccessManager.sol";
 import { IRoycoAccessManager } from "../../../../src/interfaces/factory/IRoycoAccessManager.sol";
@@ -54,7 +54,8 @@ contract DeployImplementationsComponent is DeployScriptBase, TemplateConfig {
         impls.juniorTrancheBeacon = _deployBeacon("JuniorTranche", _singletonSalt("ROYCO_JUNIOR_TRANCHE"), type(RoycoJuniorTranche).creationCode, authority);
         impls.liquidityProviderTrancheBeacon =
             _deployBeacon("LPTranche    ", _singletonSalt("ROYCO_LIQUIDITY_PROVIDER_TRANCHE"), type(RoycoLiquidityProviderTranche).creationCode, authority);
-        impls.accountantBeacon = _deployBeacon("Accountant   ", _singletonSalt("ROYCO_ACCOUNTANT"), type(RoycoDayAccountant).creationCode, authority);
+        impls.accountantBeacon =
+            _deployBeacon("Accountant   ", _singletonSalt("ROYCO_ACCOUNTANT"), type(RoycoDayFloatingRateAccountant).creationCode, authority);
 
         // The kernel implementation's only construction input is the chain's Balancer Vault, which is not market-specific
         (address gyroFactory,) = venueFactories(block.chainid);

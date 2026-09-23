@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol";
+import { RoycoDayFloatingRateAccountant } from "../../src/accountant/RoycoDayFloatingRateAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 
 /**
  * @title WaterfallSyncDriver
- * @notice Test driver over RoycoDayAccountant that seeds arbitrary checkpoints straight into the accountant's
+ * @notice Test driver over RoycoDayFloatingRateAccountant that seeds arbitrary checkpoints straight into the accountant's
  *         ERC-7201 storage and drives the internal sync waterfall, the yield share accrual, and the yield share
  *         config validation from an external call frame
  * @dev The kernel address is constructor-supplied so a test can act as the kernel for the pre-op and post-op
@@ -21,16 +22,17 @@ import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
  * @dev The maxSTDeposit, maxJTWithdrawal, and maxLPTWithdrawal views are already external on the accountant and
  *      read the seeded dust tolerance from storage, so they are driven directly with a marshaled state struct
  */
-contract WaterfallSyncDriver is RoycoDayAccountant {
+contract WaterfallSyncDriver is RoycoDayFloatingRateAccountant {
     /// @dev The accountant implementation is market-independent now, so the kernel it serves is seeded into storage
     ///      alongside the rest of the checkpoint rather than baked in at construction
     constructor(address _kernel) {
         _getRoycoDayAccountantStorage().kernel = _kernel;
     }
 
-    /// @notice Writes the full accountant state field set into ERC-7201 storage as the last committed checkpoint
-    function seedCheckpoint(RoycoDayAccountantState calldata _seed) external {
+    /// @notice Writes the full accountant and floating rate accountant state field sets into ERC-7201 storage as the last committed checkpoint
+    function seedCheckpoint(RoycoDayAccountantState calldata _seed, RoycoDayFloatingRateAccountantState calldata _floatingRateSeed) external {
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
+        RoycoDayFloatingRateAccountantState storage $_floatingRate = _getRoycoDayFloatingRateAccountantStorage();
         // Protocol fee percentages
         $.stProtocolFeeWAD = _seed.stProtocolFeeWAD;
         $.jtProtocolFeeWAD = _seed.jtProtocolFeeWAD;
@@ -44,16 +46,16 @@ contract WaterfallSyncDriver is RoycoDayAccountant {
         // Market state and clocks
         $.lastMarketState = _seed.lastMarketState;
         $.fixedTermEndTimestamp = _seed.fixedTermEndTimestamp;
-        $.lastYieldShareAccrualTimestamp = _seed.lastYieldShareAccrualTimestamp;
-        $.lastPremiumPaymentTimestamp = _seed.lastPremiumPaymentTimestamp;
+        $_floatingRate.lastYieldShareAccrualTimestamp = _floatingRateSeed.lastYieldShareAccrualTimestamp;
+        $_floatingRate.lastPremiumPaymentTimestamp = _floatingRateSeed.lastPremiumPaymentTimestamp;
         // Yield distribution models
-        $.jtYDM = _seed.jtYDM;
-        $.lptYDM = _seed.lptYDM;
+        $_floatingRate.jtYDM = _floatingRateSeed.jtYDM;
+        $_floatingRate.lptYDM = _floatingRateSeed.lptYDM;
         // Time-weighted yield share accumulators and their caps
-        $.twJTYieldShareAccruedWAD = _seed.twJTYieldShareAccruedWAD;
-        $.maxJTYieldShareWAD = _seed.maxJTYieldShareWAD;
-        $.twLPTYieldShareAccruedWAD = _seed.twLPTYieldShareAccruedWAD;
-        $.maxLPTYieldShareWAD = _seed.maxLPTYieldShareWAD;
+        $_floatingRate.twJTYieldShareAccruedWAD = _floatingRateSeed.twJTYieldShareAccruedWAD;
+        $_floatingRate.maxJTYieldShareWAD = _floatingRateSeed.maxJTYieldShareWAD;
+        $_floatingRate.twLPTYieldShareAccruedWAD = _floatingRateSeed.twLPTYieldShareAccruedWAD;
+        $_floatingRate.maxLPTYieldShareWAD = _floatingRateSeed.maxLPTYieldShareWAD;
         // Checkpointed NAVs and the JT impermanent loss ledger
         $.lastCollateralNAV = _seed.lastCollateralNAV;
         $.lastSTEffectiveNAV = _seed.lastSTEffectiveNAV;

@@ -8,9 +8,9 @@ import { BalancerPoolToken } from "../../../../../lib/balancer-v3-monorepo/pkg/v
 import { VaultGuard } from "../../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/VaultGuard.sol";
 import { IERC20 } from "../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
-import { IRoycoDayAccountant } from "../../../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoPriceOracle } from "../../../../interfaces/IRoycoPriceOracle.sol";
+import { IRoycoDayAccountant } from "../../../../interfaces/accountant/IRoycoDayAccountant.sol";
 import { IBalancerV3LiquidityVenue } from "../../../../interfaces/liquidity-venue/IBalancerV3LiquidityVenue.sol";
 import { Cache, CacheKey } from "../../../../libraries/Cache.sol";
 import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../../libraries/Constants.sol";

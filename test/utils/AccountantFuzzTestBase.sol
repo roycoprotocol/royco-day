@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { toUint256 } from "../../src/libraries/Units.sol";
 import { AccountantTestBase } from "./AccountantTestBase.sol";
 import { RoycoTestMath } from "./RoycoTestMath.sol";
@@ -40,10 +41,11 @@ abstract contract AccountantFuzzTestBase is AccountantTestBase {
      */
     function _premiumWindow(uint256 _jtRate, uint256 _lptRate) internal view returns (uint256 twJT, uint256 twLPT, uint256 elapsedSincePayment) {
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        uint256 elapsedSinceAccrual = block.timestamp - s.lastYieldShareAccrualTimestamp;
-        twJT = s.twJTYieldShareAccruedWAD + Math.min(_jtRate, DEFAULT_MAX_JT_YIELD_SHARE_WAD) * elapsedSinceAccrual;
-        twLPT = s.twLPTYieldShareAccruedWAD + Math.min(_lptRate, DEFAULT_MAX_LPT_YIELD_SHARE_WAD) * elapsedSinceAccrual;
-        elapsedSincePayment = block.timestamp - s.lastPremiumPaymentTimestamp;
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
+        uint256 elapsedSinceAccrual = block.timestamp - sFloating.lastYieldShareAccrualTimestamp;
+        twJT = sFloating.twJTYieldShareAccruedWAD + Math.min(_jtRate, DEFAULT_MAX_JT_YIELD_SHARE_WAD) * elapsedSinceAccrual;
+        twLPT = sFloating.twLPTYieldShareAccruedWAD + Math.min(_lptRate, DEFAULT_MAX_LPT_YIELD_SHARE_WAD) * elapsedSinceAccrual;
+        elapsedSincePayment = block.timestamp - sFloating.lastPremiumPaymentTimestamp;
     }
 
     /**
@@ -67,6 +69,7 @@ abstract contract AccountantFuzzTestBase is AccountantTestBase {
         returns (RoycoTestMath.SyncInputs memory in_)
     {
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
         in_.collateralNAVLast = toUint256(s.lastCollateralNAV);
         in_.stEffectiveNAVLast = toUint256(s.lastSTEffectiveNAV);
         in_.jtEffectiveNAVLast = toUint256(s.lastJTEffectiveNAV);

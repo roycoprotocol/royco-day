@@ -8,7 +8,7 @@ import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/prox
 import { UpgradeableBeacon } from "../../../lib/openzeppelin-contracts/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
-import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
+import { RoycoDayFloatingRateAccountant } from "../../../src/accountant/RoycoDayFloatingRateAccountant.sol";
 import { ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { RoycoDayBalancerV3Kernel } from "../../../src/kernels/RoycoDayBalancerV3Kernel.sol";
@@ -292,7 +292,7 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         UpgradeableBeacon stSwapBeacon = new UpgradeableBeacon(address(new RoycoSeniorTranche()), address(accessManager));
         UpgradeableBeacon jtSwapBeacon = new UpgradeableBeacon(address(new RoycoJuniorTranche()), address(accessManager));
         UpgradeableBeacon lptSwapBeacon = new UpgradeableBeacon(address(new RoycoLiquidityProviderTranche()), address(accessManager));
-        RoycoDayAccountant accImpl = new RoycoDayAccountant();
+        RoycoDayFloatingRateAccountant accImpl = new RoycoDayFloatingRateAccountant();
 
         // Tranche and accountant proxies must exist before the kernel (its initializer reads each tranche's asset)
         seniorTranche =
@@ -302,11 +302,11 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         liquidityProviderTranche = RoycoLiquidityProviderTranche(
             _deployTrancheProxy(address(lptSwapBeacon), "Royco Liquidity Provider Tranche", "RLT", predictedKernel, address(bpt))
         );
-        accountant = RoycoDayAccountant(
+        accountant = RoycoDayFloatingRateAccountant(
             address(
                 new ERC1967Proxy(
                     address(accImpl),
-                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(params, predictedKernel, jtYdmInitData, lptYdmInitData)))
+                    abi.encodeCall(RoycoDayFloatingRateAccountant.initialize, (_buildAccountantInitParams(params, predictedKernel, jtYdmInitData, lptYdmInitData)))
                 )
             )
         );

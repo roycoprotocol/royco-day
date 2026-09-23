@@ -5,7 +5,7 @@ import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/c
 import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, DispatchMode, MarketState, Operation } from "../../../src/libraries/Types.sol";

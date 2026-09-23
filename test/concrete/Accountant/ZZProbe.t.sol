@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
@@ -42,8 +43,8 @@ contract ZZProbe is AccountantTestBase {
         _p("flat", accountant.maxJTWithdrawal(st), RoycoTestMath.maxJTWithdrawal(1200e18, 200e18, 0.1e18, 0));
 
         // 5 dustFold (single dust 10)
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory pp = _defaultParams();
-        pp.dustTolerance = toNAVUnits(uint256(10));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory pp = _defaultParams();
+        pp.standardParams.dustTolerance = toNAVUnits(uint256(10));
         _deploy(pp);
         st = _bareState(1200e18, 100e18, 1000e18, 200e18, 0.1e18, 0);
         _p("dust", accountant.maxJTWithdrawal(st), RoycoTestMath.maxJTWithdrawal(1200e18, 200e18, 0.1e18, 10));

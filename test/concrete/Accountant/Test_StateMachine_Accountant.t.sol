@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { Vm } from "../../../lib/forge-std/src/Test.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -29,8 +30,8 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
      * on JT: jtEff 150e18, would-be il 50e18, stEff unchanged. The zero-duration disjunct erases the il
      */
     function test_StateMachine_zeroDurationConfigNeverEntersFixedTerm() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.fixedTermDurationSeconds = 0;
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.fixedTermDurationSeconds = 0;
         _deploy(p);
         _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
         vm.recordLogs();
@@ -177,8 +178,8 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
      * its 41 (below dust so no fee or premiumsPaid) and JT keeps only its 9 residual, ending at 200e18 - 41
      */
     function test_StateMachine_dustDrawdownFromPerpetualErasedAtCommit() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.dustTolerance = toNAVUnits(uint256(70));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.dustTolerance = toNAVUnits(uint256(70));
         _deploy(p);
         _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
         // Covered loss of 50 wei: the perpetual commit erases the dust drawdown with its exact reset event
@@ -212,11 +213,11 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
      * (stGain = floor(50 * 1000e18 / (1200e18-50)) = 41, jtGain 9, no fees at most dust, no premium reset)
      */
     function test_StateMachine_recoveryIntoDustBandErasesAndEndsTerm() public {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.dustTolerance = toNAVUnits(uint256(70));
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
+        p.standardParams.dustTolerance = toNAVUnits(uint256(70));
         // The covered 100e18 loss below marks coverageUtilization ceil(1100e18 * 0.1 / 100e18) = 1.1e18: lift the
         // liquidation threshold clear of it so this test exercises the IL / dust-tolerance path rather than a liquidation breach
-        p.coverageLiquidationUtilizationWAD = 1.5e18;
+        p.standardParams.coverageLiquidationUtilizationWAD = 1.5e18;
         _deploy(p);
         _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LPT_RAW, MarketState.PERPETUAL);
         // Enter the fixed term on a covered 100e18 loss
@@ -349,12 +350,13 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         assertEq(toUint256(state.lptProtocolFee), 76_923_076_923_076_923, "lt fee kept");
         assertEq(toUint256(state.stProtocolFee), 3_576_923_076_923_076_923, "st fee kept");
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(s.twJTYieldShareAccruedWAD, 0, "jt accumulator reset on payment");
-        assertEq(s.twLPTYieldShareAccruedWAD, 0, "lt accumulator reset on payment");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
+        assertEq(sFloating.twJTYieldShareAccruedWAD, 0, "jt accumulator reset on payment");
+        assertEq(sFloating.twLPTYieldShareAccruedWAD, 0, "lt accumulator reset on payment");
         // The expected clock is derived from windowStart rather than read from block.timestamp: the identical
         // pre-warp uint32(block.timestamp) read above gets CSE'd with a post-warp read under via-ir (TIMESTAMP is
         // frame-constant in the real EVM, so the optimizer may legally merge the reads across a vm.warp)
-        assertEq(s.lastPremiumPaymentTimestamp, windowStart + 500, "premium clock advances on payment");
-        assertGt(uint256(s.lastPremiumPaymentTimestamp), uint256(windowStart), "the window genuinely moved");
+        assertEq(sFloating.lastPremiumPaymentTimestamp, windowStart + 500, "premium clock advances on payment");
+        assertGt(uint256(sFloating.lastPremiumPaymentTimestamp), uint256(windowStart), "the window genuinely moved");
     }
 }

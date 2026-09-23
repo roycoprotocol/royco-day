@@ -16,7 +16,8 @@ import { RoycoAccessManager } from "../../../src/factory/RoycoAccessManager.sol"
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
@@ -253,11 +254,12 @@ contract Test_DmgMarketDeployment is MakinaSheetMarketDeploymentBase {
     /// @notice The DMG economics (mirroring the FalconX sheet row) land on-chain
     function test_ExecuteMarketDeployment_DmgEconomicsConfigured() external {
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
-        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayFloatingRateAccountant(r.accountant).getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = IRoycoDayFloatingRateAccountant(r.accountant).getRoycoDayFloatingRateAccountantState();
         assertEq(a.minCoverageWAD, 0.03e18, "DMG min coverage");
         assertEq(a.minLiquidityWAD, 0.1e18, "DMG min liquidity");
         assertEq(a.fixedTermDurationSeconds, 7 days, "DMG fixed term");
-        assertEq(a.maxLPTYieldShareWAD, 0.5e18, "DMG LPT yield share cap");
+        assertEq(aFloating.maxLPTYieldShareWAD, 0.5e18, "DMG LPT yield share cap");
         assertEq(IRoycoDayKernel(r.kernel).getState().stSelfLiquidationBonusWAD, 0.01e18, "DMG self-liquidation bonus");
     }
 }
@@ -280,11 +282,12 @@ contract Test_DusdMarketDeployment is MakinaSheetMarketDeploymentBase {
     /// @notice The DUSD economics (mirroring the FalconX sheet row) land on-chain
     function test_ExecuteMarketDeployment_DusdEconomicsConfigured() external {
         IRoycoProtocolTemplate.DeploymentResult memory r = _deploy();
-        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayAccountant(r.accountant).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory a = IRoycoDayFloatingRateAccountant(r.accountant).getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory aFloating = IRoycoDayFloatingRateAccountant(r.accountant).getRoycoDayFloatingRateAccountantState();
         assertEq(a.minCoverageWAD, 0.03e18, "DUSD min coverage");
         assertEq(a.minLiquidityWAD, 0.1e18, "DUSD min liquidity");
         assertEq(a.fixedTermDurationSeconds, 7 days, "DUSD fixed term");
-        assertEq(a.maxLPTYieldShareWAD, 0.5e18, "DUSD LPT yield share cap");
+        assertEq(aFloating.maxLPTYieldShareWAD, 0.5e18, "DUSD LPT yield share cap");
         assertEq(IRoycoDayKernel(r.kernel).getState().stSelfLiquidationBonusWAD, 0.01e18, "DUSD self-liquidation bonus");
     }
 }

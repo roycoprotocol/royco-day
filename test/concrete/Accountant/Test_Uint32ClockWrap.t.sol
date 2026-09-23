@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { MarketState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits } from "../../../src/libraries/Units.sol";
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
@@ -148,9 +149,10 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         vm.warp(TWO_POW_32 + 5000);
         _seedAndInitAccrual();
         IRoycoDayAccountant.RoycoDayAccountantState memory s0 = accountant.getState();
-        assertEq(s0.lastYieldShareAccrualTimestamp, 5000, "the stored accrual stamp truncates 4294972296 to its low 32 bits");
-        assertEq(uint256(s0.twJTYieldShareAccruedWAD), 0, "clock initialization accrues no jt yield share");
-        assertEq(uint256(s0.twLPTYieldShareAccruedWAD), 0, "clock initialization accrues no lt yield share");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory s0Floating = accountant.getRoycoDayFloatingRateAccountantState();
+        assertEq(s0Floating.lastYieldShareAccrualTimestamp, 5000, "the stored accrual stamp truncates 4294972296 to its low 32 bits");
+        assertEq(uint256(s0Floating.twJTYieldShareAccruedWAD), 0, "clock initialization accrues no jt yield share");
+        assertEq(uint256(s0Floating.twLPTYieldShareAccruedWAD), 0, "clock initialization accrues no lt yield share");
 
         // Pin both instantaneous yield shares at 0.1e18 (jt below its 0.2e18 cap, lt exactly at its 0.1e18 cap)
         jtYDM.setRates(0.1e18);
@@ -163,21 +165,22 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // Past the horizon: elapsed reads block.timestamp - 5000 = 2^32, the elapsed == 0 guard misses, both YDMs
         // are consulted, and each accumulator jumps by 0.1e18 x 4294967296 in a zero-second window
         IRoycoDayAccountant.RoycoDayAccountantState memory s1 = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory s1Floating = accountant.getRoycoDayFloatingRateAccountantState();
         assertEq(jtYDM.yieldShareCallCount(), 1, "the jt YDM is wrongly consulted for a zero-second window");
         assertEq(lptYDM.yieldShareCallCount(), 1, "the lt YDM is wrongly consulted for a zero-second window");
         assertEq(
-            uint256(s1.twJTYieldShareAccruedWAD), 429_496_729_600_000_000_000_000_000, "jt accumulator jumps by rate x 2^32 despite zero real elapsed time"
+            uint256(s1Floating.twJTYieldShareAccruedWAD), 429_496_729_600_000_000_000_000_000, "jt accumulator jumps by rate x 2^32 despite zero real elapsed time"
         );
         assertEq(
-            uint256(s1.twLPTYieldShareAccruedWAD), 429_496_729_600_000_000_000_000_000, "lt accumulator jumps by rate x 2^32 despite zero real elapsed time"
+            uint256(s1Floating.twLPTYieldShareAccruedWAD), 429_496_729_600_000_000_000_000_000, "lt accumulator jumps by rate x 2^32 despite zero real elapsed time"
         );
-        assertEq(s1.lastYieldShareAccrualTimestamp, 5000, "the re-stamp truncates back to the same low 32 bits, re-arming the wrap");
+        assertEq(s1Floating.lastYieldShareAccrualTimestamp, 5000, "the re-stamp truncates back to the same low 32 bits, re-arming the wrap");
     }
 
     /**
      * @notice Premium window: past the uint32 horizon, with both premium caps at 0.1e18 (so at most 20% of any
      *         senior gain should ever leave as premiums), a handful of flat syncs poison the accumulators so
-     *         badly that every subsequent gain-bearing sync reverts with PREMIUMS_EXCEED_SENIOR_YIELD — and the
+     *         badly that every subsequent gain-bearing sync reverts with PREMIUMS_EXCEED_YIELD — and the
      *         accumulators only reset when a premium is actually paid, which now can never happen, so the market
      *         cannot heal itself
      * @dev Each 1-second flat sync accrues rate x (2^32 + 1) per leg instead of rate x 1, while the premium
@@ -188,7 +191,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
     function test_premiumWindow_wrapsAtUint32_gainSyncRevertsPremiumsExceedSeniorYield() public {
         // Deploy with both premium caps at 0.1e18: jt risk premium plus lt liquidity premium should together
         // never exceed 20% of a senior gain, which is what makes the revert below a pure clock artifact
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = 0.1e18;
         p.maxLPTYieldShareWAD = 0.1e18;
         _deploy(p);
@@ -208,9 +211,10 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
             kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF));
         }
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(uint256(s.twJTYieldShareAccruedWAD), 2_576_980_378_200_000_000_000_000_000, "jt accumulator holds six phantom 2^32-second accruals");
-        assertEq(uint256(s.twLPTYieldShareAccruedWAD), 2_576_980_378_200_000_000_000_000_000, "lt accumulator holds six phantom 2^32-second accruals");
-        assertEq(s.lastPremiumPaymentTimestamp, 5000, "no premium was paid on the flat syncs so the payment window still opens at the truncated init stamp");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
+        assertEq(uint256(sFloating.twJTYieldShareAccruedWAD), 2_576_980_378_200_000_000_000_000_000, "jt accumulator holds six phantom 2^32-second accruals");
+        assertEq(uint256(sFloating.twLPTYieldShareAccruedWAD), 2_576_980_378_200_000_000_000_000_000, "lt accumulator holds six phantom 2^32-second accruals");
+        assertEq(sFloating.lastPremiumPaymentTimestamp, 5000, "no premium was paid on the flat syncs so the payment window still opens at the truncated init stamp");
 
         // Zero the forward rates: even if the YDMs never award another basis point of yield share from here
         // on, the poison already banked in the accumulators is enough to brick the market
@@ -226,7 +230,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // floor(10e18 x 2576980378200000000000000000 / (4294967303 x 1e18)) = 5999999991618096842 and the two
         // legs sum to 11999999983236193684 > the 10e18 senior gain, tripping the premiums-exceed-senior-yield guard
         vm.warp(t0 + 7);
-        vm.expectRevert(IRoycoDayAccountant.PREMIUMS_EXCEED_SENIOR_YIELD.selector);
+        vm.expectRevert(IRoycoDayAccountant.PREMIUMS_EXCEED_YIELD.selector);
         kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 12e18));
 
         // The brick is persistent: the accumulators only reset when premiums are actually paid, and every
@@ -234,7 +238,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // 6 x 2^32-scale numerator, so diluting the combined premium back under the gain would take on the
         // order of 1.2 x 2^32 seconds (about 163 more years). One block later the same gain still reverts
         vm.warp(t0 + 8);
-        vm.expectRevert(IRoycoDayAccountant.PREMIUMS_EXCEED_SENIOR_YIELD.selector);
+        vm.expectRevert(IRoycoDayAccountant.PREMIUMS_EXCEED_YIELD.selector);
         kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 12e18));
     }
 }

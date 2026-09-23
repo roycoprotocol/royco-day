@@ -8,7 +8,7 @@ import { WAD } from "../libraries/Constants.sol";
  * @title FixedYDM
  * @author Shivaansh Kapoor, Ankur Dubey, Tomer Ganor
  * @notice Royco's fixed yield distribution model (YDM): a constant yield share independent of utilization
- * @dev A general-purpose model for paying a tranche's yield as a flat premium to a capital pool, including a fixed zero
+ * @dev A general-purpose model for paying a flat share of the distributed yield as a premium to a capital pool, including a fixed zero
  * @dev The model has no concept of a target utilization and ignores the utilization input completely, so it implements
  *      IYDM directly rather than extending BaseYDM
  * @dev The explicit initialized flag disambiguates a configured zero share from an uninitialized market, so queries
@@ -49,7 +49,7 @@ contract FixedYDM is IYDM {
      * @param _fixedYieldShareWAD The fixed yield share paid at every utilization, at most WAD, scaled to WAD precision
      */
     function initializeYDMForMarket(uint64 _fixedYieldShareWAD) external {
-        // The share can never exceed the whole of the paying tranche's yield
+        // The share can never exceed the whole of the distributed yield
         require(_fixedYieldShareWAD <= WAD, INVALID_YDM_INITIALIZATION());
 
         // Initialize the YDM for the market

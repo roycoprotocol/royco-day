@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -89,6 +90,7 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
         _stepSync(int256(bound(_gain1, 1, 10_000))); // +0.01% to +100% gain: pays unless the gain only recovers IL
         _assertWindowBookkeeping();
         IRoycoDayAccountant.RoycoDayAccountantState memory afterFirst = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory afterFirstFloating = accountant.getRoycoDayFloatingRateAccountantState();
 
         // The attack: a second gain sync with zero elapsed time (the mirror inside _stepSync re-derives the
         // exact premium this sync may pay from the unchanged model window)
@@ -97,19 +99,20 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
 
         // Zero elapsed time accrues nothing: the accumulators can only shrink (a payout reset), never grow
         IRoycoDayAccountant.RoycoDayAccountantState memory afterSecond = accountant.getState();
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory afterSecondFloating = accountant.getRoycoDayFloatingRateAccountantState();
         assertLe(
-            uint256(afterSecond.twJTYieldShareAccruedWAD),
-            uint256(afterFirst.twJTYieldShareAccruedWAD),
+            uint256(afterSecondFloating.twJTYieldShareAccruedWAD),
+            uint256(afterFirstFloating.twJTYieldShareAccruedWAD),
             "a same-block repeat sync must not grow the junior accumulator"
         );
         assertLe(
-            uint256(afterSecond.twLPTYieldShareAccruedWAD),
-            uint256(afterFirst.twLPTYieldShareAccruedWAD),
+            uint256(afterSecondFloating.twLPTYieldShareAccruedWAD),
+            uint256(afterFirstFloating.twLPTYieldShareAccruedWAD),
             "a same-block repeat sync must not grow the liquidity accumulator"
         );
         assertEq(
-            uint256(afterSecond.lastYieldShareAccrualTimestamp),
-            uint256(afterFirst.lastYieldShareAccrualTimestamp),
+            uint256(afterSecondFloating.lastYieldShareAccrualTimestamp),
+            uint256(afterFirstFloating.lastYieldShareAccrualTimestamp),
             "the accrual timestamp must not move within one block"
         );
     }
@@ -250,22 +253,23 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     /// @dev Asserts the accountant's window bookkeeping equals the model and satisfies the contiguity closed form
     function _assertWindowBookkeeping() internal view {
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(uint256(s.twJTYieldShareAccruedWAD), modelTwJT, "window: junior accumulator diverged from the step model");
-        assertEq(uint256(s.twLPTYieldShareAccruedWAD), modelTwLPT, "window: liquidity accumulator diverged from the step model");
-        assertEq(uint256(s.lastYieldShareAccrualTimestamp), modelLastAccrual, "window: last accrual timestamp diverged from the step model");
-        assertEq(uint256(s.lastPremiumPaymentTimestamp), modelLastPayment, "window: last premium payment timestamp diverged from the step model");
+        IRoycoDayFloatingRateAccountant.RoycoDayFloatingRateAccountantState memory sFloating = accountant.getRoycoDayFloatingRateAccountantState();
+        assertEq(uint256(sFloating.twJTYieldShareAccruedWAD), modelTwJT, "window: junior accumulator diverged from the step model");
+        assertEq(uint256(sFloating.twLPTYieldShareAccruedWAD), modelTwLPT, "window: liquidity accumulator diverged from the step model");
+        assertEq(uint256(sFloating.lastYieldShareAccrualTimestamp), modelLastAccrual, "window: last accrual timestamp diverged from the step model");
+        assertEq(uint256(sFloating.lastPremiumPaymentTimestamp), modelLastPayment, "window: last premium payment timestamp diverged from the step model");
 
         // Contiguity closed form: with a constant pinned share, an accumulator equals the capped share
         // integrated over exactly [lastPayment, lastAccrual]. A skipped stretch reads low, a double-counted
         // one reads high, and a reset without a payment breaks the window start
-        uint256 window = uint256(s.lastYieldShareAccrualTimestamp) - uint256(s.lastPremiumPaymentTimestamp);
+        uint256 window = uint256(sFloating.lastYieldShareAccrualTimestamp) - uint256(sFloating.lastPremiumPaymentTimestamp);
         assertEq(
-            uint256(s.twJTYieldShareAccruedWAD),
+            uint256(sFloating.twJTYieldShareAccruedWAD),
             Math.min(pinnedJTRate, DEFAULT_MAX_JT_YIELD_SHARE_WAD) * window,
             "window: junior accumulator != capped share x contiguous window"
         );
         assertEq(
-            uint256(s.twLPTYieldShareAccruedWAD),
+            uint256(sFloating.twLPTYieldShareAccruedWAD),
             Math.min(pinnedLPTRate, DEFAULT_MAX_LPT_YIELD_SHARE_WAD) * window,
             "window: liquidity accumulator != capped share x contiguous window"
         );

@@ -15,7 +15,8 @@ import { RoycoBlacklist } from "../../src/auth/RoycoBlacklist.sol";
 import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, LP_ROLE_ADMIN_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
-import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
@@ -126,7 +127,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     IRoycoVaultTranche internal ST;
     IRoycoVaultTranche internal JT;
     IRoycoDayKernel internal KERNEL;
-    IRoycoDayAccountant internal ACCOUNTANT;
+    IRoycoDayFloatingRateAccountant internal ACCOUNTANT;
     IRoycoBlacklist internal BLACKLIST;
     /// @dev Owner of every per-market blacklist the base deploys — prank this to blacklist/unblacklist in tests
     address internal BLACKLIST_OWNER = makeAddr("BLACKLIST_OWNER");

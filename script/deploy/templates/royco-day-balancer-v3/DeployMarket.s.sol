@@ -6,10 +6,11 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/E
 import { RoycoAccessManager } from "../../../../src/factory/RoycoAccessManager.sol";
 import { RoycoFactory } from "../../../../src/factory/RoycoFactory.sol";
 import { RoycoDayBalancerV3MarketDeploymentTemplate } from "../../../../src/factory/templates/RoycoDayBalancerV3MarketDeploymentTemplate.sol";
-import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../../../src/interfaces/IYDM.sol";
+import { IRoycoDayAccountant } from "../../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
+import { IRoycoDayFloatingRateAccountant } from "../../../../src/interfaces/accountant/IRoycoDayFloatingRateAccountant.sol";
 import { IBaseTemplate } from "../../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoProtocolTemplate } from "../../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { toNAVUnits } from "../../../../src/libraries/Units.sol";
@@ -88,7 +89,7 @@ contract DeployMarketComponent is CollateralOracleDeployer {
             ydm: IYDM(r.ydm),
             seniorTranche: IRoycoVaultTranche(r.seniorTranche),
             juniorTranche: IRoycoVaultTranche(r.juniorTranche),
-            accountant: IRoycoDayAccountant(r.accountant),
+            accountant: IRoycoDayFloatingRateAccountant(r.accountant),
             kernel: IRoycoDayKernel(r.kernel),
             roycoBlacklist: _config.roycoBlacklist,
             entryPoint: UP.entryPoint,
