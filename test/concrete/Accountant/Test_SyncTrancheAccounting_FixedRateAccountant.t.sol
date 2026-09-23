@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Vm } from "../../../lib/forge-std/src/Test.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/accountant/IRoycoDayAccountant.sol";
 import { IRoycoDayFixedRateAccountant } from "../../../src/interfaces/accountant/IRoycoDayFixedRateAccountant.sol";
 import { WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
@@ -524,6 +525,51 @@ contract Test_SyncTrancheAccounting_FixedRateAccountant is FixedRateAccountantTe
                 fixedTermEndTimestamp: 0
             })
         );
+    }
+
+    /**
+     * Sync scenario (gain 100e18 == il exactly, large IL): the coupon-as-IL interlock at the zero crossing.
+     * The gain exactly repays ALL prior impermanent loss, then the same sync's coupon is fully fronted from
+     * the restored buffer, so il touches zero mid-waterfall and re-books before the commit: the state machine
+     * keys on the COMMITTED il, so the market stays FIXED_TERM with the ORIGINAL end despite full principal
+     * restoration, and no term or reset event fires
+     * Derivation (code order): repayment = min(100e18, 100e18) = 100e18, il -> 0, jtEffectiveNAV -> 300e18,
+     * gain -> 0. couponDue = 1e14: couponFromGain = 0, couponFromJT = min(1e14, 300e18) = 1e14, stFee = 1e13.
+     * stEffectiveNAV = 1000e18 + 1e14, jtEffectiveNAV = 300e18 - 1e14, il = 1e14, no excess so premiumsPaid
+     * false and the 5e18 accrued window persists. Conservation: their sum is 1300e18 exactly. Committed
+     * il = 1e14 > dust keeps FIXED_TERM with the seeded end unchanged.
+     * Order equivalence cross-check, pinning the ruled repayment-before-coupon choice at its sharpest point:
+     * coupon first would take couponFromGain = 1e14, then the remaining 100e18 - 1e14 repays il to 1e14 and
+     * jtEffectiveNAV = 200e18 + (100e18 - 1e14) = 300e18 - 1e14, byte-identical outputs
+     */
+    function test_Sync_LargeIL_GainExactlyRepaysIL_FrontedCouponKeepsLockAndOriginalEnd() public {
+        _seedLargeILMatchedRates();
+        uint32 end0 = accountant.getState().fixedTermEndTimestamp;
+        vm.warp(vm.getBlockTimestamp() + 100);
+        vm.recordLogs();
+        _runSyncVector(
+            1300e18,
+            ExpectedSync({
+                stEffectiveNAV: 1000e18 + 1e14,
+                jtEffectiveNAV: 300e18 - 1e14,
+                il: 1e14,
+                lptPrem: 0,
+                stFee: 1e13,
+                jtFee: 0,
+                lptFee: 0,
+                premiumsPaid: false,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEndTimestamp: end0
+            })
+        );
+
+        // The mid-waterfall zero crossing leaks no transition: no term event and no reset event fired
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(_countAccountantLogs(logs, IRoycoDayAccountant.FixedTermEnded.selector), 0, "zero crossing: no FixedTermEnded");
+        assertEq(_countAccountantLogs(logs, IRoycoDayAccountant.FixedTermCommenced.selector), 0, "zero crossing: no FixedTermCommenced");
+        assertEq(_countAccountantLogs(logs, IRoycoDayAccountant.JuniorTrancheImpermanentLossReset.selector), 0, "zero crossing: no impermanent loss reset");
+        // The unpaid premium window survives the coupon-only settlement: 0.05e18 x 100 seconds accrued
+        assertEq(uint256(accountant.getRoycoDayFixedRateAccountantState().twLPTYieldShareAccruedWAD), 5e18, "zero crossing: the accrued window persists");
     }
 
     /*----------------------------------------------------------------------

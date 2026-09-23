@@ -212,6 +212,55 @@ contract Test_YieldShareAccrual_FixedRateAccountant is FixedRateAccountantTestBa
     }
 
     /**
+     * a heterogeneous-rate accumulator prices the premium as the time-weighted AVERAGE through a payment:
+     * two accrual windows at different YDM rates sum into one accumulator, and the paying sync divides that
+     * sum by the whole payment window, so the slice discriminates the average from either endpoint rate
+     * Derivation: window one accrues 0.06e18 x 1000 = 60e18, window two accrues 0.02e18 x 250 = 5e18, tw = 65e18
+     * over the 1250 second payment window (the flat sync neither paid nor restamped anything). The paying sync
+     * settles the 1250 second coupon 1000e18 x 1e9 x 1250 / 1e18 = 1.25e15 from the gain (stFee = 1.25e14) and
+     * carves the premium from the 100e18 excess: slice = floor(100e18 x 65e18 / (1250 x 1e18)) = 5.2e18 exactly,
+     * the 0.052e18 average rate. Last-rate pricing would give 2e18 and first-rate 6e18, so the vector
+     * discriminates all three. lptFee = 0.52e18, complement = 94.8e18 to JT, jtFee = 9.48e18.
+     * stEffectiveNAV = 1000e18 + 1.25e15 + 5.2e18, jtEffectiveNAV = 294.8e18, conservation sum = 1300e18 + 1.25e15
+     */
+    function test_Accrual_multiRateWindowsPriceTimeWeightedAverageThroughPayment() public {
+        _seedAndInitAccrual();
+        lptYDM.setRates(0.06e18);
+        vm.warp(vm.getBlockTimestamp() + 1000);
+        kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
+        lptYDM.setRates(0.02e18);
+        vm.warp(vm.getBlockTimestamp() + 250);
+
+        // Same-block preview twin first, executed second, must agree byte for byte
+        SyncedAccountingState memory previewed = accountant.previewSyncTrancheAccounting(toNAVUnits(SEED_COLLATERAL + 1.25e15 + 100e18));
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayFixedRateAccountant.LPTYieldShareAccrued(0.02e18, 65e18);
+        SyncedAccountingState memory executed = kernel.doPreOp(toNAVUnits(SEED_COLLATERAL + 1.25e15 + 100e18));
+        assertEq(keccak256(abi.encode(previewed)), keccak256(abi.encode(executed)), "preview must match execution exactly");
+
+        assertEq(toUint256(executed.stEffectiveNAV), 1_005_201_250_000_000_000_000, "st books the coupon plus the average-priced premium");
+        assertEq(toUint256(executed.jtEffectiveNAV), 294_800_000_000_000_000_000, "jt keeps the complement of the excess");
+        assertEq(toUint256(executed.lptLiquidityPremium), 5.2e18, "the premium prices the time-weighted average rate");
+        assertEq(toUint256(executed.stProtocolFee), 1.25e14, "st fee on the 1250 second coupon");
+        assertEq(toUint256(executed.jtProtocolFee), 9.48e18, "jt fee on the complement");
+        assertEq(toUint256(executed.lptProtocolFee), 0.52e18, "lt fee on the premium");
+        assertEq(toUint256(executed.jtImpermanentLoss), 0, "no jt fronting so no il");
+        assertEq(uint8(executed.marketState), uint8(MarketState.PERPETUAL), "il 0 iff PERPETUAL biconditional");
+
+        // The committed checkpoint matches the returned state and conserves the collateral
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        assertEq(toUint256(s.lastSTEffectiveNAV), 1_005_201_250_000_000_000_000, "st checkpoint");
+        assertEq(toUint256(s.lastJTEffectiveNAV), 294_800_000_000_000_000_000, "jt checkpoint");
+        assertEq(toUint256(s.lastSTEffectiveNAV) + toUint256(s.lastJTEffectiveNAV), SEED_COLLATERAL + 1.25e15 + 100e18, "conservation");
+
+        // The payment consumed the heterogeneous window whole: accumulator reset, both clocks stamped
+        IRoycoDayFixedRateAccountant.RoycoDayFixedRateAccountantState memory sFixed = accountant.getRoycoDayFixedRateAccountantState();
+        assertEq(sFixed.twLPTYieldShareAccruedWAD, 0, "the summed window is consumed by the payment");
+        assertEq(sFixed.lastPremiumPaymentTimestamp, uint32(vm.getBlockTimestamp()), "payment stamped this block");
+        assertEq(_couponWindowStart(), vm.getBlockTimestamp(), "settling sync restamps the coupon clock");
+    }
+
+    /**
      * an unpaid window persists across settlements without excess: two settling syncs whose gain equals the
      * coupon exactly leave no excess, so the accumulator compounds and the payment clock never stamps
      * Derivation at rate 0.04e18:
