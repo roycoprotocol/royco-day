@@ -19,6 +19,7 @@ import { RoycoDayAccountant } from "./base/RoycoDayAccountant.sol";
  * @notice Responsible for marking tranche NAVs to market, accruing the senior tranche's fixed rate coupon, tracking the JT impermanent loss, distributing the excess yield via the LPT YDM, and computing protocol fees
  * @dev The senior tranche earns a fixed rate coupon underwritten by the junior tranche: the coupon is the fixed rate applied to the senior tranche's committed effective NAV over the window since the last settlement, settled only by a sync that observes a collateral NAV movement, so the coupon is collected exactly when fresh collateral information is priced
  * @dev Senior capital that exits between settlements is absent from the committed NAV at settlement, so it never collects the window's coupon and the junior buffer is never charged for capital that left
+ * @dev Coupon fronted from the junior buffer is booked as impermanent loss: JT underwrites the senior's minimum rate rather than principal losses alone, so the observation period covers the asset proving it earns the rate, and coupon drag beyond the buffer or the term is crystallized by the perpetual commit
  * @dev The junior tranche is the residual claimant: the excess yield above the coupon pays the LPT liquidity premium (the capped LPT YDM output) and the junior tranche keeps the remainder
  */
 contract RoycoDayFixedRateAccountant is RoycoDayAccountant, IRoycoDayFixedRateAccountant {
@@ -187,12 +188,13 @@ contract RoycoDayFixedRateAccountant is RoycoDayAccountant, IRoycoDayFixedRateAc
             if (loss != ZERO_NAV_UNITS) stEffectiveNAV = (stEffectiveNAV - loss);
 
             /// @dev STEP_SETTLE_ST_COUPON: The coupon is settled after the loss waterfall, so the junior buffer absorbs principal losses before it funds senior yield
-            // A markdown sync carries no gain, so the whole coupon is funded from what remains of JT's buffer: the transfer is permanent junior compensation to the senior, never impermanent loss, and the coupon beyond the buffer is forgiven
+            // A markdown sync carries no gain, so the whole coupon is fronted from what remains of JT's buffer and booked as impermanent loss: JT underwrites the senior's minimum rate and is restored by future gains through the repayment step
             NAV_UNIT couponPaid = RoycoUnitsMath.min(stCouponDue, jtEffectiveNAV);
             if (couponPaid != ZERO_NAV_UNITS) {
                 // Compute the protocol fee taken on the coupon if it is not attributable to any rounding/dust
                 if (couponPaid > $_accountant.dustTolerance) stProtocolFee = couponPaid.mulDiv($_accountant.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
                 jtEffectiveNAV = (jtEffectiveNAV - couponPaid);
+                jtImpermanentLoss = (jtImpermanentLoss + couponPaid);
                 stEffectiveNAV = (stEffectiveNAV + couponPaid);
             }
         } else if (_collateralNAV > lastCollateralNAV) {
@@ -200,7 +202,7 @@ contract RoycoDayFixedRateAccountant is RoycoDayAccountant, IRoycoDayFixedRateAc
             NAV_UNIT gain = (_collateralNAV - lastCollateralNAV);
 
             /// @dev STEP_SETTLE_ST_COUPON: The coupon is settled off the top of the gain, ahead of the JT impermanent loss repayment and the excess yield distribution
-            // Any shortfall is funded from JT's buffer up to its full depth: the transfer is permanent junior compensation to the senior, never impermanent loss, and the coupon beyond the buffer is forgiven
+            // Any shortfall is fronted from JT's buffer up to its full depth and booked as impermanent loss: JT underwrites the senior's minimum rate and is restored by future gains through the repayment step
             if (stCouponDue != ZERO_NAV_UNITS) {
                 NAV_UNIT couponFromGain = RoycoUnitsMath.min(gain, stCouponDue);
                 NAV_UNIT couponFromJT = RoycoUnitsMath.min((stCouponDue - couponFromGain), jtEffectiveNAV);
@@ -208,13 +210,14 @@ contract RoycoDayFixedRateAccountant is RoycoDayAccountant, IRoycoDayFixedRateAc
                 // Compute the protocol fee taken on the coupon if it is not attributable to any rounding/dust
                 if (couponPaid > $_accountant.dustTolerance) stProtocolFee = couponPaid.mulDiv($_accountant.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
                 jtEffectiveNAV = (jtEffectiveNAV - couponFromJT);
+                jtImpermanentLoss = (jtImpermanentLoss + couponFromJT);
                 stEffectiveNAV = (stEffectiveNAV + couponPaid);
                 gain = (gain - couponFromGain);
             }
 
             /// @dev STEP_REPAY_JT_IMPERMANENT_LOSS: Any prior transient loss booked by the JT from coverage provided or its own loss is repaid after the coupon
             // The repayment is restoration, never yield, so it is never has a fee
-            if (jtImpermanentLoss != ZERO_NAV_UNITS) {
+            if (gain != ZERO_NAV_UNITS && jtImpermanentLoss != ZERO_NAV_UNITS) {
                 NAV_UNIT jtImpermanentLossRepayment = RoycoUnitsMath.min(gain, jtImpermanentLoss);
                 jtImpermanentLoss = (jtImpermanentLoss - jtImpermanentLossRepayment);
                 jtEffectiveNAV = (jtEffectiveNAV + jtImpermanentLossRepayment);
